@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+pub mod worker_capnp;
+
 pub trait SchedulerDeps {
     type ExecutorId;
     type InstanceId;

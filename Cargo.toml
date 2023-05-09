@@ -2,8 +2,17 @@
 name = "meticulous"
 version = "0.1.0"
 edition = "2021"
+build = "src/build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 claim = "0.5.0"
+capnp = "0.17"
+capnp-rpc = "0.17"
+tokio = { version = "1.0.0", features = ["full"]}
+tokio-util = { version = "0.6.0", features = ["compat"] }
+futures = "0.3.0"
+
+[build-dependencies]
+capnpc = "0.17"
