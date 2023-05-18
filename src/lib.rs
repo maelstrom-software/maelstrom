@@ -1,8 +1,52 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
-pub mod worker_capnp;
+mod channel_reader;
+pub mod proto;
+mod task;
+pub mod worker;
+
+#[cfg(test)]
+pub mod test;
+
+pub type Error = anyhow::Error;
+pub type Result<T> = std::result::Result<T, Error>;
+
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct ExecutionId(u64);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ExecutionDetails {
+    pub program: String,
+    pub arguments: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ExecutionResult {
+    Exited(u8),
+    Signalled(u8),
+    Error(String),
+}
+
+#[derive(Debug, Deserialize, PartialEq, Serialize)]
+pub enum WorkerRequest {
+    EnqueueExecution(ExecutionId, ExecutionDetails),
+    CancelExecution(ExecutionId),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum WorkerResponse {
+    ExecutionCompleted(ExecutionId, ExecutionResult),
+    ExecutionCanceled(ExecutionId),
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct WorkerHello {
+    pub name: String,
+    pub slots: u32,
+}
 
 pub trait SchedulerDeps {
     type ExecutorId;
@@ -72,7 +116,8 @@ where
     }
 
     pub fn add_executor(&mut self, id: DT::ExecutorId, slot_count: usize) {
-        self.executors
+        if self
+            .executors
             .insert(
                 id,
                 Executor {
@@ -80,7 +125,10 @@ where
                     executing_instances: HashMap::new(),
                 },
             )
-            .map(|_| panic!("Duplicate executor ID."));
+            .is_some()
+        {
+            panic!("Duplicate executor ID.");
+        }
         self.slots_total += slot_count;
         self.unblock_all_possible();
     }

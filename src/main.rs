@@ -50,7 +50,7 @@ impl SchedulerDeps for SchedulerAdapter {
 
 fn main() {
     let (sender, receiver) = mpsc::channel();
-    let scheduler_adapter = SchedulerAdapter { sender: sender };
+    let scheduler_adapter = SchedulerAdapter { sender };
     let mut scheduler = Scheduler::new(scheduler_adapter);
 
     scheduler.add_executor(1000, 10);

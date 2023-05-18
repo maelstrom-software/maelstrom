@@ -1,110 +1,53 @@
-use capnp::capability::Promise;
-use capnp_rpc::{rpc_twoparty_capnp, twoparty, RpcSystem};
-use futures::AsyncReadExt;
-use meticulous::worker_capnp::{client, worker};
-use std::net::{SocketAddr, ToSocketAddrs};
-use std::process::ExitCode;
-use tokio::io::{self, AsyncWriteExt, AsyncBufReadExt, BufReader};
-use tokio::net::TcpStream;
-use tokio::task;
+use clap::{builder::NonEmptyStringValueParser, value_parser, Parser};
+use std::net::SocketAddr;
 
-async fn print(output: String) {
-    let mut stdout = io::stdout();
-    stdout.write_all(output.as_bytes()).await.unwrap();
-    stdout.flush().await.unwrap();
+fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
+    use std::net::ToSocketAddrs as _;
+    let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
+    // It's not clear how we could end up with an empty iterator. We'll assume
+    // that's impossible until proven wrong.
+    Ok(*addrs.get(0).unwrap())
 }
 
-struct Worker {}
+/// The meticulous worker. This process executes subprocesses as directed by the broker.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {
+    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
+    #[arg(value_parser = parse_socket_addr)]
+    broker: SocketAddr,
 
-impl worker::Server for Worker {
-    fn enqueue(
-        &mut self,
-        _params: worker::EnqueueParams,
-        _results: worker::EnqueueResults,
-    ) -> Promise<(), capnp::Error> {
-        Promise::ok(())
-    }
+    /// Name of the worker provided to the broker. The broker will reject workers with duplicate
+    /// names.
+    #[arg(
+        short,
+        long,
+        default_value_t = gethostname::gethostname().into_string().unwrap(),
+        value_parser = NonEmptyStringValueParser::new()
+    )]
+    name: String,
 
-    fn cancel(
-        &mut self,
-        _params: worker::CancelParams,
-        _results: worker::CancelResults,
-    ) -> Promise<(), capnp::Error> {
-        Promise::ok(())
-    }
+    /// The number of execution slots available. Most program executions will take one job slot.
+    #[arg(
+        short,
+        long,
+        default_value_t = num_cpus::get().try_into().unwrap(),
+        value_parser = value_parser!(u32).range(1..1000)
+    )]
+    slots: u32,
 }
 
-async fn command_interpreter(addr: SocketAddr) {
-    print(format!("Welcome to the worker tool. Connecting to {}.\n", addr)).await;
+fn main() -> meticulous::Result<()> {
+    let cli = Cli::parse();
 
-    let stream = TcpStream::connect(&addr).await.unwrap();
-    let (reader, writer) = tokio_util::compat::TokioAsyncReadCompatExt::compat(stream).split();
+    let runtime = tokio::runtime::Runtime::new()?;
+    runtime.block_on(async { meticulous::worker::main(cli.name, cli.slots, cli.broker).await })?;
 
-    let network = twoparty::VatNetwork::new(
-        reader,
-        writer,
-        rpc_twoparty_capnp::Side::Client,
-        Default::default(),
-        );
-
-    let mut rpc_system = RpcSystem::new(Box::new(network), None);
-
-    let broker_client: client::Client = rpc_system.bootstrap(rpc_twoparty_capnp::Side::Server);
-
-    task::spawn_local(rpc_system);
-
-    let mut request = broker_client.hello_request();
-    let mut details = request.get().init_details();
-    details.set_name("worker1");
-    details.set_slots(16);
-    request.send().promise.await.unwrap();
-
-    print(format!("Done.\n")).await;
-    print(format!("% ")).await;
-
-    let mut lines = BufReader::new(io::stdin()).lines();
-
-    while let Some(line) = lines.next_line().await.unwrap() {
-        match line.as_str() {
-            "hello" => print(format!("Hello!\n")).await,
-            "exit" => return,
-            "" => {},
-                _ => print(format!("Unknown command: {}\n", line)).await
-        }
-        print(format!("% ")).await;
-    }
+    Ok(())
 }
 
-async fn main2(addr: SocketAddr) -> ExitCode {
-    println!("address is: {:?}", addr);
-
-    task::LocalSet::new().run_until(async move {
-            command_interpreter(addr).await
-    }).await;
-
-    ExitCode::SUCCESS
-}
-
-#[tokio::main]
-async fn main() -> ExitCode {
-    let args: Vec<String> = ::std::env::args().collect();
-
-    if args.len() != 2 {
-        eprintln!("usage: {} ADDRESS", args[0]);
-        return ExitCode::FAILURE;
-    }
-
-    match args[1].to_socket_addrs() {
-        Err(e) => {
-            eprintln!("parsing address: {}", e);
-            return ExitCode::FAILURE;
-        }
-        Ok(mut iter) => match iter.next() {
-            None => {
-                eprintln!("address spec didn't yield any addresses");
-                return ExitCode::FAILURE;
-            }
-            Some(addr) => main2(addr).await,
-        },
-    }
+#[test]
+fn test_cli() {
+    use clap::CommandFactory;
+    Cli::command().debug_assert()
 }
