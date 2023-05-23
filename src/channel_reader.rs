@@ -1,6 +1,6 @@
 pub async fn run<T>(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<T>,
-    mut processor: impl FnMut(T) -> (),
+    mut processor: impl FnMut(T),
 ) {
     while let Some(x) = channel.recv().await {
         processor(x);

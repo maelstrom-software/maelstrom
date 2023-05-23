@@ -3,8 +3,10 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+pub mod broker;
 mod channel_reader;
-pub mod proto;
+pub mod client;
+mod proto;
 mod task;
 pub mod worker;
 
@@ -14,8 +16,14 @@ pub mod test;
 pub type Error = anyhow::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub struct ExecutionId(u64);
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ClientId(u32);
+
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ClientExecutionId(u32);
+
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ExecutionId(ClientId, ClientExecutionId);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ExecutionDetails {
@@ -30,23 +38,8 @@ pub enum ExecutionResult {
     Error(String),
 }
 
-#[derive(Debug, Deserialize, PartialEq, Serialize)]
-pub enum WorkerRequest {
-    EnqueueExecution(ExecutionId, ExecutionDetails),
-    CancelExecution(ExecutionId),
-}
-
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum WorkerResponse {
-    ExecutionCompleted(ExecutionId, ExecutionResult),
-    ExecutionCanceled(ExecutionId),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WorkerHello {
-    pub name: String,
-    pub slots: u32,
-}
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct WorkerId(u32);
 
 pub trait SchedulerDeps {
     type ExecutorId;

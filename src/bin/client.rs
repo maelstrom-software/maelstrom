@@ -1,4 +1,4 @@
-use clap::{builder::NonEmptyStringValueParser, value_parser, Parser};
+use clap::{builder::NonEmptyStringValueParser, Parser};
 use std::net::SocketAddr;
 
 fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
@@ -9,7 +9,7 @@ fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
     Ok(*addrs.get(0).unwrap())
 }
 
-/// The meticulous worker. This process executes subprocesses as directed by the broker.
+/// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser)]
 #[command(version)]
 struct Cli {
@@ -17,8 +17,7 @@ struct Cli {
     #[arg(value_parser = parse_socket_addr)]
     broker: SocketAddr,
 
-    /// Name of the worker provided to the broker. The broker will reject workers with duplicate
-    /// names.
+    /// Name of the client provided to the broker.
     #[arg(
         short,
         long,
@@ -26,21 +25,12 @@ struct Cli {
         value_parser = NonEmptyStringValueParser::new()
     )]
     name: String,
-
-    /// The number of execution slots available. Most program executions will take one job slot.
-    #[arg(
-        short,
-        long,
-        default_value_t = num_cpus::get().try_into().unwrap(),
-        value_parser = value_parser!(u32).range(1..1000)
-    )]
-    slots: u32,
 }
 
 fn main() -> meticulous::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async { meticulous::worker::main(cli.name, cli.slots, cli.broker).await })?;
+    runtime.block_on(async { meticulous::client::main(cli.name, cli.broker).await })?;
     Ok(())
 }
 

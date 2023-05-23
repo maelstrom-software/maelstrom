@@ -32,14 +32,14 @@ impl Drop for Handle {
 /// separate task, even if the error occurs immediately.
 pub fn start<T>(details: ExecutionDetails, done: T) -> Handle
 where
-    T: FnOnce(ExecutionResult) -> () + Send + 'static,
+    T: FnOnce(ExecutionResult) + Send + 'static,
 {
     start_with_killer(details, done, signal::kill)
 }
 
 fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> Handle
 where
-    T: FnOnce(ExecutionResult) -> () + Send + 'static,
+    T: FnOnce(ExecutionResult) + Send + 'static,
     U: Killer,
 {
     let result = tokio::process::Command::new(details.program)
@@ -71,7 +71,7 @@ where
 
 async fn waiter<T>(mut child: tokio::process::Child, should_signal: Arc<AtomicBool>, done: T)
 where
-    T: FnOnce(ExecutionResult) -> () + Send + 'static,
+    T: FnOnce(ExecutionResult) + Send + 'static,
 {
     use std::os::unix::process::ExitStatusExt;
     done(match child.wait().await {
