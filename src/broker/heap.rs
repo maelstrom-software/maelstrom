@@ -44,14 +44,14 @@ impl<D: HeapDeps> Heap<D> {
         }
     }
 
-    fn up_heap(&mut self, idx: usize) {
+    pub fn up_heap(&mut self, idx: usize) {
         let new_idx = self.up_heap_internal(idx);
         if new_idx != idx {
             self.deps.notify_of_index_change(self.vec[new_idx], new_idx);
         }
     }
 
-    fn down_heap(&mut self, idx: usize) {
+    pub fn down_heap(&mut self, idx: usize) {
         let new_idx = self.down_heap_internal(idx);
         if new_idx != idx {
             self.deps.notify_of_index_change(self.vec[new_idx], new_idx);
