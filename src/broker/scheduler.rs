@@ -249,7 +249,6 @@ mod tests {
         test::*,
     };
     use itertools::Itertools;
-    use std::{cell::RefCell, rc::Rc};
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
@@ -271,33 +270,31 @@ mod tests {
         }
     }
 
-    impl SchedulerDeps for Rc<RefCell<TestState>> {
+    impl SchedulerDeps for TestState {
         fn send_response_to_client(&mut self, id: ClientId, response: ClientResponse) {
-            self.borrow_mut().messages.push(ToClient(id, response));
+            self.messages.push(ToClient(id, response));
         }
 
         fn send_request_to_worker(&mut self, id: WorkerId, request: WorkerRequest) {
-            self.borrow_mut().messages.push(ToWorker(id, request));
+            self.messages.push(ToWorker(id, request));
         }
     }
 
     struct Fixture {
-        test_state: Rc<RefCell<TestState>>,
+        test_state: TestState,
         scheduler: Scheduler,
     }
 
     impl Fixture {
         fn new() -> Self {
-            let test_state = Rc::new(RefCell::new(TestState::new()));
-            let scheduler = Scheduler::new();
             Fixture {
-                test_state,
-                scheduler,
+                test_state: TestState::new(),
+                scheduler: Scheduler::new(),
             }
         }
 
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.test_state.borrow_mut().messages;
+            let messages = &mut self.test_state.messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
                 if perm == *messages {
                     messages.clear();
