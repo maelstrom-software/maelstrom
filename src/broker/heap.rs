@@ -166,7 +166,7 @@ impl<D: HeapDeps> Heap<D> {
             if child_idx + 1 < self.0.len()
                 && !deps.is_element_less_than(self.0[child_idx], self.0[child_idx + 1])
             {
-                child_idx = child_idx + 1;
+                child_idx += 1;
             }
 
             if !deps.is_element_less_than(self.0[child_idx], self.0[idx]) {
