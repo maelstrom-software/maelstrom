@@ -1,8 +1,6 @@
 //! A binary min-heap implementation that provides some features necessary for the broker that are
 //! missing from Rust's [std::collections::BinaryHeap].
 
-#![allow(dead_code)]
-
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
  * | '_ \| | | | '_ \| | |/ __|
@@ -227,10 +225,6 @@ mod tests {
                 elements: HashMap::new(),
                 heap: Heap::new(),
             }
-        }
-
-        fn assert_index(&self, id: u64, expected: HeapIndex) {
-            assert_eq!(self.elements.get(&id).unwrap().heap_index, expected);
         }
 
         fn validate_indices(&self) {
