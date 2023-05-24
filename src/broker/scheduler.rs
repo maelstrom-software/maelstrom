@@ -33,10 +33,9 @@ pub enum Message {
     FromWorker(WorkerId, WorkerResponse),
 }
 
-impl<D: SchedulerDeps> Scheduler<D> {
-    pub fn new(deps: D) -> Self {
+impl Scheduler {
+    pub fn new() -> Self {
         Scheduler {
-            deps,
             clients: HashSet::new(),
             workers: HashMap::new(),
             queued_requests: VecDeque::new(),
@@ -44,25 +43,25 @@ impl<D: SchedulerDeps> Scheduler<D> {
         }
     }
 
-    pub fn receive_message(&mut self, msg: Message) {
+    pub fn receive_message(&mut self, deps: &mut impl SchedulerDeps, msg: Message) {
         use Message::*;
         match msg {
             ClientConnected(id, _) => self.receive_client_connected(id),
 
-            ClientDisconnected(id) => self.receive_client_disconnected(id),
+            ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
 
             FromClient(cid, ClientRequest(ceid, details)) => {
-                self.receive_client_request(cid, ceid, details)
+                self.receive_client_request(deps, cid, ceid, details)
             }
 
             WorkerConnected(id, WorkerHello { name: _, slots }) => {
-                self.receive_worker_connected(id, slots as usize)
+                self.receive_worker_connected(deps, id, slots as usize)
             }
 
-            WorkerDisconnected(id) => self.receive_worker_disconnected(id),
+            WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
 
             FromWorker(wid, WorkerResponse(eid, result)) => {
-                self.receive_worker_response(wid, eid, result)
+                self.receive_worker_response(deps, wid, eid, result)
             }
         }
     }
@@ -84,8 +83,7 @@ struct Worker {
     heap_index: HeapIndex,
 }
 
-pub struct Scheduler<D: SchedulerDeps> {
-    deps: D,
+pub struct Scheduler {
     clients: HashSet<ClientId>,
     workers: HashMap<WorkerId, Worker>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
@@ -113,8 +111,8 @@ impl HeapDeps for HashMap<WorkerId, Worker> {
     }
 }
 
-impl<D: SchedulerDeps> Scheduler<D> {
-    fn possibly_start_executions(&mut self) {
+impl Scheduler {
+    fn possibly_start_executions(&mut self, deps: &mut impl SchedulerDeps) {
         while !self.queued_requests.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
             let worker = self.workers.get_mut(&wid).unwrap();
@@ -124,8 +122,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
             }
 
             let (eid, details) = self.queued_requests.pop_front().unwrap();
-            self.deps
-                .send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
+            deps.send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
 
             worker.pending.insert(eid, details);
             let heap_index = worker.heap_index;
@@ -137,25 +134,25 @@ impl<D: SchedulerDeps> Scheduler<D> {
         assert!(self.clients.insert(id), "duplicate client id {id:?}");
     }
 
-    fn receive_client_disconnected(&mut self, id: ClientId) {
+    fn receive_client_disconnected(&mut self, deps: &mut impl SchedulerDeps, id: ClientId) {
         assert!(self.clients.remove(&id), "unknown client id {id:?}");
         self.queued_requests
             .retain(|(ExecutionId(cid, _), _)| *cid != id);
         for (wid, worker) in self.workers.iter_mut() {
             worker.pending.retain(|eid, _| {
                 eid.0 != id || {
-                    self.deps
-                        .send_request_to_worker(*wid, WorkerRequest::CancelExecution(*eid));
+                    deps.send_request_to_worker(*wid, WorkerRequest::CancelExecution(*eid));
                     false
                 }
             });
         }
         self.worker_heap.rebuild(&mut self.workers);
-        self.possibly_start_executions();
+        self.possibly_start_executions(deps);
     }
 
     fn receive_client_request(
         &mut self,
+        deps: &mut impl SchedulerDeps,
         cid: ClientId,
         ceid: ClientExecutionId,
         details: ExecutionDetails,
@@ -163,10 +160,15 @@ impl<D: SchedulerDeps> Scheduler<D> {
         assert!(self.clients.contains(&cid), "unknown client id {cid:?}");
         self.queued_requests
             .push_back((ExecutionId(cid, ceid), details));
-        self.possibly_start_executions();
+        self.possibly_start_executions(deps);
     }
 
-    fn receive_worker_connected(&mut self, id: WorkerId, slots: usize) {
+    fn receive_worker_connected(
+        &mut self,
+        deps: &mut impl SchedulerDeps,
+        id: WorkerId,
+        slots: usize,
+    ) {
         let unique = self
             .workers
             .insert(
@@ -180,10 +182,10 @@ impl<D: SchedulerDeps> Scheduler<D> {
             .is_none();
         assert!(unique, "duplicate worker id {id:?}");
         self.worker_heap.push(&mut self.workers, id);
-        self.possibly_start_executions();
+        self.possibly_start_executions(deps);
     }
 
-    fn receive_worker_disconnected(&mut self, id: WorkerId) {
+    fn receive_worker_disconnected(&mut self, deps: &mut impl SchedulerDeps, id: WorkerId) {
         let mut worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
@@ -195,11 +197,12 @@ impl<D: SchedulerDeps> Scheduler<D> {
             self.queued_requests.push_front(x);
         }
 
-        self.possibly_start_executions();
+        self.possibly_start_executions(deps);
     }
 
     fn receive_worker_response(
         &mut self,
+        deps: &mut impl SchedulerDeps,
         wid: WorkerId,
         eid: ExecutionId,
         result: ExecutionResult,
@@ -213,15 +216,13 @@ impl<D: SchedulerDeps> Scheduler<D> {
             return;
         }
 
-        self.deps
-            .send_response_to_client(eid.0, ClientResponse(eid.1, result));
+        deps.send_response_to_client(eid.0, ClientResponse(eid.1, result));
 
         if let Some((eid, details)) = self.queued_requests.pop_front() {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
-            self.deps
-                .send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
+            deps.send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
             worker.pending.insert(eid, details);
         } else {
             // Since there are no queued_requests, we're going to have to update the
@@ -282,13 +283,13 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
-        scheduler: Scheduler<Rc<RefCell<TestState>>>,
+        scheduler: Scheduler,
     }
 
     impl Fixture {
         fn new() -> Self {
             let test_state = Rc::new(RefCell::new(TestState::new()));
-            let scheduler = Scheduler::new(test_state.clone());
+            let scheduler = Scheduler::new();
             Fixture {
                 test_state,
                 scheduler,
@@ -316,7 +317,7 @@ mod tests {
             fn $test_name() {
                 let mut fixture = Fixture::new();
                 $(
-                    fixture.scheduler.receive_message($in_msg);
+                    fixture.scheduler.receive_message(&mut fixture.test_state, $in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )+
             }
@@ -333,9 +334,10 @@ mod tests {
     #[should_panic]
     fn request_from_unknown_client_panics() {
         let mut fixture = Fixture::new();
-        fixture
-            .scheduler
-            .receive_message(FromClient(cid![1], ClientRequest(ceid![1], details![1])));
+        fixture.scheduler.receive_message(
+            &mut fixture.test_state,
+            FromClient(cid![1], ClientRequest(ceid![1], details![1])),
+        );
     }
 
     #[test]
@@ -344,7 +346,7 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture
             .scheduler
-            .receive_message(ClientDisconnected(cid![1]));
+            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
     }
 
     #[test]
@@ -353,10 +355,10 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture
             .scheduler
-            .receive_message(ClientDisconnected(cid![1]));
+            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
         fixture
             .scheduler
-            .receive_message(ClientDisconnected(cid![1]));
+            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
     }
 
     #[test]
@@ -364,13 +366,15 @@ mod tests {
     fn response_from_unknown_worker_panics() {
         let mut fixture = Fixture::new();
         // The response will be ignored unless we use a valid ClientId.
-        fixture
-            .scheduler
-            .receive_message(ClientConnected(cid![1], client_hello![1]));
+        fixture.scheduler.receive_message(
+            &mut fixture.test_state,
+            ClientConnected(cid![1], client_hello![1]),
+        );
 
-        fixture
-            .scheduler
-            .receive_message(FromWorker(wid![1], WorkerResponse(eid![1], result![1])));
+        fixture.scheduler.receive_message(
+            &mut fixture.test_state,
+            FromWorker(wid![1], WorkerResponse(eid![1], result![1])),
+        );
     }
 
     #[test]
@@ -379,19 +383,21 @@ mod tests {
         let mut fixture = Fixture::new();
         fixture
             .scheduler
-            .receive_message(WorkerDisconnected(wid![1]));
+            .receive_message(&mut fixture.test_state, WorkerDisconnected(wid![1]));
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
         let mut fixture = Fixture::new();
-        fixture
-            .scheduler
-            .receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
-        fixture
-            .scheduler
-            .receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
+        fixture.scheduler.receive_message(
+            &mut fixture.test_state,
+            WorkerConnected(wid![1], worker_hello![1, 2]),
+        );
+        fixture.scheduler.receive_message(
+            &mut fixture.test_state,
+            WorkerConnected(wid![1], worker_hello![1, 2]),
+        );
     }
 
     script_test! {
