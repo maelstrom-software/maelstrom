@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use super::heap;
+use super::heap::{Heap, HeapDeps, HeapIndex};
 use crate::{
     proto::{
         ClientHello, ClientRequest, ClientResponse, WorkerHello, WorkerRequest, WorkerResponse,
@@ -40,7 +40,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
             clients: HashSet::new(),
             workers: HashMap::new(),
             queued_requests: VecDeque::new(),
-            worker_heap: heap::Heap::new(),
+            worker_heap: Heap::new(),
         }
     }
 
@@ -81,7 +81,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
 struct Worker {
     slots: usize,
     pending: HashMap<ExecutionId, ExecutionDetails>,
-    heap_index: heap::HeapIndex,
+    heap_index: HeapIndex,
 }
 
 pub struct Scheduler<D: SchedulerDeps> {
@@ -89,10 +89,10 @@ pub struct Scheduler<D: SchedulerDeps> {
     clients: HashSet<ClientId>,
     workers: HashMap<WorkerId, Worker>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: heap::Heap<HashMap<WorkerId, Worker>>,
+    worker_heap: Heap<HashMap<WorkerId, Worker>>,
 }
 
-impl heap::HeapDeps for HashMap<WorkerId, Worker> {
+impl HeapDeps for HashMap<WorkerId, Worker> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
@@ -108,7 +108,7 @@ impl heap::HeapDeps for HashMap<WorkerId, Worker> {
         }
     }
 
-    fn update_index(&mut self, elem: WorkerId, idx: heap::HeapIndex) {
+    fn update_index(&mut self, elem: WorkerId, idx: HeapIndex) {
         self.get_mut(&elem).unwrap().heap_index = idx;
     }
 }
@@ -174,7 +174,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
                 Worker {
                     slots,
                     pending: HashMap::new(),
-                    heap_index: heap::HeapIndex::default(),
+                    heap_index: HeapIndex::default(),
                 },
             )
             .is_none();
@@ -242,14 +242,13 @@ impl<D: SchedulerDeps> Scheduler<D> {
 
 #[cfg(test)]
 mod tests {
-    use super::Message::*;
-    use super::*;
-    use crate::proto::WorkerRequest;
-    use crate::proto::WorkerRequest::*;
-    use crate::test::*;
+    use super::{Message::*, *};
+    use crate::{
+        proto::WorkerRequest::{self, *},
+        test::*,
+    };
     use itertools::Itertools;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
@@ -259,19 +258,19 @@ mod tests {
 
     use TestMessage::*;
 
-    struct FakeState {
+    struct TestState {
         messages: Vec<TestMessage>,
     }
 
-    impl FakeState {
+    impl TestState {
         fn new() -> Self {
-            FakeState {
+            TestState {
                 messages: Vec::new(),
             }
         }
     }
 
-    impl SchedulerDeps for Rc<RefCell<FakeState>> {
+    impl SchedulerDeps for Rc<RefCell<TestState>> {
         fn send_response_to_client(&mut self, id: ClientId, response: ClientResponse) {
             self.borrow_mut().messages.push(ToClient(id, response));
         }
@@ -282,22 +281,22 @@ mod tests {
     }
 
     struct Fixture {
-        fake_state: Rc<RefCell<FakeState>>,
-        scheduler: Scheduler<Rc<RefCell<FakeState>>>,
+        test_state: Rc<RefCell<TestState>>,
+        scheduler: Scheduler<Rc<RefCell<TestState>>>,
     }
 
     impl Fixture {
         fn new() -> Self {
-            let fake_state = Rc::new(RefCell::new(FakeState::new()));
-            let scheduler = Scheduler::new(fake_state.clone());
+            let test_state = Rc::new(RefCell::new(TestState::new()));
+            let scheduler = Scheduler::new(test_state.clone());
             Fixture {
-                fake_state,
+                test_state,
                 scheduler,
             }
         }
 
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.fake_state.borrow_mut().messages;
+            let messages = &mut self.test_state.borrow_mut().messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
                 if perm == *messages {
                     messages.clear();
