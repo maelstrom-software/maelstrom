@@ -7,9 +7,7 @@ use crate::{
     },
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::Rc;
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -37,14 +35,12 @@ pub enum Message {
 
 impl<D: SchedulerDeps> Scheduler<D> {
     pub fn new(deps: D) -> Self {
-        let workers = Rc::new(RefCell::new(HashMap::new()));
-        let adapter = HeapAdapter(workers.clone());
         Scheduler {
             deps,
             clients: HashSet::new(),
-            workers,
+            workers: HashMap::new(),
             queued_requests: VecDeque::new(),
-            worker_heap: heap::Heap::new(adapter),
+            worker_heap: heap::Heap::new(),
         }
     }
 
@@ -85,50 +81,45 @@ impl<D: SchedulerDeps> Scheduler<D> {
 struct Worker {
     slots: usize,
     pending: HashMap<ExecutionId, ExecutionDetails>,
-    heap_index: usize,
+    heap_index: heap::HeapIndex,
 }
 
 pub struct Scheduler<D: SchedulerDeps> {
     deps: D,
     clients: HashSet<ClientId>,
-    workers: Rc<RefCell<HashMap<WorkerId, RefCell<Worker>>>>,
+    workers: HashMap<WorkerId, Worker>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: heap::Heap<HeapAdapter>,
+    worker_heap: heap::Heap<HashMap<WorkerId, Worker>>,
 }
 
-struct HeapAdapter(Rc<RefCell<HashMap<WorkerId, RefCell<Worker>>>>);
-
-impl heap::HeapDeps for HeapAdapter {
+impl heap::HeapDeps for HashMap<WorkerId, Worker> {
     type Element = WorkerId;
 
-    fn compare_elements(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> std::cmp::Ordering {
-        let workers = self.0.borrow();
-        let lhs_worker = workers.get(&lhs_id).unwrap().borrow();
-        let rhs_worker = workers.get(&rhs_id).unwrap().borrow();
+    fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
+        let lhs_worker = self.get(&lhs_id).unwrap();
+        let rhs_worker = self.get(&rhs_id).unwrap();
         match usize::cmp(
             &(lhs_worker.pending.len() * rhs_worker.slots),
             &(rhs_worker.pending.len() * lhs_worker.slots),
         ) {
-            std::cmp::Ordering::Equal => lhs_id.cmp(&rhs_id),
-            x => x,
+            std::cmp::Ordering::Less => true,
+            std::cmp::Ordering::Equal => lhs_id < rhs_id,
+            std::cmp::Ordering::Greater => false,
         }
     }
 
-    fn notify_of_index_change(&self, elem: WorkerId, idx: usize) {
-        self.0.borrow().get(&elem).unwrap().borrow_mut().heap_index = idx;
+    fn update_index(&mut self, elem: WorkerId, idx: heap::HeapIndex) {
+        self.get_mut(&elem).unwrap().heap_index = idx;
     }
 }
 
-const OVERSUBSCRIPTION_RATIO: usize = 2;
-
 impl<D: SchedulerDeps> Scheduler<D> {
     fn possibly_start_executions(&mut self) {
-        let workers = self.workers.borrow();
-        while !self.queued_requests.is_empty() && !workers.is_empty() {
+        while !self.queued_requests.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
-            let mut worker = workers.get(&wid).unwrap().borrow_mut();
+            let worker = self.workers.get_mut(&wid).unwrap();
 
-            if worker.pending.len() == OVERSUBSCRIPTION_RATIO * worker.slots {
+            if worker.pending.len() == 2 * worker.slots {
                 break;
             }
 
@@ -138,8 +129,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
 
             worker.pending.insert(eid, details);
             let heap_index = worker.heap_index;
-            drop(worker);
-            self.worker_heap.down_heap(heap_index);
+            self.worker_heap.sift_down(&mut self.workers, heap_index);
         }
     }
 
@@ -151,21 +141,16 @@ impl<D: SchedulerDeps> Scheduler<D> {
         assert!(self.clients.remove(&id), "unknown client id {id:?}");
         self.queued_requests
             .retain(|(ExecutionId(cid, _), _)| *cid != id);
-        for (wid, worker_cell) in self.workers.borrow().iter() {
-            let mut worker = worker_cell.borrow_mut();
+        for (wid, worker) in self.workers.iter_mut() {
             worker.pending.retain(|eid, _| {
-                if eid.0 != id {
-                    true
-                } else {
+                eid.0 != id || {
                     self.deps
                         .send_request_to_worker(*wid, WorkerRequest::CancelExecution(*eid));
                     false
                 }
             });
-            let heap_index = worker.heap_index;
-            drop(worker);
-            self.worker_heap.up_heap(heap_index);
         }
+        self.worker_heap.rebuild(&mut self.workers);
         self.possibly_start_executions();
     }
 
@@ -182,30 +167,29 @@ impl<D: SchedulerDeps> Scheduler<D> {
     }
 
     fn receive_worker_connected(&mut self, id: WorkerId, slots: usize) {
-        let duplicate = self
+        let unique = self
             .workers
-            .borrow_mut()
             .insert(
                 id,
-                RefCell::new(Worker {
+                Worker {
                     slots,
                     pending: HashMap::new(),
-                    heap_index: usize::default(),
-                }),
+                    heap_index: heap::HeapIndex::default(),
+                },
             )
-            .is_some();
-        assert!(!duplicate, "duplicate worker id {id:?}");
-        self.worker_heap.push(id);
+            .is_none();
+        assert!(unique, "duplicate worker id {id:?}");
+        self.worker_heap.push(&mut self.workers, id);
         self.possibly_start_executions();
     }
 
     fn receive_worker_disconnected(&mut self, id: WorkerId) {
-        let mut worker = self.workers.borrow_mut().remove(&id).unwrap().into_inner();
-        self.worker_heap.remove(worker.heap_index);
+        let mut worker = self.workers.remove(&id).unwrap();
+        self.worker_heap
+            .remove(&mut self.workers, worker.heap_index);
 
+        // We sort the requests to keep our tests deterministic.
         let mut vec: Vec<_> = worker.pending.drain().collect();
-
-        // We sort the vector to keep our tests deterministic.
         vec.sort_by_key(|x| x.0);
         for x in vec.into_iter().rev() {
             self.queued_requests.push_front(x);
@@ -220,15 +204,12 @@ impl<D: SchedulerDeps> Scheduler<D> {
         eid: ExecutionId,
         result: ExecutionResult,
     ) {
-        let workers = self.workers.borrow();
-        let worker_cell = workers.get(&wid).unwrap();
-        let mut worker = worker_cell.borrow_mut();
+        let worker = self.workers.get_mut(&wid).unwrap();
 
         if worker.pending.remove(&eid).is_none() {
-            // This indicates that the client isn't around anymore. So we just ignore
-            // this response from the worker. When the client disconnected, we canceled
-            // all of the outstanding requests and updated our version of the worker's
-            // pending requests.
+            // This indicates that the client isn't around anymore. Just ignore this response from
+            // the worker. When the client disconnected, we canceled all of the outstanding
+            // requests and updated our version of the worker's pending requests.
             return;
         }
 
@@ -246,8 +227,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
             // Since there are no queued_requests, we're going to have to update the
             // worker's position in the workers list.
             let heap_index = worker.heap_index;
-            drop(worker);
-            self.worker_heap.up_heap(heap_index);
+            self.worker_heap.sift_up(&mut self.workers, heap_index);
         }
     }
 }
@@ -268,6 +248,8 @@ mod tests {
     use crate::proto::WorkerRequest::*;
     use crate::test::*;
     use itertools::Itertools;
+    use std::cell::RefCell;
+    use std::rc::Rc;
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
