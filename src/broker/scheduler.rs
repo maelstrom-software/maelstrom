@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use super::heap::{Heap, HeapDeps, HeapIndex};
 use crate::{
     proto::{

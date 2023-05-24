@@ -1,5 +1,5 @@
 mod heap;
-mod scheduler;
+pub mod scheduler; // XXX make private
 
 use crate::{proto, Result};
 
