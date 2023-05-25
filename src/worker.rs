@@ -1,7 +1,7 @@
 mod dispatcher;
 mod executor;
 
-use crate::{channel_reader, proto, task, Error, ExecutionDetails, ExecutionId, Result};
+use crate::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result};
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
@@ -75,22 +75,31 @@ pub async fn main(name: String, slots: u32, broker_addr: std::net::SocketAddr) -
 
     let dispatcher_sender_clone = dispatcher_sender.clone();
 
-    tokio::select! {
-        res = task::spawn(async move {
-            proto::socket_reader::<proto::WorkerRequest, dispatcher::Message>(read_stream, dispatcher_sender_clone)
-                .await
-        }) => res?,
-        res = task::spawn(async move {
-            proto::socket_writer(broker_socket_receiver, write_stream).await
-        }) => res?,
-        res = task::spawn(async move {
-            dispatcher_main(slots, dispatcher_receiver, dispatcher_sender, broker_socket_sender).await
-        }) => res?,
-        res = task::spawn(async {
-            signal_handler(tokio::signal::unix::SignalKind::interrupt()).await
-        }) => res?,
-        res = task::spawn(async {
-            signal_handler(tokio::signal::unix::SignalKind::terminate()).await
-        }) => res?,
+    let mut join_set = tokio::task::JoinSet::new();
+    join_set.spawn(async move {
+        proto::socket_reader::<proto::WorkerRequest, dispatcher::Message>(
+            read_stream,
+            dispatcher_sender_clone,
+        )
+        .await
+    });
+    join_set.spawn(async move { proto::socket_writer(broker_socket_receiver, write_stream).await });
+    join_set.spawn(async move {
+        dispatcher_main(
+            slots,
+            dispatcher_receiver,
+            dispatcher_sender,
+            broker_socket_sender,
+        )
+        .await
+    });
+    join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::interrupt()).await });
+    join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::terminate()).await });
+
+    loop {
+        join_set
+            .join_next()
+            .await
+            .expect("at least one task should return and error")??;
     }
 }
