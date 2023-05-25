@@ -3,10 +3,6 @@ use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 
 /// A trait alias for a closure that will send a signal to a process.
 trait Killer: Fn(Pid, Signal) -> nix::Result<()> + Send + 'static {}
@@ -15,14 +11,17 @@ impl<T> Killer for T where T: Fn(Pid, Signal) -> nix::Result<()> + Send + 'stati
 /// A handle for an execution that will kill the process when dropped.
 pub struct Handle {
     pid: Pid,
-    should_kill: Arc<AtomicBool>,
+    done_receiver: tokio::sync::oneshot::Receiver<()>,
     killer: Box<dyn Killer>,
 }
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        if self.should_kill.load(Ordering::Acquire) {
-            (self.killer)(self.pid, Signal::SIGKILL).ok();
+        match self.done_receiver.try_recv() {
+            Ok(()) => {}
+            Err(_) => {
+                (self.killer)(self.pid, Signal::SIGKILL).ok();
+            }
         }
     }
 }
@@ -42,35 +41,39 @@ where
     T: FnOnce(ExecutionResult) + Send + 'static,
     U: Killer,
 {
+    let killer = Box::new(killer);
+    let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
     let result = tokio::process::Command::new(details.program)
         .args(details.arguments)
         .stdin(std::process::Stdio::null())
         .spawn();
     match result {
         Err(error) => {
+            done_sender.send(()).ok();
             tokio::task::spawn(async move { done(ExecutionResult::Error(error.to_string())) });
             Handle {
                 pid: Pid::from_raw(0),
-                should_kill: Arc::new(AtomicBool::new(false)),
-                killer: Box::new(killer),
+                done_receiver,
+                killer,
             }
         }
         Ok(child) => {
             let pid = Pid::from_raw(child.id().unwrap() as i32);
-            let should_kill = Arc::new(AtomicBool::new(true));
-            let should_kill_clone = should_kill.clone();
-            tokio::task::spawn(async move { waiter(child, should_kill_clone, done).await });
+            tokio::task::spawn(async move { waiter(child, done_sender, done).await });
             Handle {
                 pid,
-                should_kill,
-                killer: Box::new(killer),
+                done_receiver,
+                killer,
             }
         }
     }
 }
 
-async fn waiter<T>(mut child: tokio::process::Child, should_signal: Arc<AtomicBool>, done: T)
-where
+async fn waiter<T>(
+    mut child: tokio::process::Child,
+    done_sender: tokio::sync::oneshot::Sender<()>,
+    done: T,
+) where
     T: FnOnce(ExecutionResult) + Send + 'static,
 {
     use std::os::unix::process::ExitStatusExt;
@@ -81,13 +84,13 @@ where
             None => ExecutionResult::Signalled(status.signal().unwrap() as u8),
         },
     });
-    should_signal.store(false, Ordering::Release);
+    done_sender.send(()).ok();
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use tempfile;
 
     macro_rules! bash {
