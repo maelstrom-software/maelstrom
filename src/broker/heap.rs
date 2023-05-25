@@ -190,7 +190,6 @@ impl<D: HeapDeps> Heap<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claim::assert_le;
     use std::collections::HashMap;
 
     struct TestElement {
@@ -228,9 +227,9 @@ mod tests {
                 let parent_idx = (idx + 1) / 2 - 1;
                 let parent_id = self.heap.0[parent_idx];
                 let id = self.heap.0[idx];
-                assert_le!(
-                    self.elements.get(&parent_id).unwrap().weight,
-                    self.elements.get(&id).unwrap().weight
+                assert!(
+                    self.elements.get(&parent_id).unwrap().weight
+                        < self.elements.get(&id).unwrap().weight
                 );
             }
         }

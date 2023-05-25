@@ -55,7 +55,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
     pub fn new(deps: D, slots: u32) -> Self {
-        claim::assert_gt!(slots, 0);
+        assert!(slots > 0);
         Dispatcher {
             deps,
             slots,
@@ -319,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "left > right")]
+    #[should_panic(expected = "assertion failed: slots > 0")]
     fn slots_must_be_nonzero() {
         let _ = Fixture::new(0);
     }

@@ -160,8 +160,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claim::assert_lt;
-    use claim::assert_none;
     use std::cell::RefCell;
     use std::collections::HashSet;
 
@@ -205,10 +203,11 @@ mod tests {
             match self.borrow_mut().executors.get_mut(&executor_id) {
                 None => panic!("Executor {} not found.", executor_id),
                 Some(executor) => {
-                    assert_lt!(executor.in_progress.len(), executor.slots as usize);
-                    assert_none!(executor
+                    assert!(executor.in_progress.len() < executor.slots as usize);
+                    assert!(executor
                         .in_progress
-                        .insert(instance_id, instance_details.clone()));
+                        .insert(instance_id, instance_details.clone())
+                        .is_none());
                 }
             }
         }
