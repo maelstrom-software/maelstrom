@@ -29,9 +29,10 @@
 /// client notifying it whenever a value changes. If the client doesn't do this, the heap condition
 /// will be violated and [Heap::peek] will no longer necessarily provide the smallest element.
 ///
-/// The modifying methods of this struct take a [&mut HeapDeps], instead of [Heap::new] taking the
-/// dependencies and storing them in the heap. This is done to satisfy the borrow checker so that
-/// clients of the heap don't need to use a bunch of Rc<Refcell<_>>s.
+/// The modifying methods of this struct take a [&mut HeapDeps], instead of a [Heap] constructor
+/// taking the dependencies and storing them in the heap. This is done to satisfy the borrow
+/// checker so that clients of the heap don't need to use a bunch of Rc<Refcell<_>>s.
+#[derive(Default)]
 pub struct Heap<D: HeapDeps>(Vec<D::Element>);
 
 /// An index value in [Heap]. These are provided to the client via [HeapDeps::update_index]. The
@@ -57,11 +58,6 @@ pub trait HeapDeps {
 }
 
 impl<D: HeapDeps> Heap<D> {
-    /// Create an empty heap. O(1).
-    pub fn new() -> Heap<D> {
-        Heap(vec![])
-    }
-
     /// Return an [Option] containing an element with the smallest value in the heap, or [None] if
     /// the heap is empty. Note that multiple elements in the heap may have the smallest value. In
     /// this case, an arbitrary element will be returned. O(1).
@@ -214,19 +210,13 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
     struct Fixture {
         elements: HashMap<u64, TestElement>,
         heap: Heap<HashMap<u64, TestElement>>,
     }
 
     impl Fixture {
-        fn new() -> Self {
-            Fixture {
-                elements: HashMap::new(),
-                heap: Heap::new(),
-            }
-        }
-
         fn validate_indices(&self) {
             for (idx, id) in self.heap.0.iter().enumerate() {
                 assert_eq!(self.elements.get(&id).unwrap().heap_index, HeapIndex(idx));
@@ -284,7 +274,7 @@ mod tests {
 
     #[test]
     fn peek_on_empty_and_small_heaps() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
 
         assert_eq!(fixture.heap.peek(), None);
         assert_eq!(fixture.heap.peek(), None);
@@ -299,7 +289,7 @@ mod tests {
 
     #[test]
     fn push_ascending() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, 1000 * i as i32);
             fixture.validate();
@@ -308,7 +298,7 @@ mod tests {
 
     #[test]
     fn push_descending() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, -1000 * i as i32);
             fixture.validate();
@@ -317,7 +307,7 @@ mod tests {
 
     #[test]
     fn push_random() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, rand::random());
             fixture.validate();
@@ -326,7 +316,7 @@ mod tests {
 
     #[test]
     fn remove_random() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, rand::random());
             fixture.validate();
@@ -339,7 +329,7 @@ mod tests {
 
     #[test]
     fn sift_up_and_sift_down_random() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, rand::random());
             fixture.validate();
@@ -354,7 +344,7 @@ mod tests {
 
     #[test]
     fn rebuild_random() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         for i in 0..1000 {
             fixture.push(i, rand::random());
             fixture.validate();

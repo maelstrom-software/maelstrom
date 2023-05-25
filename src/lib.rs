@@ -38,7 +38,9 @@ pub enum ExecutionResult {
     Error(String),
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct WorkerId(u32);
 
 pub trait SchedulerDeps {

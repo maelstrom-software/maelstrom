@@ -32,15 +32,6 @@ pub enum Message {
 }
 
 impl Scheduler {
-    pub fn new() -> Self {
-        Scheduler {
-            clients: HashSet::new(),
-            workers: HashMap::new(),
-            queued_requests: VecDeque::new(),
-            worker_heap: Heap::new(),
-        }
-    }
-
     pub fn receive_message(&mut self, deps: &mut impl SchedulerDeps, msg: Message) {
         use Message::*;
         match msg {
@@ -81,6 +72,7 @@ struct Worker {
     heap_index: HeapIndex,
 }
 
+#[derive(Default)]
 pub struct Scheduler {
     clients: HashSet<ClientId>,
     workers: HashMap<WorkerId, Worker>,
@@ -173,7 +165,7 @@ impl Scheduler {
                 id,
                 Worker {
                     slots,
-                    pending: HashMap::new(),
+                    pending: HashMap::default(),
                     heap_index: HeapIndex::default(),
                 },
             )
@@ -256,16 +248,9 @@ mod tests {
 
     use TestMessage::*;
 
+    #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
-    }
-
-    impl TestState {
-        fn new() -> Self {
-            TestState {
-                messages: Vec::new(),
-            }
-        }
     }
 
     impl SchedulerDeps for TestState {
@@ -278,19 +263,13 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
     struct Fixture {
         test_state: TestState,
         scheduler: Scheduler,
     }
 
     impl Fixture {
-        fn new() -> Self {
-            Fixture {
-                test_state: TestState::new(),
-                scheduler: Scheduler::new(),
-            }
-        }
-
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
             let messages = &mut self.test_state.messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
@@ -310,7 +289,7 @@ mod tests {
         ($test_name:ident, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
             #[test]
             fn $test_name() {
-                let mut fixture = Fixture::new();
+                let mut fixture = Fixture::default();
                 $(
                     fixture.scheduler.receive_message(&mut fixture.test_state, $in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
@@ -328,7 +307,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn request_from_unknown_client_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture.scheduler.receive_message(
             &mut fixture.test_state,
             FromClient(cid![1], ClientRequest(ceid![1], details![1])),
@@ -338,7 +317,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_client_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture
             .scheduler
             .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
@@ -347,7 +326,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn connect_from_duplicate_client_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture
             .scheduler
             .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
@@ -359,7 +338,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn response_from_unknown_worker_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         // The response will be ignored unless we use a valid ClientId.
         fixture.scheduler.receive_message(
             &mut fixture.test_state,
@@ -375,7 +354,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_worker_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture
             .scheduler
             .receive_message(&mut fixture.test_state, WorkerDisconnected(wid![1]));
@@ -384,7 +363,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
-        let mut fixture = Fixture::new();
+        let mut fixture = Fixture::default();
         fixture.scheduler.receive_message(
             &mut fixture.test_state,
             WorkerConnected(wid![1], worker_hello![1, 2]),
