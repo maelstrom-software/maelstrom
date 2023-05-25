@@ -283,6 +283,10 @@ mod tests {
                  Expected: {expected:#?}\nActual: {messages:#?}"
             );
         }
+
+        fn receive_message(&mut self, msg: Message) {
+            self.scheduler.receive_message(&mut self.test_state, msg);
+        }
     }
 
     macro_rules! script_test {
@@ -291,7 +295,7 @@ mod tests {
             fn $test_name() {
                 let mut fixture = Fixture::default();
                 $(
-                    fixture.scheduler.receive_message(&mut fixture.test_state, $in_msg);
+                    fixture.receive_message($in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )+
             }
@@ -308,31 +312,22 @@ mod tests {
     #[should_panic]
     fn request_from_unknown_client_panics() {
         let mut fixture = Fixture::default();
-        fixture.scheduler.receive_message(
-            &mut fixture.test_state,
-            FromClient(cid![1], ClientRequest(ceid![1], details![1])),
-        );
+        fixture.receive_message(FromClient(cid![1], ClientRequest(ceid![1], details![1])));
     }
 
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_client_panics() {
         let mut fixture = Fixture::default();
-        fixture
-            .scheduler
-            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
+        fixture.receive_message(ClientDisconnected(cid![1]));
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_client_panics() {
         let mut fixture = Fixture::default();
-        fixture
-            .scheduler
-            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
-        fixture
-            .scheduler
-            .receive_message(&mut fixture.test_state, ClientDisconnected(cid![1]));
+        fixture.receive_message(ClientDisconnected(cid![1]));
+        fixture.receive_message(ClientDisconnected(cid![1]));
     }
 
     #[test]
@@ -340,38 +335,24 @@ mod tests {
     fn response_from_unknown_worker_panics() {
         let mut fixture = Fixture::default();
         // The response will be ignored unless we use a valid ClientId.
-        fixture.scheduler.receive_message(
-            &mut fixture.test_state,
-            ClientConnected(cid![1], client_hello![1]),
-        );
+        fixture.receive_message(ClientConnected(cid![1], client_hello![1]));
 
-        fixture.scheduler.receive_message(
-            &mut fixture.test_state,
-            FromWorker(wid![1], WorkerResponse(eid![1], result![1])),
-        );
+        fixture.receive_message(FromWorker(wid![1], WorkerResponse(eid![1], result![1])));
     }
 
     #[test]
     #[should_panic]
     fn disconnect_from_unknown_worker_panics() {
         let mut fixture = Fixture::default();
-        fixture
-            .scheduler
-            .receive_message(&mut fixture.test_state, WorkerDisconnected(wid![1]));
+        fixture.receive_message(WorkerDisconnected(wid![1]));
     }
 
     #[test]
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
         let mut fixture = Fixture::default();
-        fixture.scheduler.receive_message(
-            &mut fixture.test_state,
-            WorkerConnected(wid![1], worker_hello![1, 2]),
-        );
-        fixture.scheduler.receive_message(
-            &mut fixture.test_state,
-            WorkerConnected(wid![1], worker_hello![1, 2]),
-        );
+        fixture.receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
+        fixture.receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
     }
 
     script_test! {
