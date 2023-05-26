@@ -1,17 +1,51 @@
+//! Easily start and stop processes.
+
 use crate::{ExecutionDetails, ExecutionResult};
-use nix::{
-    sys::signal::{self, Signal},
-    unistd::Pid,
-};
+use nix::{sys::signal::Signal, unistd::Pid};
 
-pub type Handle = GenericHandle<()>;
+/*              _     _ _
+ *  _ __  _   _| |__ | (_) ___
+ * | '_ \| | | | '_ \| | |/ __|
+ * | |_) | |_| | |_) | | | (__
+ * | .__/ \__,_|_.__/|_|_|\___|
+ * |_|
+ *  FIGLET: public
+ */
 
-pub trait Killer: Send + 'static {
+/// Start a process (i.e. execution) and call the provided callback when it completes. The process
+/// will be killed when the returned [Handle] is dropped, unless it has already completed. The
+/// provided callback is always called on a separate task, even if an error occurs immediately.
+pub fn start<D: FnOnce(ExecutionResult) + Send + 'static>(
+    details: ExecutionDetails,
+    done: D,
+) -> Handle {
+    Handle(start_with_killer(details, done, ()))
+}
+
+/// A handle that, when dropped, will kill the running process. If the process has already
+/// completed, or if it failed to start, then dropping the Handle does nothing.
+pub struct Handle(GenericHandle<()>);
+
+/*             _            _
+ *  _ __  _ __(_)_   ____ _| |_ ___
+ * | '_ \| '__| \ \ / / _` | __/ _ \
+ * | |_) | |  | |\ V / (_| | ||  __/
+ * | .__/|_|  |_| \_/ \__,_|\__\___|
+ * |_|
+ *  FIGLET: private
+ */
+
+trait Killer: Send + 'static {
     fn kill(&mut self, pid: Pid, signal: Signal);
 }
 
-/// A handle for an execution that will kill the process when dropped.
-pub struct GenericHandle<K: Killer> {
+impl Killer for () {
+    fn kill(&mut self, pid: Pid, signal: Signal) {
+        nix::sys::signal::kill(pid, signal).ok();
+    }
+}
+
+struct GenericHandle<K: Killer> {
     pid: Pid,
     done_receiver: tokio::sync::oneshot::Receiver<()>,
     killer: K,
@@ -28,27 +62,27 @@ impl<K: Killer> Drop for GenericHandle<K> {
     }
 }
 
-impl Killer for () {
-    fn kill(&mut self, pid: Pid, signal: Signal) {
-        signal::kill(pid, signal).ok();
-    }
+async fn waiter<D: FnOnce(ExecutionResult) + Send + 'static>(
+    mut child: tokio::process::Child,
+    done_sender: tokio::sync::oneshot::Sender<()>,
+    done: D,
+) {
+    use std::os::unix::process::ExitStatusExt;
+    done(match child.wait().await {
+        Err(error) => ExecutionResult::Error(error.to_string()),
+        Ok(status) => match status.code() {
+            Some(code) => ExecutionResult::Exited(code as u8),
+            None => ExecutionResult::Signalled(status.signal().unwrap() as u8),
+        },
+    });
+    done_sender.send(()).ok();
 }
 
-/// Start a process (i.e. execution). The process will be killed when the returned handle is
-/// dropped, unless it has already completed. The provided done callback is always called on a
-/// separate task, even if the error occurs immediately.
-pub fn start<T>(details: ExecutionDetails, done: T) -> Handle
-where
-    T: FnOnce(ExecutionResult) + Send + 'static,
-{
-    start_with_killer(details, done, ())
-}
-
-fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> GenericHandle<U>
-where
-    T: FnOnce(ExecutionResult) + Send + 'static,
-    U: Killer,
-{
+fn start_with_killer<D: FnOnce(ExecutionResult) + Send + 'static, K: Killer>(
+    details: ExecutionDetails,
+    done: D,
+    killer: K,
+) -> GenericHandle<K> {
     let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
     let result = tokio::process::Command::new(details.program)
         .args(details.arguments)
@@ -76,23 +110,13 @@ where
     }
 }
 
-async fn waiter<T>(
-    mut child: tokio::process::Child,
-    done_sender: tokio::sync::oneshot::Sender<()>,
-    done: T,
-) where
-    T: FnOnce(ExecutionResult) + Send + 'static,
-{
-    use std::os::unix::process::ExitStatusExt;
-    done(match child.wait().await {
-        Err(error) => ExecutionResult::Error(error.to_string()),
-        Ok(status) => match status.code() {
-            Some(code) => ExecutionResult::Exited(code as u8),
-            None => ExecutionResult::Signalled(status.signal().unwrap() as u8),
-        },
-    });
-    done_sender.send(()).ok();
-}
+/*  _            _
+ * | |_ ___  ___| |_ ___
+ * | __/ _ \/ __| __/ __|
+ * | ||  __/\__ \ |_\__ \
+ *  \__\___||___/\__|___/
+ *  FIGLET: tests
+ */
 
 #[cfg(test)]
 mod tests {
@@ -128,7 +152,7 @@ mod tests {
     impl Killer for Arc<Mutex<Option<Signal>>> {
         fn kill(&mut self, pid: Pid, signal: Signal) {
             assert!(self.lock().unwrap().replace(signal).is_none());
-            signal::kill(pid, signal).ok();
+            nix::sys::signal::kill(pid, signal).ok();
         }
     }
 
