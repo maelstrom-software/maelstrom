@@ -34,7 +34,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
 }
 
 async fn dispatcher_main(
-    slots: u32,
+    slots: usize,
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
@@ -58,7 +58,7 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
-pub async fn main(name: String, slots: u32, broker_addr: std::net::SocketAddr) -> Result<()> {
+pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr) -> Result<()> {
     let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(&broker_addr)
         .await?
         .into_split();
@@ -66,7 +66,10 @@ pub async fn main(name: String, slots: u32, broker_addr: std::net::SocketAddr) -
 
     proto::write_message(
         &mut write_stream,
-        proto::Hello::Worker(proto::WorkerHello { name, slots }),
+        proto::Hello::Worker(proto::WorkerHello {
+            name,
+            slots: slots as u32,
+        }),
     )
     .await?;
 

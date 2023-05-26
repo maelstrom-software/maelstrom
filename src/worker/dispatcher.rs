@@ -23,7 +23,7 @@ use std::collections::{HashMap, VecDeque};
 /// All methods are completely nonblocking. They will never block the task or the thread.
 pub struct Dispatcher<D: DispatcherDeps> {
     deps: D,
-    slots: u32,
+    slots: usize,
     blocked: VecDeque<(ExecutionId, ExecutionDetails)>,
     executing: HashMap<ExecutionId, D::ExecutionHandle>,
 }
@@ -61,7 +61,7 @@ pub enum Message {
 impl<D: DispatcherDeps> Dispatcher<D> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
-    pub fn new(deps: D, slots: u32) -> Self {
+    pub fn new(deps: D, slots: usize) -> Self {
         assert!(slots > 0);
         Dispatcher {
             deps,
@@ -117,7 +117,7 @@ impl From<WorkerRequest> for Message {
 
 impl<D: DispatcherDeps> Dispatcher<D> {
     fn possibly_start_execution(&mut self) {
-        if self.executing.len() < self.slots as usize {
+        if self.executing.len() < self.slots {
             if let Some((id, details)) = self.blocked.pop_front() {
                 let handle = self.deps.start_execution(id, details);
                 if self.executing.insert(id, handle).is_some() {
@@ -209,7 +209,7 @@ mod tests {
     }
 
     impl Fixture {
-        fn new(slots: u32) -> Self {
+        fn new(slots: usize) -> Self {
             let fake_state = Rc::new(RefCell::new(FakeState::new()));
             let dispatcher = Dispatcher::new(fake_state.clone(), slots);
             Fixture {
