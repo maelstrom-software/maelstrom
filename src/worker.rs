@@ -80,10 +80,9 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
 
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(async move {
-        proto::socket_reader::<proto::WorkerRequest, dispatcher::Message>(
-            read_stream,
-            dispatcher_sender_clone,
-        )
+        proto::socket_reader(read_stream, dispatcher_sender_clone, |req| {
+            dispatcher::Message::FromBroker(req)
+        })
         .await
     });
     join_set.spawn(async move { proto::socket_writer(broker_socket_receiver, write_stream).await });

@@ -58,13 +58,6 @@ pub enum Message {
     FromExecutor(ExecutionId, ExecutionResult),
 }
 
-/// Used by [crate::proto::socket_reader].
-impl From<WorkerRequest> for Message {
-    fn from(request: WorkerRequest) -> Message {
-        Message::FromBroker(request)
-    }
-}
-
 impl<D: DispatcherDeps> Dispatcher<D> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.

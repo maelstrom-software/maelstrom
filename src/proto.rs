@@ -68,14 +68,14 @@ where
 pub async fn socket_reader<T, U>(
     mut socket: (impl tokio::io::AsyncRead + Unpin),
     channel: tokio::sync::mpsc::UnboundedSender<U>,
+    transform: impl Fn(T) -> U,
 ) -> Result<()>
 where
     T: DeserializeOwned,
-    U: From<T>,
 {
     loop {
         let msg = read_message::<T>(&mut socket).await?;
-        if channel.send(msg.into()).is_err() {
+        if channel.send(transform(msg)).is_err() {
             return Ok(());
         }
     }
