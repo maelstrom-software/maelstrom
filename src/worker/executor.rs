@@ -4,44 +4,49 @@ use nix::{
     unistd::Pid,
 };
 
-/// A trait alias for a closure that will send a signal to a process.
-trait Killer: Fn(Pid, Signal) -> nix::Result<()> + Send + 'static {}
-impl<T> Killer for T where T: Fn(Pid, Signal) -> nix::Result<()> + Send + 'static {}
-
-/// A handle for an execution that will kill the process when dropped.
-pub struct Handle {
-    pid: Pid,
-    done_receiver: tokio::sync::oneshot::Receiver<()>,
-    killer: Box<dyn Killer>,
+pub trait Killer: Send + 'static {
+    fn kill(&mut self, pid: Pid, signal: Signal);
 }
 
-impl Drop for Handle {
+/// A handle for an execution that will kill the process when dropped.
+pub struct Handle<K: Killer> {
+    pid: Pid,
+    done_receiver: tokio::sync::oneshot::Receiver<()>,
+    killer: K,
+}
+
+impl<K: Killer> Drop for Handle<K> {
     fn drop(&mut self) {
         match self.done_receiver.try_recv() {
             Ok(()) => {}
             Err(_) => {
-                (self.killer)(self.pid, Signal::SIGKILL).ok();
+                self.killer.kill(self.pid, Signal::SIGKILL);
             }
         }
+    }
+}
+
+impl Killer for () {
+    fn kill(&mut self, pid: Pid, signal: Signal) {
+        signal::kill(pid, signal).ok();
     }
 }
 
 /// Start a process (i.e. execution). The process will be killed when the returned handle is
 /// dropped, unless it has already completed. The provided done callback is always called on a
 /// separate task, even if the error occurs immediately.
-pub fn start<T>(details: ExecutionDetails, done: T) -> Handle
+pub fn start<T>(details: ExecutionDetails, done: T) -> Handle<()>
 where
     T: FnOnce(ExecutionResult) + Send + 'static,
 {
-    start_with_killer(details, done, signal::kill)
+    start_with_killer(details, done, ())
 }
 
-fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> Handle
+fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> Handle<U>
 where
     T: FnOnce(ExecutionResult) + Send + 'static,
     U: Killer,
 {
-    let killer = Box::new(killer);
     let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
     let result = tokio::process::Command::new(details.program)
         .args(details.arguments)
@@ -118,25 +123,25 @@ mod tests {
         rx.await.unwrap()
     }
 
-    fn logging_killer() -> (impl Killer, impl FnOnce() -> Option<Signal>) {
-        let killed: Arc<Mutex<Option<Signal>>> = Arc::new(Mutex::new(None));
-        let killed_clone = killed.clone();
-        (
-            move |pid, sig| {
-                assert!(killed_clone.lock().unwrap().replace(sig).is_none());
-                signal::kill(pid, sig)
-            },
-            move || *killed.lock().unwrap(),
-        )
+    impl Killer for Arc<Mutex<Option<Signal>>> {
+        fn kill(&mut self, pid: Pid, signal: Signal) {
+            assert!(self.lock().unwrap().replace(signal).is_none());
+            signal::kill(pid, signal).ok();
+        }
     }
 
     async fn start_and_await_with_logging_killer(
         details: ExecutionDetails,
     ) -> (ExecutionResult, Option<Signal>) {
-        let (killer, killed) = logging_killer();
+        let killer = Arc::new(Mutex::new(None));
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let _handle = start_with_killer(details, move |result| tx.send(result).unwrap(), killer);
-        (rx.await.unwrap(), killed())
+        let _handle = start_with_killer(
+            details,
+            move |result| tx.send(result).unwrap(),
+            killer.clone(),
+        );
+        let signal = *killer.lock().unwrap();
+        (rx.await.unwrap(), signal)
     }
 
     #[tokio::test]
@@ -240,15 +245,15 @@ mod tests {
     #[tokio::test]
     async fn handle_sends_signal_on_drop_if_process_still_running() {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let (killer, killed) = logging_killer();
+        let killer = Arc::new(Mutex::new(None));
         let handle = start_with_killer(
             bash!("sleep infinity"),
             move |result| tx.send(result).unwrap(),
-            killer,
+            killer.clone(),
         );
         drop(handle);
         let result = rx.await.unwrap();
         assert_eq!(result, ExecutionResult::Signalled(9));
-        assert_eq!(killed(), Some(Signal::SIGKILL));
+        assert_eq!(*killer.lock().unwrap(), Some(Signal::SIGKILL));
     }
 }
