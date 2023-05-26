@@ -1,8 +1,6 @@
 use super::heap::{Heap, HeapDeps, HeapIndex};
 use crate::{
-    proto::{
-        ClientHello, ClientRequest, ClientResponse, WorkerHello, WorkerRequest, WorkerResponse,
-    },
+    proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -23,10 +21,10 @@ pub trait SchedulerDeps {
 
 #[derive(Debug)]
 pub enum Message {
-    ClientConnected(ClientId, ClientHello),
+    ClientConnected(ClientId),
     ClientDisconnected(ClientId),
     FromClient(ClientId, ClientRequest),
-    WorkerConnected(WorkerId, WorkerHello),
+    WorkerConnected(WorkerId, usize),
     WorkerDisconnected(WorkerId),
     FromWorker(WorkerId, WorkerResponse),
 }
@@ -35,7 +33,7 @@ impl Scheduler {
     pub fn receive_message(&mut self, deps: &mut impl SchedulerDeps, msg: Message) {
         use Message::*;
         match msg {
-            ClientConnected(id, _) => self.receive_client_connected(id),
+            ClientConnected(id) => self.receive_client_connected(id),
 
             ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
 
@@ -43,9 +41,7 @@ impl Scheduler {
                 self.receive_client_request(deps, cid, ceid, details)
             }
 
-            WorkerConnected(id, WorkerHello { name: _, slots }) => {
-                self.receive_worker_connected(deps, id, slots as usize)
-            }
+            WorkerConnected(id, slots) => self.receive_worker_connected(deps, id, slots),
 
             WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
 
@@ -304,7 +300,7 @@ mod tests {
 
     script_test! {
         message_from_known_client_ok,
-        ClientConnected(cid![1], client_hello![1]) => {};
+        ClientConnected(cid![1]) => {};
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {};
     }
 
@@ -335,7 +331,7 @@ mod tests {
     fn response_from_unknown_worker_panics() {
         let mut fixture = Fixture::default();
         // The response will be ignored unless we use a valid ClientId.
-        fixture.receive_message(ClientConnected(cid![1], client_hello![1]));
+        fixture.receive_message(ClientConnected(cid![1]));
 
         fixture.receive_message(FromWorker(wid![1], WorkerResponse(eid![1], result![1])));
     }
@@ -351,20 +347,20 @@ mod tests {
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
         let mut fixture = Fixture::default();
-        fixture.receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
-        fixture.receive_message(WorkerConnected(wid![1], worker_hello![1, 2]));
+        fixture.receive_message(WorkerConnected(wid![1], 2));
+        fixture.receive_message(WorkerConnected(wid![1], 2));
     }
 
     script_test! {
         response_from_known_worker_for_unknown_execution_ignored,
-        WorkerConnected(wid![1], worker_hello![1, 2]) => {};
+        WorkerConnected(wid![1], 2) => {};
         FromWorker(wid![1], WorkerResponse(eid![1], result![1])) => {};
     }
 
     script_test! {
         one_client_one_worker,
-        ClientConnected(cid![1], client_hello![1]) => {};
-        WorkerConnected(wid![1], worker_hello![1, 2]) => {};
+        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 2) => {};
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1], details![1])),
         };
@@ -375,16 +371,16 @@ mod tests {
 
     script_test! {
         response_from_worker_for_disconnected_client_ignored,
-        WorkerConnected(wid![1], worker_hello![1, 2]) => {};
+        WorkerConnected(wid![1], 2) => {};
         FromWorker(wid![1], WorkerResponse(eid![1], result![1])) => {};
     }
 
     script_test! {
         requests_go_to_workers_based_on_subscription_percentage,
-        WorkerConnected(wid![1], worker_hello![1, 2]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 2]) => {};
-        WorkerConnected(wid![3], worker_hello![3, 3]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 2) => {};
+        WorkerConnected(wid![2], 2) => {};
+        WorkerConnected(wid![3], 3) => {};
+        ClientConnected(cid![1]) => {};
 
         // 0/2 0/2 0/3
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
@@ -445,9 +441,9 @@ mod tests {
 
     script_test! {
         requests_start_queueing_at_2x_workers_slot_count,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        WorkerConnected(wid![2], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         // 0/1 0/1
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
@@ -488,7 +484,7 @@ mod tests {
 
     script_test! {
         queued_requests_go_to_workers_on_connect,
-        ClientConnected(cid![1], client_hello![1]) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {};
         FromClient(cid![1], ClientRequest(ceid![2], details![2])) => {};
@@ -497,14 +493,14 @@ mod tests {
         FromClient(cid![1], ClientRequest(ceid![5], details![5])) => {};
         FromClient(cid![1], ClientRequest(ceid![6], details![6])) => {};
 
-        WorkerConnected(wid![1], worker_hello![1, 2]) => {
+        WorkerConnected(wid![1], 2) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 4], details![4])),
         };
 
-        WorkerConnected(wid![2], worker_hello![2, 2]) => {
+        WorkerConnected(wid![2], 2) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 6], details![6])),
         };
@@ -512,10 +508,10 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {};
-        WorkerConnected(wid![3], worker_hello![3, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        WorkerConnected(wid![2], 1) => {};
+        WorkerConnected(wid![3], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -549,8 +545,8 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers_2,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -568,7 +564,7 @@ mod tests {
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
         };
 
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {
+        WorkerConnected(wid![2], 1) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
         };
 
@@ -584,8 +580,8 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_go_to_head_of_queue_for_other_workers,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -600,7 +596,7 @@ mod tests {
 
         WorkerDisconnected(wid![1]) => {};
 
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {
+        WorkerConnected(wid![2], 1) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 1], details![1])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         };
@@ -609,8 +605,8 @@ mod tests {
     script_test! {
         requests_get_removed_from_workers_pending_map,
 
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -629,13 +625,13 @@ mod tests {
         };
 
         WorkerDisconnected(wid![1]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {};
+        WorkerConnected(wid![2], 1) => {};
     }
 
     script_test! {
         client_disconnects_with_outstanding_work_1,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -648,10 +644,10 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_2,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
-        ClientConnected(cid![2], client_hello![2]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        WorkerConnected(wid![2], 1) => {};
+        ClientConnected(cid![1]) => {};
+        ClientConnected(cid![2]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -672,8 +668,8 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_3,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        ClientConnected(cid![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -683,7 +679,7 @@ mod tests {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
-        ClientConnected(cid![2], client_hello![2]) => {};
+        ClientConnected(cid![2]) => {};
         FromClient(cid![2], ClientRequest(ceid![1], details![1])) => {};
         FromClient(cid![1], ClientRequest(ceid![3], details![3])) => {};
 
@@ -697,10 +693,10 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_4,
-        WorkerConnected(wid![1], worker_hello![1, 1]) => {};
-        WorkerConnected(wid![2], worker_hello![2, 1]) => {};
-        ClientConnected(cid![1], client_hello![1]) => {};
-        ClientConnected(cid![2], client_hello![2]) => {};
+        WorkerConnected(wid![1], 1) => {};
+        WorkerConnected(wid![2], 1) => {};
+        ClientConnected(cid![1]) => {};
+        ClientConnected(cid![2]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),

@@ -76,22 +76,3 @@ macro_rules! result {
     };
 }
 pub(crate) use result;
-
-macro_rules! client_hello {
-    ($n:literal) => {
-        ClientHello {
-            name: concat!("client_", $n).to_string(),
-        }
-    };
-}
-pub(crate) use client_hello;
-
-macro_rules! worker_hello {
-    ($n:literal, $slots:expr) => {
-        WorkerHello {
-            name: concat!("client_", $n).to_string(),
-            slots: $slots,
-        }
-    };
-}
-pub(crate) use worker_hello;
