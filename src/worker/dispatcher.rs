@@ -1,11 +1,24 @@
+//! Central processing module for the worker. Receive messages from the broker and executors, and
+//! start or cancel executions as appropriate.
+
 use crate::{
     proto::{WorkerRequest, WorkerResponse},
     ExecutionDetails, ExecutionId, ExecutionResult,
 };
 use std::collections::{HashMap, VecDeque};
 
-/// Manage executions based on the slot count and requests from the broker. Executes
-/// requests in FIFO order: It's up to the broker to order the requests properly.
+/*              _     _ _
+ *  _ __  _   _| |__ | (_) ___
+ * | '_ \| | | | '_ \| | |/ __|
+ * | |_) | |_| | |_) | | | (__
+ * | .__/ \__,_|_.__/|_|_|\___|
+ * |_|
+ *  FIGLET: public
+ */
+
+/// Manage executions based on the slot count and requests from the broker. If the broker
+/// sends more execution requests than there are slots, the extra requests are queued in a FIFO
+/// queue. It's up to the broker to order the requests properly.
 ///
 /// All methods are completely nonblocking. They will never block the task or the thread.
 pub struct Dispatcher<D: DispatcherDeps> {
@@ -39,16 +52,11 @@ pub trait DispatcherDeps {
     fn send_response_to_broker(&mut self, message: WorkerResponse);
 }
 
+/// An input message for the dispatcher. These come from either the broker or from an executor.
 #[derive(Debug)]
 pub enum Message {
     FromBroker(WorkerRequest),
     FromExecutor(ExecutionId, ExecutionResult),
-}
-
-impl From<WorkerRequest> for Message {
-    fn from(request: WorkerRequest) -> Message {
-        Message::FromBroker(request)
-    }
 }
 
 impl<D: DispatcherDeps> Dispatcher<D> {
@@ -93,7 +101,24 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             }
         }
     }
+}
 
+/*             _            _
+ *  _ __  _ __(_)_   ____ _| |_ ___
+ * | '_ \| '__| \ \ / / _` | __/ _ \
+ * | |_) | |  | |\ V / (_| | ||  __/
+ * | .__/|_|  |_| \_/ \__,_|\__\___|
+ * |_|
+ *  FIGLET: private
+ */
+
+impl From<WorkerRequest> for Message {
+    fn from(request: WorkerRequest) -> Message {
+        Message::FromBroker(request)
+    }
+}
+
+impl<D: DispatcherDeps> Dispatcher<D> {
     fn possibly_start_execution(&mut self) {
         if self.slots_used < self.slots {
             if let Some((id, details)) = self.blocked.pop_front() {
@@ -106,6 +131,14 @@ impl<D: DispatcherDeps> Dispatcher<D> {
         }
     }
 }
+
+/*  _            _
+ * | |_ ___  ___| |_ ___
+ * | __/ _ \/ __| __/ __|
+ * | ||  __/\__ \ |_\__ \
+ *  \__\___||___/\__|___/
+ *  FIGLET: tests
+ */
 
 #[cfg(test)]
 mod tests {
