@@ -103,6 +103,6 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
         join_set
             .join_next()
             .await
-            .expect("at least one task should return and error")??;
+            .expect("at least one task should return an error")??;
     }
 }
