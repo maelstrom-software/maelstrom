@@ -156,13 +156,13 @@ mod tests {
 
     use TestMessage::*;
 
-    struct FakeState {
+    struct TestState {
         messages: Vec<TestMessage>,
     }
 
-    impl FakeState {
+    impl TestState {
         fn new() -> Self {
-            FakeState {
+            TestState {
                 messages: Vec::new(),
             }
         }
@@ -170,19 +170,19 @@ mod tests {
 
     struct ExecutionHandle {
         id: ExecutionId,
-        fake_state: Rc<RefCell<FakeState>>,
+        test_state: Rc<RefCell<TestState>>,
     }
 
     impl Drop for ExecutionHandle {
         fn drop(&mut self) {
-            self.fake_state
+            self.test_state
                 .borrow_mut()
                 .messages
                 .push(DropExecutionHandle(self.id))
         }
     }
 
-    impl DispatcherDeps for Rc<RefCell<FakeState>> {
+    impl DispatcherDeps for Rc<RefCell<TestState>> {
         type ExecutionHandle = ExecutionHandle;
 
         fn start_execution(
@@ -193,7 +193,7 @@ mod tests {
             self.borrow_mut().messages.push(StartExecution(id, details));
             ExecutionHandle {
                 id,
-                fake_state: self.clone(),
+                test_state: self.clone(),
             }
         }
 
@@ -205,22 +205,22 @@ mod tests {
     }
 
     struct Fixture {
-        fake_state: Rc<RefCell<FakeState>>,
-        dispatcher: Dispatcher<Rc<RefCell<FakeState>>>,
+        test_state: Rc<RefCell<TestState>>,
+        dispatcher: Dispatcher<Rc<RefCell<TestState>>>,
     }
 
     impl Fixture {
         fn new(slots: usize) -> Self {
-            let fake_state = Rc::new(RefCell::new(FakeState::new()));
-            let dispatcher = Dispatcher::new(fake_state.clone(), slots);
+            let test_state = Rc::new(RefCell::new(TestState::new()));
+            let dispatcher = Dispatcher::new(test_state.clone(), slots);
             Fixture {
-                fake_state,
+                test_state,
                 dispatcher,
             }
         }
 
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.fake_state.borrow_mut().messages;
+            let messages = &mut self.test_state.borrow_mut().messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
                 if perm == *messages {
                     messages.clear();
