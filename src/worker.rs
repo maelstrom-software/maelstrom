@@ -74,9 +74,9 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
     .await?;
 
     let (dispatcher_sender, dispatcher_receiver) = tokio::sync::mpsc::unbounded_channel();
-    let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
-
     let dispatcher_sender_clone = dispatcher_sender.clone();
+
+    let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(async move {
