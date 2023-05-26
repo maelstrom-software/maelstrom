@@ -24,7 +24,7 @@ use std::collections::{HashMap, VecDeque};
 pub struct Dispatcher<D: DispatcherDeps> {
     deps: D,
     slots: usize,
-    blocked: VecDeque<(ExecutionId, ExecutionDetails)>,
+    queued: VecDeque<(ExecutionId, ExecutionDetails)>,
     executing: HashMap<ExecutionId, D::ExecutionHandle>,
 }
 
@@ -66,7 +66,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
         Dispatcher {
             deps,
             slots,
-            blocked: VecDeque::new(),
+            queued: VecDeque::new(),
             executing: HashMap::new(),
         }
     }
@@ -76,15 +76,15 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     pub fn receive_message(&mut self, msg: Message) {
         match msg {
             Message::FromBroker(WorkerRequest::EnqueueExecution(id, details)) => {
-                self.blocked.push_back((id, details));
+                self.queued.push_back((id, details));
                 self.possibly_start_execution();
             }
             Message::FromBroker(WorkerRequest::CancelExecution(id)) => {
                 // Remove execution handle from executing map, which will drop it, which will tell
                 // the executor to kill the process.
                 if self.executing.remove(&id).is_none() {
-                    // If it's not in the executing map, then it may be in the blocked queue.
-                    self.blocked.retain(|x| x.0 != id);
+                    // If it's not in the executing map, then it may be in the queue.
+                    self.queued.retain(|x| x.0 != id);
                 }
             }
             Message::FromExecutor(id, result) => {
@@ -118,7 +118,7 @@ impl From<WorkerRequest> for Message {
 impl<D: DispatcherDeps> Dispatcher<D> {
     fn possibly_start_execution(&mut self) {
         if self.executing.len() < self.slots {
-            if let Some((id, details)) = self.blocked.pop_front() {
+            if let Some((id, details)) = self.queued.pop_front() {
                 let handle = self.deps.start_execution(id, details);
                 if self.executing.insert(id, handle).is_some() {
                     panic!("duplicate id ${id:?}");
