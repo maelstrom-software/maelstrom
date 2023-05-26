@@ -4,18 +4,20 @@ use nix::{
     unistd::Pid,
 };
 
+pub type Handle = GenericHandle<()>;
+
 pub trait Killer: Send + 'static {
     fn kill(&mut self, pid: Pid, signal: Signal);
 }
 
 /// A handle for an execution that will kill the process when dropped.
-pub struct Handle<K: Killer> {
+pub struct GenericHandle<K: Killer> {
     pid: Pid,
     done_receiver: tokio::sync::oneshot::Receiver<()>,
     killer: K,
 }
 
-impl<K: Killer> Drop for Handle<K> {
+impl<K: Killer> Drop for GenericHandle<K> {
     fn drop(&mut self) {
         match self.done_receiver.try_recv() {
             Ok(()) => {}
@@ -35,14 +37,14 @@ impl Killer for () {
 /// Start a process (i.e. execution). The process will be killed when the returned handle is
 /// dropped, unless it has already completed. The provided done callback is always called on a
 /// separate task, even if the error occurs immediately.
-pub fn start<T>(details: ExecutionDetails, done: T) -> Handle<()>
+pub fn start<T>(details: ExecutionDetails, done: T) -> Handle
 where
     T: FnOnce(ExecutionResult) + Send + 'static,
 {
     start_with_killer(details, done, ())
 }
 
-fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> Handle<U>
+fn start_with_killer<T, U>(details: ExecutionDetails, done: T, killer: U) -> GenericHandle<U>
 where
     T: FnOnce(ExecutionResult) + Send + 'static,
     U: Killer,
@@ -56,7 +58,7 @@ where
         Err(error) => {
             done_sender.send(()).ok();
             tokio::task::spawn(async move { done(ExecutionResult::Error(error.to_string())) });
-            Handle {
+            GenericHandle {
                 pid: Pid::from_raw(0),
                 done_receiver,
                 killer,
@@ -65,7 +67,7 @@ where
         Ok(child) => {
             let pid = Pid::from_raw(child.id().unwrap() as i32);
             tokio::task::spawn(async move { waiter(child, done_sender, done).await });
-            Handle {
+            GenericHandle {
                 pid,
                 done_receiver,
                 killer,

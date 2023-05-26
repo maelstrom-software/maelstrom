@@ -13,7 +13,7 @@ struct DispatcherAdapter {
 }
 
 impl dispatcher::DispatcherDeps for DispatcherAdapter {
-    type ExecutionHandle = executor::Handle<()>;
+    type ExecutionHandle = executor::Handle;
 
     fn start_execution(
         &mut self,
