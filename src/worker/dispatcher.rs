@@ -24,7 +24,6 @@ use std::collections::{HashMap, VecDeque};
 pub struct Dispatcher<D: DispatcherDeps> {
     deps: D,
     slots: u32,
-    slots_used: u32,
     blocked: VecDeque<(ExecutionId, ExecutionDetails)>,
     executing: HashMap<ExecutionId, D::ExecutionHandle>,
 }
@@ -67,7 +66,6 @@ impl<D: DispatcherDeps> Dispatcher<D> {
         Dispatcher {
             deps,
             slots,
-            slots_used: 0,
             blocked: VecDeque::new(),
             executing: HashMap::new(),
         }
@@ -96,7 +94,6 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                     self.deps
                         .send_response_to_broker(WorkerResponse(id, result));
                 }
-                self.slots_used -= 1;
                 self.possibly_start_execution();
             }
         }
@@ -120,9 +117,8 @@ impl From<WorkerRequest> for Message {
 
 impl<D: DispatcherDeps> Dispatcher<D> {
     fn possibly_start_execution(&mut self) {
-        if self.slots_used < self.slots {
+        if self.executing.len() < self.slots as usize {
             if let Some((id, details)) = self.blocked.pop_front() {
-                self.slots_used += 1;
                 let handle = self.deps.start_execution(id, details);
                 if self.executing.insert(id, handle).is_some() {
                     panic!("duplicate id ${id:?}");
