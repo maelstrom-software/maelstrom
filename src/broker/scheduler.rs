@@ -3,7 +3,7 @@ use crate::{
     proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -15,25 +15,31 @@ use std::collections::{HashMap, HashSet, VecDeque};
  */
 
 pub trait SchedulerDeps {
-    fn send_response_to_client(&mut self, id: ClientId, response: ClientResponse);
-    fn send_request_to_worker(&mut self, id: WorkerId, request: WorkerRequest);
+    type ClientSender;
+    type WorkerSender;
+    fn send_response_to_client(
+        &mut self,
+        sender: &mut Self::ClientSender,
+        response: ClientResponse,
+    );
+    fn send_request_to_worker(&mut self, sender: &mut Self::WorkerSender, request: WorkerRequest);
 }
 
 #[derive(Debug)]
-pub enum Message {
-    ClientConnected(ClientId),
+pub enum Message<D: SchedulerDeps> {
+    ClientConnected(ClientId, D::ClientSender),
     ClientDisconnected(ClientId),
     FromClient(ClientId, ClientRequest),
-    WorkerConnected(WorkerId, usize),
+    WorkerConnected(WorkerId, usize, D::WorkerSender),
     WorkerDisconnected(WorkerId),
     FromWorker(WorkerId, WorkerResponse),
 }
 
-impl Scheduler {
-    pub fn receive_message(&mut self, deps: &mut impl SchedulerDeps, msg: Message) {
+impl<D: SchedulerDeps> Scheduler<D> {
+    pub fn receive_message(&mut self, deps: &mut D, msg: Message<D>) {
         use Message::*;
         match msg {
-            ClientConnected(id) => self.receive_client_connected(id),
+            ClientConnected(id, sender) => self.receive_client_connected(id, sender),
 
             ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
 
@@ -41,7 +47,9 @@ impl Scheduler {
                 self.receive_client_request(deps, cid, ceid, details)
             }
 
-            WorkerConnected(id, slots) => self.receive_worker_connected(deps, id, slots),
+            WorkerConnected(id, slots, sender) => {
+                self.receive_worker_connected(deps, id, slots, sender)
+            }
 
             WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
 
@@ -62,21 +70,32 @@ impl Scheduler {
  */
 
 #[derive(Debug)]
-struct Worker {
+struct Worker<D: SchedulerDeps> {
     slots: usize,
     pending: HashMap<ExecutionId, ExecutionDetails>,
     heap_index: HeapIndex,
+    sender: D::WorkerSender,
 }
 
-#[derive(Default)]
-pub struct Scheduler {
-    clients: HashSet<ClientId>,
-    workers: HashMap<WorkerId, Worker>,
+pub struct Scheduler<D: SchedulerDeps> {
+    clients: HashMap<ClientId, D::ClientSender>,
+    workers: HashMap<WorkerId, Worker<D>>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: Heap<HashMap<WorkerId, Worker>>,
+    worker_heap: Heap<HashMap<WorkerId, Worker<D>>>,
 }
 
-impl HeapDeps for HashMap<WorkerId, Worker> {
+impl<D: SchedulerDeps> Default for Scheduler<D> {
+    fn default() -> Self {
+        Scheduler {
+            clients: HashMap::default(),
+            workers: HashMap::default(),
+            queued_requests: VecDeque::default(),
+            worker_heap: Heap::default(),
+        }
+    }
+}
+
+impl<D: SchedulerDeps> HeapDeps for HashMap<WorkerId, Worker<D>> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
@@ -97,8 +116,8 @@ impl HeapDeps for HashMap<WorkerId, Worker> {
     }
 }
 
-impl Scheduler {
-    fn possibly_start_executions(&mut self, deps: &mut impl SchedulerDeps) {
+impl<D: SchedulerDeps> Scheduler<D> {
+    fn possibly_start_executions(&mut self, deps: &mut D) {
         while !self.queued_requests.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
             let worker = self.workers.get_mut(&wid).unwrap();
@@ -108,7 +127,10 @@ impl Scheduler {
             }
 
             let (eid, details) = self.queued_requests.pop_front().unwrap();
-            deps.send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
+            deps.send_request_to_worker(
+                &mut worker.sender,
+                WorkerRequest::EnqueueExecution(eid, details.clone()),
+            );
 
             worker.pending.insert(eid, details);
             let heap_index = worker.heap_index;
@@ -116,18 +138,24 @@ impl Scheduler {
         }
     }
 
-    fn receive_client_connected(&mut self, id: ClientId) {
-        assert!(self.clients.insert(id), "duplicate client id {id:?}");
+    fn receive_client_connected(&mut self, id: ClientId, sender: D::ClientSender) {
+        assert!(
+            self.clients.insert(id, sender).is_none(),
+            "duplicate client id {id:?}"
+        );
     }
 
-    fn receive_client_disconnected(&mut self, deps: &mut impl SchedulerDeps, id: ClientId) {
-        assert!(self.clients.remove(&id), "unknown client id {id:?}");
+    fn receive_client_disconnected(&mut self, deps: &mut D, id: ClientId) {
+        assert!(self.clients.remove(&id).is_some());
         self.queued_requests
             .retain(|(ExecutionId(cid, _), _)| *cid != id);
-        for (wid, worker) in self.workers.iter_mut() {
+        for worker in self.workers.values_mut() {
             worker.pending.retain(|eid, _| {
                 eid.0 != id || {
-                    deps.send_request_to_worker(*wid, WorkerRequest::CancelExecution(*eid));
+                    deps.send_request_to_worker(
+                        &mut worker.sender,
+                        WorkerRequest::CancelExecution(*eid),
+                    );
                     false
                 }
             });
@@ -138,12 +166,12 @@ impl Scheduler {
 
     fn receive_client_request(
         &mut self,
-        deps: &mut impl SchedulerDeps,
+        deps: &mut D,
         cid: ClientId,
         ceid: ClientExecutionId,
         details: ExecutionDetails,
     ) {
-        assert!(self.clients.contains(&cid), "unknown client id {cid:?}");
+        assert!(self.clients.contains_key(&cid), "unknown client id {cid:?}");
         self.queued_requests
             .push_back((ExecutionId(cid, ceid), details));
         self.possibly_start_executions(deps);
@@ -151,9 +179,10 @@ impl Scheduler {
 
     fn receive_worker_connected(
         &mut self,
-        deps: &mut impl SchedulerDeps,
+        deps: &mut D,
         id: WorkerId,
         slots: usize,
+        sender: D::WorkerSender,
     ) {
         let unique = self
             .workers
@@ -163,6 +192,7 @@ impl Scheduler {
                     slots,
                     pending: HashMap::default(),
                     heap_index: HeapIndex::default(),
+                    sender,
                 },
             )
             .is_none();
@@ -171,7 +201,7 @@ impl Scheduler {
         self.possibly_start_executions(deps);
     }
 
-    fn receive_worker_disconnected(&mut self, deps: &mut impl SchedulerDeps, id: WorkerId) {
+    fn receive_worker_disconnected(&mut self, deps: &mut D, id: WorkerId) {
         let mut worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
@@ -188,7 +218,7 @@ impl Scheduler {
 
     fn receive_worker_response(
         &mut self,
-        deps: &mut impl SchedulerDeps,
+        deps: &mut D,
         wid: WorkerId,
         eid: ExecutionId,
         result: ExecutionResult,
@@ -202,13 +232,19 @@ impl Scheduler {
             return;
         }
 
-        deps.send_response_to_client(eid.0, ClientResponse(eid.1, result));
+        deps.send_response_to_client(
+            self.clients.get_mut(&eid.0).unwrap(),
+            ClientResponse(eid.1, result),
+        );
 
         if let Some((eid, details)) = self.queued_requests.pop_front() {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
-            deps.send_request_to_worker(wid, WorkerRequest::EnqueueExecution(eid, details.clone()));
+            deps.send_request_to_worker(
+                &mut worker.sender,
+                WorkerRequest::EnqueueExecution(eid, details.clone()),
+            );
             worker.pending.insert(eid, details);
         } else {
             // Since there are no queued_requests, we're going to have to update the
@@ -244,25 +280,39 @@ mod tests {
 
     use TestMessage::*;
 
+    struct TestClientSender(ClientId);
+    struct TestWorkerSender(WorkerId);
+
     #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
     }
 
     impl SchedulerDeps for TestState {
-        fn send_response_to_client(&mut self, id: ClientId, response: ClientResponse) {
-            self.messages.push(ToClient(id, response));
+        type ClientSender = TestClientSender;
+        type WorkerSender = TestWorkerSender;
+
+        fn send_response_to_client(
+            &mut self,
+            sender: &mut TestClientSender,
+            response: ClientResponse,
+        ) {
+            self.messages.push(ToClient(sender.0, response));
         }
 
-        fn send_request_to_worker(&mut self, id: WorkerId, request: WorkerRequest) {
-            self.messages.push(ToWorker(id, request));
+        fn send_request_to_worker(
+            &mut self,
+            sender: &mut TestWorkerSender,
+            request: WorkerRequest,
+        ) {
+            self.messages.push(ToWorker(sender.0, request));
         }
     }
 
     #[derive(Default)]
     struct Fixture {
         test_state: TestState,
-        scheduler: Scheduler,
+        scheduler: Scheduler<TestState>,
     }
 
     impl Fixture {
@@ -280,9 +330,17 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message) {
+        fn receive_message(&mut self, msg: Message<TestState>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
+    }
+
+    macro_rules! client_sender {
+        [$n:expr] => { TestClientSender(cid![$n]) };
+    }
+
+    macro_rules! worker_sender {
+        [$n:expr] => { TestWorkerSender(wid![$n]) };
     }
 
     macro_rules! script_test {
@@ -300,7 +358,7 @@ mod tests {
 
     script_test! {
         message_from_known_client_ok,
-        ClientConnected(cid![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {};
     }
 
@@ -331,7 +389,7 @@ mod tests {
     fn response_from_unknown_worker_panics() {
         let mut fixture = Fixture::default();
         // The response will be ignored unless we use a valid ClientId.
-        fixture.receive_message(ClientConnected(cid![1]));
+        fixture.receive_message(ClientConnected(cid![1], client_sender![1]));
 
         fixture.receive_message(FromWorker(wid![1], WorkerResponse(eid![1], result![1])));
     }
@@ -347,20 +405,20 @@ mod tests {
     #[should_panic]
     fn connect_from_duplicate_worker_panics() {
         let mut fixture = Fixture::default();
-        fixture.receive_message(WorkerConnected(wid![1], 2));
-        fixture.receive_message(WorkerConnected(wid![1], 2));
+        fixture.receive_message(WorkerConnected(wid![1], 2, worker_sender![1]));
+        fixture.receive_message(WorkerConnected(wid![1], 2, worker_sender![1]));
     }
 
     script_test! {
         response_from_known_worker_for_unknown_execution_ignored,
-        WorkerConnected(wid![1], 2) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         FromWorker(wid![1], WorkerResponse(eid![1], result![1])) => {};
     }
 
     script_test! {
         one_client_one_worker,
-        ClientConnected(cid![1]) => {};
-        WorkerConnected(wid![1], 2) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1], details![1])),
         };
@@ -371,16 +429,16 @@ mod tests {
 
     script_test! {
         response_from_worker_for_disconnected_client_ignored,
-        WorkerConnected(wid![1], 2) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         FromWorker(wid![1], WorkerResponse(eid![1], result![1])) => {};
     }
 
     script_test! {
         requests_go_to_workers_based_on_subscription_percentage,
-        WorkerConnected(wid![1], 2) => {};
-        WorkerConnected(wid![2], 2) => {};
-        WorkerConnected(wid![3], 3) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        WorkerConnected(wid![2], 2, worker_sender![2]) => {};
+        WorkerConnected(wid![3], 3, worker_sender![3]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/2 0/2 0/3
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
@@ -441,9 +499,9 @@ mod tests {
 
     script_test! {
         requests_start_queueing_at_2x_workers_slot_count,
-        WorkerConnected(wid![1], 1) => {};
-        WorkerConnected(wid![2], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/1 0/1
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
@@ -484,7 +542,7 @@ mod tests {
 
     script_test! {
         queued_requests_go_to_workers_on_connect,
-        ClientConnected(cid![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {};
         FromClient(cid![1], ClientRequest(ceid![2], details![2])) => {};
@@ -493,14 +551,14 @@ mod tests {
         FromClient(cid![1], ClientRequest(ceid![5], details![5])) => {};
         FromClient(cid![1], ClientRequest(ceid![6], details![6])) => {};
 
-        WorkerConnected(wid![1], 2) => {
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 4], details![4])),
         };
 
-        WorkerConnected(wid![2], 2) => {
+        WorkerConnected(wid![2], 2, worker_sender![2]) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 6], details![6])),
         };
@@ -508,10 +566,10 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers,
-        WorkerConnected(wid![1], 1) => {};
-        WorkerConnected(wid![2], 1) => {};
-        WorkerConnected(wid![3], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
+        WorkerConnected(wid![3], 1, worker_sender![3]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -545,8 +603,8 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers_2,
-        WorkerConnected(wid![1], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -564,7 +622,7 @@ mod tests {
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
         };
 
-        WorkerConnected(wid![2], 1) => {
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
         };
 
@@ -580,8 +638,8 @@ mod tests {
 
     script_test! {
         requests_outstanding_on_disconnected_worker_go_to_head_of_queue_for_other_workers,
-        WorkerConnected(wid![1], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -596,7 +654,7 @@ mod tests {
 
         WorkerDisconnected(wid![1]) => {};
 
-        WorkerConnected(wid![2], 1) => {
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 1], details![1])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         };
@@ -605,8 +663,8 @@ mod tests {
     script_test! {
         requests_get_removed_from_workers_pending_map,
 
-        WorkerConnected(wid![1], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -625,13 +683,13 @@ mod tests {
         };
 
         WorkerDisconnected(wid![1]) => {};
-        WorkerConnected(wid![2], 1) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
     }
 
     script_test! {
         client_disconnects_with_outstanding_work_1,
-        WorkerConnected(wid![1], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -644,10 +702,10 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_2,
-        WorkerConnected(wid![1], 1) => {};
-        WorkerConnected(wid![2], 1) => {};
-        ClientConnected(cid![1]) => {};
-        ClientConnected(cid![2]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+        ClientConnected(cid![2], client_sender![2]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -668,8 +726,8 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_3,
-        WorkerConnected(wid![1], 1) => {};
-        ClientConnected(cid![1]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -679,7 +737,7 @@ mod tests {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
-        ClientConnected(cid![2]) => {};
+        ClientConnected(cid![2], client_sender![2]) => {};
         FromClient(cid![2], ClientRequest(ceid![1], details![1])) => {};
         FromClient(cid![1], ClientRequest(ceid![3], details![3])) => {};
 
@@ -693,10 +751,10 @@ mod tests {
 
     script_test! {
         client_disconnects_with_outstanding_work_4,
-        WorkerConnected(wid![1], 1) => {};
-        WorkerConnected(wid![2], 1) => {};
-        ClientConnected(cid![1]) => {};
-        ClientConnected(cid![2]) => {};
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        WorkerConnected(wid![2], 1, worker_sender![2]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+        ClientConnected(cid![2], client_sender![2]) => {};
 
         FromClient(cid![1], ClientRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),

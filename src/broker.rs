@@ -2,79 +2,43 @@ mod heap;
 mod scheduler;
 
 use crate::{
-    proto::{self, ClientHello, Hello, WorkerHello},
+    proto::{self, ClientHello, ClientResponse, Hello, WorkerHello, WorkerRequest},
     ClientId, Error, Result, WorkerId,
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 
-mod scheduler_task {
-    use super::scheduler;
-    use crate::{
-        proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
-        ClientId, Result, WorkerId,
-    };
-    use std::collections::HashMap;
-    use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+type WorkerSocketSender = tokio::sync::mpsc::UnboundedSender<WorkerRequest>;
+type ClientSocketSender = tokio::sync::mpsc::UnboundedSender<ClientResponse>;
+type SchedulerReceiver = tokio::sync::mpsc::UnboundedReceiver<scheduler::Message<()>>;
+type SchedulerSender = tokio::sync::mpsc::UnboundedSender<scheduler::Message<()>>;
 
-    #[derive(Debug)]
-    pub enum Message {
-        ClientConnected(ClientId, UnboundedSender<ClientResponse>),
-        ClientDisconnected(ClientId),
-        FromClient(ClientId, ClientRequest),
-        WorkerConnected(WorkerId, usize, UnboundedSender<WorkerRequest>),
-        WorkerDisconnected(WorkerId),
-        FromWorker(WorkerId, WorkerResponse),
+impl scheduler::SchedulerDeps for () {
+    type ClientSender = ClientSocketSender;
+    type WorkerSender = WorkerSocketSender;
+
+    fn send_response_to_client(
+        &mut self,
+        sender: &mut ClientSocketSender,
+        response: ClientResponse,
+    ) {
+        sender.send(response).ok();
     }
 
-    #[derive(Default)]
-    struct SchedulerAdapter {
-        clients: HashMap<ClientId, UnboundedSender<ClientResponse>>,
-        workers: HashMap<WorkerId, UnboundedSender<WorkerRequest>>,
+    fn send_request_to_worker(&mut self, sender: &mut WorkerSocketSender, request: WorkerRequest) {
+        sender.send(request).ok();
     }
+}
 
-    impl scheduler::SchedulerDeps for SchedulerAdapter {
-        fn send_response_to_client(&mut self, id: ClientId, response: ClientResponse) {
-            self.clients.get_mut(&id).unwrap().send(response).ok();
-        }
-
-        fn send_request_to_worker(&mut self, id: WorkerId, request: WorkerRequest) {
-            self.workers.get_mut(&id).unwrap().send(request).ok();
-        }
+pub async fn scheduler_main(mut receiver: SchedulerReceiver) -> Result<()> {
+    let mut scheduler = scheduler::Scheduler::default();
+    while let Some(msg) = receiver.recv().await {
+        scheduler.receive_message(&mut (), msg);
     }
-
-    pub async fn main(mut receiver: UnboundedReceiver<Message>) -> Result<()> {
-        let mut adapter = SchedulerAdapter::default();
-        let mut scheduler = scheduler::Scheduler::default();
-        while let Some(msg) = receiver.recv().await {
-            let msg = match msg {
-                Message::ClientConnected(id, sender) => {
-                    assert!(
-                        adapter.clients.insert(id, sender).is_none(),
-                        "duplicate client id {id:?}"
-                    );
-                    scheduler::Message::ClientConnected(id)
-                }
-                Message::ClientDisconnected(id) => scheduler::Message::ClientDisconnected(id),
-                Message::FromClient(id, request) => scheduler::Message::FromClient(id, request),
-                Message::WorkerConnected(id, slots, sender) => {
-                    assert!(
-                        adapter.workers.insert(id, sender).is_none(),
-                        "duplicate worker id {id:?}"
-                    );
-                    scheduler::Message::WorkerConnected(id, slots)
-                }
-                Message::WorkerDisconnected(id) => scheduler::Message::WorkerDisconnected(id),
-                Message::FromWorker(id, response) => scheduler::Message::FromWorker(id, response),
-            };
-            scheduler.receive_message(&mut adapter, msg);
-        }
-        Ok(())
-    }
+    Ok(())
 }
 
 async fn socket_main(
     socket: tokio::net::TcpStream,
-    scheduler_sender: UnboundedSender<scheduler_task::Message>,
+    scheduler_sender: SchedulerSender,
     id: u32,
 ) -> Result<()> {
     let (read_stream, write_stream) = socket.into_split();
@@ -85,8 +49,9 @@ async fn socket_main(
         Hello::Client(ClientHello { name }) => {
             println!("client {name} connected and assigned id {id}");
             let id = ClientId(id);
-            let (client_socket_sender, client_socket_receiver) = unbounded_channel();
-            scheduler_sender.send(scheduler_task::Message::ClientConnected(
+            let (client_socket_sender, client_socket_receiver) =
+                tokio::sync::mpsc::unbounded_channel();
+            scheduler_sender.send(scheduler::Message::ClientConnected(
                 id,
                 client_socket_sender,
             ))?;
@@ -95,7 +60,7 @@ async fn socket_main(
             let mut join_set = tokio::task::JoinSet::new();
             join_set.spawn(async move {
                 proto::socket_reader(read_stream, scheduler_sender_clone, |req| {
-                    scheduler_task::Message::FromClient(id, req)
+                    scheduler::Message::FromClient(id, req)
                 })
                 .await
             });
@@ -105,13 +70,14 @@ async fn socket_main(
 
             join_set.join_next().await.unwrap()??;
             join_set.shutdown().await;
-            scheduler_sender.send(scheduler_task::Message::ClientDisconnected(id))?;
+            scheduler_sender.send(scheduler::Message::ClientDisconnected(id))?;
         }
         Hello::Worker(WorkerHello { name, slots }) => {
             println!("worker {name} with {slots} slots connected and assigned id {id}");
             let id = WorkerId(id);
-            let (worker_socket_sender, worker_socket_receiver) = unbounded_channel();
-            scheduler_sender.send(scheduler_task::Message::WorkerConnected(
+            let (worker_socket_sender, worker_socket_receiver) =
+                tokio::sync::mpsc::unbounded_channel();
+            scheduler_sender.send(scheduler::Message::WorkerConnected(
                 id,
                 slots as usize,
                 worker_socket_sender,
@@ -121,7 +87,7 @@ async fn socket_main(
             let mut join_set = tokio::task::JoinSet::new();
             join_set.spawn(async move {
                 proto::socket_reader(read_stream, scheduler_sender_clone, |resp| {
-                    scheduler_task::Message::FromWorker(id, resp)
+                    scheduler::Message::FromWorker(id, resp)
                 })
                 .await
             });
@@ -131,16 +97,13 @@ async fn socket_main(
 
             join_set.join_next().await.unwrap()??;
             join_set.shutdown().await;
-            scheduler_sender.send(scheduler_task::Message::WorkerDisconnected(id))?;
+            scheduler_sender.send(scheduler::Message::WorkerDisconnected(id))?;
         }
     }
     Ok(())
 }
 
-async fn listener_main(
-    port: Option<u16>,
-    scheduler_sender: UnboundedSender<scheduler_task::Message>,
-) -> Result<()> {
+async fn listener_main(port: Option<u16>, scheduler_sender: SchedulerSender) -> Result<()> {
     let sockaddr =
         std::net::SocketAddrV6::new(std::net::Ipv6Addr::UNSPECIFIED, port.unwrap_or(0), 0, 0);
     let listener = tokio::net::TcpListener::bind(sockaddr).await?;
@@ -165,11 +128,11 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub async fn main(port: Option<u16>) -> Result<()> {
-    let (scheduler_sender, scheduler_receiver) = unbounded_channel();
+    let (scheduler_sender, scheduler_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(async move { listener_main(port, scheduler_sender).await });
-    join_set.spawn(async move { scheduler_task::main(scheduler_receiver).await });
+    join_set.spawn(async move { scheduler_main(scheduler_receiver).await });
     join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::interrupt()).await });
     join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::terminate()).await });
 
