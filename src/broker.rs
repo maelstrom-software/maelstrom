@@ -1,4 +1,3 @@
-mod heap;
 mod scheduler;
 
 use crate::{proto, ClientId, Error, Result, WorkerId};

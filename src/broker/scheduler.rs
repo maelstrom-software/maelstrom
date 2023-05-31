@@ -1,5 +1,5 @@
-use super::heap::{Heap, HeapDeps, HeapIndex};
 use crate::{
+    heap::{Heap, HeapDeps, HeapIndex},
     proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };

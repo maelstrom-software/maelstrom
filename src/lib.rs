@@ -6,6 +6,7 @@ use std::hash::Hash;
 pub mod broker;
 mod channel_reader;
 pub mod client;
+mod heap;
 mod proto;
 pub mod task; // XXX make private or remove
 pub mod worker;
