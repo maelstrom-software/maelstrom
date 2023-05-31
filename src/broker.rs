@@ -3,8 +3,8 @@ mod scheduler;
 use crate::{proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
-/// The production implementation of [SchedulerDeps]. This implementation just hands the message to
-/// the provided sender. No state is required, so we just implemented it for [()].
+/// The production implementation of [scheduler::SchedulerDeps]. This implementation just hands the
+/// message to the provided sender. No state is required, so we just implemented it for [()].
 impl scheduler::SchedulerDeps for () {
     type ClientSender = UnboundedSender<proto::ClientResponse>;
     type WorkerSender = UnboundedSender<proto::WorkerRequest>;
@@ -26,9 +26,9 @@ impl scheduler::SchedulerDeps for () {
     }
 }
 
-/// The production scheduler message type. Some [Message] arms contain a [SchedulerDeps], so it's
-/// defined as a generic type. But in this module, we only use one implementation of
-/// [SchedulerDeps].
+/// The production scheduler message type. Some [scheduler::Message] arms contain a
+/// [scheduler::SchedulerDeps], so it's defined as a generic type. But in this module, we only use
+/// one implementation of [scheduler::SchedulerDeps].
 type SchedulerMessage = scheduler::Message<()>;
 
 /// Main loop for the scheduler. This should be run on a task of its own. There should be exactly
@@ -40,7 +40,8 @@ type SchedulerMessage = scheduler::Message<()>;
 /// rationale is that this indicates that the socket connection has closed, and there are no more
 /// worker tasks to handle that connection. This means that a disconnected message is on its way to
 /// notify the scheduler. It is best to just ignore the error in that case. Besides, the
-/// [SchedulerDeps] interface doesn't give us a way to return an error, for precisely this reason.
+/// [scheduler::SchedulerDeps] interface doesn't give us a way to return an error, for precisely
+/// this reason.
 async fn scheduler_main(mut receiver: UnboundedReceiver<SchedulerMessage>) {
     let mut scheduler = scheduler::Scheduler::default();
     while let Some(msg) = receiver.recv().await {
