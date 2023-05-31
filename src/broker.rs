@@ -1,6 +1,6 @@
 mod scheduler;
 
-use crate::{proto, ClientId, Error, Result, WorkerId};
+use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 /// The production implementation of [scheduler::SchedulerDeps]. This implementation just hands the
@@ -42,11 +42,9 @@ type SchedulerMessage = scheduler::Message<()>;
 /// notify the scheduler. It is best to just ignore the error in that case. Besides, the
 /// [scheduler::SchedulerDeps] interface doesn't give us a way to return an error, for precisely
 /// this reason.
-async fn scheduler_main(mut receiver: UnboundedReceiver<SchedulerMessage>) {
+async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
     let mut scheduler = scheduler::Scheduler::default();
-    while let Some(msg) = receiver.recv().await {
-        scheduler.receive_message(&mut (), msg);
-    }
+    channel_reader::run(receiver, |msg| scheduler.receive_message(&mut (), msg)).await;
 }
 
 /// Main loop for a client or worker socket. There should be one of these for each connected client
