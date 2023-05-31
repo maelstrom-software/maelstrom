@@ -1,3 +1,7 @@
+//! Read messages from a channel.
+
+/// Read messages from a channel, calling an individual function on each one. Return when there are
+/// no more channel senders.
 pub async fn run<T>(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<T>,
     mut processor: impl FnMut(T),

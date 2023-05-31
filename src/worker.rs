@@ -1,3 +1,5 @@
+//! Code for the worker binary.
+
 mod dispatcher;
 mod executor;
 

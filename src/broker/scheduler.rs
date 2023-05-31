@@ -1,3 +1,6 @@
+//! Central processing module for the broker. Receives and sends messages to and from clients and
+//! workers.
+
 use crate::{
     heap::{Heap, HeapDeps, HeapIndex},
     proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
@@ -14,6 +17,16 @@ use std::collections::{HashMap, VecDeque};
  *  FIGLET: public
  */
 
+/// All methods are completely nonblocking. They will never block the task or the thread.
+pub struct Scheduler<D: SchedulerDeps> {
+    clients: HashMap<ClientId, D::ClientSender>,
+    workers: HashMap<WorkerId, Worker<D>>,
+    queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
+    worker_heap: Heap<HashMap<WorkerId, Worker<D>>>,
+}
+
+/// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
+/// must not block the current task or thread.
 pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
@@ -75,13 +88,6 @@ struct Worker<D: SchedulerDeps> {
     pending: HashMap<ExecutionId, ExecutionDetails>,
     heap_index: HeapIndex,
     sender: D::WorkerSender,
-}
-
-pub struct Scheduler<D: SchedulerDeps> {
-    clients: HashMap<ClientId, D::ClientSender>,
-    workers: HashMap<WorkerId, Worker<D>>,
-    queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: Heap<HashMap<WorkerId, Worker<D>>>,
 }
 
 impl<D: SchedulerDeps> Default for Scheduler<D> {

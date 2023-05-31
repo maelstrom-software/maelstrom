@@ -1,5 +1,5 @@
 //! A binary min-heap implementation that provides some features necessary for us that are missing
-//! from Rust's [std::collections::BinaryHeap].
+//! from [std::collections::BinaryHeap].
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___

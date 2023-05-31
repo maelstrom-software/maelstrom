@@ -1,3 +1,5 @@
+//! Code for the client binary.
+
 use crate::{proto, Result};
 
 /// The main function for the client. This should be called on a task of its own. It will return

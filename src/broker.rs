@@ -1,3 +1,5 @@
+//! Code for the broker binary.
+
 mod scheduler;
 
 use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
@@ -50,6 +52,7 @@ async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
 /// Main loop for a client or worker socket. There should be one of these for each connected client
 /// or worker socket. This function will run until the client is closed. There is no error return
 /// since this function will always eventually run into an error.
+// XXX: Unit test this function.
 async fn socket_main<I, S, R>(
     read_stream: impl tokio::io::AsyncRead + Send + Unpin + 'static,
     write_stream: impl tokio::io::AsyncWrite + Send + Unpin + 'static,
@@ -98,6 +101,7 @@ async fn socket_main<I, S, R>(
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
+// XXX: Unit test this function.
 async fn listener_main(
     port: Option<u16>,
     scheduler_sender: UnboundedSender<SchedulerMessage>,

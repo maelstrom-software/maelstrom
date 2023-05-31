@@ -22,8 +22,8 @@ pub fn start<D: FnOnce(ExecutionResult) + Send + 'static>(
     Handle(start_with_killer(details, done, ()))
 }
 
-/// A handle that, when dropped, will kill the running process. If the process has already
-/// completed, or if it failed to start, then dropping the Handle does nothing.
+/// A handle that will kill the running process when dropped. If the process has already completed,
+/// or if it failed to start, then dropping the Handle does nothing.
 pub struct Handle(GenericHandle<()>);
 
 /*             _            _
