@@ -1,5 +1,5 @@
-//! A binary min-heap implementation that provides some features necessary for the broker that are
-//! missing from Rust's [std::collections::BinaryHeap].
+//! A binary min-heap implementation that provides some features necessary for us that are missing
+//! from Rust's [std::collections::BinaryHeap].
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -10,8 +10,8 @@
  *  FIGLET: public
  */
 
-/// A min-heap implementation that provides some features necessary for the broker that are missing
-/// from [std::collections::BinaryHeap]:
+/// A min-heap implementation that provides some features necessary for us that are missing from
+/// [std::collections::BinaryHeap]:
 ///
 ///   - The values (priorities) of elements can be stored outside of the heap itself. This supports
 ///     a common use case where the heap just contains IDs for a specific data structure, and the
