@@ -80,7 +80,7 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
     join_set.spawn(proto::socket_reader(
         read_stream,
         dispatcher_sender_clone,
-        |req| dispatcher::Message::FromBroker(req),
+        dispatcher::Message::FromBroker,
     ));
     join_set.spawn(proto::socket_writer(broker_socket_receiver, write_stream));
     join_set.spawn(async move {
