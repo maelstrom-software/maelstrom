@@ -8,11 +8,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
         .into_split();
     let _read_stream = tokio::io::BufReader::new(read_stream);
 
-    proto::write_message(
-        &mut write_stream,
-        proto::Hello::Client(proto::ClientHello { name }),
-    )
-    .await?;
+    proto::write_message(&mut write_stream, proto::Hello::Client { name }).await?;
 
     Ok(())
 }

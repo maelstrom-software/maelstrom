@@ -66,10 +66,10 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
 
     proto::write_message(
         &mut write_stream,
-        proto::Hello::Worker(proto::WorkerHello {
+        proto::Hello::Worker {
             name,
             slots: slots as u32,
-        }),
+        },
     )
     .await?;
 

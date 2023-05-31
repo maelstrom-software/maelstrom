@@ -2,20 +2,9 @@ use crate::{ClientExecutionId, ExecutionDetails, ExecutionId, ExecutionResult, R
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ClientHello {
-    pub name: String,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct WorkerHello {
-    pub name: String,
-    pub slots: u32,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
 pub enum Hello {
-    Client(ClientHello),
-    Worker(WorkerHello),
+    Client { name: String },
+    Worker { name: String, slots: u32 },
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
