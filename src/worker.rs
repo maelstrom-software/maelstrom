@@ -40,17 +40,13 @@ async fn dispatcher_main(
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-) -> Result<()> {
+) {
     let adapter = DispatcherAdapter {
         dispatcher_sender,
         broker_socket_sender,
     };
     let mut dispatcher = dispatcher::Dispatcher::new(adapter, slots);
-    channel_reader::run(dispatcher_receiver, move |msg| {
-        dispatcher.receive_message(msg)
-    })
-    .await;
-    Ok(())
+    channel_reader::run(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await;
 }
 
 async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
@@ -81,13 +77,12 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
     let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(async move {
-        proto::socket_reader(read_stream, dispatcher_sender_clone, |req| {
-            dispatcher::Message::FromBroker(req)
-        })
-        .await
-    });
-    join_set.spawn(async move { proto::socket_writer(broker_socket_receiver, write_stream).await });
+    join_set.spawn(proto::socket_reader(
+        read_stream,
+        dispatcher_sender_clone,
+        |req| dispatcher::Message::FromBroker(req),
+    ));
+    join_set.spawn(proto::socket_writer(broker_socket_receiver, write_stream));
     join_set.spawn(async move {
         dispatcher_main(
             slots,
@@ -95,15 +90,17 @@ pub async fn main(name: String, slots: usize, broker_addr: std::net::SocketAddr)
             dispatcher_sender,
             broker_socket_sender,
         )
-        .await
+        .await;
+        Ok(())
     });
-    join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::interrupt()).await });
-    join_set.spawn(async { signal_handler(tokio::signal::unix::SignalKind::terminate()).await });
+    join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
+    join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::terminate()));
 
     loop {
         join_set
             .join_next()
             .await
-            .expect("at least one task should return an error")??;
+            .expect("at least one task should return an error")
+            .expect("no task should panic or be canceled")?;
     }
 }
