@@ -1,4 +1,0 @@
-#!/usr/bin/env sh
-
-echo "Running test2"
-exit 1
