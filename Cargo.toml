@@ -17,3 +17,4 @@ itertools = "0.10.5"
 nix = { version = "0.26.2", features = ["signal"] }
 tempfile = "3.5.0"
 rand = "0.8.5"
+regex = "1.8.3"
