@@ -107,14 +107,9 @@ impl<D: SchedulerDeps> HeapDeps for HashMap<WorkerId, Worker<D>> {
     fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
         let lhs_worker = self.get(&lhs_id).unwrap();
         let rhs_worker = self.get(&rhs_id).unwrap();
-        match usize::cmp(
-            &(lhs_worker.pending.len() * rhs_worker.slots),
-            &(rhs_worker.pending.len() * lhs_worker.slots),
-        ) {
-            std::cmp::Ordering::Less => true,
-            std::cmp::Ordering::Equal => lhs_id < rhs_id,
-            std::cmp::Ordering::Greater => false,
-        }
+        let lhs = (lhs_worker.pending.len() * rhs_worker.slots, lhs_id);
+        let rhs = (rhs_worker.pending.len() * lhs_worker.slots, rhs_id);
+        lhs.cmp(&rhs) == std::cmp::Ordering::Less
     }
 
     fn update_index(&mut self, elem: WorkerId, idx: HeapIndex) {
