@@ -53,18 +53,18 @@ async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
 /// or worker socket. This function will run until the client is closed. There is no error return
 /// since this function will always eventually run into an error.
 // XXX: Unit test this function.
-async fn socket_main<I, S, R>(
+async fn socket_main<IdT, SenderT, RequestT>(
     read_stream: impl tokio::io::AsyncRead + Send + Unpin + 'static,
     write_stream: impl tokio::io::AsyncWrite + Send + Unpin + 'static,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
-    id: I,
-    connected_msg: impl FnOnce(I, UnboundedSender<S>) -> SchedulerMessage,
-    transform_msg: impl Fn(I, R) -> SchedulerMessage + Send + 'static,
-    disconnected_msg: impl FnOnce(I) -> SchedulerMessage,
+    id: IdT,
+    connected_msg: impl FnOnce(IdT, UnboundedSender<SenderT>) -> SchedulerMessage,
+    transform_msg: impl Fn(IdT, RequestT) -> SchedulerMessage + Send + 'static,
+    disconnected_msg: impl FnOnce(IdT) -> SchedulerMessage,
 ) where
-    I: Copy + Send + 'static,
-    S: serde::Serialize + Send + 'static,
-    R: serde::de::DeserializeOwned + 'static,
+    IdT: Copy + Send + 'static,
+    SenderT: serde::Serialize + Send + 'static,
+    RequestT: serde::de::DeserializeOwned + 'static,
 {
     let (socket_sender, socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 

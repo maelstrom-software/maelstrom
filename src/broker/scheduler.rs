@@ -18,11 +18,11 @@ use std::collections::{BTreeMap, VecDeque};
  */
 
 /// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Scheduler<D: SchedulerDeps> {
-    clients: BTreeMap<ClientId, D::ClientSender>,
-    workers: BTreeMap<WorkerId, Worker<D>>,
+pub struct Scheduler<DepsT: SchedulerDeps> {
+    clients: BTreeMap<ClientId, DepsT::ClientSender>,
+    workers: BTreeMap<WorkerId, Worker<DepsT>>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: Heap<BTreeMap<WorkerId, Worker<D>>>,
+    worker_heap: Heap<BTreeMap<WorkerId, Worker<DepsT>>>,
 }
 
 /// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
@@ -39,17 +39,17 @@ pub trait SchedulerDeps {
 }
 
 #[derive(Debug)]
-pub enum Message<D: SchedulerDeps> {
-    ClientConnected(ClientId, D::ClientSender),
+pub enum Message<DepsT: SchedulerDeps> {
+    ClientConnected(ClientId, DepsT::ClientSender),
     ClientDisconnected(ClientId),
     FromClient(ClientId, ClientRequest),
-    WorkerConnected(WorkerId, usize, D::WorkerSender),
+    WorkerConnected(WorkerId, usize, DepsT::WorkerSender),
     WorkerDisconnected(WorkerId),
     FromWorker(WorkerId, WorkerResponse),
 }
 
-impl<D: SchedulerDeps> Scheduler<D> {
-    pub fn receive_message(&mut self, deps: &mut D, msg: Message<D>) {
+impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
+    pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT>) {
         use Message::*;
         match msg {
             ClientConnected(id, sender) => self.receive_client_connected(id, sender),
@@ -83,14 +83,14 @@ impl<D: SchedulerDeps> Scheduler<D> {
  */
 
 #[derive(Debug)]
-struct Worker<D: SchedulerDeps> {
+struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
     pending: BTreeMap<ExecutionId, ExecutionDetails>,
     heap_index: HeapIndex,
-    sender: D::WorkerSender,
+    sender: DepsT::WorkerSender,
 }
 
-impl<D: SchedulerDeps> Default for Scheduler<D> {
+impl<DepsT: SchedulerDeps> Default for Scheduler<DepsT> {
     fn default() -> Self {
         Scheduler {
             clients: BTreeMap::default(),
@@ -101,7 +101,7 @@ impl<D: SchedulerDeps> Default for Scheduler<D> {
     }
 }
 
-impl<D: SchedulerDeps> HeapDeps for BTreeMap<WorkerId, Worker<D>> {
+impl<DepsT: SchedulerDeps> HeapDeps for BTreeMap<WorkerId, Worker<DepsT>> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
@@ -117,8 +117,8 @@ impl<D: SchedulerDeps> HeapDeps for BTreeMap<WorkerId, Worker<D>> {
     }
 }
 
-impl<D: SchedulerDeps> Scheduler<D> {
-    fn possibly_start_executions(&mut self, deps: &mut D) {
+impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
+    fn possibly_start_executions(&mut self, deps: &mut DepsT) {
         while !self.queued_requests.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
             let worker = self.workers.get_mut(&wid).unwrap();
@@ -139,14 +139,14 @@ impl<D: SchedulerDeps> Scheduler<D> {
         }
     }
 
-    fn receive_client_connected(&mut self, id: ClientId, sender: D::ClientSender) {
+    fn receive_client_connected(&mut self, id: ClientId, sender: DepsT::ClientSender) {
         assert!(
             self.clients.insert(id, sender).is_none(),
             "duplicate client id {id:?}"
         );
     }
 
-    fn receive_client_disconnected(&mut self, deps: &mut D, id: ClientId) {
+    fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
         assert!(self.clients.remove(&id).is_some());
         self.queued_requests
             .retain(|(ExecutionId(cid, _), _)| *cid != id);
@@ -167,7 +167,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
 
     fn receive_client_request(
         &mut self,
-        deps: &mut D,
+        deps: &mut DepsT,
         cid: ClientId,
         ceid: ClientExecutionId,
         details: ExecutionDetails,
@@ -180,10 +180,10 @@ impl<D: SchedulerDeps> Scheduler<D> {
 
     fn receive_worker_connected(
         &mut self,
-        deps: &mut D,
+        deps: &mut DepsT,
         id: WorkerId,
         slots: usize,
-        sender: D::WorkerSender,
+        sender: DepsT::WorkerSender,
     ) {
         let unique = self
             .workers
@@ -202,7 +202,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
         self.possibly_start_executions(deps);
     }
 
-    fn receive_worker_disconnected(&mut self, deps: &mut D, id: WorkerId) {
+    fn receive_worker_disconnected(&mut self, deps: &mut DepsT, id: WorkerId) {
         let worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
@@ -216,7 +216,7 @@ impl<D: SchedulerDeps> Scheduler<D> {
 
     fn receive_worker_response(
         &mut self,
-        deps: &mut D,
+        deps: &mut DepsT,
         wid: WorkerId,
         eid: ExecutionId,
         result: ExecutionResult,

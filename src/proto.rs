@@ -51,9 +51,11 @@ pub async fn write_message(
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of [write_message].
-pub async fn read_message<T>(stream: &mut (impl tokio::io::AsyncRead + Unpin)) -> Result<T>
+pub async fn read_message<MessageT>(
+    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+) -> Result<MessageT>
 where
-    T: DeserializeOwned,
+    MessageT: DeserializeOwned,
 {
     let mut msg_len: [u8; 4] = [0; 4];
     tokio::io::AsyncReadExt::read_exact(stream, &mut msg_len).await?;
@@ -68,16 +70,16 @@ where
 /// encounters an error reading from the socket, it will return that error. On the other hand, if
 /// it encounters an error writing to the sender -- which indicates that there is no longer a
 /// receiver for the channel -- it will return Ok(()).
-pub async fn socket_reader<T, U>(
+pub async fn socket_reader<MessageT, TransformedT>(
     mut socket: (impl tokio::io::AsyncRead + Unpin),
-    channel: tokio::sync::mpsc::UnboundedSender<U>,
-    transform: impl Fn(T) -> U,
+    channel: tokio::sync::mpsc::UnboundedSender<TransformedT>,
+    transform: impl Fn(MessageT) -> TransformedT,
 ) -> Result<()>
 where
-    T: DeserializeOwned,
+    MessageT: DeserializeOwned,
 {
     loop {
-        let msg = read_message::<T>(&mut socket).await?;
+        let msg = read_message(&mut socket).await?;
         if channel.send(transform(msg)).is_err() {
             return Ok(());
         }
