@@ -5,7 +5,7 @@ use crate::{
     proto::{WorkerRequest, WorkerResponse},
     ExecutionDetails, ExecutionId, ExecutionResult,
 };
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -25,7 +25,7 @@ pub struct Dispatcher<D: DispatcherDeps> {
     deps: D,
     slots: usize,
     queued: VecDeque<(ExecutionId, ExecutionDetails)>,
-    executing: HashMap<ExecutionId, D::ExecutionHandle>,
+    executing: BTreeMap<ExecutionId, D::ExecutionHandle>,
 }
 
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
@@ -67,7 +67,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             deps,
             slots,
             queued: VecDeque::new(),
-            executing: HashMap::new(),
+            executing: BTreeMap::new(),
         }
     }
 
