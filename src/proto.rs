@@ -87,13 +87,10 @@ where
 /// Loop reading messages from an mpsc channel and writing them to a socket. This will return
 /// Ok(()) when all producers have closed their mpsc channel senders and there are no more messages
 /// to read.
-pub async fn socket_writer<T>(
-    mut channel: tokio::sync::mpsc::UnboundedReceiver<T>,
+pub async fn socket_writer(
+    mut channel: tokio::sync::mpsc::UnboundedReceiver<impl Serialize>,
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
-) -> Result<()>
-where
-    T: Serialize,
-{
+) -> Result<()> {
     while let Some(msg) = channel.recv().await {
         write_message(&mut socket, msg).await?;
     }
