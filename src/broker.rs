@@ -5,9 +5,11 @@ mod scheduler;
 use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+struct PassThroughDeps;
+
 /// The production implementation of [scheduler::SchedulerDeps]. This implementation just hands the
-/// message to the provided sender. No state is required, so we just implemented it for [()].
-impl scheduler::SchedulerDeps for () {
+/// message to the provided sender.
+impl scheduler::SchedulerDeps for PassThroughDeps {
     type ClientSender = UnboundedSender<proto::ClientResponse>;
     type WorkerSender = UnboundedSender<proto::WorkerRequest>;
 
@@ -31,7 +33,7 @@ impl scheduler::SchedulerDeps for () {
 /// The production scheduler message type. Some [scheduler::Message] arms contain a
 /// [scheduler::SchedulerDeps], so it's defined as a generic type. But in this module, we only use
 /// one implementation of [scheduler::SchedulerDeps].
-type SchedulerMessage = scheduler::Message<()>;
+type SchedulerMessage = scheduler::Message<PassThroughDeps>;
 
 /// Main loop for the scheduler. This should be run on a task of its own. There should be exactly
 /// one of these in a broker process. It will return when all senders associated with the
@@ -46,7 +48,10 @@ type SchedulerMessage = scheduler::Message<()>;
 /// this reason.
 async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
     let mut scheduler = scheduler::Scheduler::default();
-    channel_reader::run(receiver, |msg| scheduler.receive_message(&mut (), msg)).await;
+    channel_reader::run(receiver, |msg| {
+        scheduler.receive_message(&mut PassThroughDeps, msg)
+    })
+    .await;
 }
 
 /// Main loop for a client or worker socket. There should be one of these for each connected client
