@@ -115,7 +115,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             if let Some((id, details)) = self.queued.pop_front() {
                 let handle = self.deps.start_execution(id, details);
                 if self.executing.insert(id, handle).is_some() {
-                    panic!("duplicate id ${id:?}");
+                    panic!("duplicate id {id:?}");
                 }
             }
         }
