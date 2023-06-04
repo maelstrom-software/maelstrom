@@ -116,8 +116,9 @@ async fn listener_main(
     let listener = tokio::net::TcpListener::bind(sockaddr).await?;
 
     println!("listening on: {}", listener.local_addr()?);
+    let mut id = 0;
 
-    for id in 0.. {
+    loop {
         let (socket, peer_addr) = listener.accept().await?;
         let (read_stream, write_stream) = socket.into_split();
         let mut read_stream = tokio::io::BufReader::new(read_stream);
@@ -156,8 +157,9 @@ async fn listener_main(
             println!("{hello:?} from {peer_addr}, id {id}, disconnected");
             Ok::<(), Error>(())
         });
+
+        id = id.wrapping_add(1);
     }
-    unreachable!();
 }
 
 /// "Main loop" for a signal handler. This function will block until it receives the indicated
