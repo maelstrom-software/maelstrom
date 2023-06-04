@@ -32,8 +32,8 @@ async fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
 /// when a signal is received or when all work has been processed by the broker.
 pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()> {
     let mut pairs = vec![];
-    for binary in get_test_binaries().await?.into_iter() {
-        for case in get_cases_from_binary(&binary).await?.into_iter() {
+    for binary in get_test_binaries().await? {
+        for case in get_cases_from_binary(&binary).await? {
             pairs.push((binary.clone(), case))
         }
     }
