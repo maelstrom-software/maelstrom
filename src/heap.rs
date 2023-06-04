@@ -62,11 +62,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     /// the heap is empty. Note that multiple elements in the heap may have the smallest value. In
     /// this case, an arbitrary element will be returned. O(1).
     pub fn peek(&self) -> Option<DepsT::Element> {
-        if self.0.is_empty() {
-            None
-        } else {
-            Some(self.0[0])
-        }
+        self.0.get(0).copied()
     }
 
     /// Add a new element to the heap. O(log(n)).
