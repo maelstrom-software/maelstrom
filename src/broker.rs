@@ -164,7 +164,7 @@ async fn listener_main(
 /// signal, then it will return an error.
 async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
     tokio::signal::unix::signal(kind)?.recv().await;
-    Err(Error::msg(format!("received signal {:?}", kind)))
+    Err(Error::msg(format!("received signal {kind:?}")))
 }
 
 /// The main function for the broker. This should be called on a task of its own. It will return
