@@ -43,7 +43,7 @@ pub enum ExecutionResult {
 pub struct WorkerId(u32);
 
 #[derive(Clone, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct Sha256Digest([u8; 32]);
+pub struct Sha256Digest(pub [u8; 32]);
 
 impl From<u32> for Sha256Digest {
     fn from(input: u32) -> Self {
