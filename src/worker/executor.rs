@@ -15,9 +15,9 @@ use nix::{sys::signal::Signal, unistd::Pid};
 /// Start a process (i.e. execution) and call the provided callback when it completes. The process
 /// will be killed when the returned [Handle] is dropped, unless it has already completed. The
 /// provided callback is always called on a separate task, even if an error occurs immediately.
-pub fn start<D: FnOnce(ExecutionResult) + Send + 'static>(
+pub fn start(
     details: ExecutionDetails,
-    done: D,
+    done: impl FnOnce(ExecutionResult) + Send + 'static,
 ) -> Handle {
     Handle(start_with_killer(details, done, ()))
 }
@@ -62,10 +62,10 @@ impl<K: Killer> Drop for GenericHandle<K> {
     }
 }
 
-async fn waiter<D: FnOnce(ExecutionResult) + Send + 'static>(
+async fn waiter(
     mut child: tokio::process::Child,
     done_sender: tokio::sync::oneshot::Sender<()>,
-    done: D,
+    done: impl FnOnce(ExecutionResult) + Send + 'static,
 ) {
     use std::os::unix::process::ExitStatusExt;
     done(match child.wait().await {
@@ -78,9 +78,9 @@ async fn waiter<D: FnOnce(ExecutionResult) + Send + 'static>(
     done_sender.send(()).ok();
 }
 
-fn start_with_killer<D: FnOnce(ExecutionResult) + Send + 'static, K: Killer>(
+fn start_with_killer<K: Killer>(
     details: ExecutionDetails,
-    done: D,
+    done: impl FnOnce(ExecutionResult) + Send + 'static,
     killer: K,
 ) -> GenericHandle<K> {
     let (done_sender, done_receiver) = tokio::sync::oneshot::channel();

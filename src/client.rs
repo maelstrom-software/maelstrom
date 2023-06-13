@@ -1,7 +1,7 @@
 //! Code for the client binary.
 
 use crate::{proto, ClientExecutionId, ExecutionDetails, Result};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 async fn get_test_binaries() -> Result<Vec<String>> {
     let output = tokio::process::Command::new("cargo")
@@ -32,8 +32,8 @@ async fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
 /// when a signal is received or when all work has been processed by the broker.
 pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()> {
     let mut pairs = vec![];
-    for binary in get_test_binaries().await?.into_iter() {
-        for case in get_cases_from_binary(&binary).await?.into_iter() {
+    for binary in get_test_binaries().await? {
+        for case in get_cases_from_binary(&binary).await? {
             pairs.push((binary.clone(), case))
         }
     }
@@ -43,7 +43,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
     let mut read_stream = tokio::io::BufReader::new(read_stream);
 
     proto::write_message(&mut write_stream, proto::Hello::Client { name }).await?;
-    let mut map = HashMap::new();
+    let mut map = BTreeMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
         let id = ClientExecutionId(id as u32);
         map.insert(id, case.clone());
@@ -63,7 +63,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
     while !map.is_empty() {
         let proto::ClientResponse(id, result) = proto::read_message(&mut read_stream).await?;
         let case = map.remove(&id).unwrap();
-        println!("{}: {:?}", case, result);
+        println!("{case}: {result:?}");
     }
 
     Ok(())

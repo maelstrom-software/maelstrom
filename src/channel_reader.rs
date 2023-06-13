@@ -2,9 +2,9 @@
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are
 /// no more channel senders.
-pub async fn run<T>(
-    mut channel: tokio::sync::mpsc::UnboundedReceiver<T>,
-    mut processor: impl FnMut(T),
+pub async fn run<MessageT>(
+    mut channel: tokio::sync::mpsc::UnboundedReceiver<MessageT>,
+    mut processor: impl FnMut(MessageT),
 ) {
     while let Some(x) = channel.recv().await {
         processor(x);

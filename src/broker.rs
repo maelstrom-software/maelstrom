@@ -5,9 +5,11 @@ mod scheduler;
 use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
+struct PassThroughDeps;
+
 /// The production implementation of [scheduler::SchedulerDeps]. This implementation just hands the
-/// message to the provided sender. No state is required, so we just implemented it for [()].
-impl scheduler::SchedulerDeps for () {
+/// message to the provided sender.
+impl scheduler::SchedulerDeps for PassThroughDeps {
     type ClientSender = UnboundedSender<proto::ClientResponse>;
     type WorkerSender = UnboundedSender<proto::WorkerRequest>;
 
@@ -31,7 +33,7 @@ impl scheduler::SchedulerDeps for () {
 /// The production scheduler message type. Some [scheduler::Message] arms contain a
 /// [scheduler::SchedulerDeps], so it's defined as a generic type. But in this module, we only use
 /// one implementation of [scheduler::SchedulerDeps].
-type SchedulerMessage = scheduler::Message<()>;
+type SchedulerMessage = scheduler::Message<PassThroughDeps>;
 
 /// Main loop for the scheduler. This should be run on a task of its own. There should be exactly
 /// one of these in a broker process. It will return when all senders associated with the
@@ -46,25 +48,28 @@ type SchedulerMessage = scheduler::Message<()>;
 /// this reason.
 async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
     let mut scheduler = scheduler::Scheduler::default();
-    channel_reader::run(receiver, |msg| scheduler.receive_message(&mut (), msg)).await;
+    channel_reader::run(receiver, |msg| {
+        scheduler.receive_message(&mut PassThroughDeps, msg)
+    })
+    .await;
 }
 
 /// Main loop for a client or worker socket. There should be one of these for each connected client
 /// or worker socket. This function will run until the client is closed. There is no error return
 /// since this function will always eventually run into an error.
 // XXX: Unit test this function.
-async fn socket_main<I, S, R>(
+async fn socket_main<IdT, SenderT, RequestT>(
     read_stream: impl tokio::io::AsyncRead + Send + Unpin + 'static,
     write_stream: impl tokio::io::AsyncWrite + Send + Unpin + 'static,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
-    id: I,
-    connected_msg: impl FnOnce(I, UnboundedSender<S>) -> SchedulerMessage,
-    transform_msg: impl Fn(I, R) -> SchedulerMessage + Send + 'static,
-    disconnected_msg: impl FnOnce(I) -> SchedulerMessage,
+    id: IdT,
+    connected_msg: impl FnOnce(IdT, UnboundedSender<SenderT>) -> SchedulerMessage,
+    transform_msg: impl Fn(IdT, RequestT) -> SchedulerMessage + Send + 'static,
+    disconnected_msg: impl FnOnce(IdT) -> SchedulerMessage,
 ) where
-    I: Copy + Send + 'static,
-    S: serde::Serialize + Send + 'static,
-    R: serde::de::DeserializeOwned + 'static,
+    IdT: Copy + Send + 'static,
+    SenderT: serde::Serialize + Send + 'static,
+    RequestT: serde::de::DeserializeOwned + 'static,
 {
     let (socket_sender, socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 
@@ -111,8 +116,9 @@ async fn listener_main(
     let listener = tokio::net::TcpListener::bind(sockaddr).await?;
 
     println!("listening on: {}", listener.local_addr()?);
+    let mut id = 0;
 
-    for id in 0.. {
+    loop {
         let (socket, peer_addr) = listener.accept().await?;
         let (read_stream, write_stream) = socket.into_split();
         let mut read_stream = tokio::io::BufReader::new(read_stream);
@@ -151,15 +157,16 @@ async fn listener_main(
             println!("{hello:?} from {peer_addr}, id {id}, disconnected");
             Ok::<(), Error>(())
         });
+
+        id = id.wrapping_add(1);
     }
-    unreachable!();
 }
 
 /// "Main loop" for a signal handler. This function will block until it receives the indicated
 /// signal, then it will return an error.
 async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
     tokio::signal::unix::signal(kind)?.recv().await;
-    Err(Error::msg(format!("received signal {:?}", kind)))
+    Err(Error::msg(format!("received signal {kind:?}")))
 }
 
 /// The main function for the broker. This should be called on a task of its own. It will return

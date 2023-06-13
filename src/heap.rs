@@ -33,7 +33,7 @@
 /// taking the dependencies and storing them in the heap. This is done to satisfy the borrow
 /// checker so that clients of the heap don't need to use a bunch of Rc<Refcell<_>>s.
 #[derive(Default)]
-pub struct Heap<D: HeapDeps>(Vec<D::Element>);
+pub struct Heap<DepsT: HeapDeps>(Vec<DepsT::Element>);
 
 /// An index value in [Heap]. These are provided to the client via [HeapDeps::update_index]. The
 /// client then provides them back to the heap when calling [Heap::sift_up], [Heap::sift_down], and
@@ -57,20 +57,16 @@ pub trait HeapDeps {
     fn update_index(&mut self, elem: Self::Element, idx: HeapIndex);
 }
 
-impl<D: HeapDeps> Heap<D> {
+impl<DepsT: HeapDeps> Heap<DepsT> {
     /// Return an [Option] containing an element with the smallest value in the heap, or [None] if
     /// the heap is empty. Note that multiple elements in the heap may have the smallest value. In
     /// this case, an arbitrary element will be returned. O(1).
-    pub fn peek(&self) -> Option<D::Element> {
-        if self.0.is_empty() {
-            None
-        } else {
-            Some(self.0[0])
-        }
+    pub fn peek(&self) -> Option<DepsT::Element> {
+        self.0.get(0).copied()
     }
 
     /// Add a new element to the heap. O(log(n)).
-    pub fn push(&mut self, deps: &mut D, elem: D::Element) {
+    pub fn push(&mut self, deps: &mut DepsT, elem: DepsT::Element) {
         let idx = HeapIndex(self.0.len());
         self.0.push(elem);
         let idx = self.sift_up_internal(deps, idx);
@@ -79,7 +75,7 @@ impl<D: HeapDeps> Heap<D> {
 
     /// Remove the element at the given index from the heap. If the index is out of range, the
     /// function will panic. O(log(n)).
-    pub fn remove(&mut self, deps: &mut D, idx: HeapIndex) {
+    pub fn remove(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         self.0.swap_remove(idx.0);
         if idx.0 < self.0.len() {
             let mut new_idx = self.sift_up_internal(deps, idx);
@@ -92,7 +88,7 @@ impl<D: HeapDeps> Heap<D> {
 
     /// Notify the heap an element's value has decreased. The heap will see if the element needs to
     /// be sifted up the heap. If the index is out of range, the function will panic. O(log(n)).
-    pub fn sift_up(&mut self, deps: &mut D, idx: HeapIndex) {
+    pub fn sift_up(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_up_internal(deps, idx);
         if new_idx != idx {
             deps.update_index(self.0[new_idx.0], new_idx);
@@ -101,7 +97,7 @@ impl<D: HeapDeps> Heap<D> {
 
     /// Notify the heap an element's value has increased. The heap will see if the element needs to
     /// be sifted down the heap. If the index is out of range, the function will panic. O(log(n)).
-    pub fn sift_down(&mut self, deps: &mut D, idx: HeapIndex) {
+    pub fn sift_down(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_down_internal(deps, idx, true);
         if new_idx != idx {
             deps.update_index(self.0[new_idx.0], new_idx);
@@ -111,7 +107,7 @@ impl<D: HeapDeps> Heap<D> {
     /// Assume all elements' values have changed and rebuild the heap accordingly. If one is
     /// changing the values of most of the elements in the heap, this method is faster than calling
     /// [Heap::sift_up] or [Heap::sift_down] on each element. O(n).
-    pub fn rebuild(&mut self, deps: &mut D) {
+    pub fn rebuild(&mut self, deps: &mut DepsT) {
         // The last ceil(n/2) elements form single-element sub heaps. We walk backwards from there
         // sifting down the remaining floor(n/2) elements.
         for idx in (0..self.0.len() / 2).rev() {
@@ -132,8 +128,8 @@ impl<D: HeapDeps> Heap<D> {
  *  FIGLET: private
  */
 
-impl<D: HeapDeps> Heap<D> {
-    fn sift_up_internal(&mut self, deps: &mut D, HeapIndex(mut idx): HeapIndex) -> HeapIndex {
+impl<DepsT: HeapDeps> Heap<DepsT> {
+    fn sift_up_internal(&mut self, deps: &mut DepsT, HeapIndex(mut idx): HeapIndex) -> HeapIndex {
         while idx != 0 {
             let parent_idx = (idx + 1) / 2 - 1;
 
@@ -150,7 +146,7 @@ impl<D: HeapDeps> Heap<D> {
 
     fn sift_down_internal(
         &mut self,
-        deps: &mut D,
+        deps: &mut DepsT,
         HeapIndex(mut idx): HeapIndex,
         update_index: bool,
     ) -> HeapIndex {
@@ -190,14 +186,14 @@ impl<D: HeapDeps> Heap<D> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     struct TestElement {
         weight: i32,
         heap_index: HeapIndex,
     }
 
-    impl HeapDeps for HashMap<u64, TestElement> {
+    impl HeapDeps for BTreeMap<u64, TestElement> {
         type Element = u64;
 
         fn is_element_less_than(&self, lhs: u64, rhs: u64) -> bool {
@@ -211,8 +207,8 @@ mod tests {
 
     #[derive(Default)]
     struct Fixture {
-        elements: HashMap<u64, TestElement>,
-        heap: Heap<HashMap<u64, TestElement>>,
+        elements: BTreeMap<u64, TestElement>,
+        heap: Heap<BTreeMap<u64, TestElement>>,
     }
 
     impl Fixture {
