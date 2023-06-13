@@ -186,14 +186,14 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::BTreeMap;
+    use std::collections::HashMap;
 
     struct TestElement {
         weight: i32,
         heap_index: HeapIndex,
     }
 
-    impl HeapDeps for BTreeMap<u64, TestElement> {
+    impl HeapDeps for HashMap<u64, TestElement> {
         type Element = u64;
 
         fn is_element_less_than(&self, lhs: u64, rhs: u64) -> bool {
@@ -207,8 +207,8 @@ mod tests {
 
     #[derive(Default)]
     struct Fixture {
-        elements: BTreeMap<u64, TestElement>,
-        heap: Heap<BTreeMap<u64, TestElement>>,
+        elements: HashMap<u64, TestElement>,
+        heap: Heap<HashMap<u64, TestElement>>,
     }
 
     impl Fixture {

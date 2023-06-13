@@ -1,7 +1,7 @@
 //! Code for the client binary.
 
 use crate::{proto, ClientExecutionId, ExecutionDetails, Result};
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 
 async fn get_test_binaries() -> Result<Vec<String>> {
     let output = tokio::process::Command::new("cargo")
@@ -43,7 +43,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
     let mut read_stream = tokio::io::BufReader::new(read_stream);
 
     proto::write_message(&mut write_stream, proto::Hello::Client { name }).await?;
-    let mut map = BTreeMap::new();
+    let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
         let id = ClientExecutionId(id as u32);
         map.insert(id, case.clone());

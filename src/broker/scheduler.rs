@@ -6,7 +6,7 @@ use crate::{
     proto::{ClientRequest, ClientResponse, WorkerRequest, WorkerResponse},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -19,10 +19,10 @@ use std::collections::{BTreeMap, VecDeque};
 
 /// All methods are completely nonblocking. They will never block the task or the thread.
 pub struct Scheduler<DepsT: SchedulerDeps> {
-    clients: BTreeMap<ClientId, DepsT::ClientSender>,
-    workers: BTreeMap<WorkerId, Worker<DepsT>>,
+    clients: HashMap<ClientId, DepsT::ClientSender>,
+    workers: HashMap<WorkerId, Worker<DepsT>>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: Heap<BTreeMap<WorkerId, Worker<DepsT>>>,
+    worker_heap: Heap<HashMap<WorkerId, Worker<DepsT>>>,
 }
 
 /// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
@@ -85,7 +85,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 #[derive(Debug)]
 struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
-    pending: BTreeMap<ExecutionId, ExecutionDetails>,
+    pending: HashMap<ExecutionId, ExecutionDetails>,
     heap_index: HeapIndex,
     sender: DepsT::WorkerSender,
 }
@@ -93,15 +93,15 @@ struct Worker<DepsT: SchedulerDeps> {
 impl<DepsT: SchedulerDeps> Default for Scheduler<DepsT> {
     fn default() -> Self {
         Scheduler {
-            clients: BTreeMap::default(),
-            workers: BTreeMap::default(),
+            clients: HashMap::default(),
+            workers: HashMap::default(),
             queued_requests: VecDeque::default(),
             worker_heap: Heap::default(),
         }
     }
 }
 
-impl<DepsT: SchedulerDeps> HeapDeps for BTreeMap<WorkerId, Worker<DepsT>> {
+impl<DepsT: SchedulerDeps> HeapDeps for HashMap<WorkerId, Worker<DepsT>> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
@@ -191,7 +191,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
                 id,
                 Worker {
                     slots,
-                    pending: BTreeMap::default(),
+                    pending: HashMap::default(),
                     heap_index: HeapIndex::default(),
                     sender,
                 },
@@ -203,11 +203,14 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     }
 
     fn receive_worker_disconnected(&mut self, deps: &mut DepsT, id: WorkerId) {
-        let worker = self.workers.remove(&id).unwrap();
+        let mut worker = self.workers.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
-        for x in worker.pending.into_iter().rev() {
+        // We sort the requests to keep our tests deterministic.
+        let mut vec: Vec<_> = worker.pending.drain().collect();
+        vec.sort_by_key(|x| x.0);
+        for x in vec.into_iter().rev() {
             self.queued_requests.push_front(x);
         }
 
