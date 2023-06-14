@@ -32,7 +32,6 @@
 /// The modifying methods of this struct take a [&mut HeapDeps], instead of a [Heap] constructor
 /// taking the dependencies and storing them in the heap. This is done to satisfy the borrow
 /// checker so that clients of the heap don't need to use a bunch of Rc<Refcell<_>>s.
-#[derive(Default)]
 pub struct Heap<DepsT: HeapDeps>(Vec<DepsT::Element>);
 
 /// An index value in [Heap]. These are provided to the client via [HeapDeps::update_index]. The
@@ -55,6 +54,12 @@ pub trait HeapDeps {
     /// [Heap::sift_up], and [Heap::sift_down]. The methods of [Heap] will call this at most once
     /// for a given element in a given method call.
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex);
+}
+
+impl<DepsT: HeapDeps> Default for Heap<DepsT> {
+    fn default() -> Self {
+        Heap(Vec::default())
+    }
 }
 
 impl<DepsT: HeapDeps> Heap<DepsT> {
