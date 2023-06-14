@@ -44,25 +44,25 @@ pub struct HeapIndex(usize);
 /// A client of the [Heap] must implement this trait.
 pub trait HeapDeps {
     /// The type of elements to be stored in the heap.
-    type Element: Copy;
+    type Element;
 
     /// Compare two elements. This is defined on [HeapDeps], instead of just using [Ord] on the
     /// element type, because the client will usually want to consult external data to determine
     /// the ordering of two elements.
-    fn is_element_less_than(&self, lhs: Self::Element, rhs: Self::Element) -> bool;
+    fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool;
 
     /// Update the stored index of a given element. This index can be used for [Heap::remove],
     /// [Heap::sift_up], and [Heap::sift_down]. The methods of [Heap] will call this at most once
     /// for a given element in a given method call.
-    fn update_index(&mut self, elem: Self::Element, idx: HeapIndex);
+    fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex);
 }
 
 impl<DepsT: HeapDeps> Heap<DepsT> {
     /// Return an [Option] containing an element with the smallest value in the heap, or [None] if
     /// the heap is empty. Note that multiple elements in the heap may have the smallest value. In
     /// this case, an arbitrary element will be returned. O(1).
-    pub fn peek(&self) -> Option<DepsT::Element> {
-        self.0.get(0).copied()
+    pub fn peek(&self) -> Option<&DepsT::Element> {
+        self.0.get(0)
     }
 
     /// Add a new element to the heap. O(log(n)).
@@ -70,7 +70,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
         let idx = HeapIndex(self.0.len());
         self.0.push(elem);
         let idx = self.sift_up_internal(deps, idx);
-        deps.update_index(elem, idx);
+        deps.update_index(&self.0[idx.0], idx);
     }
 
     /// Remove the element at the given index from the heap. If the index is out of range, the
@@ -82,7 +82,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
             if new_idx == idx {
                 new_idx = self.sift_down_internal(deps, idx, true);
             }
-            deps.update_index(self.0[new_idx.0], new_idx);
+            deps.update_index(&self.0[new_idx.0], new_idx);
         }
     }
 
@@ -91,7 +91,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     pub fn sift_up(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_up_internal(deps, idx);
         if new_idx != idx {
-            deps.update_index(self.0[new_idx.0], new_idx);
+            deps.update_index(&self.0[new_idx.0], new_idx);
         }
     }
 
@@ -100,7 +100,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     pub fn sift_down(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_down_internal(deps, idx, true);
         if new_idx != idx {
-            deps.update_index(self.0[new_idx.0], new_idx);
+            deps.update_index(&self.0[new_idx.0], new_idx);
         }
     }
 
@@ -114,7 +114,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
             self.sift_down_internal(deps, HeapIndex(idx), false);
         }
         for (idx, elem) in self.0.iter().enumerate() {
-            deps.update_index(*elem, HeapIndex(idx));
+            deps.update_index(elem, HeapIndex(idx));
         }
     }
 }
@@ -133,12 +133,12 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
         while idx != 0 {
             let parent_idx = (idx + 1) / 2 - 1;
 
-            if !deps.is_element_less_than(self.0[idx], self.0[parent_idx]) {
+            if !deps.is_element_less_than(&self.0[idx], &self.0[parent_idx]) {
                 break;
             }
 
             self.0.swap(parent_idx, idx);
-            deps.update_index(self.0[idx], HeapIndex(idx));
+            deps.update_index(&self.0[idx], HeapIndex(idx));
             idx = parent_idx;
         }
         HeapIndex(idx)
@@ -156,18 +156,18 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
                 break;
             }
             if child_idx + 1 < self.0.len()
-                && !deps.is_element_less_than(self.0[child_idx], self.0[child_idx + 1])
+                && !deps.is_element_less_than(&self.0[child_idx], &self.0[child_idx + 1])
             {
                 child_idx += 1;
             }
 
-            if !deps.is_element_less_than(self.0[child_idx], self.0[idx]) {
+            if !deps.is_element_less_than(&self.0[child_idx], &self.0[idx]) {
                 break;
             }
 
             self.0.swap(child_idx, idx);
             if update_index {
-                deps.update_index(self.0[idx], HeapIndex(idx));
+                deps.update_index(&self.0[idx], HeapIndex(idx));
             }
             idx = child_idx;
         }
@@ -196,12 +196,12 @@ mod tests {
     impl HeapDeps for HashMap<u64, TestElement> {
         type Element = u64;
 
-        fn is_element_less_than(&self, lhs: u64, rhs: u64) -> bool {
-            self.get(&lhs).unwrap().weight < self.get(&rhs).unwrap().weight
+        fn is_element_less_than(&self, lhs: &u64, rhs: &u64) -> bool {
+            self.get(lhs).unwrap().weight < self.get(rhs).unwrap().weight
         }
 
-        fn update_index(&mut self, id: u64, idx: HeapIndex) {
-            self.get_mut(&id).unwrap().heap_index = idx;
+        fn update_index(&mut self, id: &u64, idx: HeapIndex) {
+            self.get_mut(id).unwrap().heap_index = idx;
         }
     }
 
@@ -271,15 +271,15 @@ mod tests {
     fn peek_on_empty_and_small_heaps() {
         let mut fixture = Fixture::default();
 
-        assert_eq!(fixture.heap.peek(), None);
-        assert_eq!(fixture.heap.peek(), None);
+        assert_eq!(fixture.heap.peek().copied(), None);
+        assert_eq!(fixture.heap.peek().copied(), None);
 
         fixture.push(1, 1000);
-        assert_eq!(fixture.heap.peek(), Some(1));
-        assert_eq!(fixture.heap.peek(), Some(1));
+        assert_eq!(fixture.heap.peek().copied(), Some(1));
+        assert_eq!(fixture.heap.peek().copied(), Some(1));
 
         fixture.push(2, 0);
-        assert_eq!(fixture.heap.peek(), Some(2));
+        assert_eq!(fixture.heap.peek().copied(), Some(2));
     }
 
     #[test]

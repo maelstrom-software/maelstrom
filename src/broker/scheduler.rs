@@ -104,16 +104,16 @@ impl<DepsT: SchedulerDeps> Default for Scheduler<DepsT> {
 impl<DepsT: SchedulerDeps> HeapDeps for HashMap<WorkerId, Worker<DepsT>> {
     type Element = WorkerId;
 
-    fn is_element_less_than(&self, lhs_id: WorkerId, rhs_id: WorkerId) -> bool {
-        let lhs_worker = self.get(&lhs_id).unwrap();
-        let rhs_worker = self.get(&rhs_id).unwrap();
-        let lhs = (lhs_worker.pending.len() * rhs_worker.slots, lhs_id);
-        let rhs = (rhs_worker.pending.len() * lhs_worker.slots, rhs_id);
+    fn is_element_less_than(&self, lhs_id: &WorkerId, rhs_id: &WorkerId) -> bool {
+        let lhs_worker = self.get(lhs_id).unwrap();
+        let rhs_worker = self.get(rhs_id).unwrap();
+        let lhs = (lhs_worker.pending.len() * rhs_worker.slots, *lhs_id);
+        let rhs = (rhs_worker.pending.len() * lhs_worker.slots, *rhs_id);
         lhs.cmp(&rhs) == std::cmp::Ordering::Less
     }
 
-    fn update_index(&mut self, elem: WorkerId, idx: HeapIndex) {
-        self.get_mut(&elem).unwrap().heap_index = idx;
+    fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
+        self.get_mut(elem).unwrap().heap_index = idx;
     }
 }
 
@@ -121,7 +121,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     fn possibly_start_executions(&mut self, deps: &mut DepsT) {
         while !self.queued_requests.is_empty() && !self.workers.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
-            let worker = self.workers.get_mut(&wid).unwrap();
+            let worker = self.workers.get_mut(wid).unwrap();
 
             if worker.pending.len() == 2 * worker.slots {
                 break;
