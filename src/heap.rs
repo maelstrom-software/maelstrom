@@ -70,12 +70,26 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
         self.0.get(0)
     }
 
+    /// Remove the element with the smallest value in the heap, or [None] if the heap is empty.
+    /// Note that multiple elements in the heap may have the smallest value. In this case, an
+    /// arbitrary element will be returned. O(log(n)).
+    pub fn pop(&mut self, deps: &mut DepsT) -> Option<DepsT::Element> {
+        match self.0.len() {
+            0 => None,
+            1 => Some(self.0.remove(0)),
+            _ => {
+                let elem = self.0.swap_remove(0);
+                self.update_index(deps, self.sift_down_internal(deps, HeapIndex(0), true));
+                Some(elem)
+            }
+        }
+    }
+
     /// Add a new element to the heap. O(log(n)).
     pub fn push(&mut self, deps: &mut DepsT, elem: DepsT::Element) {
         let idx = HeapIndex(self.0.len());
         self.0.push(elem);
-        let idx = self.sift_up_internal(deps, idx);
-        deps.update_index(&self.0[idx.0], idx);
+        self.update_index(deps, self.sift_up_internal(deps, idx));
     }
 
     /// Remove the element at the given index from the heap. If the index is out of range, the
@@ -87,7 +101,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
             if new_idx == idx {
                 new_idx = self.sift_down_internal(deps, idx, true);
             }
-            deps.update_index(&self.0[new_idx.0], new_idx);
+            self.update_index(deps, new_idx);
         }
     }
 
@@ -96,7 +110,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     pub fn sift_up(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_up_internal(deps, idx);
         if new_idx != idx {
-            deps.update_index(&self.0[new_idx.0], new_idx);
+            self.update_index(deps, new_idx);
         }
     }
 
@@ -105,7 +119,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     pub fn sift_down(&mut self, deps: &mut DepsT, idx: HeapIndex) {
         let new_idx = self.sift_down_internal(deps, idx, true);
         if new_idx != idx {
-            deps.update_index(&self.0[new_idx.0], new_idx);
+            self.update_index(deps, new_idx);
         }
     }
 
@@ -134,6 +148,10 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
  */
 
 impl<DepsT: HeapDeps> Heap<DepsT> {
+    fn update_index(&mut self, deps: &mut DepsT, idx: HeapIndex) {
+        deps.update_index(&self.0[idx.0], idx);
+    }
+
     fn sift_up_internal(&mut self, deps: &mut DepsT, HeapIndex(mut idx): HeapIndex) -> HeapIndex {
         while idx != 0 {
             let parent_idx = (idx + 1) / 2 - 1;
@@ -143,7 +161,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
             }
 
             self.0.swap(parent_idx, idx);
-            deps.update_index(&self.0[idx], HeapIndex(idx));
+            self.update_index(deps, HeapIndex(idx));
             idx = parent_idx;
         }
         HeapIndex(idx)
@@ -172,7 +190,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
 
             self.0.swap(child_idx, idx);
             if update_index {
-                deps.update_index(&self.0[idx], HeapIndex(idx));
+                self.update_index(deps, HeapIndex(idx));
             }
             idx = child_idx;
         }
@@ -259,6 +277,12 @@ mod tests {
             self.heap.remove(&mut self.elements, elem.heap_index);
         }
 
+        fn pop(&mut self) -> Option<(u64, i32)> {
+            self.heap
+                .pop(&mut self.elements)
+                .map(|id| (id, self.elements.remove(&id).unwrap().weight))
+        }
+
         fn reweigh(&mut self, id: u64, new_weight: i32) {
             let elem = self.elements.get_mut(&id).unwrap();
             let old_weight = elem.weight;
@@ -312,6 +336,38 @@ mod tests {
             fixture.push(i, rand::random());
             fixture.validate();
         }
+    }
+
+    #[test]
+    fn pop_all_ascending() {
+        let mut fixture = Fixture::default();
+        for i in 0..1000 {
+            fixture.push(i, 1000 * i as i32);
+        }
+        for i in 0..1000 {
+            let (id, weight) = fixture.pop().unwrap();
+            assert_eq!(i, id);
+            assert_eq!(weight, 1000 * i as i32);
+        }
+        assert_eq!(fixture.pop(), None);
+        assert_eq!(fixture.pop(), None);
+        assert_eq!(fixture.pop(), None);
+    }
+
+    #[test]
+    fn pop_all_descending() {
+        let mut fixture = Fixture::default();
+        for i in 0..1000 {
+            fixture.push(i, -1000 * i as i32);
+        }
+        for i in 0..1000 {
+            let (id, weight) = fixture.pop().unwrap();
+            assert_eq!(i, 999 - id);
+            assert_eq!(weight, -1000 * id as i32);
+        }
+        assert_eq!(fixture.pop(), None);
+        assert_eq!(fixture.pop(), None);
+        assert_eq!(fixture.pop(), None);
     }
 
     #[test]
