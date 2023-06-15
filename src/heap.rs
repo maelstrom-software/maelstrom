@@ -73,13 +73,15 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     /// Remove the element with the smallest value in the heap, or [None] if the heap is empty.
     /// Note that multiple elements in the heap may have the smallest value. In this case, an
     /// arbitrary element will be returned. O(log(n)).
+    #[allow(dead_code)]
     pub fn pop(&mut self, deps: &mut DepsT) -> Option<DepsT::Element> {
         match self.0.len() {
             0 => None,
             1 => Some(self.0.remove(0)),
             _ => {
                 let elem = self.0.swap_remove(0);
-                self.update_index(deps, self.sift_down_internal(deps, HeapIndex(0), true));
+                let idx = self.sift_down_internal(deps, HeapIndex(0), true);
+                self.update_index(deps, idx);
                 Some(elem)
             }
         }
@@ -89,7 +91,8 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     pub fn push(&mut self, deps: &mut DepsT, elem: DepsT::Element) {
         let idx = HeapIndex(self.0.len());
         self.0.push(elem);
-        self.update_index(deps, self.sift_up_internal(deps, idx));
+        let idx = self.sift_up_internal(deps, idx);
+        self.update_index(deps, idx);
     }
 
     /// Remove the element at the given index from the heap. If the index is out of range, the
