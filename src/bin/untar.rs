@@ -80,25 +80,50 @@ impl<DelegateT: std::io::Read> std::io::Read for Sha256Verifier<DelegateT> {
     }
 }
 
+struct CountingReader<DelegateT> {
+    delegate: DelegateT,
+    count: u64,
+}
+
+impl<DelegateT> CountingReader<DelegateT> {
+    fn new(delegate: DelegateT) -> Self {
+        CountingReader { delegate, count: 0 }
+    }
+
+    fn bytes_read(&self) -> u64 {
+        self.count
+    }
+}
+
+impl<DelegateT: std::io::Read> std::io::Read for CountingReader<DelegateT> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.delegate.read(buf)?;
+        self.count += count as u64;
+        Ok(count)
+    }
+}
+
 fn read_to_end(mut input: impl std::io::Read) -> std::io::Result<()> {
     let mut buf = [0u8; 4096];
     while input.read(&mut buf)? > 0 {}
     Ok(())
 }
 
+fn main2(cli: Cli, input: impl std::io::Read) -> Result<()> {
+    let mut counting_reader = CountingReader::new(input);
+    let mut sha_verifier = Sha256Verifier::new(&mut counting_reader, cli.checksum);
+    tar::Archive::new(&mut sha_verifier).unpack(cli.output)?;
+    read_to_end(sha_verifier)?;
+    eprintln!("{} bytes read", counting_reader.bytes_read());
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let input = std::io::stdin();
-
     if cli.unzip {
-        let input = flate2::read::GzDecoder::new(input);
-        let mut input = Sha256Verifier::new(input, cli.checksum);
-        tar::Archive::new(&mut input).unpack(cli.output)?;
-        read_to_end(input)?;
+        main2(cli, flate2::read::GzDecoder::new(input))
     } else {
-        let mut input = Sha256Verifier::new(input, cli.checksum);
-        tar::Archive::new(&mut input).unpack(cli.output)?;
-        read_to_end(input)?;
+        main2(cli, input)
     }
-    Ok(())
 }
