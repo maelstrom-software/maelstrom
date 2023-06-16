@@ -1,5 +1,6 @@
 //! Code for the worker binary.
 
+pub mod cache;
 mod dispatcher;
 mod executor;
 
