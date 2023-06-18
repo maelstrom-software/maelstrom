@@ -83,37 +83,47 @@ impl<CacheHandleDepsT: CacheHandleDeps> Drop for CacheHandle<CacheHandleDepsT> {
 
 /// [Cache]'s external dependencies that must be fulfilled by its caller.
 pub trait CacheDeps {
-    /// The type of the random number generator returned by [Self::rng].
-    type Rng: rand::Rng + ?Sized;
-
-    /// Return a reference to a random number generator. This is used for creating unique path
-    /// names in the directory removal code path.
-    fn rng(&mut self) -> &mut Self::Rng;
+    /// Return a random u64. This is used for creating unique path names in the directory removal
+    /// code path.
+    fn rand_u64(&mut self) -> u64 {
+        rand::random()
+    }
 
     /// Return true if a file (or directory, or symlink, etc.) exists with the given path, and
     /// false otherwise. Panic on file system error.
-    fn file_exists(&mut self, path: &Path) -> bool;
+    fn file_exists(&mut self, path: &Path) -> bool {
+        path.try_exists().unwrap()
+    }
 
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
-    fn rename(&mut self, source: &Path, destination: &Path);
+    fn rename(&mut self, source: &Path, destination: &Path) {
+        std::fs::rename(source, destination).unwrap()
+    }
 
     /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
     /// separate thread. Panic on file system error.
-    fn remove_recursively_on_thread(&mut self, path: PathBuf);
+    fn remove_recursively_on_thread(&mut self, path: PathBuf) {
+        std::thread::spawn(move || std::fs::remove_dir_all(path).unwrap());
+    }
 
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
     /// directories.
-    fn mkdir_recursively(&mut self, path: &Path);
-
-    /// The type of the iterator returned by [Self::read_dir].
-    type ReadDirIterator: Iterator<Item = PathBuf>;
+    fn mkdir_recursively(&mut self, path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+    }
 
     /// Return and iterator that will yield all of the children of a directory. Panic on file
     /// system error or if `path` doesn't exist or isn't a directory.
-    fn read_dir(&mut self, path: &Path) -> Self::ReadDirIterator;
+    fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
+        Box::new(
+            std::fs::read_dir(path)
+                .unwrap()
+                .map(|de| de.unwrap().path()),
+        )
+    }
 
     /// Download `digest` from somewhere and extract it into `path`. Assume that `path` does not exist, but
     /// that its parent directory does. Validate the digest while downloading and extracting. When
@@ -258,12 +268,10 @@ enum CacheEntry {
 
 impl Cache {
     fn remove_in_background(deps: &mut impl CacheDeps, root: &Path, source: &Path) {
-        use rand::Rng;
         let mut target = root.to_owned();
         target.push("removing");
         loop {
-            let mut key = 0u64;
-            deps.rng().fill(std::slice::from_mut(&mut key));
+            let key = deps.rand_u64();
             target.push(format!("{key:016x}"));
             if !deps.file_exists(&target) {
                 break;
@@ -493,28 +501,6 @@ mod tests {
     use itertools::Itertools;
     use TestMessage::*;
 
-    #[derive(Default)]
-    struct CountingRng(u64);
-
-    impl rand_core::RngCore for CountingRng {
-        fn next_u32(&mut self) -> u32 {
-            self.next_u64() as u32
-        }
-
-        fn next_u64(&mut self) -> u64 {
-            self.0 += 1;
-            self.0
-        }
-
-        fn fill_bytes(&mut self, dest: &mut [u8]) {
-            rand_core::impls::fill_bytes_via_next(self, dest)
-        }
-
-        fn try_fill_bytes(&mut self, dest: &mut [u8]) -> std::result::Result<(), rand_core::Error> {
-            Ok(self.fill_bytes(dest))
-        }
-    }
-
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
         FileExists(PathBuf),
@@ -540,15 +526,14 @@ mod tests {
         messages: Vec<TestMessage>,
         existing_files: HashSet<PathBuf>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
-        rng: CountingRng,
+        last_random_number: u64,
         cache_handle_deps: TestCacheHandleDeps,
     }
 
     impl CacheDeps for TestCacheDeps {
-        type Rng = CountingRng;
-
-        fn rng(&mut self) -> &mut Self::Rng {
-            &mut self.rng
+        fn rand_u64(&mut self) -> u64 {
+            self.last_random_number += 1;
+            self.last_random_number
         }
 
         fn file_exists(&mut self, path: &Path) -> bool {
@@ -569,15 +554,15 @@ mod tests {
             self.messages.push(MkdirRecursively(path.to_owned()));
         }
 
-        type ReadDirIterator = <Vec<PathBuf> as IntoIterator>::IntoIter;
-
-        fn read_dir(&mut self, path: &Path) -> Self::ReadDirIterator {
+        fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
             self.messages.push(ReadDir(path.to_owned()));
-            self.directories
-                .get(path)
-                .unwrap_or(&vec![])
-                .clone()
-                .into_iter()
+            Box::new(
+                self.directories
+                    .get(path)
+                    .unwrap_or(&vec![])
+                    .clone()
+                    .into_iter(),
+            )
         }
 
         fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
