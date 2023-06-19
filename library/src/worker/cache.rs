@@ -88,10 +88,10 @@ pub trait CacheDeps {
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
 /// [Cache].
-pub enum Message<CacheDepsT: CacheDeps> {
+pub enum Message<RequestIdT> {
     /// Request a [CacheHandle] for a given [Sha256Digest]. Eventually, the [Cache] will call
     /// [CacheDeps::get_completed] in response to this message.
-    GetRequest(CacheDepsT::RequestId, Sha256Digest),
+    GetRequest(RequestIdT, Sha256Digest),
 
     /// Tell the [Cache] that a [CacheDeps::download_and_extract] has completed.
     DownloadAndExtractCompleted(Sha256Digest, Result<u64>),
@@ -150,7 +150,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     }
 
     /// Receive a message and act on it. See [Message].
-    pub fn receive_message(&mut self, deps: &mut CacheDepsT, msg: Message<CacheDepsT>) {
+    pub fn receive_message(&mut self, deps: &mut CacheDepsT, msg: Message<CacheDepsT::RequestId>) {
         use Message::*;
         match msg {
             GetRequest(request_id, digest) => self.receive_get_request(deps, request_id, digest),
