@@ -26,61 +26,6 @@ use std::{
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct CacheRequestId(u64);
 
-/// As long as at least one [CacheHandle] is alive for a given [Sha256Digest], the cache won't
-/// delete the underlying directory. [CacheHandle] is [Clone] and [Drop], which it uses to
-/// implement a reference count. This trait must be implemented by the caller and must somehow
-/// translate the various calls on this trait into messages delivered to the [Cache].
-///
-/// The caller must guarantee that no [Message::DecrementRefcount] gets reordered in front of an
-/// [Message::IncrementRefcount].
-pub trait CacheHandleDeps: Clone {
-    /// Send an [Message::IncrementRefcount] message to the [Cache].
-    fn send_increment_refcount(&mut self, digest: Sha256Digest);
-
-    /// Send a [Message::DecrementRefcount] message to the [Cache].
-    fn send_decrement_refcount(&mut self, digest: Sha256Digest);
-}
-
-/// A handle on an entry in the [Cache]. As long as there is at least one extant [CacheHandle] for
-/// a given entry, the underlying directory is guaranteed to exist. Once the last [CacheHandle] is
-/// dropped, the cache can remove the directory if it chooses.
-#[derive(Debug, PartialEq)]
-pub struct CacheHandle<CacheHandleDepsT: CacheHandleDeps> {
-    deps: CacheHandleDepsT,
-    digest: Sha256Digest,
-    path: PathBuf,
-}
-
-impl<CacheHandleDepsT: CacheHandleDeps> CacheHandle<CacheHandleDepsT> {
-    fn new(deps: CacheHandleDepsT, digest: Sha256Digest, path: PathBuf) -> Self {
-        CacheHandle { deps, digest, path }
-    }
-
-    /// Return the path for the [CacheHandle]. This directory is guaranteed to exist as long as the
-    /// [CacheHandle] itself does (and any of its clones).
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
-}
-
-impl<CacheHandleDepsT: CacheHandleDeps> Clone for CacheHandle<CacheHandleDepsT> {
-    fn clone(&self) -> Self {
-        let mut deps_clone = self.deps.clone();
-        deps_clone.send_increment_refcount(self.digest.clone());
-        CacheHandle {
-            deps: deps_clone,
-            digest: self.digest.clone(),
-            path: self.path.clone(),
-        }
-    }
-}
-
-impl<CacheHandleDepsT: CacheHandleDeps> Drop for CacheHandle<CacheHandleDepsT> {
-    fn drop(&mut self) {
-        self.deps.send_decrement_refcount(self.digest.clone());
-    }
-}
-
 /// [Cache]'s external dependencies that must be fulfilled by its caller.
 pub trait CacheDeps {
     /// Return a random u64. This is used for creating unique path names in the directory removal
@@ -130,21 +75,11 @@ pub trait CacheDeps {
     /// finished, deliver a [Message::DownloadAndExtractCompleted].
     fn download_and_extract(&mut self, digest: Sha256Digest, path: PathBuf);
 
-    /// Receive notification that a [Message::GetRequest] has completed. If `handle` is [None],
+    /// Receive notification that a [Message::GetRequest] has completed. If `path` is [None],
     /// then there was an error and the artifact isn't available. Otherwise, the artifact will
-    /// remain available until `handle` and any of its clones exist.
-    fn get_completed(
-        &mut self,
-        request_id: CacheRequestId,
-        handle: Option<CacheHandle<Self::CacheHandleDeps>>,
-    );
-
-    /// The [CacheHandleDeps] type used for [CacheHandle]s returned by this [Cache].
-    type CacheHandleDeps: CacheHandleDeps;
-
-    /// Provide a reference to a [Self::CacheHandleDeps] that can then be cloned to create
-    /// [CacheHandle]s.
-    fn cache_handle_deps(&self) -> &Self::CacheHandleDeps;
+    /// remain available at the given `path` until a [Message::DecrementRefcount] is sent to the
+    /// cache.
+    fn get_completed(&mut self, request_id: CacheRequestId, path: Option<PathBuf>);
 }
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
@@ -157,12 +92,8 @@ pub enum Message {
     /// Tell the [Cache] that a [CacheDeps::download_and_extract] has completed.
     DownloadAndExtractCompleted(Sha256Digest, Result<u64>),
 
-    /// Tell the [Cache] to increment the refcount on a [CacheHandle]. These are sent by
-    /// [CacheHandleDeps::send_increment_refcount].
-    IncrementRefcount(Sha256Digest),
-
-    /// Tell the [Cache] to decrement the refcount on a [CacheHandle]. These are sent by
-    /// [CacheHandleDeps::send_decrement_refcount].
+    /// Tell the [Cache] to decrement the refcount on a digest and path. Once the refcount reaches
+    /// zero, the cache is free to delete the underlying directory.
     DecrementRefcount(Sha256Digest),
 }
 
@@ -225,7 +156,6 @@ impl Cache {
             DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
                 self.receive_download_and_extract_success(deps, digest, bytes_used)
             }
-            IncrementRefcount(digest) => self.receive_increment_refcount(digest),
             DecrementRefcount(digest) => self.receive_decrement_refcount(deps, digest),
         }
     }
@@ -297,14 +227,7 @@ impl Cache {
         digest: Sha256Digest,
     ) {
         let path = Self::cache_path(root, &digest);
-        deps.get_completed(
-            request_id,
-            Some(CacheHandle::new(
-                deps.cache_handle_deps().clone(),
-                digest,
-                path,
-            )),
-        );
+        deps.get_completed(request_id, Some(path));
     }
 
     fn receive_get_request(
@@ -421,17 +344,6 @@ impl Cache {
         }
     }
 
-    fn receive_increment_refcount(&mut self, digest: Sha256Digest) {
-        match self.entries.get_mut(&digest) {
-            Some(CacheEntry::InUse { refcount, .. }) => {
-                *refcount = refcount.checked_add(1).unwrap();
-            }
-            _ => {
-                panic!("Got IncrementRefcount in unexpected state");
-            }
-        }
-    }
-
     fn receive_decrement_refcount(&mut self, deps: &mut impl CacheDeps, digest: Sha256Digest) {
         let entry = self
             .entries
@@ -513,21 +425,12 @@ mod tests {
         GetRequestFailed(CacheRequestId),
     }
 
-    #[derive(Clone, Default)]
-    struct TestCacheHandleDeps {}
-
-    impl CacheHandleDeps for TestCacheHandleDeps {
-        fn send_increment_refcount(&mut self, _digest: Sha256Digest) {}
-        fn send_decrement_refcount(&mut self, _digest: Sha256Digest) {}
-    }
-
     #[derive(Default)]
     struct TestCacheDeps {
         messages: Vec<TestMessage>,
         existing_files: HashSet<PathBuf>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
         last_random_number: u64,
-        cache_handle_deps: TestCacheHandleDeps,
     }
 
     impl CacheDeps for TestCacheDeps {
@@ -569,21 +472,11 @@ mod tests {
             self.messages.push(DownloadAndExtract(digest, prefix))
         }
 
-        fn get_completed(
-            &mut self,
-            request_id: CacheRequestId,
-            handle: Option<CacheHandle<Self::CacheHandleDeps>>,
-        ) {
-            self.messages.push(match handle {
-                Some(handle) => GetRequestSucceeded(request_id, handle.path().to_owned()),
+        fn get_completed(&mut self, request_id: CacheRequestId, path: Option<PathBuf>) {
+            self.messages.push(match path {
+                Some(path) => GetRequestSucceeded(request_id, path),
                 None => GetRequestFailed(request_id),
             });
-        }
-
-        type CacheHandleDeps = TestCacheHandleDeps;
-
-        fn cache_handle_deps(&self) -> &Self::CacheHandleDeps {
-            &self.cache_handle_deps
         }
     }
 
@@ -702,32 +595,6 @@ mod tests {
         DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
             GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
         };
-
-        DecrementRefcount(digest!(42)) => {
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
-    }
-
-    script_test! {
-        get_request_for_empty_larger_than_goal_does_no_remove_until_refcount_is_zero;
-        Fixture::new_and_clear_messages(1000);
-
-        GetRequest(CacheRequestId(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
-        };
-
-        IncrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {};
-        IncrementRefcount(digest!(42)) => {};
-        IncrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {};
 
         DecrementRefcount(digest!(42)) => {
             FileExists(short_path!("/cache/root/removing", 1)),
@@ -1077,67 +944,5 @@ mod tests {
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
             MkdirRecursively(path_buf!("/cache/root/sha256")),
         ]);
-    }
-
-    #[test]
-    fn cache_handle() {
-        use std::{cell::RefCell, ops::Deref, rc::Rc};
-
-        #[derive(Debug, PartialEq)]
-        enum Message {
-            IncrementRefcount(Sha256Digest),
-            DecrementRefcount(Sha256Digest),
-        }
-
-        #[derive(Clone)]
-        struct TestCacheHandleDeps {
-            messages: Rc<RefCell<Vec<Message>>>,
-        }
-
-        impl CacheHandleDeps for TestCacheHandleDeps {
-            fn send_increment_refcount(&mut self, digest: Sha256Digest) {
-                self.messages
-                    .borrow_mut()
-                    .push(Message::IncrementRefcount(digest))
-            }
-
-            fn send_decrement_refcount(&mut self, digest: Sha256Digest) {
-                self.messages
-                    .borrow_mut()
-                    .push(Message::DecrementRefcount(digest))
-            }
-        }
-
-        let digest = digest!(1);
-        let path = Path::new("/foo/bar/baz");
-        let messages = Rc::new(RefCell::new(Vec::new()));
-        let handle = CacheHandle::new(
-            TestCacheHandleDeps {
-                messages: messages.clone(),
-            },
-            digest.clone(),
-            path.to_path_buf(),
-        );
-
-        assert_eq!(handle.path(), path);
-
-        let handle2 = handle.clone();
-        drop(handle2.clone());
-        drop(handle.clone());
-        drop(handle2);
-        drop(handle);
-
-        assert_eq!(
-            messages.borrow().deref(),
-            &vec![
-                Message::IncrementRefcount(digest.clone()),
-                Message::IncrementRefcount(digest.clone()),
-                Message::DecrementRefcount(digest.clone()),
-                Message::IncrementRefcount(digest.clone()),
-                Message::DecrementRefcount(digest.clone()),
-                Message::DecrementRefcount(digest.clone()),
-                Message::DecrementRefcount(digest.clone()),
-            ]
-        );
     }
 }
