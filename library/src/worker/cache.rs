@@ -409,6 +409,7 @@ impl<CacheDepsT: CacheDeps> HeapDeps for HashMap<Sha256Digest, CacheEntry<CacheD
 mod tests {
     use super::Message::*;
     use super::*;
+    use crate::test::*;
     use anyhow::anyhow;
     use itertools::Itertools;
     use TestMessage::*;
@@ -539,30 +540,6 @@ mod tests {
         fn clear_messages(&mut self) {
             self.test_cache_deps.messages.clear();
         }
-    }
-
-    macro_rules! digest {
-        [$n:expr] => {
-            $crate::Sha256Digest::from($n as u64)
-        }
-    }
-
-    macro_rules! path_buf {
-        ($e:expr) => {
-            Path::new($e).to_path_buf()
-        };
-    }
-
-    macro_rules! long_path {
-        ($prefix:expr, $n:expr) => {
-            format!("{}/{:0>64x}", $prefix, $n).into()
-        };
-    }
-
-    macro_rules! short_path {
-        ($prefix:expr, $n:expr) => {
-            format!("{}/{:0>16x}", $prefix, $n).into()
-        };
     }
 
     macro_rules! request_id {

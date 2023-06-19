@@ -76,3 +76,31 @@ macro_rules! result {
     };
 }
 pub(crate) use result;
+
+macro_rules! digest {
+    [$n:expr] => {
+        $crate::Sha256Digest::from($n as u64)
+    }
+}
+pub(crate) use digest;
+
+macro_rules! path_buf {
+    ($e:expr) => {
+        std::path::Path::new($e).to_path_buf()
+    };
+}
+pub(crate) use path_buf;
+
+macro_rules! long_path {
+    ($prefix:expr, $n:expr) => {
+        format!("{}/{:0>64x}", $prefix, $n).into()
+    };
+}
+pub(crate) use long_path;
+
+macro_rules! short_path {
+    ($prefix:expr, $n:expr) => {
+        format!("{}/{:0>16x}", $prefix, $n).into()
+    };
+}
+pub(crate) use short_path;
