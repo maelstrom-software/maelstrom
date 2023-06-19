@@ -19,13 +19,6 @@ use std::{
  *  FIGLET: public
  */
 
-/// Used to associate [Message::GetRequest] messages with [CacheDeps::get_completed] calls. The
-/// caller is responsible for generating these and ensuring that they are unique. The cache
-/// actually doesn't care if they are unique, but the caller would likely be confused if they
-/// weren't.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct CacheRequestId(u64);
-
 /// [Cache]'s external dependencies that must be fulfilled by its caller.
 pub trait CacheDeps {
     /// Return a random u64. This is used for creating unique path names in the directory removal
@@ -70,6 +63,12 @@ pub trait CacheDeps {
         )
     }
 
+    /// Used to associate [Message::GetRequest] messages with [CacheDeps::get_completed] calls. The
+    /// caller is responsible for generating these and ensuring that they are unique. The cache
+    /// actually doesn't care if they are unique, but the caller would likely be confused if they
+    /// weren't.
+    type RequestId: Copy + std::hash::Hash + Eq;
+
     /// Download `digest` from somewhere and extract it into `path`. Assume that `path` does not exist, but
     /// that its parent directory does. Validate the digest while downloading and extracting. When
     /// finished, deliver a [Message::DownloadAndExtractCompleted].
@@ -79,15 +78,15 @@ pub trait CacheDeps {
     /// then there was an error and the artifact isn't available. Otherwise, the artifact will
     /// remain available at the given `path` until a [Message::DecrementRefcount] is sent to the
     /// cache.
-    fn get_completed(&mut self, request_id: CacheRequestId, path: Option<PathBuf>);
+    fn get_completed(&mut self, request_id: Self::RequestId, path: Option<PathBuf>);
 }
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
 /// [Cache].
-pub enum Message {
+pub enum Message<CacheDepsT: CacheDeps> {
     /// Request a [CacheHandle] for a given [Sha256Digest]. Eventually, the [Cache] will call
     /// [CacheDeps::get_completed] in response to this message.
-    GetRequest(CacheRequestId, Sha256Digest),
+    GetRequest(CacheDepsT::RequestId, Sha256Digest),
 
     /// Tell the [Cache] that a [CacheDeps::download_and_extract] has completed.
     DownloadAndExtractCompleted(Sha256Digest, Result<u64>),
@@ -100,16 +99,16 @@ pub enum Message {
 /// Manage a directory of downloaded, extracted images. Coordinate fetching of these images, and
 /// removing them when they are no longer in use and the amount of space used by the directory has
 /// grown too large.
-pub struct Cache {
+pub struct Cache<CacheDepsT: CacheDeps> {
     root: PathBuf,
-    entries: HashMap<Sha256Digest, CacheEntry>,
-    heap: Heap<HashMap<Sha256Digest, CacheEntry>>,
+    entries: HashMap<Sha256Digest, CacheEntry<CacheDepsT>>,
+    heap: Heap<HashMap<Sha256Digest, CacheEntry<CacheDepsT>>>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_goal: u64,
 }
 
-impl Cache {
+impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/sha256`. Any pre-existing entries
     /// in `{root}/removing` and `{root}/sha256` will be removed. That implies that the [Cache]
@@ -118,7 +117,7 @@ impl Cache {
     /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(root: &Path, deps: &mut impl CacheDeps, bytes_used_goal: u64) -> Self {
+    pub fn new(root: &Path, deps: &mut CacheDepsT, bytes_used_goal: u64) -> Self {
         let mut path = root.to_owned();
 
         path.push("removing");
@@ -146,7 +145,7 @@ impl Cache {
     }
 
     /// Receive a message and act on it. See [Message].
-    pub fn receive_message(&mut self, deps: &mut impl CacheDeps, msg: Message) {
+    pub fn receive_message(&mut self, deps: &mut CacheDepsT, msg: Message<CacheDepsT>) {
         use Message::*;
         match msg {
             GetRequest(request_id, digest) => self.receive_get_request(deps, request_id, digest),
@@ -172,11 +171,11 @@ impl Cache {
 
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
 /// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
-enum CacheEntry {
+enum CacheEntry<CacheDepsT: CacheDeps> {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
     /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
     /// on where the extraction process is.
-    DownloadingAndExtracting(HashSet<CacheRequestId>),
+    DownloadingAndExtracting(HashSet<CacheDepsT::RequestId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
     /// currently being used by at least one execution. We refcount this state since there may be
@@ -196,8 +195,8 @@ enum CacheEntry {
     },
 }
 
-impl Cache {
-    fn remove_in_background(deps: &mut impl CacheDeps, root: &Path, source: &Path) {
+impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
+    fn remove_in_background(deps: &mut CacheDepsT, root: &Path, source: &Path) {
         let mut target = root.to_owned();
         target.push("removing");
         loop {
@@ -221,9 +220,9 @@ impl Cache {
     }
 
     fn send_get_completed_successfully(
-        deps: &mut impl CacheDeps,
+        deps: &mut CacheDepsT,
         root: &Path,
-        request_id: CacheRequestId,
+        request_id: CacheDepsT::RequestId,
         digest: Sha256Digest,
     ) {
         let path = Self::cache_path(root, &digest);
@@ -232,8 +231,8 @@ impl Cache {
 
     fn receive_get_request(
         &mut self,
-        deps: &mut impl CacheDeps,
-        request_id: CacheRequestId,
+        deps: &mut CacheDepsT,
+        request_id: CacheDepsT::RequestId,
         digest: Sha256Digest,
     ) {
         match self.entries.get_mut(&digest) {
@@ -270,11 +269,7 @@ impl Cache {
         }
     }
 
-    fn receive_download_and_extract_error(
-        &mut self,
-        deps: &mut impl CacheDeps,
-        digest: Sha256Digest,
-    ) {
+    fn receive_download_and_extract_error(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
         match self.entries.remove(&digest) {
             Some(CacheEntry::DownloadingAndExtracting(requests)) => {
                 for request_id in requests.iter() {
@@ -291,7 +286,7 @@ impl Cache {
         }
     }
 
-    fn possibly_remove_some(&mut self, deps: &mut impl CacheDeps) {
+    fn possibly_remove_some(&mut self, deps: &mut CacheDepsT) {
         while self.bytes_used > self.bytes_used_goal {
             match self.heap.pop(&mut self.entries) {
                 None => {
@@ -313,7 +308,7 @@ impl Cache {
 
     fn receive_download_and_extract_success(
         &mut self,
-        deps: &mut impl CacheDeps,
+        deps: &mut CacheDepsT,
         digest: Sha256Digest,
         bytes_used: u64,
     ) {
@@ -344,7 +339,7 @@ impl Cache {
         }
     }
 
-    fn receive_decrement_refcount(&mut self, deps: &mut impl CacheDeps, digest: Sha256Digest) {
+    fn receive_decrement_refcount(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
         let entry = self
             .entries
             .get_mut(&digest)
@@ -374,7 +369,7 @@ impl Cache {
     }
 }
 
-impl HeapDeps for HashMap<Sha256Digest, CacheEntry> {
+impl<CacheDepsT: CacheDeps> HeapDeps for HashMap<Sha256Digest, CacheEntry<CacheDepsT>> {
     type Element = Sha256Digest;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
@@ -421,8 +416,8 @@ mod tests {
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         DownloadAndExtract(Sha256Digest, PathBuf),
-        GetRequestSucceeded(CacheRequestId, PathBuf),
-        GetRequestFailed(CacheRequestId),
+        GetRequestSucceeded(u32, PathBuf),
+        GetRequestFailed(u32),
     }
 
     #[derive(Default)]
@@ -468,11 +463,13 @@ mod tests {
             )
         }
 
+        type RequestId = u32;
+
         fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
             self.messages.push(DownloadAndExtract(digest, prefix))
         }
 
-        fn get_completed(&mut self, request_id: CacheRequestId, path: Option<PathBuf>) {
+        fn get_completed(&mut self, request_id: Self::RequestId, path: Option<PathBuf>) {
             self.messages.push(match path {
                 Some(path) => GetRequestSucceeded(request_id, path),
                 None => GetRequestFailed(request_id),
@@ -482,7 +479,7 @@ mod tests {
 
     struct Fixture {
         test_cache_deps: TestCacheDeps,
-        cache: Cache,
+        cache: Cache<TestCacheDeps>,
     }
 
     impl Fixture {
@@ -558,6 +555,12 @@ mod tests {
         };
     }
 
+    macro_rules! request_id {
+        ($n:expr) => {
+            $n as u32
+        };
+    }
+
     macro_rules! script_test {
         ($test_name:ident; $fixture:expr; $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
             #[test]
@@ -575,12 +578,12 @@ mod tests {
         get_request_for_empty;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
         };
     }
 
@@ -588,12 +591,12 @@ mod tests {
         get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_refcount;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {
@@ -607,38 +610,38 @@ mod tests {
         cache_entries_are_removed_in_lru_order;
         Fixture::new_and_clear_messages(10);
 
-        GetRequest(CacheRequestId(1), digest!(1)) => {
+        GetRequest(request_id!(1), digest!(1)) => {
             DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
         };
         DownloadAndExtractCompleted(digest!(1), Ok(4)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 1)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 1)),
         };
         DecrementRefcount(digest!(1)) => {};
 
-        GetRequest(CacheRequestId(2), digest!(2)) => {
+        GetRequest(request_id!(2), digest!(2)) => {
             DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
         };
         DownloadAndExtractCompleted(digest!(2), Ok(4)) => {
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 2)),
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 2)),
         };
         DecrementRefcount(digest!(2)) => {};
 
-        GetRequest(CacheRequestId(3), digest!(3)) => {
+        GetRequest(request_id!(3), digest!(3)) => {
             DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
         };
         DownloadAndExtractCompleted(digest!(3), Ok(4)) => {
-            GetRequestSucceeded(CacheRequestId(3), long_path!("/cache/root/sha256", 3)),
+            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 3)),
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 1), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
         };
         DecrementRefcount(digest!(3)) => {};
 
-        GetRequest(CacheRequestId(4), digest!(4)) => {
+        GetRequest(request_id!(4), digest!(4)) => {
             DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
         };
         DownloadAndExtractCompleted(digest!(4), Ok(4)) => {
-            GetRequestSucceeded(CacheRequestId(4), long_path!("/cache/root/sha256", 4)),
+            GetRequestSucceeded(request_id!(4), long_path!("/cache/root/sha256", 4)),
             FileExists(short_path!("/cache/root/removing", 2)),
             Rename(long_path!("/cache/root/sha256", 2), short_path!("/cache/root/removing", 2)),
             RemoveRecursively(short_path!("/cache/root/removing", 2)),
@@ -650,36 +653,36 @@ mod tests {
         lru_order_augmented_by_last_use;
         Fixture::new_and_clear_messages(10);
 
-        GetRequest(CacheRequestId(1), digest!(1)) => {
+        GetRequest(request_id!(1), digest!(1)) => {
             DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
         };
         DownloadAndExtractCompleted(digest!(1), Ok(3)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 1)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 1)),
         };
 
-        GetRequest(CacheRequestId(2), digest!(2)) => {
+        GetRequest(request_id!(2), digest!(2)) => {
             DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
         };
         DownloadAndExtractCompleted(digest!(2), Ok(3)) => {
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 2)),
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 2)),
         };
 
-        GetRequest(CacheRequestId(3), digest!(3)) => {
+        GetRequest(request_id!(3), digest!(3)) => {
             DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
         };
         DownloadAndExtractCompleted(digest!(3), Ok(3)) => {
-            GetRequestSucceeded(CacheRequestId(3), long_path!("/cache/root/sha256", 3)),
+            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 3)),
         };
 
         DecrementRefcount(digest!(3)) => {};
         DecrementRefcount(digest!(2)) => {};
         DecrementRefcount(digest!(1)) => {};
 
-        GetRequest(CacheRequestId(4), digest!(4)) => {
+        GetRequest(request_id!(4), digest!(4)) => {
             DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
         };
         DownloadAndExtractCompleted(digest!(4), Ok(3)) => {
-            GetRequestSucceeded(CacheRequestId(4), long_path!("/cache/root/sha256", 4)),
+            GetRequestSucceeded(request_id!(4), long_path!("/cache/root/sha256", 4)),
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 3), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
@@ -690,17 +693,17 @@ mod tests {
         multiple_get_requests_for_empty;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42))
         };
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {};
-        GetRequest(CacheRequestId(3), digest!(42)) => {};
+        GetRequest(request_id!(2), digest!(42)) => {};
+        GetRequest(request_id!(3), digest!(42)) => {};
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(CacheRequestId(3), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 42)),
         };
     }
 
@@ -708,17 +711,17 @@ mod tests {
         multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42))
         };
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {};
-        GetRequest(CacheRequestId(3), digest!(42)) => {};
+        GetRequest(request_id!(2), digest!(42)) => {};
+        GetRequest(request_id!(3), digest!(42)) => {};
 
         DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(CacheRequestId(3), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
@@ -734,16 +737,16 @@ mod tests {
         get_request_for_currently_used;
         Fixture::new_and_clear_messages(10);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
         };
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 42)),
+        GetRequest(request_id!(2), digest!(42)) => {
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
@@ -758,26 +761,26 @@ mod tests {
         get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_refcount;
         Fixture::new_and_clear_messages(100);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(10)) => {
-            GetRequestSucceeded(CacheRequestId(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {
-            GetRequestSucceeded(CacheRequestId(2), long_path!("/cache/root/sha256", 42)),
+        GetRequest(request_id!(2), digest!(42)) => {
+            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
         };
 
-        GetRequest(CacheRequestId(3), digest!(43)) => {
+        GetRequest(request_id!(3), digest!(43)) => {
             DownloadAndExtract(digest!(43), long_path!("/cache/root/sha256", 43)),
         };
 
         DownloadAndExtractCompleted(digest!(43), Ok(100)) => {
-            GetRequestSucceeded(CacheRequestId(3), long_path!("/cache/root/sha256", 43)),
+            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 43)),
         };
 
         DecrementRefcount(digest!(42)) => {
@@ -791,13 +794,13 @@ mod tests {
         get_request_for_empty_with_download_and_extract_failure_and_no_files_created;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
             FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(CacheRequestId(1)),
+            GetRequestFailed(request_id!(1)),
         };
     }
 
@@ -809,7 +812,7 @@ mod tests {
             fixture
         };
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
@@ -818,7 +821,7 @@ mod tests {
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(CacheRequestId(1)),
+            GetRequestFailed(request_id!(1)),
         };
     }
 
@@ -830,21 +833,21 @@ mod tests {
             fixture
         };
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {};
-        GetRequest(CacheRequestId(3), digest!(42)) => {};
+        GetRequest(request_id!(2), digest!(42)) => {};
+        GetRequest(request_id!(3), digest!(42)) => {};
 
         DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
             FileExists(long_path!("/cache/root/sha256", 42)),
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(CacheRequestId(1)),
-            GetRequestFailed(CacheRequestId(2)),
-            GetRequestFailed(CacheRequestId(3)),
+            GetRequestFailed(request_id!(1)),
+            GetRequestFailed(request_id!(2)),
+            GetRequestFailed(request_id!(3)),
         };
     }
 
@@ -852,16 +855,16 @@ mod tests {
         get_after_error_retries;
         Fixture::new_and_clear_messages(1000);
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
             FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(CacheRequestId(1)),
+            GetRequestFailed(request_id!(1)),
         };
 
-        GetRequest(CacheRequestId(2), digest!(42)) => {
+        GetRequest(request_id!(2), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
     }
@@ -877,7 +880,7 @@ mod tests {
             fixture
         };
 
-        GetRequest(CacheRequestId(1), digest!(42)) => {
+        GetRequest(request_id!(1), digest!(42)) => {
             DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
@@ -889,7 +892,7 @@ mod tests {
             FileExists(short_path!("/cache/root/removing", 4)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 4)),
             RemoveRecursively(short_path!("/cache/root/removing", 4)),
-            GetRequestFailed(CacheRequestId(1)),
+            GetRequestFailed(request_id!(1)),
         };
     }
 
