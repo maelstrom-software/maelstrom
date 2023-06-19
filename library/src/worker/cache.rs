@@ -5,7 +5,7 @@ use crate::{
     Result, Sha256Digest,
 };
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
@@ -67,7 +67,7 @@ pub trait CacheDeps {
     /// caller is responsible for generating these and ensuring that they are unique. The cache
     /// actually doesn't care if they are unique, but the caller would likely be confused if they
     /// weren't.
-    type RequestId: Copy + std::hash::Hash + Eq;
+    type RequestId: Copy;
 
     /// Download `digest` from somewhere and extract it into `path`. Assume that `path` does not exist, but
     /// that its parent directory does. Validate the digest while downloading and extracting. When
@@ -180,7 +180,7 @@ enum CacheEntry<CacheDepsT: CacheDeps> {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
     /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
     /// on where the extraction process is.
-    DownloadingAndExtracting(HashSet<CacheDepsT::RequestId>),
+    DownloadingAndExtracting(Vec<CacheDepsT::RequestId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
     /// currently being used by at least one execution. We refcount this state since there may be
@@ -246,11 +246,11 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
                 deps.download_and_extract(digest.clone(), cache_path);
                 self.entries.insert(
                     digest,
-                    CacheEntry::DownloadingAndExtracting(HashSet::from([request_id])),
+                    CacheEntry::DownloadingAndExtracting(Vec::from([request_id])),
                 );
             }
             Some(CacheEntry::DownloadingAndExtracting(requests)) => {
-                assert!(requests.insert(request_id));
+                requests.push(request_id);
             }
             Some(CacheEntry::InUse { refcount, .. }) => {
                 *refcount = refcount.checked_add(1).unwrap();
@@ -412,6 +412,7 @@ mod tests {
     use crate::test::*;
     use anyhow::anyhow;
     use itertools::Itertools;
+    use std::collections::HashSet;
     use TestMessage::*;
 
     #[derive(Clone, Debug, PartialEq)]
