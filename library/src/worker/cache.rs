@@ -78,7 +78,12 @@ pub trait CacheDeps {
     /// then there was an error and the artifact isn't available. Otherwise, the artifact will
     /// remain available at the given `path` until a [Message::DecrementRefcount] is sent to the
     /// cache.
-    fn get_completed(&mut self, request_id: Self::RequestId, path: Option<PathBuf>);
+    fn get_completed(
+        &mut self,
+        request_id: Self::RequestId,
+        digest: Sha256Digest,
+        path: Option<PathBuf>,
+    );
 }
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
@@ -226,7 +231,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         digest: Sha256Digest,
     ) {
         let path = Self::cache_path(root, &digest);
-        deps.get_completed(request_id, Some(path));
+        deps.get_completed(request_id, digest, Some(path));
     }
 
     fn receive_get_request(
@@ -273,7 +278,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         match self.entries.remove(&digest) {
             Some(CacheEntry::DownloadingAndExtracting(requests)) => {
                 for request_id in requests.iter() {
-                    deps.get_completed(*request_id, None);
+                    deps.get_completed(*request_id, digest.clone(), None);
                 }
                 let cache_path = Self::cache_path(&self.root, &digest);
                 if deps.file_exists(&cache_path) {
@@ -416,8 +421,8 @@ mod tests {
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         DownloadAndExtract(Sha256Digest, PathBuf),
-        GetRequestSucceeded(u32, PathBuf),
-        GetRequestFailed(u32),
+        GetRequestSucceeded(u32, Sha256Digest, PathBuf),
+        GetRequestFailed(u32, Sha256Digest),
     }
 
     #[derive(Default)]
@@ -469,10 +474,15 @@ mod tests {
             self.messages.push(DownloadAndExtract(digest, prefix))
         }
 
-        fn get_completed(&mut self, request_id: Self::RequestId, path: Option<PathBuf>) {
+        fn get_completed(
+            &mut self,
+            request_id: Self::RequestId,
+            digest: Sha256Digest,
+            path: Option<PathBuf>,
+        ) {
             self.messages.push(match path {
-                Some(path) => GetRequestSucceeded(request_id, path),
-                None => GetRequestFailed(request_id),
+                Some(path) => GetRequestSucceeded(request_id, digest, path),
+                None => GetRequestFailed(request_id, digest),
             });
         }
     }
@@ -583,7 +593,7 @@ mod tests {
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
     }
 
@@ -596,7 +606,7 @@ mod tests {
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {
@@ -614,7 +624,7 @@ mod tests {
             DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
         };
         DownloadAndExtractCompleted(digest!(1), Ok(4)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 1)),
+            GetRequestSucceeded(request_id!(1), digest!(1), long_path!("/cache/root/sha256", 1)),
         };
         DecrementRefcount(digest!(1)) => {};
 
@@ -622,7 +632,7 @@ mod tests {
             DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
         };
         DownloadAndExtractCompleted(digest!(2), Ok(4)) => {
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 2)),
+            GetRequestSucceeded(request_id!(2), digest!(2), long_path!("/cache/root/sha256", 2)),
         };
         DecrementRefcount(digest!(2)) => {};
 
@@ -630,7 +640,7 @@ mod tests {
             DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
         };
         DownloadAndExtractCompleted(digest!(3), Ok(4)) => {
-            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 3)),
+            GetRequestSucceeded(request_id!(3), digest!(3), long_path!("/cache/root/sha256", 3)),
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 1), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
@@ -641,7 +651,7 @@ mod tests {
             DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
         };
         DownloadAndExtractCompleted(digest!(4), Ok(4)) => {
-            GetRequestSucceeded(request_id!(4), long_path!("/cache/root/sha256", 4)),
+            GetRequestSucceeded(request_id!(4), digest!(4), long_path!("/cache/root/sha256", 4)),
             FileExists(short_path!("/cache/root/removing", 2)),
             Rename(long_path!("/cache/root/sha256", 2), short_path!("/cache/root/removing", 2)),
             RemoveRecursively(short_path!("/cache/root/removing", 2)),
@@ -657,21 +667,21 @@ mod tests {
             DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
         };
         DownloadAndExtractCompleted(digest!(1), Ok(3)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 1)),
+            GetRequestSucceeded(request_id!(1), digest!(1), long_path!("/cache/root/sha256", 1)),
         };
 
         GetRequest(request_id!(2), digest!(2)) => {
             DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
         };
         DownloadAndExtractCompleted(digest!(2), Ok(3)) => {
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 2)),
+            GetRequestSucceeded(request_id!(2), digest!(2), long_path!("/cache/root/sha256", 2)),
         };
 
         GetRequest(request_id!(3), digest!(3)) => {
             DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
         };
         DownloadAndExtractCompleted(digest!(3), Ok(3)) => {
-            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 3)),
+            GetRequestSucceeded(request_id!(3), digest!(3), long_path!("/cache/root/sha256", 3)),
         };
 
         DecrementRefcount(digest!(3)) => {};
@@ -682,7 +692,7 @@ mod tests {
             DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
         };
         DownloadAndExtractCompleted(digest!(4), Ok(3)) => {
-            GetRequestSucceeded(request_id!(4), long_path!("/cache/root/sha256", 4)),
+            GetRequestSucceeded(request_id!(4), digest!(4), long_path!("/cache/root/sha256", 4)),
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 3), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
@@ -701,9 +711,9 @@ mod tests {
         GetRequest(request_id!(3), digest!(42)) => {};
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(3), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
     }
 
@@ -719,9 +729,9 @@ mod tests {
         GetRequest(request_id!(3), digest!(42)) => {};
 
         DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(3), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
@@ -742,11 +752,11 @@ mod tests {
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         GetRequest(request_id!(2), digest!(42)) => {
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
@@ -766,13 +776,13 @@ mod tests {
         };
 
         DownloadAndExtractCompleted(digest!(42), Ok(10)) => {
-            GetRequestSucceeded(request_id!(1), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         DecrementRefcount(digest!(42)) => {};
 
         GetRequest(request_id!(2), digest!(42)) => {
-            GetRequestSucceeded(request_id!(2), long_path!("/cache/root/sha256", 42)),
+            GetRequestSucceeded(request_id!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
         };
 
         GetRequest(request_id!(3), digest!(43)) => {
@@ -780,7 +790,7 @@ mod tests {
         };
 
         DownloadAndExtractCompleted(digest!(43), Ok(100)) => {
-            GetRequestSucceeded(request_id!(3), long_path!("/cache/root/sha256", 43)),
+            GetRequestSucceeded(request_id!(3), digest!(43), long_path!("/cache/root/sha256", 43)),
         };
 
         DecrementRefcount(digest!(42)) => {
@@ -800,7 +810,7 @@ mod tests {
 
         DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
             FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(request_id!(1)),
+            GetRequestFailed(request_id!(1), digest!(42)),
         };
     }
 
@@ -821,7 +831,7 @@ mod tests {
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(request_id!(1)),
+            GetRequestFailed(request_id!(1), digest!(42)),
         };
     }
 
@@ -845,9 +855,9 @@ mod tests {
             FileExists(short_path!("/cache/root/removing", 1)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
             RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(request_id!(1)),
-            GetRequestFailed(request_id!(2)),
-            GetRequestFailed(request_id!(3)),
+            GetRequestFailed(request_id!(1), digest!(42)),
+            GetRequestFailed(request_id!(2), digest!(42)),
+            GetRequestFailed(request_id!(3), digest!(42)),
         };
     }
 
@@ -861,7 +871,7 @@ mod tests {
 
         DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
             FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(request_id!(1)),
+            GetRequestFailed(request_id!(1), digest!(42)),
         };
 
         GetRequest(request_id!(2), digest!(42)) => {
@@ -892,7 +902,7 @@ mod tests {
             FileExists(short_path!("/cache/root/removing", 4)),
             Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 4)),
             RemoveRecursively(short_path!("/cache/root/removing", 4)),
-            GetRequestFailed(request_id!(1)),
+            GetRequestFailed(request_id!(1), digest!(42)),
         };
     }
 
