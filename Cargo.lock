@@ -409,19 +409,27 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "clap",
- "flate2",
- "gethostname",
  "itertools",
  "nix",
- "num_cpus",
  "rand",
  "rand_core",
  "regex",
  "serde",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "meticulous_cli"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "flate2",
+ "gethostname",
+ "meticulous",
+ "num_cpus",
  "sha2",
  "tar",
- "tempfile",
  "tokio",
 ]
 
