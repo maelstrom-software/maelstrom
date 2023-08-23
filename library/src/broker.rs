@@ -1,5 +1,6 @@
 //! Code for the broker binary.
 
+pub mod http;
 mod scheduler;
 
 use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
@@ -115,7 +116,7 @@ async fn listener_main(
         std::net::SocketAddrV6::new(std::net::Ipv6Addr::UNSPECIFIED, port.unwrap_or(0), 0, 0);
     let listener = tokio::net::TcpListener::bind(sockaddr).await?;
 
-    println!("listening on: {}", listener.local_addr()?);
+    println!("broker listening on: {}", listener.local_addr()?);
     let mut id = 0;
 
     loop {
