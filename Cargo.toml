@@ -2,5 +2,6 @@
 resolver = "2"
 members = [
     "cli",
-    "library"
+    "library",
+    "web"
 ]
