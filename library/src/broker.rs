@@ -109,14 +109,9 @@ async fn socket_main<IdT, SenderT, RequestT>(
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
 // XXX: Unit test this function.
 async fn listener_main(
-    port: Option<u16>,
+    listener: tokio::net::TcpListener,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
 ) -> Result<()> {
-    let sockaddr =
-        std::net::SocketAddrV6::new(std::net::Ipv6Addr::UNSPECIFIED, port.unwrap_or(0), 0, 0);
-    let listener = tokio::net::TcpListener::bind(sockaddr).await?;
-
-    println!("broker listening on: {}", listener.local_addr()?);
     let mut id = 0;
 
     loop {
@@ -173,11 +168,11 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 /// The main function for the broker. This should be called on a task of its own. It will return
 /// if there is an error establishing the listener socket, when a signal is received, or when the
 /// listener socket returns an error at accept time.
-pub async fn main(port: Option<u16>) -> Result<()> {
+pub async fn main(listener: tokio::net::TcpListener) -> Result<()> {
     let (scheduler_sender, scheduler_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(listener_main(port, scheduler_sender));
+    join_set.spawn(listener_main(listener, scheduler_sender));
     join_set.spawn(async move {
         scheduler_main(scheduler_receiver).await;
         Ok(())
