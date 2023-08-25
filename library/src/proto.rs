@@ -28,12 +28,18 @@ pub struct WorkerResponse(pub ExecutionId, pub ExecutionResult);
 /// Message sent from a client to the broker. After sending the initial [Hello], a client will
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ClientRequest(pub ClientExecutionId, pub ExecutionDetails);
+pub enum ClientRequest {
+    Execution(ClientExecutionId, ExecutionDetails),
+    Ui(meticulous_ui::Request),
+}
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ClientResponse(pub ClientExecutionId, pub ExecutionResult);
+pub enum ClientResponse {
+    Execution(ClientExecutionId, ExecutionResult),
+    Ui(meticulous_ui::Response),
+}
 
 /// Write a message to a Tokio output stream. Each message is framed by sending a leading 4-byte,
 /// little-endian message size.
