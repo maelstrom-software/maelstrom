@@ -61,11 +61,17 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
     }
 
     while !map.is_empty() {
-        if let proto::BrokerToClient::ExecutionResponse(id, result) =
-            proto::read_message(&mut read_stream).await?
-        {
-            let case = map.remove(&id).unwrap();
-            println!("{case}: {result:?}");
+        match proto::read_message(&mut read_stream).await? {
+            proto::BrokerToClient::ExecutionResponse(id, result) => {
+                let case = map.remove(&id).unwrap();
+                println!("{case}: {result:?}");
+            }
+            proto::BrokerToClient::TransferArtifact(_) => {
+                todo!();
+            }
+            proto::BrokerToClient::UiResponse(_) => {
+                panic!("Got a UI response even though we don't send UI requests");
+            }
         }
     }
 
