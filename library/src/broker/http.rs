@@ -16,7 +16,7 @@ use tokio::io::{ReadHalf, WriteHalf};
 use tokio::net::TcpStream;
 use tungstenite::Message;
 
-const WASM_TAR: &'static [u8] = include_bytes!("../../../target/web.tar");
+const WASM_TAR: &[u8] = include_bytes!("../../../target/web.tar");
 
 fn mime_for_path(path: &str) -> &'static str {
     if let Some(ext) = Path::new(path).extension() {
