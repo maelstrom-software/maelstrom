@@ -8,7 +8,7 @@ use crate::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result}
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
-type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerResponse>;
+type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerToBroker>;
 
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
@@ -31,7 +31,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
         })
     }
 
-    fn send_response_to_broker(&mut self, message: proto::WorkerResponse) {
+    fn send_response_to_broker(&mut self, message: proto::WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
 }

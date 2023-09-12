@@ -2,7 +2,7 @@
 //! start or cancel executions as appropriate.
 
 use crate::{
-    proto::{WorkerRequest, WorkerResponse},
+    proto::{BrokerToWorker, WorkerToBroker},
     ExecutionDetails, ExecutionId, ExecutionResult,
 };
 use std::collections::{HashMap, VecDeque};
@@ -48,13 +48,13 @@ pub trait DispatcherDeps {
     ) -> Self::ExecutionHandle;
 
     /// Send a message to the broker.
-    fn send_response_to_broker(&mut self, message: WorkerResponse);
+    fn send_response_to_broker(&mut self, message: WorkerToBroker);
 }
 
 /// An input message for the dispatcher. These come from either the broker or from an executor.
 #[derive(Debug)]
 pub enum Message {
-    FromBroker(WorkerRequest),
+    FromBroker(BrokerToWorker),
     FromExecutor(ExecutionId, ExecutionResult),
 }
 
@@ -75,11 +75,11 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     /// [Message] for more information.
     pub fn receive_message(&mut self, msg: Message) {
         match msg {
-            Message::FromBroker(WorkerRequest::EnqueueExecution(id, details)) => {
+            Message::FromBroker(BrokerToWorker::EnqueueExecution(id, details)) => {
                 self.queued.push_back((id, details));
                 self.possibly_start_execution();
             }
-            Message::FromBroker(WorkerRequest::CancelExecution(id)) => {
+            Message::FromBroker(BrokerToWorker::CancelExecution(id)) => {
                 // Remove execution handle from executing map, which will drop it, which will tell
                 // the executor to kill the process.
                 if self.executing.remove(&id).is_none() {
@@ -92,7 +92,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                 // and we don't need to send any message to the broker.
                 if self.executing.remove(&id).is_some() {
                     self.deps
-                        .send_response_to_broker(WorkerResponse(id, result));
+                        .send_response_to_broker(WorkerToBroker(id, result));
                 }
                 self.possibly_start_execution();
             }
@@ -138,13 +138,13 @@ mod tests {
     use itertools::Itertools;
     use std::cell::RefCell;
     use std::rc::Rc;
-    use WorkerRequest::*;
+    use BrokerToWorker::*;
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
         StartExecution(ExecutionId, ExecutionDetails),
         DropExecutionHandle(ExecutionId),
-        SendResponseToBroker(WorkerResponse),
+        SendResponseToBroker(WorkerToBroker),
     }
 
     use TestMessage::*;
@@ -190,7 +190,7 @@ mod tests {
             }
         }
 
-        fn send_response_to_broker(&mut self, message: WorkerResponse) {
+        fn send_response_to_broker(&mut self, message: WorkerToBroker) {
             self.borrow_mut()
                 .messages
                 .push(SendResponseToBroker(message));
@@ -267,7 +267,7 @@ mod tests {
         FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1]) };
         FromExecutor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
-            SendResponseToBroker(WorkerResponse(eid![1], result![1])),
+            SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
         };
     }
 
@@ -279,7 +279,7 @@ mod tests {
         FromBroker(EnqueueExecution(eid![3], details![3])) => {};
         FromExecutor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
-            SendResponseToBroker(WorkerResponse(eid![1], result![1])),
+            SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
             StartExecution(eid![3], details![3]),
         };
     }
@@ -291,7 +291,7 @@ mod tests {
         FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2]) };
         FromExecutor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
-            SendResponseToBroker(WorkerResponse(eid![1], result![1]))
+            SendResponseToBroker(WorkerToBroker(eid![1], result![1]))
         };
         FromBroker(EnqueueExecution(eid![3], details![3])) => { StartExecution(eid![3], details![3]) };
     }
@@ -306,7 +306,7 @@ mod tests {
         FromBroker(CancelExecution(eid![3])) => {};
         FromExecutor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
-            SendResponseToBroker(WorkerResponse(eid![1], result![1])),
+            SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
             StartExecution(eid![4], details![4]),
         };
     }

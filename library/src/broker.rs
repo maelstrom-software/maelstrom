@@ -11,13 +11,13 @@ struct PassThroughDeps;
 /// The production implementation of [scheduler::SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
 impl scheduler::SchedulerDeps for PassThroughDeps {
-    type ClientSender = UnboundedSender<proto::ClientResponse>;
-    type WorkerSender = UnboundedSender<proto::WorkerRequest>;
+    type ClientSender = UnboundedSender<proto::BrokerToClient>;
+    type WorkerSender = UnboundedSender<proto::BrokerToWorker>;
 
     fn send_response_to_client(
         &mut self,
         sender: &mut Self::ClientSender,
-        response: proto::ClientResponse,
+        response: proto::BrokerToClient,
     ) {
         sender.send(response).ok();
     }
@@ -25,7 +25,7 @@ impl scheduler::SchedulerDeps for PassThroughDeps {
     fn send_request_to_worker(
         &mut self,
         sender: &mut Self::WorkerSender,
-        request: proto::WorkerRequest,
+        request: proto::BrokerToWorker,
     ) {
         sender.send(request).ok();
     }

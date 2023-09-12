@@ -14,21 +14,21 @@ pub enum Hello {
 /// Message sent from the broker to a worker. The broker won't send a message until it has received
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum WorkerRequest {
+pub enum BrokerToWorker {
     EnqueueExecution(ExecutionId, ExecutionDetails),
     CancelExecution(ExecutionId),
 }
 
 /// Message sent from a worker to the broker. These are responses to previous
-/// [WorkerRequest::EnqueueExecution] messages. After sending the initial [Hello], a worker will
+/// [BrokerToWorker::EnqueueExecution] messages. After sending the initial [Hello], a worker will
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct WorkerResponse(pub ExecutionId, pub ExecutionResult);
+pub struct WorkerToBroker(pub ExecutionId, pub ExecutionResult);
 
 /// Message sent from a client to the broker. After sending the initial [Hello], a client will
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum ClientRequest {
+pub enum ClientToBroker {
     Execution(ClientExecutionId, ExecutionDetails),
     Ui(meticulous_ui::Request),
 }
@@ -36,7 +36,7 @@ pub enum ClientRequest {
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum ClientResponse {
+pub enum BrokerToClient {
     Execution(ClientExecutionId, ExecutionResult),
     Ui(meticulous_ui::Response),
 }

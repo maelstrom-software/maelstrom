@@ -112,7 +112,7 @@ async fn serve_broker_to_client(
     broker_read: &mut ReadHalf<TcpStream>,
     ws_write: &mut SplitSink<WebSocketStream<Upgraded>, Message>,
 ) -> Result<()> {
-    while let proto::ClientResponse::Ui(resp) = proto::read_message(broker_read).await? {
+    while let proto::BrokerToClient::Ui(resp) = proto::read_message(broker_read).await? {
         ws_write
             .send(Message::binary(bincode::serialize(&resp).unwrap()))
             .await?
@@ -126,7 +126,7 @@ async fn serve_client_to_broker(
 ) -> Result<()> {
     while let Some(Ok(Message::Binary(msg))) = ws_read.next().await {
         let msg = bincode::deserialize(&msg)?;
-        proto::write_message(broker_write, proto::ClientRequest::Ui(msg)).await?;
+        proto::write_message(broker_write, proto::ClientToBroker::Ui(msg)).await?;
     }
 
     Ok(())
