@@ -29,7 +29,7 @@ pub struct WorkerToBroker(pub ExecutionId, pub ExecutionResult);
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
-    Execution(ClientExecutionId, ExecutionDetails),
+    ExecutionRequest(ClientExecutionId, ExecutionDetails),
     Ui(meticulous_ui::Request),
 }
 
@@ -37,7 +37,7 @@ pub enum ClientToBroker {
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
-    Execution(ClientExecutionId, ExecutionResult),
+    ExecutionResponse(ClientExecutionId, ExecutionResult),
     Ui(meticulous_ui::Response),
 }
 

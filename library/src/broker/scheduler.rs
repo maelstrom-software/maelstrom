@@ -56,7 +56,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 
             ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
 
-            FromClient(cid, ClientToBroker::Execution(ceid, details)) => {
+            FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
                 self.receive_client_request(deps, cid, ceid, details)
             }
 
@@ -258,7 +258,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 
         deps.send_response_to_client(
             self.clients.get_mut(&eid.0).unwrap(),
-            BrokerToClient::Execution(eid.1, result),
+            BrokerToClient::ExecutionResponse(eid.1, result),
         );
 
         if let Some((eid, details)) = self.queued_requests.pop_front() {
@@ -383,7 +383,7 @@ mod tests {
     script_test! {
         message_from_known_client_ok,
         ClientConnected(cid![1], client_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
     }
 
     #[test]
@@ -392,7 +392,7 @@ mod tests {
         let mut fixture = Fixture::default();
         fixture.receive_message(FromClient(
             cid![1],
-            ClientToBroker::Execution(ceid![1], details![1]),
+            ClientToBroker::ExecutionRequest(ceid![1], details![1]),
         ));
     }
 
@@ -446,11 +446,11 @@ mod tests {
         one_client_one_worker,
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1], details![1])),
         };
         FromWorker(wid![1], WorkerToBroker(eid![1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
         };
     }
 
@@ -468,58 +468,58 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
         // 1/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         };
 
         // 1/2 1/2 0/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
             ToWorker(wid![3], EnqueueExecution(eid![1, 3], details![3])),
         };
 
         // 1/2 1/2 1/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
             ToWorker(wid![3], EnqueueExecution(eid![1, 4], details![4])),
         };
 
         // 1/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![5], details![5])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 5], details![5])),
         };
 
         // 2/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![6], details![6])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 6], details![6])),
         };
 
         // 2/2 2/2 2/3
-        FromClient(cid![1], ClientToBroker::Execution(ceid![7], details![7])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![7], details![7])) => {
             ToWorker(wid![3], EnqueueExecution(eid![1, 7], details![7])),
         };
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
         };
-        FromClient(cid![1], ClientToBroker::Execution(ceid![8], details![8])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![8], details![8])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 8], details![8])),
         };
 
         FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![2], result![2])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
         };
-        FromClient(cid![1], ClientToBroker::Execution(ceid![9], details![9])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![9], details![9])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 9], details![9])),
         };
 
         FromWorker(wid![3], WorkerToBroker(eid![1, 3], result![3])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![3], result![3])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![3], result![3])),
         };
-        FromClient(cid![1], ClientToBroker::Execution(ceid![10], details![10])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![10], details![10])) => {
             ToWorker(wid![3], EnqueueExecution(eid![1, 10], details![10])),
         };
     }
@@ -531,38 +531,38 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/1 0/1
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
         // 1/1 0/1
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         };
 
         // 1/1 1/1
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
         };
 
         // 2/1 1/1
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
         };
 
         // 2/1 2/1
-        FromClient(cid![1], ClientToBroker::Execution(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![6], details![6])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {};
 
         // 2/2 1/2
         FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![2], result![2])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
         };
 
         // 1/2 2/2
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 6], details![6])),
         };
     }
@@ -571,12 +571,12 @@ mod tests {
         queued_requests_go_to_workers_on_connect,
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![6], details![6])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {};
 
         WorkerConnected(wid![1], 2, worker_sender![1]) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
@@ -598,23 +598,23 @@ mod tests {
         WorkerConnected(wid![3], 1, worker_sender![3]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
             ToWorker(wid![3], EnqueueExecution(eid![1, 3], details![3])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 4], details![4])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![5], details![5])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {
             ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
         };
 
@@ -623,7 +623,7 @@ mod tests {
         };
 
         FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![2], result![2])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
         };
     }
@@ -633,19 +633,19 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
         };
 
@@ -658,7 +658,7 @@ mod tests {
         };
 
         FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![2], result![2])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 3], details![3])),
         };
     }
@@ -668,16 +668,16 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
 
         WorkerDisconnected(wid![1]) => {};
 
@@ -693,20 +693,20 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
         };
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 2], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![2], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![1])),
         };
 
         WorkerDisconnected(wid![1]) => {};
@@ -718,7 +718,7 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
@@ -734,11 +734,11 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![2], EnqueueExecution(eid![2, 1], details![1])),
         };
 
@@ -746,7 +746,7 @@ mod tests {
         //    ToWorker(wid![2], CancelExecution(eid![2, 1])),
         //};
 
-        //FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        //FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
         //    ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
         //};
     }
@@ -756,22 +756,22 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
         };
 
         ClientConnected(cid![2], client_sender![2]) => {};
-        FromClient(cid![2], ClientToBroker::Execution(ceid![1], details![1])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {};
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
 
         ClientDisconnected(cid![2]) => {};
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::Execution(ceid![1], result![1])),
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
         };
     }
@@ -783,28 +783,28 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::Execution(ceid![1], details![1])) => {
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
             ToWorker(wid![2], EnqueueExecution(eid![2, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::Execution(ceid![2], details![2])) => {
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
             ToWorker(wid![1], EnqueueExecution(eid![2, 2], details![2])),
         };
 
-        FromClient(cid![2], ClientToBroker::Execution(ceid![3], details![3])) => {
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
             ToWorker(wid![2], EnqueueExecution(eid![2, 3], details![3])),
         };
 
-        FromClient(cid![2], ClientToBroker::Execution(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![2], details![2])) => {};
-        FromClient(cid![2], ClientToBroker::Execution(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::Execution(ceid![5], details![5])) => {};
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {};
+        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
 
         ClientDisconnected(cid![2]) => {
             ToWorker(wid![2], CancelExecution(eid![2, 1])),

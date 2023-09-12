@@ -49,7 +49,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
         map.insert(id, case.clone());
         proto::write_message(
             &mut write_stream,
-            proto::ClientToBroker::Execution(
+            proto::ClientToBroker::ExecutionRequest(
                 id,
                 ExecutionDetails {
                     program: binary,
@@ -61,7 +61,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
     }
 
     while !map.is_empty() {
-        if let proto::BrokerToClient::Execution(id, result) =
+        if let proto::BrokerToClient::ExecutionResponse(id, result) =
             proto::read_message(&mut read_stream).await?
         {
             let case = map.remove(&id).unwrap();
