@@ -30,7 +30,7 @@ async fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
 
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
-pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()> {
+pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()> {
     let mut pairs = vec![];
     for binary in get_test_binaries().await? {
         for case in get_cases_from_binary(&binary).await? {
@@ -42,7 +42,7 @@ pub async fn main(name: String, broker_addr: std::net::SocketAddr) -> Result<()>
         .into_split();
     let mut read_stream = tokio::io::BufReader::new(read_stream);
 
-    proto::write_message(&mut write_stream, proto::Hello::Client { name }).await?;
+    proto::write_message(&mut write_stream, proto::Hello::Client).await?;
     let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
         let id = ClientExecutionId(id as u32);

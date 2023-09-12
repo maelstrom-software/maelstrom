@@ -139,13 +139,7 @@ async fn serve_websocket(websocket: HyperWebsocket, broker_addr: SocketAddr) -> 
     let (mut broker_read, mut broker_write) = tokio::io::split(broker_socket);
     let (mut ws_write, mut ws_read) = websocket.split();
 
-    proto::write_message(
-        &mut broker_write,
-        proto::Hello::Client {
-            name: "WebUI".into(),
-        },
-    )
-    .await?;
+    proto::write_message(&mut broker_write, proto::Hello::Client).await?;
 
     tokio::select! {
         res = serve_broker_to_client(&mut broker_read, &mut ws_write) => res?,

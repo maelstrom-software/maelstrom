@@ -125,7 +125,7 @@ async fn listener_main(
             let hello = proto::read_message(&mut read_stream).await?;
             println!("{hello:?} from {peer_addr} connected, assigned id: {id}");
             match hello {
-                proto::Hello::Client { .. } => {
+                proto::Hello::Client => {
                     socket_main(
                         read_stream,
                         write_stream,
@@ -137,7 +137,7 @@ async fn listener_main(
                     )
                     .await
                 }
-                proto::Hello::Worker { slots, .. } => {
+                proto::Hello::Worker { slots } => {
                     socket_main(
                         read_stream,
                         write_stream,

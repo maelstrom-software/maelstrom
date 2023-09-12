@@ -9,8 +9,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 /// gives any relevant information.
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Hello {
-    Client { name: String },
-    Worker { name: String, slots: u32 },
+    Client,
+    Worker { slots: u32 },
     ClientArtifact { digest: Sha256Digest, length: u64 },
     WorkerArtifact { digest: Sha256Digest },
 }
