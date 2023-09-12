@@ -149,6 +149,9 @@ async fn listener_main(
                     )
                     .await
                 }
+                proto::Hello::ClientArtifact { .. } | proto::Hello::WorkerArtifact { .. } => {
+                    todo!("artifact handling not yet implemented")
+                }
             }
             println!("{hello:?} from {peer_addr}, id {id}, disconnected");
             Ok::<(), Error>(())

@@ -11,6 +11,8 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 pub enum Hello {
     Client { name: String },
     Worker { name: String, slots: u32 },
+    ClientArtifact { digest: Sha256Digest, length: u64 },
+    WorkerArtifact { digest: Sha256Digest },
 }
 
 /// Message sent from the broker to a worker. The broker won't send a message until it has received
