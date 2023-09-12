@@ -50,27 +50,20 @@ pub enum Message<DepsT: SchedulerDeps> {
 
 impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT>) {
-        use Message::*;
         match msg {
-            ClientConnected(id, sender) => self.receive_client_connected(id, sender),
-
-            ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
-
-            FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
+            Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
+            Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
+            Message::FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
                 self.receive_client_request(deps, cid, ceid, details)
             }
-
-            FromClient(cid, ClientToBroker::UiRequest(msg)) => {
+            Message::FromClient(cid, ClientToBroker::UiRequest(msg)) => {
                 self.receive_ui_request(deps, cid, msg)
             }
-
-            WorkerConnected(id, slots, sender) => {
+            Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
-
-            WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
-
-            FromWorker(wid, WorkerToBroker(eid, result)) => {
+            Message::WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
+            Message::FromWorker(wid, WorkerToBroker(eid, result)) => {
                 self.receive_worker_response(deps, wid, eid, result)
             }
         }

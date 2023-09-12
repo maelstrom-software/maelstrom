@@ -151,16 +151,17 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
 
     /// Receive a message and act on it. See [Message].
     pub fn receive_message(&mut self, deps: &mut CacheDepsT, msg: Message<CacheDepsT::RequestId>) {
-        use Message::*;
         match msg {
-            GetRequest(request_id, digest) => self.receive_get_request(deps, request_id, digest),
-            DownloadAndExtractCompleted(digest, Err(_)) => {
+            Message::GetRequest(request_id, digest) => {
+                self.receive_get_request(deps, request_id, digest)
+            }
+            Message::DownloadAndExtractCompleted(digest, Err(_)) => {
                 self.receive_download_and_extract_error(deps, digest)
             }
-            DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
+            Message::DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
                 self.receive_download_and_extract_success(deps, digest, bytes_used)
             }
-            DecrementRefcount(digest) => self.receive_decrement_refcount(deps, digest),
+            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(deps, digest),
         }
     }
 }
