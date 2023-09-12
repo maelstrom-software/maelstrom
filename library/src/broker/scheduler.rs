@@ -60,7 +60,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
                 self.receive_client_request(deps, cid, ceid, details)
             }
 
-            FromClient(cid, ClientToBroker::Ui(msg)) => self.receive_ui_request(deps, cid, msg),
+            FromClient(cid, ClientToBroker::UiRequest(msg)) => {
+                self.receive_ui_request(deps, cid, msg)
+            }
 
             WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
@@ -197,7 +199,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         };
         deps.send_response_to_client(
             self.clients.get_mut(&client_id).unwrap(),
-            BrokerToClient::Ui(resp),
+            BrokerToClient::UiResponse(resp),
         );
     }
 

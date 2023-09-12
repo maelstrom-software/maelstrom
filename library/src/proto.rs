@@ -30,7 +30,7 @@ pub struct WorkerToBroker(pub ExecutionId, pub ExecutionResult);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     ExecutionRequest(ClientExecutionId, ExecutionDetails),
-    Ui(meticulous_ui::Request),
+    UiRequest(meticulous_ui::Request),
 }
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
@@ -38,7 +38,7 @@ pub enum ClientToBroker {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
     ExecutionResponse(ClientExecutionId, ExecutionResult),
-    Ui(meticulous_ui::Response),
+    UiResponse(meticulous_ui::Response),
 }
 
 /// Write a message to a Tokio output stream. Each message is framed by sending a leading 4-byte,
