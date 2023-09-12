@@ -19,42 +19,57 @@ use std::{
  *  FIGLET: public
  */
 
-/// [Cache]'s external dependencies that must be fulfilled by its caller.
-pub trait CacheDeps {
+pub trait CacheFs {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
-    fn rand_u64(&mut self) -> u64 {
-        rand::random()
-    }
+    fn rand_u64(&mut self) -> u64;
 
     /// Return true if a file (or directory, or symlink, etc.) exists with the given path, and
     /// false otherwise. Panic on file system error.
-    fn file_exists(&mut self, path: &Path) -> bool {
-        path.try_exists().unwrap()
-    }
+    fn file_exists(&mut self, path: &Path) -> bool;
 
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
-    fn rename(&mut self, source: &Path, destination: &Path) {
-        std::fs::rename(source, destination).unwrap()
-    }
+    fn rename(&mut self, source: &Path, destination: &Path);
 
     /// Remove `path`, and if `path` is a directory, all descendants of `path`. Do this on a
     /// separate thread. Panic on file system error.
-    fn remove_recursively_on_thread(&mut self, path: PathBuf) {
-        std::thread::spawn(move || std::fs::remove_dir_all(path).unwrap());
-    }
+    fn remove_recursively_on_thread(&mut self, path: PathBuf);
 
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
     /// directories.
+    fn mkdir_recursively(&mut self, path: &Path);
+
+    /// Return and iterator that will yield all of the children of a directory. Panic on file
+    /// system error or if `path` doesn't exist or isn't a directory.
+    fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
+}
+
+pub struct StdCacheFs;
+
+impl CacheFs for StdCacheFs {
+    fn rand_u64(&mut self) -> u64 {
+        rand::random()
+    }
+
+    fn file_exists(&mut self, path: &Path) -> bool {
+        path.try_exists().unwrap()
+    }
+
+    fn rename(&mut self, source: &Path, destination: &Path) {
+        std::fs::rename(source, destination).unwrap()
+    }
+
+    fn remove_recursively_on_thread(&mut self, path: PathBuf) {
+        std::thread::spawn(move || std::fs::remove_dir_all(path).unwrap());
+    }
+
     fn mkdir_recursively(&mut self, path: &Path) {
         std::fs::create_dir_all(path).unwrap();
     }
 
-    /// Return and iterator that will yield all of the children of a directory. Panic on file
-    /// system error or if `path` doesn't exist or isn't a directory.
     fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
         Box::new(
             std::fs::read_dir(path)
@@ -62,7 +77,10 @@ pub trait CacheDeps {
                 .map(|de| de.unwrap().path()),
         )
     }
+}
 
+/// [Cache]'s external dependencies that must be fulfilled by its caller.
+pub trait CacheDeps {
     /// Used to associate [Message::GetRequest] messages with [CacheDeps::get_completed] calls. The
     /// caller is responsible for generating these and ensuring that they are unique. The cache
     /// actually doesn't care if they are unique, but the caller would likely be confused if they
@@ -84,6 +102,11 @@ pub trait CacheDeps {
         digest: Sha256Digest,
         path: Option<PathBuf>,
     );
+
+    type Fs: CacheFs;
+
+    /// Get a reference to the CacheFs being used.
+    fn fs(&mut self) -> &mut Self::Fs;
 }
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
@@ -126,17 +149,18 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         let mut path = root.to_owned();
 
         path.push("removing");
-        deps.mkdir_recursively(&path);
-        for child in deps.read_dir(&path) {
-            deps.remove_recursively_on_thread(child);
+        let fs = deps.fs();
+        fs.mkdir_recursively(&path);
+        for child in fs.read_dir(&path) {
+            fs.remove_recursively_on_thread(child);
         }
         path.pop();
 
         path.push("sha256");
-        if deps.file_exists(&path) {
-            Self::remove_in_background(deps, root, &path);
+        if fs.file_exists(&path) {
+            Self::remove_in_background(fs, root, &path);
         }
-        deps.mkdir_recursively(&path);
+        fs.mkdir_recursively(&path);
         path.pop();
 
         Cache {
@@ -202,20 +226,20 @@ enum CacheEntry<CacheDepsT: CacheDeps> {
 }
 
 impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
-    fn remove_in_background(deps: &mut CacheDepsT, root: &Path, source: &Path) {
+    fn remove_in_background(fs: &mut CacheDepsT::Fs, root: &Path, source: &Path) {
         let mut target = root.to_owned();
         target.push("removing");
         loop {
-            let key = deps.rand_u64();
+            let key = fs.rand_u64();
             target.push(format!("{key:016x}"));
-            if !deps.file_exists(&target) {
+            if !fs.file_exists(&target) {
                 break;
             } else {
                 target.pop();
             }
         }
-        deps.rename(source, &target);
-        deps.remove_recursively_on_thread(target);
+        fs.rename(source, &target);
+        fs.remove_recursively_on_thread(target);
     }
 
     fn cache_path(root: &Path, digest: &Sha256Digest) -> PathBuf {
@@ -283,8 +307,8 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
                     deps.get_completed(*request_id, digest.clone(), None);
                 }
                 let cache_path = Self::cache_path(&self.root, &digest);
-                if deps.file_exists(&cache_path) {
-                    Self::remove_in_background(deps, &self.root, &cache_path);
+                if deps.fs().file_exists(&cache_path) {
+                    Self::remove_in_background(deps.fs(), &self.root, &cache_path);
                 }
             }
             _ => {
@@ -302,7 +326,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
                 Some(digest) => match self.entries.remove(&digest) {
                     Some(CacheEntry::InHeap { bytes_used, .. }) => {
                         let path = Self::cache_path(&self.root, &digest);
-                        Self::remove_in_background(deps, &self.root, &path);
+                        Self::remove_in_background(deps.fs(), &self.root, &path);
                         self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
                     }
                     _ => {
@@ -439,7 +463,7 @@ mod tests {
         last_random_number: u64,
     }
 
-    impl CacheDeps for TestCacheDeps {
+    impl CacheFs for TestCacheDeps {
         fn rand_u64(&mut self) -> u64 {
             self.last_random_number += 1;
             self.last_random_number
@@ -473,7 +497,9 @@ mod tests {
                     .into_iter(),
             )
         }
+    }
 
+    impl CacheDeps for TestCacheDeps {
         type RequestId = u32;
 
         fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
@@ -490,6 +516,12 @@ mod tests {
                 Some(path) => GetRequestSucceeded(request_id, digest, path),
                 None => GetRequestFailed(request_id, digest),
             });
+        }
+
+        type Fs = Self;
+
+        fn fs(&mut self) -> &mut Self::Fs {
+            self
         }
     }
 
