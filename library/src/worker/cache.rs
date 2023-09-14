@@ -261,7 +261,8 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
                     bytes_used,
                     heap_index,
                     ..
-                } = *entry else {
+                } = *entry
+                else {
                     unreachable!()
                 };
                 *entry = CacheEntry::InUse {
@@ -319,7 +320,9 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     ) {
         match self.entries.get_mut(&digest) {
             Some(entry @ CacheEntry::DownloadingAndExtracting(_)) => {
-                let CacheEntry::DownloadingAndExtracting(requests) = entry else { unreachable!() };
+                let CacheEntry::DownloadingAndExtracting(requests) = entry else {
+                    unreachable!()
+                };
                 let mut refcount = 0;
                 for request_id in requests.iter() {
                     refcount += 1;
