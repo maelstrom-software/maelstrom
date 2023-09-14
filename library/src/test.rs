@@ -95,12 +95,18 @@ macro_rules! long_path {
     ($prefix:expr, $n:expr) => {
         format!("{}/{:0>64x}", $prefix, $n).into()
     };
+    ($prefix:expr, $n:expr, $s:expr) => {
+        format!("{}/{:0>64x}.{}", $prefix, $n, $s).into()
+    };
 }
 pub(crate) use long_path;
 
 macro_rules! short_path {
     ($prefix:expr, $n:expr) => {
         format!("{}/{:0>16x}", $prefix, $n).into()
+    };
+    ($prefix:expr, $n:expr, $s:expr) => {
+        format!("{}/{:0>16x}.{}", $prefix, $n, $s).into()
     };
 }
 pub(crate) use short_path;

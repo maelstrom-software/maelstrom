@@ -1,5 +1,6 @@
 //! Code for the broker binary.
 
+pub mod cache;
 pub mod http;
 mod scheduler;
 
