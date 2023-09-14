@@ -5,7 +5,7 @@ use crate::{
     Result, Sha256Digest,
 };
 use std::{
-    collections::HashMap,
+    collections::{hash_map, HashMap},
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
@@ -265,75 +265,69 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         request_id: CacheDepsT::RequestId,
         digest: Sha256Digest,
     ) {
-        match self.entries.get_mut(&digest) {
-            None => {
-                let cache_path = Self::cache_path(&self.root, &digest);
-                deps.download_and_extract(digest.clone(), cache_path);
-                self.entries.insert(
-                    digest,
-                    CacheEntry::DownloadingAndExtracting(Vec::from([request_id])),
-                );
+        match self.entries.entry(digest) {
+            hash_map::Entry::Vacant(entry) => {
+                let cache_path = Self::cache_path(&self.root, entry.key());
+                deps.download_and_extract(entry.key().clone(), cache_path);
+                entry.insert(CacheEntry::DownloadingAndExtracting(Vec::from([
+                    request_id,
+                ])));
             }
-            Some(CacheEntry::DownloadingAndExtracting(requests)) => {
-                requests.push(request_id);
-            }
-            Some(CacheEntry::InUse { refcount, .. }) => {
-                *refcount = refcount.checked_add(1).unwrap();
-                Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
-            }
-            Some(entry @ CacheEntry::InHeap { .. }) => {
-                let CacheEntry::InHeap {
-                    bytes_used,
-                    heap_index,
-                    ..
-                } = *entry
-                else {
-                    unreachable!()
-                };
-                *entry = CacheEntry::InUse {
-                    refcount: NonZeroU32::new(1).unwrap(),
-                    bytes_used,
-                };
-                self.heap.remove(&mut self.entries, heap_index);
-                Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
+            hash_map::Entry::Occupied(entry) => {
+                let digest = entry.key().clone();
+                let entry = entry.into_mut();
+                match entry {
+                    CacheEntry::DownloadingAndExtracting(requests) => requests.push(request_id),
+                    CacheEntry::InUse { refcount, .. } => {
+                        *refcount = refcount.checked_add(1).unwrap();
+                        Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
+                    }
+                    CacheEntry::InHeap {
+                        bytes_used,
+                        heap_index,
+                        ..
+                    } => {
+                        let heap_index = *heap_index;
+                        *entry = CacheEntry::InUse {
+                            refcount: NonZeroU32::new(1).unwrap(),
+                            bytes_used: *bytes_used,
+                        };
+                        self.heap.remove(&mut self.entries, heap_index);
+                        Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
+                    }
+                }
             }
         }
     }
 
     fn receive_download_and_extract_error(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
-        match self.entries.remove(&digest) {
-            Some(CacheEntry::DownloadingAndExtracting(requests)) => {
-                for request_id in requests.iter() {
-                    deps.get_completed(*request_id, digest.clone(), None);
-                }
-                let cache_path = Self::cache_path(&self.root, &digest);
-                if deps.fs().file_exists(&cache_path) {
-                    Self::remove_in_background(deps.fs(), &self.root, &cache_path);
-                }
-            }
-            _ => {
-                panic!("Got DownloadingAndExtracting in unexpected state");
-            }
+        let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.remove(&digest)
+        else {
+            panic!("Got DownloadingAndExtracting in unexpected state");
+        };
+        for request_id in requests.iter() {
+            deps.get_completed(*request_id, digest.clone(), None);
+        }
+        let cache_path = Self::cache_path(&self.root, &digest);
+        if deps.fs().file_exists(&cache_path) {
+            Self::remove_in_background(deps.fs(), &self.root, &cache_path);
         }
     }
 
     fn possibly_remove_some(&mut self, deps: &mut CacheDepsT) {
         while self.bytes_used > self.bytes_used_goal {
-            match self.heap.pop(&mut self.entries) {
-                None => {
-                    break;
-                }
-                Some(digest) => match self.entries.remove(&digest) {
-                    Some(CacheEntry::InHeap { bytes_used, .. }) => {
-                        let path = Self::cache_path(&self.root, &digest);
-                        Self::remove_in_background(deps.fs(), &self.root, &path);
-                        self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
-                    }
-                    _ => {
-                        panic!("Entry popped off of heap was in unexpected state");
-                    }
-                },
-            }
+            let Some(digest) = self.heap.pop(&mut self.entries) else {
+                break;
+            };
+            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
+                panic!("Entry popped off of heap was in unexpected state");
+            };
+            Self::remove_in_background(
+                deps.fs(),
+                &self.root,
+                &Self::cache_path(&self.root, &digest),
+            );
+            self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
         }
     }
 
@@ -343,33 +337,25 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         digest: Sha256Digest,
         bytes_used: u64,
     ) {
-        match self.entries.get_mut(&digest) {
-            Some(entry @ CacheEntry::DownloadingAndExtracting(_)) => {
-                let CacheEntry::DownloadingAndExtracting(requests) = entry else {
-                    unreachable!()
-                };
-                let mut refcount = 0;
-                for request_id in requests.iter() {
-                    refcount += 1;
-                    Self::send_get_completed_successfully(
-                        deps,
-                        &self.root,
-                        *request_id,
-                        digest.clone(),
-                    );
-                }
-                // Refcount must be > 0 since we don't allow cancellation of gets.
-                *entry = CacheEntry::InUse {
-                    bytes_used,
-                    refcount: NonZeroU32::new(refcount).unwrap(),
-                };
-                self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
-                self.possibly_remove_some(deps);
-            }
-            _ => {
-                panic!("Got DownloadingAndExtracting in unexpected state");
-            }
+        let entry = self
+            .entries
+            .get_mut(&digest)
+            .expect("Got DownloadingAndExtracting in unexpected state");
+        let CacheEntry::DownloadingAndExtracting(requests) = entry else {
+            panic!("Got DownloadingAndExtracting in unexpected state");
+        };
+        let mut refcount = 0;
+        for request_id in requests.iter() {
+            refcount += 1;
+            Self::send_get_completed_successfully(deps, &self.root, *request_id, digest.clone());
         }
+        // Refcount must be > 0 since we don't allow cancellation of gets.
+        *entry = CacheEntry::InUse {
+            bytes_used,
+            refcount: NonZeroU32::new(refcount).unwrap(),
+        };
+        self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+        self.possibly_remove_some(deps);
     }
 
     fn receive_decrement_refcount(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
@@ -377,26 +363,24 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
             .entries
             .get_mut(&digest)
             .expect("Got DecrementRefcount in unexpected state");
-        match entry {
-            CacheEntry::InUse {
-                bytes_used,
-                refcount,
-            } => match NonZeroU32::new(refcount.get() - 1) {
-                Some(new_refcount) => *refcount = new_refcount,
-                None => {
-                    let priority = self.next_priority;
-                    self.next_priority = self.next_priority.checked_add(1).unwrap();
-                    *entry = CacheEntry::InHeap {
-                        bytes_used: *bytes_used,
-                        priority,
-                        heap_index: HeapIndex::default(),
-                    };
-                    self.heap.push(&mut self.entries, digest);
-                    self.possibly_remove_some(deps);
-                }
-            },
-            _ => {
-                panic!("Got DecrementRefcount with existing zero refcount");
+        let CacheEntry::InUse {
+            bytes_used,
+            refcount,
+        } = entry
+        else {
+            panic!("Got DecrementRefcount with existing zero refcount");
+        };
+        match NonZeroU32::new(refcount.get() - 1) {
+            Some(new_refcount) => *refcount = new_refcount,
+            None => {
+                *entry = CacheEntry::InHeap {
+                    bytes_used: *bytes_used,
+                    priority: self.next_priority,
+                    heap_index: HeapIndex::default(),
+                };
+                self.heap.push(&mut self.entries, digest);
+                self.next_priority = self.next_priority.checked_add(1).unwrap();
+                self.possibly_remove_some(deps);
             }
         }
     }
