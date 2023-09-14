@@ -49,7 +49,7 @@ pub trait DispatcherDeps {
     fn start_execution(
         &mut self,
         id: ExecutionId,
-        details: ExecutionDetails,
+        details: &ExecutionDetails,
         layers: Vec<PathBuf>,
     ) -> Self::ExecutionHandle;
 
@@ -214,7 +214,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     fn possibly_start_execution(&mut self) {
         if self.executing.len() < self.slots {
             if let Some((id, details, layer_paths)) = self.queued.pop_front() {
-                let handle = self.deps.start_execution(id, details.clone(), layer_paths);
+                let handle = self.deps.start_execution(id, &details, layer_paths);
                 assert!(self.executing.insert(id, (details, handle)).is_none());
             }
         }
@@ -300,12 +300,12 @@ mod tests {
         fn start_execution(
             &mut self,
             id: ExecutionId,
-            details: ExecutionDetails,
+            details: &ExecutionDetails,
             layers: Vec<PathBuf>,
         ) -> ExecutionHandle {
             self.borrow_mut()
                 .messages
-                .push(StartExecution(id, details, layers));
+                .push(StartExecution(id, details.clone(), layers));
             ExecutionHandle {
                 id,
                 test_state: self.clone(),

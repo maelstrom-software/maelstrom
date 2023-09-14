@@ -22,7 +22,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
     fn start_execution(
         &mut self,
         id: ExecutionId,
-        details: ExecutionDetails,
+        details: &ExecutionDetails,
         _layers: Vec<PathBuf>,
     ) -> Self::ExecutionHandle {
         let sender = self.dispatcher_sender.clone();

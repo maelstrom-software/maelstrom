@@ -16,7 +16,7 @@ use nix::{sys::signal::Signal, unistd::Pid};
 /// will be killed when the returned [Handle] is dropped, unless it has already completed. The
 /// provided callback is always called on a separate task, even if an error occurs immediately.
 pub fn start(
-    details: ExecutionDetails,
+    details: &ExecutionDetails,
     done: impl FnOnce(ExecutionResult) + Send + 'static,
 ) -> Handle {
     Handle(start_with_killer(details, done, ()))
@@ -79,13 +79,13 @@ async fn waiter(
 }
 
 fn start_with_killer<K: Killer>(
-    details: ExecutionDetails,
+    details: &ExecutionDetails,
     done: impl FnOnce(ExecutionResult) + Send + 'static,
     killer: K,
 ) -> GenericHandle<K> {
     let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
-    let result = tokio::process::Command::new(details.program)
-        .args(details.arguments)
+    let result = tokio::process::Command::new(&details.program)
+        .args(details.arguments.iter())
         .stdin(std::process::Stdio::null())
         .spawn();
     match result {
@@ -147,7 +147,7 @@ mod tests {
 
     async fn start_and_await(details: ExecutionDetails) -> ExecutionResult {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let _handle = start(details, move |result| tx.send(result).unwrap());
+        let _handle = start(&details, move |result| tx.send(result).unwrap());
         rx.await.unwrap()
     }
 
@@ -164,7 +164,7 @@ mod tests {
         let killer = Arc::new(Mutex::new(None));
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _handle = start_with_killer(
-            details,
+            &details,
             move |result| tx.send(result).unwrap(),
             killer.clone(),
         );
@@ -189,7 +189,7 @@ mod tests {
 
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _ = start(
-            bash!("sleep infinity && touch {}", tempfile.display()),
+            &bash!("sleep infinity && touch {}", tempfile.display()),
             move |result| tx.send(result).unwrap(),
         );
         let result = rx.await.unwrap();
@@ -235,7 +235,7 @@ mod tests {
         let guard = mutex.lock().unwrap();
         let mutex_clone = mutex.clone();
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let _handle = start(bad_program(), move |result| {
+        let _handle = start(&bad_program(), move |result| {
             let _guard = mutex_clone.try_lock().unwrap();
             tx.send(result).unwrap()
         });
@@ -275,7 +275,7 @@ mod tests {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let killer = Arc::new(Mutex::new(None));
         let handle = start_with_killer(
-            bash!("sleep infinity"),
+            &bash!("sleep infinity"),
             move |result| tx.send(result).unwrap(),
             killer.clone(),
         );
