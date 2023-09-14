@@ -115,19 +115,17 @@ async fn listener_main(
     let mut id = 0;
 
     loop {
-        let (socket, peer_addr) = listener.accept().await?;
-        let (read_stream, write_stream) = socket.into_split();
-        let mut read_stream = tokio::io::BufReader::new(read_stream);
-
+        let (mut socket, peer_addr) = listener.accept().await?;
         let scheduler_sender_clone = scheduler_sender.clone();
 
         tokio::task::spawn(async move {
-            let hello = proto::read_message(&mut read_stream).await?;
+            let hello = proto::read_message(&mut socket).await?;
             println!("{hello:?} from {peer_addr} connected, assigned id: {id}");
             match hello {
                 proto::Hello::Client => {
+                    let (read_stream, write_stream) = socket.into_split();
                     socket_main(
-                        read_stream,
+                        tokio::io::BufReader::new(read_stream),
                         write_stream,
                         scheduler_sender_clone,
                         ClientId(id),
@@ -138,8 +136,9 @@ async fn listener_main(
                     .await
                 }
                 proto::Hello::Worker { slots } => {
+                    let (read_stream, write_stream) = socket.into_split();
                     socket_main(
-                        read_stream,
+                        tokio::io::BufReader::new(read_stream),
                         write_stream,
                         scheduler_sender_clone,
                         WorkerId(id),
