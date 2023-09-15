@@ -39,13 +39,13 @@ pub trait DispatcherDeps {
     /// A handle to a pending execution. When dropped, the handle must tell the execution to
     /// terminate immediately. However, the drop method must not wait for the execution to
     /// terminate. Instead, that must happen asynchronously, and the actual execution termination
-    /// notification must come through as a [Message::FromExecutor] message.
+    /// notification must come through as a [Message::Executor] message.
     ///
     /// It must be safe to drop the handle after the execution has terminated.
     type ExecutionHandle;
 
     /// Start a new execution. When the execution terminates, the notification must come through as
-    /// a [Message::FromExecutor] message.
+    /// a [Message::Executor] message.
     fn start_execution(
         &mut self,
         id: ExecutionId,
@@ -66,10 +66,10 @@ pub trait DispatcherDeps {
 /// An input message for the dispatcher. These come from either the broker or from an executor.
 #[derive(Debug)]
 pub enum Message {
-    FromBroker(BrokerToWorker),
-    FromExecutor(ExecutionId, ExecutionResult),
+    Broker(BrokerToWorker),
+    Executor(ExecutionId, ExecutionResult),
     #[allow(dead_code)]
-    FromCache(ExecutionId, Sha256Digest, Option<PathBuf>),
+    Cache(ExecutionId, Sha256Digest, Option<PathBuf>),
 }
 
 impl<D: DispatcherDeps> Dispatcher<D> {
@@ -90,7 +90,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     /// [Message] for more information.
     pub fn receive_message(&mut self, msg: Message) {
         match msg {
-            Message::FromBroker(BrokerToWorker::EnqueueExecution(id, details)) => {
+            Message::Broker(BrokerToWorker::EnqueueExecution(id, details)) => {
                 if details.layers.is_empty() {
                     self.queued.push_back((id, details, vec![]));
                     self.possibly_start_execution();
@@ -104,7 +104,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                         .is_none());
                 }
             }
-            Message::FromBroker(BrokerToWorker::CancelExecution(id)) => {
+            Message::Broker(BrokerToWorker::CancelExecution(id)) => {
                 let mut layers = vec![];
                 if let Some(entry) = self.awaiting_layers.remove(&id) {
                     // We may have already gotten some layers. Make sure we release those.
@@ -131,7 +131,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                     self.deps.send_decrement_refcount_to_cache(digest);
                 }
             }
-            Message::FromExecutor(id, result) => {
+            Message::Executor(id, result) => {
                 // If there is no entry in the executing map, then the execution has been canceled
                 // and we don't need to send any message to the broker.
                 if let Some((details, _)) = self.executing.remove(&id) {
@@ -143,7 +143,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                 }
                 self.possibly_start_execution();
             }
-            Message::FromCache(id, digest, path) => {
+            Message::Cache(id, digest, path) => {
                 match path {
                     None => {
                         // There was an error getting the layer.
@@ -377,36 +377,36 @@ mod tests {
     script_test! {
         enqueue_1,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
     }
 
     script_test! {
         enqueue_2,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
     }
 
     script_test! {
         enqueue_3_with_2_slots,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => {};
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => {};
     }
 
     script_test! {
         enqueue_1_with_layers,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
+        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
             SendGetRequestToCache(eid![1], digest!(41)),
             SendGetRequestToCache(eid![1], digest!(42)),
             SendGetRequestToCache(eid![1], digest!(43)),
         };
 
-        FromCache(eid![1], digest!(43), Some(path_buf!("/c"))) => {};
-        FromCache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
-        FromCache(eid![1], digest!(42), Some(path_buf!("/b"))) => {
+        Cache(eid![1], digest!(43), Some(path_buf!("/c"))) => {};
+        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
+        Cache(eid![1], digest!(42), Some(path_buf!("/b"))) => {
             StartExecution(eid![1], details![1, [41, 42, 43]], path_buf_vec!["/a", "/b", "/c"])
         };
     }
@@ -414,15 +414,15 @@ mod tests {
     script_test! {
         enqueue_1_with_layers_with_layer_failure,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
+        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
             SendGetRequestToCache(eid![1], digest!(41)),
             SendGetRequestToCache(eid![1], digest!(42)),
             SendGetRequestToCache(eid![1], digest!(43)),
         };
 
-        FromCache(eid![1], digest!(43), Some(path_buf!("/c"))) => {};
-        FromCache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
-        FromCache(eid![1], digest!(42), None) => {
+        Cache(eid![1], digest!(43), Some(path_buf!("/c"))) => {};
+        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
+        Cache(eid![1], digest!(42), None) => {
             SendResponseToBroker(WorkerToBroker(eid![1], ExecutionResult::Error(
                 "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
             SendDecrementRefcountToCache(digest!(41)),
@@ -433,8 +433,8 @@ mod tests {
     script_test! {
         complete_1,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromExecutor(eid![1], result![1]) => {
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
         };
@@ -443,10 +443,10 @@ mod tests {
     script_test! {
         complete_1_while_blocked,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => {};
-        FromExecutor(eid![1], result![1]) => {
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => {};
+        Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
             StartExecution(eid![3], details![3], path_buf_vec![]),
@@ -456,24 +456,24 @@ mod tests {
     script_test! {
         enqueue_2_complete_1_enqueue_1,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromExecutor(eid![1], result![1]) => {
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1]))
         };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
     }
 
     script_test! {
         cancel_queued,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => {};
-        FromBroker(EnqueueExecution(eid![4], details![4])) => {};
-        FromBroker(CancelExecution(eid![3])) => {};
-        FromExecutor(eid![1], result![1]) => {
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => {};
+        Broker(EnqueueExecution(eid![4], details![4])) => {};
+        Broker(CancelExecution(eid![3])) => {};
+        Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
             StartExecution(eid![4], details![4], path_buf_vec![]),
@@ -483,31 +483,31 @@ mod tests {
     script_test! {
         cancel_executing,
         2,
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => {};
-        FromBroker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
-        FromExecutor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => {};
+        Broker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
+        Executor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
     }
 
     script_test! {
         cancels_idempotent,
         2,
-        FromBroker(CancelExecution(eid![2])) => {};
-        FromBroker(CancelExecution(eid![2])) => {};
-        FromBroker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        FromBroker(EnqueueExecution(eid![3], details![3])) => {};
-        FromBroker(EnqueueExecution(eid![4], details![4])) => {};
-        FromBroker(CancelExecution(eid![4])) => {};
-        FromBroker(CancelExecution(eid![4])) => {};
-        FromBroker(CancelExecution(eid![4])) => {};
-        FromBroker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
-        FromBroker(CancelExecution(eid![2])) => {};
-        FromBroker(CancelExecution(eid![2])) => {};
-        FromExecutor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
-        FromBroker(CancelExecution(eid![2])) => {};
-        FromBroker(CancelExecution(eid![2])) => {};
+        Broker(CancelExecution(eid![2])) => {};
+        Broker(CancelExecution(eid![2])) => {};
+        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![3], details![3])) => {};
+        Broker(EnqueueExecution(eid![4], details![4])) => {};
+        Broker(CancelExecution(eid![4])) => {};
+        Broker(CancelExecution(eid![4])) => {};
+        Broker(CancelExecution(eid![4])) => {};
+        Broker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
+        Broker(CancelExecution(eid![2])) => {};
+        Broker(CancelExecution(eid![2])) => {};
+        Executor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
+        Broker(CancelExecution(eid![2])) => {};
+        Broker(CancelExecution(eid![2])) => {};
     }
 
     #[test]
@@ -522,9 +522,9 @@ mod tests {
         let mut fixture = Fixture::new(2);
         fixture
             .dispatcher
-            .receive_message(FromBroker(EnqueueExecution(eid![1], details![1])));
+            .receive_message(Broker(EnqueueExecution(eid![1], details![1])));
         fixture
             .dispatcher
-            .receive_message(FromBroker(EnqueueExecution(eid![1], details![2])));
+            .receive_message(Broker(EnqueueExecution(eid![1], details![2])));
     }
 }

@@ -27,9 +27,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
     ) -> Self::ExecutionHandle {
         let sender = self.dispatcher_sender.clone();
         executor::start(details, move |result| {
-            sender
-                .send(dispatcher::Message::FromExecutor(id, result))
-                .ok();
+            sender.send(dispatcher::Message::Executor(id, result)).ok();
         })
     }
 
@@ -90,7 +88,7 @@ pub async fn main(_name: String, slots: usize, broker_addr: std::net::SocketAddr
     join_set.spawn(proto::socket_reader(
         read_stream,
         dispatcher_sender_clone,
-        dispatcher::Message::FromBroker,
+        dispatcher::Message::Broker,
     ));
     join_set.spawn(proto::socket_writer(broker_socket_receiver, write_stream));
     join_set.spawn(async move {
