@@ -1,5 +1,5 @@
 use clap::{builder::NonEmptyStringValueParser, value_parser, Parser};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
     use std::net::ToSocketAddrs as _;
@@ -35,13 +35,22 @@ struct Cli {
         value_parser = value_parser!(u32).range(1..1000)
     )]
     slots: u32,
+
+    /// The directory to use for the cache.
+    #[arg(short = 'd', long, default_value = "./worker")]
+    cache_directory: PathBuf,
+
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative.
+    #[arg(short = 'c', long, default_value_t = 100000000)]
+    cache_bytes_used_target: u64,
 }
 
 fn main() -> meticulous::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        meticulous::worker::main(cli.name, cli.slots as usize, cli.broker).await
+    runtime.block_on(async move {
+        meticulous::worker::main(cli.name, cli.slots as usize, cli.cache_directory, cli.cache_bytes_used_target, cli.broker).await
     })?;
     Ok(())
 }

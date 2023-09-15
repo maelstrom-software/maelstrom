@@ -68,7 +68,6 @@ pub trait DispatcherDeps {
 pub enum Message {
     Broker(BrokerToWorker),
     Executor(ExecutionId, ExecutionResult),
-    #[allow(dead_code)]
     Cache(ExecutionId, Sha256Digest, Option<PathBuf>),
 }
 

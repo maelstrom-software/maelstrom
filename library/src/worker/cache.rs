@@ -117,10 +117,12 @@ pub enum Message<RequestIdT> {
     GetRequest(RequestIdT, Sha256Digest),
 
     /// Tell the [Cache] that a [CacheDeps::download_and_extract] has completed.
+    #[allow(dead_code)]
     DownloadAndExtractCompleted(Sha256Digest, Result<u64>),
 
     /// Tell the [Cache] to decrement the refcount on a digest and path. Once the refcount reaches
     /// zero, the cache is free to delete the underlying directory.
+    #[allow(dead_code)]
     DecrementRefcount(Sha256Digest),
 }
 
