@@ -91,112 +91,13 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     pub fn receive_message(&mut self, msg: Message) {
         match msg {
             Message::Broker(BrokerToWorker::EnqueueExecution(id, details)) => {
-                if details.layers.is_empty() {
-                    self.queued.push_back((id, details, vec![]));
-                    self.possibly_start_execution();
-                } else {
-                    for digest in &details.layers {
-                        self.deps.send_get_request_to_cache(id, digest.clone());
-                    }
-                    assert!(self
-                        .awaiting_layers
-                        .insert(id, AwaitingLayersEntry::new(details))
-                        .is_none());
-                }
+                self.receive_enqueue_execution(id, details)
             }
             Message::Broker(BrokerToWorker::CancelExecution(id)) => {
-                let mut layers = vec![];
-                if let Some(entry) = self.awaiting_layers.remove(&id) {
-                    // We may have already gotten some layers. Make sure we release those.
-                    layers = entry.layers.into_keys().collect();
-                } else if let Some((details, handle)) = self.executing.remove(&id) {
-                    // If it was executing, we just need to drop the execution handle, which will
-                    // tell the executor to kill the process.
-                    layers = details.layers;
-                    drop(handle);
-                } else {
-                    // It may be the queue.
-                    // If it's not in the executing map, then it may be in the queue.
-                    self.queued.retain_mut(|x| {
-                        if x.0 != id {
-                            true
-                        } else {
-                            assert!(layers.is_empty());
-                            mem::swap(&mut x.1.layers, &mut layers);
-                            false
-                        }
-                    });
-                }
-                for digest in layers {
-                    self.deps.send_decrement_refcount_to_cache(digest);
-                }
+                self.receive_cancel_execution(id)
             }
-            Message::Executor(id, result) => {
-                // If there is no entry in the executing map, then the execution has been canceled
-                // and we don't need to send any message to the broker.
-                if let Some((details, _)) = self.executing.remove(&id) {
-                    self.deps
-                        .send_response_to_broker(WorkerToBroker(id, result));
-                    for digest in details.layers {
-                        self.deps.send_decrement_refcount_to_cache(digest);
-                    }
-                }
-                self.possibly_start_execution();
-            }
-            Message::Cache(id, digest, path) => {
-                match path {
-                    None => {
-                        // There was an error getting the layer.
-                        //
-                        // If this was the first layer error for this request, then we'll find
-                        // something in the hash table, and we'll need to clean up.
-                        //
-                        // Otherwise, it means that there were previous errors for this entry, and
-                        // there's nothing to do here.
-                        if let Some(entry) = self.awaiting_layers.remove(&id) {
-                            self.deps.send_response_to_broker(WorkerToBroker(
-                                id,
-                                ExecutionResult::Error(format!(
-                                    "Failed to download and extract layer artifact {}",
-                                    digest
-                                )),
-                            ));
-                            for digest in entry.layers.into_keys() {
-                                self.deps.send_decrement_refcount_to_cache(digest);
-                            }
-                        }
-                    }
-                    Some(path) => {
-                        // We got one of the layers back successfully.
-                        //
-                        // If there were previous errors for this execution, then we'll find
-                        // nothing in the hash table, and we'll need to release this layer.
-                        //
-                        // Otherwise, it means that so far all is good. We then need to check if
-                        // we've gotten all layers. If we have, then we can go ahead and schedule
-                        // the execution.
-                        match self.awaiting_layers.entry(id) {
-                            hash_map::Entry::Vacant(_) => {
-                                self.deps.send_decrement_refcount_to_cache(digest);
-                            }
-                            hash_map::Entry::Occupied(mut oe) => {
-                                assert!(oe.get_mut().layers.insert(digest, path).is_none());
-                                if oe.get().has_all_layers() {
-                                    let mut entry = oe.remove();
-                                    let layers = entry
-                                        .details
-                                        .layers
-                                        .iter()
-                                        .map(|digest| entry.layers.remove(digest).unwrap())
-                                        .collect();
-                                    self.queued.push_back((id, entry.details, layers));
-                                    self.possibly_start_execution();
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Message::Executor(id, result) => self.receive_execution_result(id, result),
+            Message::Cache(id, digest, path) => self.receive_cache_response(id, digest, path),
         }
     }
 }
@@ -216,6 +117,120 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             if let Some((id, details, layer_paths)) = self.queued.pop_front() {
                 let handle = self.deps.start_execution(id, &details, layer_paths);
                 assert!(self.executing.insert(id, (details, handle)).is_none());
+            }
+        }
+    }
+
+    fn receive_enqueue_execution(&mut self, id: ExecutionId, details: ExecutionDetails) {
+        if details.layers.is_empty() {
+            self.queued.push_back((id, details, vec![]));
+            self.possibly_start_execution();
+        } else {
+            for digest in &details.layers {
+                self.deps.send_get_request_to_cache(id, digest.clone());
+            }
+            assert!(self
+                .awaiting_layers
+                .insert(id, AwaitingLayersEntry::new(details))
+                .is_none());
+        }
+    }
+
+    fn receive_cancel_execution(&mut self, id: ExecutionId) {
+        let mut layers = vec![];
+        if let Some(entry) = self.awaiting_layers.remove(&id) {
+            // We may have already gotten some layers. Make sure we release those.
+            layers = entry.layers.into_keys().collect();
+        } else if let Some((details, _)) = self.executing.remove(&id) {
+            // If it was executing, we need to drop the execution handle, which will
+            // tell the executor to kill the process. We also need to clean up all of our layers.
+            layers = details.layers;
+        } else {
+            // It may be the queue.
+            self.queued.retain_mut(|x| {
+                if x.0 != id {
+                    true
+                } else {
+                    assert!(layers.is_empty());
+                    mem::swap(&mut x.1.layers, &mut layers);
+                    false
+                }
+            });
+        }
+        for digest in layers {
+            self.deps.send_decrement_refcount_to_cache(digest);
+        }
+    }
+
+    fn receive_execution_result(&mut self, id: ExecutionId, result: ExecutionResult) {
+        // If there is no entry in the executing map, then the execution has been canceled
+        // and we don't need to send any message to the broker.
+        if let Some((details, _)) = self.executing.remove(&id) {
+            self.deps
+                .send_response_to_broker(WorkerToBroker(id, result));
+            for digest in details.layers {
+                self.deps.send_decrement_refcount_to_cache(digest);
+            }
+        }
+        self.possibly_start_execution();
+    }
+
+    fn receive_cache_response(
+        &mut self,
+        id: ExecutionId,
+        digest: Sha256Digest,
+        path: Option<PathBuf>,
+    ) {
+        match path {
+            None => {
+                // There was an error getting the layer.
+                //
+                // If this was the first layer error for this request, then we'll find
+                // something in the hash table, and we'll need to clean up.
+                //
+                // Otherwise, it means that there were previous errors for this entry, and
+                // there's nothing to do here.
+                if let Some(entry) = self.awaiting_layers.remove(&id) {
+                    self.deps.send_response_to_broker(WorkerToBroker(
+                        id,
+                        ExecutionResult::Error(format!(
+                            "Failed to download and extract layer artifact {}",
+                            digest
+                        )),
+                    ));
+                    for digest in entry.layers.into_keys() {
+                        self.deps.send_decrement_refcount_to_cache(digest);
+                    }
+                }
+            }
+            Some(path) => {
+                // We got one of the layers back successfully.
+                //
+                // If there were previous errors for this execution, then we'll find
+                // nothing in the hash table, and we'll need to release this layer.
+                //
+                // Otherwise, it means that so far all is good. We then need to check if
+                // we've gotten all layers. If we have, then we can go ahead and schedule
+                // the execution.
+                match self.awaiting_layers.entry(id) {
+                    hash_map::Entry::Vacant(_) => {
+                        self.deps.send_decrement_refcount_to_cache(digest);
+                    }
+                    hash_map::Entry::Occupied(mut oe) => {
+                        assert!(oe.get_mut().layers.insert(digest, path).is_none());
+                        if oe.get().has_all_layers() {
+                            let mut entry = oe.remove();
+                            let layers = entry
+                                .details
+                                .layers
+                                .iter()
+                                .map(|digest| entry.layers.remove(digest).unwrap())
+                                .collect();
+                            self.queued.push_back((id, entry.details, layers));
+                            self.possibly_start_execution();
+                        }
+                    }
+                }
             }
         }
     }
