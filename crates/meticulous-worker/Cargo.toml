@@ -7,7 +7,7 @@ edition = "2021"
 anyhow = "1.0.71"
 clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 gethostname = "0.4.2"
-meticulous = { path = "../../library", version = "^0.1" }
+meticulous = { path = "../meticulous-base", version = "^0.1" }
 nix = { version = "0.26.2", features = ["signal"] }
 num_cpus = "1.15.0"
 rand = "0.8.5"
