@@ -1653,7 +1653,6 @@ dependencies = [
  "anyhow",
  "bincode",
  "meticulous-ui",
- "rand",
  "serde",
  "tokio",
 ]
@@ -1717,11 +1716,7 @@ dependencies = [
 name = "meticulous-util"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "bincode",
- "meticulous-ui",
  "rand",
- "serde",
  "tokio",
 ]
 
