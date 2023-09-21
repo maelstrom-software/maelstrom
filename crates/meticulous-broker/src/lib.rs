@@ -5,7 +5,7 @@ pub mod http;
 mod scheduler;
 
 use meticulous_base::{proto, ClientId, Error, Result, WorkerId};
-use meticulous_util::channel_reader;
+use meticulous_util::net;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 struct PassThroughDeps;
@@ -51,7 +51,7 @@ type SchedulerMessage = scheduler::Message<PassThroughDeps>;
 /// this reason.
 async fn scheduler_main(receiver: UnboundedReceiver<SchedulerMessage>) {
     let mut scheduler = scheduler::Scheduler::default();
-    channel_reader::run(receiver, |msg| {
+    net::channel_reader(receiver, |msg| {
         scheduler.receive_message(&mut PassThroughDeps, msg)
     })
     .await;

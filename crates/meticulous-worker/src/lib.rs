@@ -5,7 +5,7 @@ mod dispatcher;
 mod executor;
 
 use meticulous_base::{proto, Error, ExecutionDetails, ExecutionId, Result, Sha256Digest};
-use meticulous_util::channel_reader;
+use meticulous_util::net;
 use std::path::PathBuf;
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
@@ -115,7 +115,7 @@ async fn dispatcher_main(
         &mut cache_adapter,
     );
     let mut dispatcher = dispatcher::Dispatcher::new(adapter, slots);
-    channel_reader::run(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await;
+    net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await;
 }
 
 async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {

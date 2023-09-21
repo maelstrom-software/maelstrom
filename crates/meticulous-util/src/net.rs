@@ -1,8 +1,8 @@
-//! Read messages from a channel.
+//! Functions that are useful for reading and writing messages, to and from sockets and channels.
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are
 /// no more channel senders.
-pub async fn run<MessageT>(
+pub async fn channel_reader<MessageT>(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<MessageT>,
     mut processor: impl FnMut(MessageT),
 ) {
@@ -19,7 +19,7 @@ mod tests {
     async fn no_messages() {
         let (_, rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
         let mut vec = vec![];
-        run(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await;
         assert_eq!(vec, vec![]);
     }
 
@@ -28,7 +28,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         tokio::task::spawn(async move { tx.send(1).unwrap() });
         let mut vec = vec![];
-        run(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await;
 
         assert_eq!(vec, vec![1]);
     }
@@ -42,7 +42,7 @@ mod tests {
             tx.send(3).unwrap();
         });
         let mut vec = vec![];
-        run(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await;
 
         assert_eq!(vec, vec![1, 2, 3]);
     }
