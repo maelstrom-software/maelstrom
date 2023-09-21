@@ -266,7 +266,7 @@ impl AwaitingLayersEntry {
 mod tests {
     use super::Message::*;
     use super::*;
-    use meticulous_base::*;
+    use meticulous_test::*;
     use itertools::Itertools;
     use std::cell::RefCell;
     use std::rc::Rc;

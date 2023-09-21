@@ -320,7 +320,7 @@ impl HeapDeps for CacheMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use meticulous_base::*;
+    use meticulous_test::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 

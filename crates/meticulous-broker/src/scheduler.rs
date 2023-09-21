@@ -290,8 +290,8 @@ mod tests {
     use super::{Message::*, *};
     use meticulous_base::{
         proto::BrokerToWorker::{self, *},
-        *
     };
+    use meticulous_test::*;
     use itertools::Itertools;
 
     #[derive(Clone, Debug, PartialEq)]

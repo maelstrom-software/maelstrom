@@ -18,3 +18,4 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 itertools = { workspace = true }
+meticulous-test = { workspace = true }

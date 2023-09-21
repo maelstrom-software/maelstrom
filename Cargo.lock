@@ -1669,6 +1669,7 @@ dependencies = [
  "hyper-tungstenite",
  "itertools",
  "meticulous-base",
+ "meticulous-test",
  "meticulous-ui",
  "meticulous-util",
  "serde",
@@ -1697,6 +1698,10 @@ dependencies = [
  "sha2",
  "tar",
 ]
+
+[[package]]
+name = "meticulous-test"
+version = "0.1.0"
 
 [[package]]
 name = "meticulous-ui"
@@ -1747,6 +1752,7 @@ dependencies = [
  "gethostname 0.4.2",
  "itertools",
  "meticulous-base",
+ "meticulous-test",
  "meticulous-util",
  "nix 0.26.2",
  "num_cpus",

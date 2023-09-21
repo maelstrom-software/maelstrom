@@ -16,4 +16,5 @@ tokio = { workspace = true }
 [dev-dependencies]
 anyhow = { workspace = true }
 itertools = { workspace = true }
+meticulous-test = { workspace = true }
 tempfile = { workspace = true }

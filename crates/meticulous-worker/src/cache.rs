@@ -427,7 +427,7 @@ impl<CacheDepsT: CacheDeps> HeapDeps for CacheMap<CacheDepsT> {
 mod tests {
     use super::Message::*;
     use super::*;
-    use meticulous_base::*;
+    use meticulous_test::*;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::collections::HashSet;
