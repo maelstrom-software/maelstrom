@@ -1,6 +1,7 @@
 //! Code for the client binary.
 
-use meticulous_base::{proto, ClientExecutionId, ExecutionDetails, Result};
+use anyhow::Result;
+use meticulous_base::{proto, ClientExecutionId, ExecutionDetails};
 use meticulous_util::net;
 use std::collections::HashMap;
 

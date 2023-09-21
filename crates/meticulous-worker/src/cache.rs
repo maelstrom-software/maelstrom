@@ -1,7 +1,10 @@
 //! Manage downloading, extracting, and storing of image files specified by executions.
 
-use meticulous_base::{Result, Sha256Digest};
-use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use meticulous_base::Sha256Digest;
+use meticulous_util::{
+    error::Result,
+    heap::{Heap, HeapDeps, HeapIndex},
+};
 use std::{
     collections::{hash_map, HashMap},
     num::NonZeroU32,

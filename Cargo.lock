@@ -1650,7 +1650,6 @@ dependencies = [
 name = "meticulous-base"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "meticulous-ui",
  "serde",
 ]
@@ -1659,6 +1658,7 @@ dependencies = [
 name = "meticulous-broker"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bincode",
  "clap",
  "futures",
@@ -1678,6 +1678,7 @@ dependencies = [
 name = "meticulous-client"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "gethostname 0.4.2",
  "meticulous-base",
@@ -1690,6 +1691,7 @@ dependencies = [
 name = "meticulous-prototypes"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "clap",
  "flate2",
  "meticulous-base",
@@ -1715,6 +1717,7 @@ dependencies = [
 name = "meticulous-util"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bincode",
  "meticulous-base",
  "rand",

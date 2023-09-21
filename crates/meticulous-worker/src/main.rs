@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{builder::NonEmptyStringValueParser, value_parser, Parser};
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -46,7 +47,7 @@ struct Cli {
     cache_bytes_used_target: u64,
 }
 
-fn main() -> meticulous_base::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {

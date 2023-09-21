@@ -1,6 +1,6 @@
 //! Functions that are useful for reading and writing messages, to and from sockets and channels.
 
-use meticulous_base::Result;
+use crate::error::Result;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are

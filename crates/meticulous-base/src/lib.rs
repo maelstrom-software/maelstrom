@@ -4,9 +4,6 @@ use std::hash::Hash;
 
 pub mod proto;
 
-pub type Error = anyhow::Error;
-pub type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientId(pub u32);
 

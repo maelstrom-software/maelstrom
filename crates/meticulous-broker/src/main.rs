@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{value_parser, Parser};
 use std::net::SocketAddrV6;
 
@@ -20,7 +21,7 @@ struct Cli {
     http_port: Option<u16>,
 }
 
-fn main() -> meticulous_base::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {

@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::{builder::NonEmptyStringValueParser, Parser};
 use std::net::SocketAddr;
 
@@ -27,7 +28,7 @@ struct Cli {
     name: String,
 }
 
-fn main() -> meticulous_base::Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async { meticulous_client::main(cli.name, cli.broker).await })?;

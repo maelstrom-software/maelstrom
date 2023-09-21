@@ -4,8 +4,11 @@ pub mod cache;
 pub mod http;
 mod scheduler;
 
-use meticulous_base::{proto, ClientId, Error, Result, WorkerId};
-use meticulous_util::net;
+use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_util::{
+    error::{Error, Result},
+    net,
+};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 struct PassThroughDeps;
