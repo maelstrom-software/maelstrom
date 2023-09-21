@@ -1,11 +1,11 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
+use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::collections::{HashMap, VecDeque};
 
 /*              _     _ _
@@ -288,11 +288,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use meticulous_base::{
-        proto::BrokerToWorker::{self, *},
-    };
-    use meticulous_test::*;
     use itertools::Itertools;
+    use meticulous_base::proto::BrokerToWorker::{self, *};
+    use meticulous_test::*;
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {

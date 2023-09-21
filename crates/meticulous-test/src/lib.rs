@@ -130,4 +130,3 @@ macro_rules! short_path {
         format!("{}/{:0>16x}.{}", $prefix, $n, $s).into()
     };
 }
-

@@ -50,7 +50,14 @@ fn main() -> meticulous_base::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {
-        meticulous_worker::main(cli.name, cli.slots as usize, cli.cache_directory, cli.cache_bytes_used_target, cli.broker).await
+        meticulous_worker::main(
+            cli.name,
+            cli.slots as usize,
+            cli.cache_directory,
+            cli.cache_bytes_used_target,
+            cli.broker,
+        )
+        .await
     })?;
     Ok(())
 }

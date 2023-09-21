@@ -1,5 +1,5 @@
+use meticulous_base::{ClientId, ExecutionId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use meticulous_base::{ClientId, ExecutionId, Sha256Digest };
 use std::{
     collections::{hash_map, HashMap, HashSet},
     num::NonZeroU32,
