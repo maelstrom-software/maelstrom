@@ -1,7 +1,5 @@
-use meticulous::{
-    heap::{Heap, HeapDeps, HeapIndex},
-    ClientId, ExecutionId, Sha256Digest,
-};
+use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use meticulous::{ClientId, ExecutionId, Sha256Digest };
 use std::{
     collections::{hash_map, HashMap, HashSet},
     num::NonZeroU32,

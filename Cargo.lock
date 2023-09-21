@@ -1670,6 +1670,7 @@ dependencies = [
  "itertools",
  "meticulous",
  "meticulous-ui",
+ "meticulous-util",
  "serde",
  "tar",
  "tokio",
@@ -1708,6 +1709,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "meticulous-util"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "meticulous-ui",
+ "rand",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "meticulous-web"
 version = "0.1.0"
 dependencies = [
@@ -1734,6 +1747,7 @@ dependencies = [
  "gethostname 0.4.2",
  "itertools",
  "meticulous",
+ "meticulous-util",
  "nix 0.26.2",
  "num_cpus",
  "rand",

@@ -1,8 +1,8 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
+use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use meticulous::{
-    heap::{Heap, HeapDeps, HeapIndex},
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };

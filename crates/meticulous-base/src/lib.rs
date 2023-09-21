@@ -2,8 +2,6 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Debug};
 use std::hash::Hash;
 
-pub mod channel_reader;
-pub mod heap;
 pub mod proto;
 
 pub type Error = anyhow::Error;
