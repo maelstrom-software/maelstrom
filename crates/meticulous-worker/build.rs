@@ -12,6 +12,7 @@ fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
 }
 
 fn main() {
+    println!("cargo:rerun-if-changed=../meticulous-web/Cargo.toml");
     println!("cargo:rerun-if-changed=../meticulous-web/src/");
     println!("cargo:rerun-if-changed=../meticulous-web/www/");
 
