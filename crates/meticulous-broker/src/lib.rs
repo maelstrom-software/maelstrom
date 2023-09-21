@@ -175,10 +175,14 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 /// The main function for the broker. This should be called on a task of its own. It will return
 /// if there is an error establishing the listener socket, when a signal is received, or when the
 /// listener socket returns an error at accept time.
-pub async fn main(listener: tokio::net::TcpListener) -> Result<()> {
+pub async fn main(
+    listener: tokio::net::TcpListener,
+    http_listener: tokio::net::TcpListener,
+) -> Result<()> {
     let (scheduler_sender, scheduler_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
+    join_set.spawn(http::main(listener.local_addr()?, http_listener));
     join_set.spawn(listener_main(listener, scheduler_sender));
     join_set.spawn(async move {
         scheduler_main(scheduler_receiver).await;
@@ -192,7 +196,7 @@ pub async fn main(listener: tokio::net::TcpListener) -> Result<()> {
         join_set
             .join_next()
             .await
-            .expect("at least one task should return an error")
+            .expect("join_set should not be empty")
             .expect("no task should panic or be canceled")?;
     }
 }

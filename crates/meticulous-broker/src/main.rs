@@ -32,8 +32,7 @@ fn main() -> Result<()> {
             0,
         );
         let broker_listener = tokio::net::TcpListener::bind(sockaddr).await?;
-        let broker_addr = broker_listener.local_addr()?;
-        println!("broker listening on: {broker_addr}");
+        println!("broker listening on: {:?}", broker_listener.local_addr()?);
 
         let sock_addr = SocketAddrV6::new(
             std::net::Ipv6Addr::UNSPECIFIED,
@@ -44,10 +43,7 @@ fn main() -> Result<()> {
         let http_listener = tokio::net::TcpListener::bind(&sock_addr).await?;
         println!("web UI listing on {:?}", http_listener.local_addr()?);
 
-        tokio::spawn(
-            async move { meticulous_broker::http::main(broker_addr, http_listener).await },
-        );
-        meticulous_broker::main(broker_listener).await
+        meticulous_broker::main(broker_listener, http_listener).await
     })?;
     Ok(())
 }
