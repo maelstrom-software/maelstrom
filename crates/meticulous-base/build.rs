@@ -12,8 +12,8 @@ fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=../../web/src/");
-    println!("cargo:rerun-if-changed=../../web/www/");
+    println!("cargo:rerun-if-changed=../meticulous-web/src/");
+    println!("cargo:rerun-if-changed=../meticulous-web/www/");
 
-    sh(["web/build.sh"], "../..");
+    sh(["crates/meticulous-web/build.sh"], "../..");
 }

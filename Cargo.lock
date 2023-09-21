@@ -1705,6 +1705,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "meticulous-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "console_error_panic_hook",
+ "eframe",
+ "egui",
+ "futures",
+ "gloo-net",
+ "gloo-utils",
+ "meticulous-ui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-logger",
+ "web-sys",
+]
+
+[[package]]
 name = "meticulous-worker"
 version = "0.1.0"
 dependencies = [
@@ -1732,25 +1751,6 @@ dependencies = [
  "sha2",
  "tar",
  "tokio",
-]
-
-[[package]]
-name = "meticulous_web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bincode",
- "console_error_panic_hook",
- "eframe",
- "egui",
- "futures",
- "gloo-net",
- "gloo-utils",
- "meticulous-ui",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-logger",
- "web-sys",
 ]
 
 [[package]]
