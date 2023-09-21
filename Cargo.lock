@@ -1656,7 +1656,7 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "itertools",
- "meticulous_ui",
+ "meticulous-ui",
  "nix 0.26.2",
  "rand",
  "regex",
@@ -1677,7 +1677,7 @@ dependencies = [
  "hyper-tungstenite",
  "itertools",
  "meticulous",
- "meticulous_ui",
+ "meticulous-ui",
  "serde",
  "tar",
  "tokio",
@@ -1692,6 +1692,16 @@ dependencies = [
  "meticulous",
  "regex",
  "tokio",
+]
+
+[[package]]
+name = "meticulous-ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "eframe",
+ "egui",
+ "serde",
 ]
 
 [[package]]
@@ -1725,16 +1735,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meticulous_ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eframe",
- "egui",
- "serde",
-]
-
-[[package]]
 name = "meticulous_web"
 version = "0.1.0"
 dependencies = [
@@ -1746,7 +1746,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "gloo-utils",
- "meticulous_ui",
+ "meticulous-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",
