@@ -1652,17 +1652,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bincode",
- "futures",
- "hyper",
- "hyper-tungstenite",
- "itertools",
  "meticulous-ui",
- "nix 0.26.2",
  "rand",
- "regex",
  "serde",
- "tar",
- "tempfile",
  "tokio",
 ]
 
@@ -1700,12 +1692,9 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "flate2",
- "gethostname 0.4.2",
  "meticulous",
- "num_cpus",
  "sha2",
  "tar",
- "tokio",
 ]
 
 [[package]]
@@ -1726,7 +1715,6 @@ dependencies = [
  "bincode",
  "console_error_panic_hook",
  "eframe",
- "egui",
  "futures",
  "gloo-net",
  "gloo-utils",
@@ -2325,9 +2313,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.105"
+version = "1.0.107"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "693151e1ac27563d6dbcec9dee9fbd5da8539b20fa14ad3752b2e6d363ace360"
+checksum = "6b420ce6e3d8bd882e9b243c6eed35dbc9a6110c9769e74b584e0d68d1f20c65"
 dependencies = [
  "itoa",
  "ryu",

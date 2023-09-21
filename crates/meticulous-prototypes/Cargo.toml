@@ -4,11 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
-flate2 = "1.0.26"
-gethostname = "0.4.2"
-meticulous = { path = "../meticulous-base", version = "^0.1" }
-num_cpus = "1.15.0"
-sha2 = "0.10.6"
-tar = "0.4.38"
-tokio = { version = "1.28", features = ["full"] }
+clap = { workspace = true }
+flate2 = { workspace = true }
+meticulous = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
