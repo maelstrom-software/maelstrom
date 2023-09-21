@@ -11,11 +11,11 @@ anyhow = { workspace = true }
 bincode = { workspace = true }
 console_error_panic_hook = { workspace = true }
 eframe = { workspace = true }
+egui = { workspace = true }
 futures = { workspace = true }
 gloo-net = { workspace = true }
 gloo-utils = { workspace = true }
 meticulous-base = { workspace = true }
-meticulous-ui = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-logger = { workspace = true }

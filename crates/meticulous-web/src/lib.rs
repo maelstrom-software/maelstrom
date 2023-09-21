@@ -3,13 +3,52 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
+    use anyhow::Result;
     use futures::{SinkExt as _, StreamExt as _};
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
-    use meticulous_base::proto;
-    use meticulous_ui::UiHandler;
-    use std::cell::RefCell;
+    use meticulous_base::proto::{BrokerStatistics, UiRequest, UiResponse};
+    use std::{cell::RefCell, time::Duration};
     use wasm_bindgen_futures::spawn_local;
+
+    pub trait ClientRpcConnection {
+        fn send(&self, message: UiRequest) -> Result<()>;
+        fn try_recv(&self) -> Result<Option<UiResponse>>;
+    }
+
+    pub struct UiHandler<RpcConnectionT> {
+        rpc: RpcConnectionT,
+        stats: Option<BrokerStatistics>,
+    }
+
+    impl<RpcConnectionT> UiHandler<RpcConnectionT> {
+        pub fn new(rpc: RpcConnectionT, _cc: &eframe::CreationContext<'_>) -> Self {
+            Self { rpc, stats: None }
+        }
+    }
+
+    impl<RpcConnectionT: ClientRpcConnection> eframe::App for UiHandler<RpcConnectionT> {
+        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.heading("Meticulous UI");
+                if let Some(stats) = &self.stats {
+                    ui.label(&format!("number of clients: {}", stats.num_clients));
+                    ui.label(&format!("number of workers: {}", stats.num_workers));
+                    ui.label(&format!("number of requests: {}", stats.num_requests));
+                } else {
+                    ui.label("loading..");
+                }
+
+                self.rpc.send(UiRequest::GetStatistics).unwrap();
+
+                if let Some(UiResponse::GetStatistics(stats)) = self.rpc.try_recv().unwrap() {
+                    self.stats = Some(stats);
+                }
+
+                ctx.request_repaint_after(Duration::from_millis(500));
+            });
+        }
+    }
 
     fn window() -> web_sys::Window {
         web_sys::window().expect("no global `window` exists")
@@ -55,15 +94,15 @@ mod wasm {
         }
     }
 
-    impl meticulous_ui::ClientRpcConnection for RpcConnection {
-        fn send(&self, message: proto::UiRequest) -> meticulous_ui::Result<()> {
+    impl ClientRpcConnection for RpcConnection {
+        fn send(&self, message: UiRequest) -> anyhow::Result<()> {
             self.send
                 .borrow_mut()
                 .try_send(Message::Bytes(bincode::serialize(&message).unwrap()))?;
             Ok(())
         }
 
-        fn try_recv(&self) -> meticulous_ui::Result<Option<proto::UiResponse>> {
+        fn try_recv(&self) -> anyhow::Result<Option<UiResponse>> {
             match self.recv.borrow_mut().try_next() {
                 Ok(Some(Message::Bytes(b))) => Ok(Some(bincode::deserialize(&b)?)),
                 Ok(Some(Message::Text(_))) => Err(anyhow::Error::msg("Unexpected Message::Text")),

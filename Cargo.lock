@@ -1702,16 +1702,6 @@ name = "meticulous-test"
 version = "0.1.0"
 
 [[package]]
-name = "meticulous-ui"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "eframe",
- "egui",
- "meticulous-base",
-]
-
-[[package]]
 name = "meticulous-util"
 version = "0.1.0"
 dependencies = [
@@ -1731,11 +1721,11 @@ dependencies = [
  "bincode",
  "console_error_panic_hook",
  "eframe",
+ "egui",
  "futures",
  "gloo-net",
  "gloo-utils",
  "meticulous-base",
- "meticulous-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",

@@ -19,7 +19,6 @@ hyper-tungstenite = "0.11"
 itertools = "0.10.5"
 meticulous-base = { path = "crates/meticulous-base" }
 meticulous-test = { path = "crates/meticulous-test" }
-meticulous-ui = { path = "crates/meticulous-ui" }
 meticulous-util = { path = "crates/meticulous-util" }
 nix = { version = "0.26.2", features = ["signal"] }
 num_cpus = "1.15.0"
