@@ -1695,6 +1695,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "meticulous-prototypes"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "flate2",
+ "gethostname 0.4.2",
+ "meticulous",
+ "num_cpus",
+ "sha2",
+ "tar",
+ "tokio",
+]
+
+[[package]]
 name = "meticulous-ui"
 version = "0.1.0"
 dependencies = [
@@ -1736,20 +1750,6 @@ dependencies = [
  "num_cpus",
  "rand",
  "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "meticulous_bin"
-version = "0.1.0"
-dependencies = [
- "clap",
- "flate2",
- "gethostname 0.4.2",
- "meticulous",
- "num_cpus",
- "sha2",
- "tar",
  "tokio",
 ]
 

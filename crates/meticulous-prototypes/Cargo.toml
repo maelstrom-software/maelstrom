@@ -1,5 +1,5 @@
 [package]
-name = "meticulous_bin"
+name = "meticulous-prototypes"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,7 @@ edition = "2021"
 clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 flate2 = "1.0.26"
 gethostname = "0.4.2"
-meticulous = { path = "../crates/meticulous-base", version = "^0.1" }
+meticulous = { path = "../meticulous-base", version = "^0.1" }
 num_cpus = "1.15.0"
 sha2 = "0.10.6"
 tar = "0.4.38"
