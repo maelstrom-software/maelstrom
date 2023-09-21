@@ -137,7 +137,7 @@ pub async fn main(
         .into_split();
     let read_stream = tokio::io::BufReader::new(read_stream);
 
-    proto::write_message(
+    net::write_message_to_socket(
         &mut write_stream,
         proto::Hello::Worker {
             slots: slots as u32,
@@ -151,12 +151,12 @@ pub async fn main(
     let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(proto::socket_reader(
+    join_set.spawn(net::socket_reader(
         read_stream,
         dispatcher_sender_clone,
         dispatcher::Message::Broker,
     ));
-    join_set.spawn(proto::socket_writer(broker_socket_receiver, write_stream));
+    join_set.spawn(net::socket_writer(broker_socket_receiver, write_stream));
     join_set.spawn(async move {
         dispatcher_main(
             slots,

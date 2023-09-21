@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 clap = { workspace = true }
 meticulous-base = { workspace = true }
+meticulous-util = { workspace = true }
 gethostname = { workspace = true }
 tokio = { workspace = true }
 regex = { workspace = true }

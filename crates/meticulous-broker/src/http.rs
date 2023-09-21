@@ -1,4 +1,5 @@
 use crate::{proto, Result};
+use meticulous_util::net;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{sink::SinkExt, stream::StreamExt};
 use hyper::service::Service;
@@ -112,7 +113,7 @@ async fn serve_broker_to_client(
     broker_read: &mut ReadHalf<TcpStream>,
     ws_write: &mut SplitSink<WebSocketStream<Upgraded>, Message>,
 ) -> Result<()> {
-    while let proto::BrokerToClient::UiResponse(resp) = proto::read_message(broker_read).await? {
+    while let proto::BrokerToClient::UiResponse(resp) = net::read_message_from_socket(broker_read).await? {
         ws_write
             .send(Message::binary(bincode::serialize(&resp).unwrap()))
             .await?
@@ -126,7 +127,7 @@ async fn serve_client_to_broker(
 ) -> Result<()> {
     while let Some(Ok(Message::Binary(msg))) = ws_read.next().await {
         let msg = bincode::deserialize(&msg)?;
-        proto::write_message(broker_write, proto::ClientToBroker::UiRequest(msg)).await?;
+        net::write_message_to_socket(broker_write, proto::ClientToBroker::UiRequest(msg)).await?;
     }
 
     Ok(())
@@ -139,7 +140,7 @@ async fn serve_websocket(websocket: HyperWebsocket, broker_addr: SocketAddr) -> 
     let (mut broker_read, mut broker_write) = tokio::io::split(broker_socket);
     let (mut ws_write, mut ws_read) = websocket.split();
 
-    proto::write_message(&mut broker_write, proto::Hello::Client).await?;
+    net::write_message_to_socket(&mut broker_write, proto::Hello::Client).await?;
 
     tokio::select! {
         res = serve_broker_to_client(&mut broker_read, &mut ws_write) => res?,

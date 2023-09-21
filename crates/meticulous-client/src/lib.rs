@@ -1,6 +1,7 @@
 //! Code for the client binary.
 
 use meticulous_base::{proto, ClientExecutionId, ExecutionDetails, Result};
+use meticulous_util::net;
 use std::collections::HashMap;
 
 async fn get_test_binaries() -> Result<Vec<String>> {
@@ -42,12 +43,12 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
         .into_split();
     let mut read_stream = tokio::io::BufReader::new(read_stream);
 
-    proto::write_message(&mut write_stream, proto::Hello::Client).await?;
+    net::write_message_to_socket(&mut write_stream, proto::Hello::Client).await?;
     let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
         let id = ClientExecutionId(id as u32);
         map.insert(id, case.clone());
-        proto::write_message(
+        net::write_message_to_socket(
             &mut write_stream,
             proto::ClientToBroker::ExecutionRequest(
                 id,
@@ -62,7 +63,7 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
     }
 
     while !map.is_empty() {
-        match proto::read_message(&mut read_stream).await? {
+        match net::read_message_from_socket(&mut read_stream).await? {
             proto::BrokerToClient::ExecutionResponse(id, result) => {
                 let case = map.remove(&id).unwrap();
                 println!("{case}: {result:?}");

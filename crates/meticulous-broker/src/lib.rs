@@ -90,12 +90,12 @@ async fn socket_main<IdT, SenderT, RequestT>(
     // Next, spawn two tasks to read and write from the socket. Plumb the message queues
     // appropriately.
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(proto::socket_reader(
+    join_set.spawn(net::socket_reader(
         read_stream,
         scheduler_sender.clone(),
         move |req| transform_msg(id, req),
     ));
-    join_set.spawn(proto::socket_writer(socket_receiver, write_stream));
+    join_set.spawn(net::socket_writer(socket_receiver, write_stream));
 
     // Wait for one task to complete and then cancel the other one and wait for it.
     join_set.join_next().await;
@@ -121,7 +121,7 @@ async fn listener_main(
         let scheduler_sender_clone = scheduler_sender.clone();
 
         tokio::task::spawn(async move {
-            let hello = proto::read_message(&mut socket).await?;
+            let hello = net::read_message_from_socket(&mut socket).await?;
             println!("{hello:?} from {peer_addr} connected, assigned id: {id}");
             match hello {
                 proto::Hello::Client => {

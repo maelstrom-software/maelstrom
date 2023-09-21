@@ -1683,6 +1683,7 @@ dependencies = [
  "clap",
  "gethostname 0.4.2",
  "meticulous-base",
+ "meticulous-util",
  "regex",
  "tokio",
 ]
@@ -1716,7 +1717,10 @@ dependencies = [
 name = "meticulous-util"
 version = "0.1.0"
 dependencies = [
+ "bincode",
+ "meticulous-base",
  "rand",
+ "serde",
  "tokio",
 ]
 
