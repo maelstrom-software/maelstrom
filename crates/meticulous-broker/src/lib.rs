@@ -184,10 +184,7 @@ pub async fn main(
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(http::main(listener.local_addr()?, http_listener));
     join_set.spawn(listener_main(listener, scheduler_sender));
-    join_set.spawn(async move {
-        scheduler_main(scheduler_receiver).await;
-        Ok(())
-    });
+    join_set.spawn(async move { Ok(scheduler_main(scheduler_receiver).await) });
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::terminate()));
 
