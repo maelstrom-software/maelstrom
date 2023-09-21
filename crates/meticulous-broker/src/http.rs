@@ -1,5 +1,4 @@
 use crate::{proto, Result};
-use meticulous_util::net;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{sink::SinkExt, stream::StreamExt};
 use hyper::service::Service;
@@ -7,6 +6,7 @@ use hyper::upgrade::Upgraded;
 use hyper::{Body, Request, Response};
 use hyper_tungstenite::WebSocketStream;
 use hyper_tungstenite::{tungstenite, HyperWebsocket};
+use meticulous_util::net;
 use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
@@ -113,7 +113,9 @@ async fn serve_broker_to_client(
     broker_read: &mut ReadHalf<TcpStream>,
     ws_write: &mut SplitSink<WebSocketStream<Upgraded>, Message>,
 ) -> Result<()> {
-    while let proto::BrokerToClient::UiResponse(resp) = net::read_message_from_socket(broker_read).await? {
+    while let proto::BrokerToClient::UiResponse(resp) =
+        net::read_message_from_socket(broker_read).await?
+    {
         ws_write
             .send(Message::binary(bincode::serialize(&resp).unwrap()))
             .await?
