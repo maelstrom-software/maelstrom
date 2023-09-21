@@ -5,7 +5,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = { workspace = true }
-bincode = { workspace = true }
 meticulous-ui = { workspace = true }
 serde = { workspace = true }
-tokio = { workspace = true }
