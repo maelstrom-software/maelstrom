@@ -15,7 +15,7 @@ meticulous-ui = { workspace = true }
 meticulous-util = { workspace = true }
 serde = { workspace = true }
 tar = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [dev-dependencies]
 itertools = { workspace = true }

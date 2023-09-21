@@ -12,7 +12,7 @@ meticulous-util = { workspace = true }
 nix = { workspace = true }
 num_cpus = { workspace = true }
 rand = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
 
 [dev-dependencies]
 anyhow = { workspace = true }

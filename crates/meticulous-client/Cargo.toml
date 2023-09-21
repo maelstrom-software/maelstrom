@@ -9,5 +9,5 @@ clap = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }
 gethostname = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
 regex = { workspace = true }
