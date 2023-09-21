@@ -5,7 +5,7 @@ pub mod http;
 mod scheduler;
 
 use meticulous_util::channel_reader;
-use meticulous::{proto, ClientId, Error, Result, WorkerId};
+use meticulous_base::{proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 struct PassThroughDeps;

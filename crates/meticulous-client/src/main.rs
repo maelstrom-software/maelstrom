@@ -27,7 +27,7 @@ struct Cli {
     name: String,
 }
 
-fn main() -> meticulous::Result<()> {
+fn main() -> meticulous_base::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async { meticulous_client::main(cli.name, cli.broker).await })?;

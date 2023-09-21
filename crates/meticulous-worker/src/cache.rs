@@ -1,7 +1,7 @@
 //! Manage downloading, extracting, and storing of image files specified by executions.
 
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use meticulous::{
+use meticulous_base::{
     Result, Sha256Digest,
 };
 use std::{
@@ -427,7 +427,7 @@ impl<CacheDepsT: CacheDeps> HeapDeps for CacheMap<CacheDepsT> {
 mod tests {
     use super::Message::*;
     use super::*;
-    use meticulous::*;
+    use meticulous_base::*;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::collections::HashSet;

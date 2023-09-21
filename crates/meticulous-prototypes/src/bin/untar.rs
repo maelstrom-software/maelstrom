@@ -1,5 +1,5 @@
 use clap::Parser;
-use meticulous::{Result, Sha256Digest};
+use meticulous_base::{Result, Sha256Digest};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]

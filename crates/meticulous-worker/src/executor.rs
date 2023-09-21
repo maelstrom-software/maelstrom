@@ -1,6 +1,6 @@
 //! Easily start and stop processes.
 
-use meticulous::{ExecutionDetails, ExecutionResult};
+use meticulous_base::{ExecutionDetails, ExecutionResult};
 use nix::{sys::signal::Signal, unistd::Pid};
 
 /*              _     _ _

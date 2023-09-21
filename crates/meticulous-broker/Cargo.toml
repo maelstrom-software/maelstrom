@@ -9,7 +9,7 @@ clap = { workspace = true }
 futures = { workspace = true }
 hyper-tungstenite = { workspace = true }
 hyper = { workspace = true }
-meticulous = { workspace = true }
+meticulous-base = { workspace = true }
 meticulous-ui = { workspace = true }
 meticulous-util = { workspace = true }
 serde = { workspace = true }

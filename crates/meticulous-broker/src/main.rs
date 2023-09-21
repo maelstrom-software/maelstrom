@@ -20,7 +20,7 @@ struct Cli {
     http_port: Option<u16>,
 }
 
-fn main() -> meticulous::Result<()> {
+fn main() -> meticulous_base::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {

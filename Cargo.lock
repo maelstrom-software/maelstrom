@@ -1647,7 +1647,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "meticulous"
+name = "meticulous-base"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -1668,7 +1668,7 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "itertools",
- "meticulous",
+ "meticulous-base",
  "meticulous-ui",
  "meticulous-util",
  "serde",
@@ -1682,7 +1682,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "gethostname 0.4.2",
- "meticulous",
+ "meticulous-base",
  "regex",
  "tokio",
 ]
@@ -1693,7 +1693,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "flate2",
- "meticulous",
+ "meticulous-base",
  "sha2",
  "tar",
 ]
@@ -1746,7 +1746,7 @@ dependencies = [
  "clap",
  "gethostname 0.4.2",
  "itertools",
- "meticulous",
+ "meticulous-base",
  "meticulous-util",
  "nix 0.26.2",
  "num_cpus",

@@ -46,7 +46,7 @@ struct Cli {
     cache_bytes_used_target: u64,
 }
 
-fn main() -> meticulous::Result<()> {
+fn main() -> meticulous_base::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async move {

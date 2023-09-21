@@ -2,7 +2,7 @@
 //! workers.
 
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use meticulous::{
+use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
@@ -288,7 +288,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use meticulous::{
+    use meticulous_base::{
         proto::BrokerToWorker::{self, *},
         *
     };

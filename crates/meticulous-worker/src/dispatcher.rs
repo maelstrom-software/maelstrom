@@ -1,7 +1,7 @@
 //! Central processing module for the worker. Receive messages from the broker and executors, and
 //! start or cancel executions as appropriate.
 
-use meticulous::{
+use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     ExecutionDetails, ExecutionId, ExecutionResult, Sha256Digest,
 };
@@ -266,7 +266,7 @@ impl AwaitingLayersEntry {
 mod tests {
     use super::Message::*;
     use super::*;
-    use meticulous::*;
+    use meticulous_base::*;
     use itertools::Itertools;
     use std::cell::RefCell;
     use std::rc::Rc;

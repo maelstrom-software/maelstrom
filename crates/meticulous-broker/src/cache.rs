@@ -1,5 +1,5 @@
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use meticulous::{ClientId, ExecutionId, Sha256Digest };
+use meticulous_base::{ClientId, ExecutionId, Sha256Digest };
 use std::{
     collections::{hash_map, HashMap, HashSet},
     num::NonZeroU32,
@@ -320,7 +320,7 @@ impl HeapDeps for CacheMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use meticulous::*;
+    use meticulous_base::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 
