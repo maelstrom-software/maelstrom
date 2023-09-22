@@ -1,4 +1,7 @@
-use crate::{proto, Result};
+use crate::{
+    connection::{self, IdVendor},
+    proto, Result, SchedulerMessage,
+};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{sink::SinkExt, stream::StreamExt};
 use hyper::service::Service;
@@ -6,15 +9,14 @@ use hyper::upgrade::Upgraded;
 use hyper::{Body, Request, Response};
 use hyper_tungstenite::WebSocketStream;
 use hyper_tungstenite::{tungstenite, HyperWebsocket};
-use meticulous_util::net;
+use meticulous_base::{proto::BrokerToClient, ClientId};
 use std::collections::HashMap;
 use std::future::Future;
-use std::net::SocketAddr;
 use std::path::Path;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
-use tokio::io::{ReadHalf, WriteHalf};
-use tokio::net::TcpStream;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tungstenite::Message;
 
 const WASM_TAR: &[u8] = include_bytes!("../../../target/web.tar");
@@ -81,7 +83,8 @@ impl TarHandler {
 #[derive(Clone)]
 struct Handler {
     tar_handler: TarHandler,
-    broker_addr: SocketAddr,
+    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id_vendor: Arc<IdVendor>,
 }
 
 impl Service<Request<Body>> for Handler {
@@ -96,9 +99,14 @@ impl Service<Request<Body>> for Handler {
     fn call(&mut self, mut request: Request<Body>) -> Self::Future {
         let resp = (|| {
             if hyper_tungstenite::is_upgrade_request(&request) {
-                let broker_addr = self.broker_addr;
                 let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
-                tokio::spawn(async move { serve_websocket(websocket, broker_addr).await.ok() });
+                let scheduler_sender = self.scheduler_sender.clone();
+                let id_vendor = self.id_vendor.clone();
+                tokio::spawn(async move {
+                    serve_websocket(websocket, scheduler_sender, id_vendor)
+                        .await
+                        .ok()
+                });
                 Ok(response)
             } else {
                 Ok(self.tar_handler.get_file(&request.uri().to_string()))
@@ -109,50 +117,68 @@ impl Service<Request<Body>> for Handler {
     }
 }
 
-async fn serve_broker_to_client(
-    broker_read: &mut ReadHalf<TcpStream>,
-    ws_write: &mut SplitSink<WebSocketStream<Upgraded>, Message>,
+async fn websocket_writer(
+    mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
+    mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
 ) -> Result<()> {
-    while let proto::BrokerToClient::UiResponse(resp) =
-        net::read_message_from_socket(broker_read).await?
-    {
-        ws_write
-            .send(Message::binary(bincode::serialize(&resp).unwrap()))
+    while let Some(msg) = scheduler_receiver.recv().await {
+        socket
+            .send(Message::binary(bincode::serialize(&msg).unwrap()))
             .await?
     }
     Ok(())
 }
 
-async fn serve_client_to_broker(
-    broker_write: &mut WriteHalf<TcpStream>,
-    ws_read: &mut SplitStream<WebSocketStream<Upgraded>>,
+async fn websocket_reader(
+    mut socket: SplitStream<WebSocketStream<Upgraded>>,
+    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id: ClientId,
 ) -> Result<()> {
-    while let Some(Ok(Message::Binary(msg))) = ws_read.next().await {
+    while let Some(Ok(Message::Binary(msg))) = socket.next().await {
         let msg = bincode::deserialize(&msg)?;
-        net::write_message_to_socket(broker_write, proto::ClientToBroker::UiRequest(msg)).await?;
+        if scheduler_sender
+            .send(SchedulerMessage::FromClient(
+                id,
+                proto::ClientToBroker::UiRequest(msg),
+            ))
+            .is_err()
+        {
+            return Ok(());
+        }
     }
 
     Ok(())
 }
 
-async fn serve_websocket(websocket: HyperWebsocket, broker_addr: SocketAddr) -> Result<()> {
+async fn serve_websocket(
+    websocket: HyperWebsocket,
+    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id_vendor: Arc<IdVendor>,
+) -> Result<()> {
     let websocket = websocket.await?;
-    let broker_socket = TcpStream::connect(broker_addr).await?;
 
-    let (mut broker_read, mut broker_write) = tokio::io::split(broker_socket);
-    let (mut ws_write, mut ws_read) = websocket.split();
+    let (write_stream, read_stream) = websocket.split();
 
-    net::write_message_to_socket(&mut broker_write, proto::Hello::Client).await?;
+    let id = id_vendor.vend();
 
-    tokio::select! {
-        res = serve_broker_to_client(&mut broker_read, &mut ws_write) => res?,
-        res = serve_client_to_broker(&mut broker_write, &mut ws_read) => res?,
-    }
+    connection::socket_main(
+        scheduler_sender,
+        id,
+        SchedulerMessage::ClientConnected,
+        SchedulerMessage::ClientDisconnected,
+        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
+        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
+    )
+    .await;
 
     Ok(())
 }
 
-pub async fn main(broker_addr: SocketAddr, listener: tokio::net::TcpListener) -> Result<()> {
+pub async fn main(
+    listener: tokio::net::TcpListener,
+    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id_vendor: Arc<IdVendor>,
+) -> Result<()> {
     let mut http = hyper::server::conn::Http::new();
     http.http1_only(true);
     http.http1_keep_alive(true);
@@ -162,12 +188,15 @@ pub async fn main(broker_addr: SocketAddr, listener: tokio::net::TcpListener) ->
     loop {
         let (stream, _) = listener.accept().await?;
         let tar_handler = tar_handler.clone();
+        let scheduler_sender = scheduler_sender.clone();
+        let id_vendor = id_vendor.clone();
         let connection = http
             .serve_connection(
                 stream,
                 Handler {
-                    tar_handler: tar_handler.clone(),
-                    broker_addr,
+                    tar_handler,
+                    scheduler_sender,
+                    id_vendor,
                 },
             )
             .with_upgrades();
