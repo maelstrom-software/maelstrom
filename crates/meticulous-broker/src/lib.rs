@@ -8,7 +8,6 @@ mod scheduler_main;
 
 use meticulous_util::error::{Error, Result};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 /// "Main loop" for a signal handler. This function will block until it receives the indicated
 /// signal, then it will return an error.
@@ -21,21 +20,21 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 /// when a signal is received, or when the broker or http listener socket returns an error at
 /// accept time.
 pub async fn main(listener: tokio::net::TcpListener, http_listener: tokio::net::TcpListener) {
-    let (scheduler_sender, scheduler_receiver) = mpsc::unbounded_channel();
+    let scheduler_main = scheduler_main::SchedulerMain::default();
     let id_vendor = Arc::new(connection::IdVendor::default());
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(http::listener_main(
         http_listener,
-        scheduler_sender.clone(),
+        scheduler_main.scheduler_sender().clone(),
         id_vendor.clone(),
     ));
     join_set.spawn(connection::listener_main(
         listener,
-        scheduler_sender,
+        scheduler_main.scheduler_sender().clone(),
         id_vendor,
     ));
     join_set.spawn(async move {
-        scheduler_main::scheduler_main(scheduler_receiver).await;
+        scheduler_main.run().await;
         Ok(())
     });
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
