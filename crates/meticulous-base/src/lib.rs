@@ -7,6 +7,12 @@ pub mod proto;
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientId(pub u32);
 
+impl From<u32> for ClientId {
+    fn from(input: u32) -> Self {
+        ClientId(input)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientExecutionId(pub u32);
 
@@ -31,6 +37,12 @@ pub enum ExecutionResult {
     Copy, Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 pub struct WorkerId(pub u32);
+
+impl From<u32> for WorkerId {
+    fn from(input: u32) -> Self {
+        WorkerId(input)
+    }
+}
 
 #[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sha256Digest(pub [u8; 32]);

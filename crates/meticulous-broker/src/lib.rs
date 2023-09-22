@@ -10,6 +10,7 @@ use meticulous_util::{
     error::{Error, Result},
     net,
 };
+use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 pub struct PassThroughDeps;
@@ -76,10 +77,15 @@ pub async fn main(
     http_listener: tokio::net::TcpListener,
 ) -> Result<()> {
     let (scheduler_sender, scheduler_receiver) = mpsc::unbounded_channel();
+    let id_vendor = Arc::new(connection::IdVendor::default());
 
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(http::main(listener.local_addr()?, http_listener));
-    join_set.spawn(connection::listener_main(listener, scheduler_sender));
+    join_set.spawn(connection::listener_main(
+        listener,
+        scheduler_sender,
+        id_vendor,
+    ));
     join_set.spawn(async move {
         scheduler_main(scheduler_receiver).await;
         Ok(())

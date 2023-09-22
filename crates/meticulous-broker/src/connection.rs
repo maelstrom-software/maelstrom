@@ -1,10 +1,32 @@
 use super::SchedulerMessage;
-use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_base::proto;
 use meticulous_util::{
     error::{Error, Result},
     net,
 };
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+pub struct IdVendor {
+    id: AtomicU32,
+}
+
+impl Default for IdVendor {
+    fn default() -> Self {
+        IdVendor {
+            id: AtomicU32::new(0),
+        }
+    }
+}
+
+impl IdVendor {
+    pub fn vend<T: From<u32>>(&self) -> T {
+        self.id.fetch_add(1, Ordering::SeqCst).into()
+    }
+}
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
 /// of these for each connected client or worker socket. This function will run until the client or
@@ -94,21 +116,21 @@ pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFuture
 pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id_vendor: Arc<IdVendor>,
 ) -> Result<()> {
-    let mut id = 0;
-
     loop {
         let (mut socket, peer_addr) = listener.accept().await?;
         let scheduler_sender = scheduler_sender.clone();
+        let id_vendor = id_vendor.clone();
 
         tokio::task::spawn(async move {
             let hello = net::read_message_from_socket(&mut socket).await?;
-            println!("{hello:?} from {peer_addr} connected, assigned id: {id}");
+            println!("{hello:?} from {peer_addr} connected");
             match hello {
                 proto::Hello::Client => {
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id = ClientId(id);
+                    let id = id_vendor.vend();
                     socket_main(
                         scheduler_sender,
                         id,
@@ -126,7 +148,7 @@ pub async fn listener_main(
                 proto::Hello::Worker { slots } => {
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id = WorkerId(id);
+                    let id = id_vendor.vend();
                     socket_main(
                         scheduler_sender,
                         id,
@@ -145,10 +167,8 @@ pub async fn listener_main(
                     todo!("artifact handling not yet implemented")
                 }
             }
-            println!("{hello:?} from {peer_addr}, id {id}, disconnected");
+            println!("{hello:?} from {peer_addr} disconnected");
             Ok::<(), Error>(())
         });
-
-        id = id.wrapping_add(1);
     }
 }
