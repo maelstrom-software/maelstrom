@@ -79,8 +79,8 @@ pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFuture
 ) where
     IdT: Copy + Send + 'static,
     FromSchedulerMessageT: serde::Serialize + Send + 'static,
-    ReaderFutureT: std::future::Future<Output = Result<()>> + Send + 'static,
-    WriterFutureT: std::future::Future<Output = Result<()>> + Send + 'static,
+    ReaderFutureT: std::future::Future<Output = ()> + Send + 'static,
+    WriterFutureT: std::future::Future<Output = ()> + Send + 'static,
 {
     let (socket_sender, socket_receiver) = mpsc::unbounded_channel();
 

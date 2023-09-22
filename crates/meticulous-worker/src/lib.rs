@@ -5,10 +5,7 @@ mod dispatcher;
 mod executor;
 
 use meticulous_base::{proto, ExecutionDetails, ExecutionId, Sha256Digest};
-use meticulous_util::{
-    error::{Error, Result},
-    net,
-};
+use meticulous_util::{error::Result, net};
 use std::path::PathBuf;
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
@@ -118,12 +115,14 @@ async fn dispatcher_main(
         &mut cache_adapter,
     );
     let mut dispatcher = dispatcher::Dispatcher::new(adapter, slots);
-    net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await;
+    net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
 
-async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
-    tokio::signal::unix::signal(kind)?.recv().await;
-    Err(Error::msg(format!("received signal {kind:?}")))
+async fn signal_handler(kind: tokio::signal::unix::SignalKind) {
+    tokio::signal::unix::signal(kind)
+        .expect("failed to register signal handler")
+        .recv()
+        .await;
 }
 
 /// The main function for the worker. This should be called on a task of its own. It will return
@@ -160,26 +159,16 @@ pub async fn main(
         dispatcher::Message::Broker,
     ));
     join_set.spawn(net::socket_writer(broker_socket_receiver, write_stream));
-    join_set.spawn(async move {
-        dispatcher_main(
-            slots,
-            cache_root,
-            cache_bytes_used_goal,
-            dispatcher_receiver,
-            dispatcher_sender,
-            broker_socket_sender,
-        )
-        .await;
-        Ok(())
-    });
+    join_set.spawn(dispatcher_main(
+        slots,
+        cache_root,
+        cache_bytes_used_goal,
+        dispatcher_receiver,
+        dispatcher_sender,
+        broker_socket_sender,
+    ));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::terminate()));
-
-    loop {
-        join_set
-            .join_next()
-            .await
-            .expect("at least one task should return an error")
-            .expect("no task should panic or be canceled")?;
-    }
+    join_set.join_next().await;
+    Ok(())
 }

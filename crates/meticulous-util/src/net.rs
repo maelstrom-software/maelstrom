@@ -53,14 +53,12 @@ pub async fn socket_reader<MessageT, TransformedT>(
     mut socket: (impl tokio::io::AsyncRead + Unpin),
     channel: tokio::sync::mpsc::UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
-) -> Result<()>
-where
+) where
     MessageT: DeserializeOwned,
 {
-    loop {
-        let msg = read_message_from_socket(&mut socket).await?;
+    while let Ok(msg) = read_message_from_socket(&mut socket).await {
         if channel.send(transform(msg)).is_err() {
-            return Ok(());
+            break;
         }
     }
 }
@@ -71,11 +69,12 @@ where
 pub async fn socket_writer(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<impl Serialize>,
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
-) -> Result<()> {
+) {
     while let Some(msg) = channel.recv().await {
-        write_message_to_socket(&mut socket, msg).await?;
+        if write_message_to_socket(&mut socket, msg).await.is_err() {
+            break;
+        }
     }
-    Ok(())
 }
 
 #[cfg(test)]

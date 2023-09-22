@@ -81,22 +81,27 @@ impl TarHandler {
 async fn websocket_writer(
     mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
-) -> Result<()> {
+) {
     while let Some(msg) = scheduler_receiver.recv().await {
-        socket
+        if socket
             .send(Message::binary(bincode::serialize(&msg).unwrap()))
-            .await?
+            .await
+            .is_err()
+        {
+            break;
+        }
     }
-    Ok(())
 }
 
 async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
     id: ClientId,
-) -> Result<()> {
+) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
-        let msg = bincode::deserialize(&msg)?;
+        let Ok(msg) = bincode::deserialize(&msg) else {
+            break;
+        };
         if scheduler_sender
             .send(SchedulerMessage::FromClient(
                 id,
@@ -104,11 +109,9 @@ async fn websocket_reader(
             ))
             .is_err()
         {
-            return Ok(());
+            break;
         }
     }
-
-    Ok(())
 }
 
 async fn serve_websocket(
