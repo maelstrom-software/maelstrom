@@ -21,19 +21,6 @@ use tungstenite::Message;
 
 const WASM_TAR: &[u8] = include_bytes!("../../../target/web.tar");
 
-fn mime_for_path(path: &str) -> &'static str {
-    if let Some(ext) = Path::new(path).extension() {
-        match &ext.to_str().unwrap().to_lowercase()[..] {
-            "wasm" => return "application/wasm",
-            "js" => return "text/javascript",
-            "html" => return "text/html",
-            _ => (),
-        }
-    }
-
-    "application/octet-stream"
-}
-
 #[derive(Clone)]
 pub struct TarHandler {
     map: HashMap<String, &'static [u8]>,
@@ -56,6 +43,18 @@ impl TarHandler {
     }
 
     fn get_file(&self, path: &str) -> Response<Body> {
+        fn mime_for_path(path: &str) -> &'static str {
+            if let Some(ext) = Path::new(path).extension() {
+                match &ext.to_str().unwrap().to_lowercase()[..] {
+                    "wasm" => return "application/wasm",
+                    "js" => return "text/javascript",
+                    "html" => return "text/html",
+                    _ => (),
+                }
+            }
+            "application/octet-stream"
+        }
+
         let mut path = format!(".{}", path);
 
         if path == "./" {
