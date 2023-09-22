@@ -113,7 +113,7 @@ pub trait CacheDeps {
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
 /// [Cache].
 pub enum Message<RequestIdT> {
-    /// Request a [CacheHandle] for a given [Sha256Digest]. Eventually, the [Cache] will call
+    /// Request a reference for a given [Sha256Digest]. Eventually, the [Cache] will call
     /// [CacheDeps::get_completed] in response to this message.
     GetRequest(RequestIdT, Sha256Digest),
 

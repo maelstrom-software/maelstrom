@@ -29,7 +29,8 @@ pub async fn write_message_to_socket(
     Ok(tokio::io::AsyncWriteExt::write_all(stream, &buf).await?)
 }
 
-/// Read a message from a Tokio input stream. The framing must match that of [write_message].
+/// Read a message from a Tokio input stream. The framing must match that of
+/// [write_message_to_socket].
 pub async fn read_message_from_socket<MessageT>(
     stream: &mut (impl tokio::io::AsyncRead + Unpin),
 ) -> Result<MessageT>

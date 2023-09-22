@@ -1,24 +1,39 @@
+//! The task main and all associated code to implement the HTTP server for the broker.
+//!
+//! The HTTP server is responsible for doing two things.
+//!
+//! First, it serves up the actual website. This is prebuilt, including all of the Wasm, and put in
+//! a tar file. The tar file is then embedded in this module as compile time.
+//!
+//! Second, it handles WebSockets. These are treated just like client connections.
 use crate::{
     connection::{self, IdVendor},
-    proto, Result, SchedulerMessage,
+    SchedulerMessage,
 };
-use futures::stream::{SplitSink, SplitStream};
-use futures::{sink::SinkExt, stream::StreamExt};
-use hyper::service::Service;
-use hyper::upgrade::Upgraded;
-use hyper::{Body, Request, Response};
-use hyper_tungstenite::WebSocketStream;
-use hyper_tungstenite::{tungstenite, HyperWebsocket};
-use meticulous_base::{proto::BrokerToClient, ClientId};
-use std::collections::HashMap;
-use std::future::Future;
-use std::path::Path;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::{Context, Poll};
+use futures::{
+    sink::SinkExt,
+    stream::{SplitSink, SplitStream, StreamExt},
+};
+use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
+use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
+use meticulous_base::{
+    proto::{BrokerToClient, ClientToBroker},
+    ClientId,
+};
+use meticulous_util::error::{Error, Result};
+use std::{
+    collections::HashMap,
+    future::Future,
+    path::Path,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+};
+use tar::Archive;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tungstenite::Message;
 
+/// The embedded website. This is built from [`meticulous-web`].
 const WASM_TAR: &[u8] = include_bytes!("../../../target/web.tar");
 
 pub struct TarHandler {
@@ -29,7 +44,7 @@ impl TarHandler {
     pub fn from_embedded() -> Self {
         let bytes = WASM_TAR;
         let mut map = HashMap::new();
-        let mut ar = tar::Archive::new(bytes);
+        let mut ar = Archive::new(bytes);
         for entry in ar.entries().unwrap() {
             let entry = entry.unwrap();
             let header = entry.header();
@@ -78,11 +93,16 @@ impl TarHandler {
     }
 }
 
+/// Looping reading from `scheduler_receiver` and writing to `socket`. If an error is encountered,
+/// return immediately.
 async fn websocket_writer(
     mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
+        let BrokerToClient::UiResponse(msg) = msg else {
+            continue;
+        };
         if socket
             .send(Message::binary(bincode::serialize(&msg).unwrap()))
             .await
@@ -93,6 +113,8 @@ async fn websocket_writer(
     }
 }
 
+/// Looping reading from `socket` and writing to `scheduler_sender`. If an error is encountered,
+/// return immediately.
 async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
@@ -105,7 +127,7 @@ async fn websocket_reader(
         if scheduler_sender
             .send(SchedulerMessage::FromClient(
                 id,
-                proto::ClientToBroker::UiRequest(msg),
+                ClientToBroker::UiRequest(msg),
             ))
             .is_err()
         {
@@ -114,17 +136,17 @@ async fn websocket_reader(
     }
 }
 
-async fn serve_websocket(
+/// Task main loop for handing a websocket. This just calls into [connection::socket_main].
+async fn websocket_main(
     websocket: HyperWebsocket,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
     id_vendor: Arc<IdVendor>,
-) -> Result<()> {
-    let websocket = websocket.await?;
-
+) {
+    let Ok(websocket) = websocket.await else {
+        return;
+    };
     let (write_stream, read_stream) = websocket.split();
-
     let id = id_vendor.vend();
-
     connection::socket_main(
         scheduler_sender,
         id,
@@ -133,9 +155,7 @@ async fn serve_websocket(
         |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
         |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
     )
-    .await;
-
-    Ok(())
+    .await
 }
 
 struct Handler {
@@ -146,7 +166,7 @@ struct Handler {
 
 impl Service<Request<Body>> for Handler {
     type Response = Response<Body>;
-    type Error = crate::Error;
+    type Error = Error;
     type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
@@ -157,13 +177,11 @@ impl Service<Request<Body>> for Handler {
         let resp = (|| {
             if hyper_tungstenite::is_upgrade_request(&request) {
                 let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
-                let scheduler_sender = self.scheduler_sender.clone();
-                let id_vendor = self.id_vendor.clone();
-                tokio::spawn(async move {
-                    serve_websocket(websocket, scheduler_sender, id_vendor)
-                        .await
-                        .ok()
-                });
+                tokio::spawn(websocket_main(
+                    websocket,
+                    self.scheduler_sender.clone(),
+                    self.id_vendor.clone(),
+                ));
                 Ok(response)
             } else {
                 Ok(self.tar_handler.get_file(&request.uri().to_string()))
@@ -179,7 +197,7 @@ pub async fn listener_main(
     scheduler_sender: UnboundedSender<SchedulerMessage>,
     id_vendor: Arc<IdVendor>,
 ) -> Result<()> {
-    let mut http = hyper::server::conn::Http::new();
+    let mut http = Http::new();
     http.http1_only(true);
     http.http1_keep_alive(true);
 
