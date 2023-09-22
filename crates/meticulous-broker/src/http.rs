@@ -8,7 +8,7 @@
 //! Second, it handles WebSockets. These are treated just like client connections.
 use super::{
     connection::{self, IdVendor},
-    scheduler_main::{SchedulerMessage, SchedulerSender},
+    scheduler_task::{SchedulerMessage, SchedulerSender},
 };
 use futures::{
     sink::SinkExt,

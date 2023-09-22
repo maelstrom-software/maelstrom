@@ -4,7 +4,7 @@ pub mod cache;
 mod connection;
 mod http;
 pub mod scheduler;
-mod scheduler_main;
+mod scheduler_task;
 
 use meticulous_util::error::{Error, Result};
 use std::sync::Arc;
@@ -20,21 +20,21 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) -> Result<()> {
 /// when a signal is received, or when the broker or http listener socket returns an error at
 /// accept time.
 pub async fn main(listener: tokio::net::TcpListener, http_listener: tokio::net::TcpListener) {
-    let scheduler_main = scheduler_main::SchedulerMain::default();
+    let scheduler_task = scheduler_task::SchedulerTask::default();
     let id_vendor = Arc::new(connection::IdVendor::default());
     let mut join_set = tokio::task::JoinSet::new();
     join_set.spawn(http::listener_main(
         http_listener,
-        scheduler_main.scheduler_sender().clone(),
+        scheduler_task.scheduler_sender().clone(),
         id_vendor.clone(),
     ));
     join_set.spawn(connection::listener_main(
         listener,
-        scheduler_main.scheduler_sender().clone(),
+        scheduler_task.scheduler_sender().clone(),
         id_vendor,
     ));
     join_set.spawn(async move {
-        scheduler_main.run().await;
+        scheduler_task.run().await;
         Ok(())
     });
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));

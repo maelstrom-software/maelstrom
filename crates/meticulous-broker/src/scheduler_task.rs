@@ -36,16 +36,16 @@ pub type SchedulerMessage = Message<PassThroughDeps>;
 /// This type is used often enough to warrant an alias.
 pub type SchedulerSender = UnboundedSender<SchedulerMessage>;
 
-pub struct SchedulerMain {
+pub struct SchedulerTask {
     scheduler: Scheduler<PassThroughDeps>,
     sender: SchedulerSender,
     receiver: UnboundedReceiver<SchedulerMessage>,
 }
 
-impl Default for SchedulerMain {
+impl Default for SchedulerTask {
     fn default() -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        SchedulerMain {
+        SchedulerTask {
             scheduler: Default::default(),
             sender,
             receiver,
@@ -53,7 +53,7 @@ impl Default for SchedulerMain {
     }
 }
 
-impl SchedulerMain {
+impl SchedulerTask {
     pub fn scheduler_sender(&self) -> &SchedulerSender {
         &self.sender
     }

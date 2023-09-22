@@ -1,4 +1,4 @@
-use super::scheduler_main::{SchedulerMessage, SchedulerSender};
+use super::scheduler_task::{SchedulerMessage, SchedulerSender};
 use meticulous_base::proto;
 use meticulous_util::{
     error::{Error, Result},
