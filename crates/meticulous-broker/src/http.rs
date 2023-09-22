@@ -6,9 +6,9 @@
 //! a tar file. The tar file is then embedded in this module as compile time.
 //!
 //! Second, it handles WebSockets. These are treated just like client connections.
-use crate::{
+use super::{
     connection::{self, IdVendor},
-    SchedulerMessage,
+    scheduler_main::{SchedulerMessage, SchedulerSender},
 };
 use futures::{
     sink::SinkExt,
@@ -30,7 +30,7 @@ use std::{
     task::{Context, Poll},
 };
 use tar::Archive;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::UnboundedReceiver;
 use tungstenite::Message;
 
 /// The embedded website. This is built from [`meticulous-web`].
@@ -117,7 +117,7 @@ async fn websocket_writer(
 /// return immediately.
 async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id: ClientId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
@@ -139,7 +139,7 @@ async fn websocket_reader(
 /// Task main loop for handing a websocket. This just calls into [connection::socket_main].
 async fn websocket_main(
     websocket: HyperWebsocket,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
 ) {
     let Ok(websocket) = websocket.await else {
@@ -160,7 +160,7 @@ async fn websocket_main(
 
 struct Handler {
     tar_handler: Arc<TarHandler>,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
 }
 
@@ -194,7 +194,7 @@ impl Service<Request<Body>> for Handler {
 
 pub async fn listener_main(
     listener: tokio::net::TcpListener,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
 ) -> Result<()> {
     let mut http = Http::new();

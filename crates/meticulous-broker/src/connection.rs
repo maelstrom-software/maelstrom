@@ -1,4 +1,4 @@
-use super::SchedulerMessage;
+use super::scheduler_main::{SchedulerMessage, SchedulerSender};
 use meticulous_base::proto;
 use meticulous_util::{
     error::{Error, Result},
@@ -70,11 +70,11 @@ impl IdVendor {
 ///
 // XXX: Unit test this function.
 pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT>(
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id: IdT,
     connected_msg_builder: impl FnOnce(IdT, UnboundedSender<FromSchedulerMessageT>) -> SchedulerMessage,
     disconnected_msg_builder: impl FnOnce(IdT) -> SchedulerMessage,
-    socket_reader_main: impl FnOnce(UnboundedSender<SchedulerMessage>) -> ReaderFutureT,
+    socket_reader_main: impl FnOnce(SchedulerSender) -> ReaderFutureT,
     socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerMessageT>) -> WriterFutureT,
 ) where
     IdT: Copy + Send + 'static,
@@ -115,7 +115,7 @@ pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFuture
 // XXX: Unit test this function.
 pub async fn listener_main(
     listener: tokio::net::TcpListener,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
 ) -> Result<()> {
     loop {

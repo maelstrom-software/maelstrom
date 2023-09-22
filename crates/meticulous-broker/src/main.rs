@@ -23,15 +23,14 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async {
-        let sockaddr = std::net::SocketAddrV6::new(
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let sock_addr = std::net::SocketAddrV6::new(
             std::net::Ipv6Addr::UNSPECIFIED,
             cli.broker_port.unwrap_or(0),
             0,
             0,
         );
-        let broker_listener = tokio::net::TcpListener::bind(sockaddr).await?;
+        let broker_listener = tokio::net::TcpListener::bind(sock_addr).await?;
         println!("broker listening on: {:?}", broker_listener.local_addr()?);
 
         let sock_addr = SocketAddrV6::new(
@@ -40,12 +39,12 @@ fn main() -> Result<()> {
             0,
             0,
         );
-        let http_listener = tokio::net::TcpListener::bind(&sock_addr).await?;
+        let http_listener = tokio::net::TcpListener::bind(sock_addr).await?;
         println!("web UI listing on {:?}", http_listener.local_addr()?);
 
-        meticulous_broker::main(broker_listener, http_listener).await
-    })?;
-    Ok(())
+        meticulous_broker::main(broker_listener, http_listener).await;
+        Ok(())
+    })
 }
 
 #[test]
