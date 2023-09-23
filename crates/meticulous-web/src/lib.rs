@@ -8,7 +8,7 @@ mod wasm {
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
     use meticulous_base::proto::{
-        BrokerStatistics, BrokerToClient, ClientToBroker, UiRequest, UiResponse,
+        BrokerStatistics, BrokerToClient, ClientToBroker,
     };
     use std::{cell::RefCell, time::Duration};
     use wasm_bindgen_futures::spawn_local;
@@ -42,12 +42,12 @@ mod wasm {
                 }
 
                 self.rpc
-                    .send(ClientToBroker::UiRequest(UiRequest::GetStatistics))
+                    .send(ClientToBroker::StatisticsRequest)
                     .unwrap();
 
                 if let Some(msg) = self.rpc.try_recv().unwrap() {
                     match msg {
-                        BrokerToClient::UiResponse(UiResponse::GetStatistics(stats)) => {
+                        BrokerToClient::StatisticsResponse(stats) => {
                             self.stats = Some(stats)
                         }
                         _ => unimplemented!(),

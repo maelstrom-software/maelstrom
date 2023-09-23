@@ -32,7 +32,7 @@ pub struct WorkerToBroker(pub ExecutionId, pub ExecutionResult);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     ExecutionRequest(ClientExecutionId, ExecutionDetails),
-    UiRequest(UiRequest),
+    StatisticsRequest,
 }
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
@@ -41,12 +41,7 @@ pub enum ClientToBroker {
 pub enum BrokerToClient {
     ExecutionResponse(ClientExecutionId, ExecutionResult),
     TransferArtifact(Sha256Digest),
-    UiResponse(UiResponse),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum UiRequest {
-    GetStatistics,
+    StatisticsResponse(BrokerStatistics),
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -54,9 +49,4 @@ pub struct BrokerStatistics {
     pub num_clients: u64,
     pub num_workers: u64,
     pub num_requests: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum UiResponse {
-    GetStatistics(BrokerStatistics),
 }

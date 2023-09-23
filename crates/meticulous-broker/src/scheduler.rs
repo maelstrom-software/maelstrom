@@ -2,10 +2,7 @@
 //! workers.
 
 use meticulous_base::{
-    proto::{
-        BrokerStatistics, BrokerToClient, BrokerToWorker, ClientToBroker, UiRequest, UiResponse,
-        WorkerToBroker,
-    },
+    proto::{BrokerStatistics, BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
@@ -57,10 +54,10 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
             Message::FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
-                self.receive_client_request(deps, cid, ceid, details)
+                self.receiver_client_execution_request(deps, cid, ceid, details)
             }
-            Message::FromClient(cid, ClientToBroker::UiRequest(msg)) => {
-                self.receive_ui_request(deps, cid, msg)
+            Message::FromClient(cid, ClientToBroker::StatisticsRequest) => {
+                self.receiver_client_statistics_request(deps, cid)
             }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
@@ -167,7 +164,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         self.possibly_start_executions(deps);
     }
 
-    fn receive_client_request(
+    fn receiver_client_execution_request(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
@@ -180,18 +177,13 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         self.possibly_start_executions(deps);
     }
 
-    fn receive_ui_request(&mut self, deps: &mut DepsT, client_id: ClientId, request: UiRequest) {
-        let resp = match request {
-            UiRequest::GetStatistics => UiResponse::GetStatistics(BrokerStatistics {
-                num_clients: self.clients.len() as u64,
-                num_workers: self.workers.0.len() as u64,
-                num_requests: self.queued_requests.len() as u64,
-            }),
-        };
-        deps.send_response_to_client(
-            self.clients.get_mut(&client_id).unwrap(),
-            BrokerToClient::UiResponse(resp),
-        );
+    fn receiver_client_statistics_request(&mut self, deps: &mut DepsT, client_id: ClientId) {
+        let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
+            num_clients: self.clients.len() as u64,
+            num_workers: self.workers.0.len() as u64,
+            num_requests: self.queued_requests.len() as u64,
+        });
+        deps.send_response_to_client(self.clients.get_mut(&client_id).unwrap(), resp);
     }
 
     fn receive_worker_connected(

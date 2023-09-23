@@ -72,8 +72,8 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
             proto::BrokerToClient::TransferArtifact(_) => {
                 todo!();
             }
-            proto::BrokerToClient::UiResponse(_) => {
-                panic!("Got a UI response even though we don't send UI requests");
+            proto::BrokerToClient::StatisticsResponse(_) => {
+                panic!("Got a StatisticsResponse even though we don't send requests");
             }
         }
     }
