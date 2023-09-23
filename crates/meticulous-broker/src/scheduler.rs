@@ -20,7 +20,7 @@ use std::collections::{HashMap, VecDeque};
 
 /// All methods are completely nonblocking. They will never block the task or the thread.
 pub struct Scheduler<DepsT: SchedulerDeps> {
-    clients: HashMap<ClientId, DepsT::ClientSender>,
+    clients: HashMap<ClientId, Client<DepsT>>,
     workers: WorkerMap<DepsT>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
     worker_heap: Heap<WorkerMap<DepsT>>,
@@ -79,6 +79,17 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
  * |_|
  *  FIGLET: private
  */
+
+#[derive(Debug)]
+struct Client<DepsT: SchedulerDeps> {
+    sender: DepsT::ClientSender,
+}
+
+impl<DepsT: SchedulerDeps> Client<DepsT> {
+    fn new(sender: DepsT::ClientSender) -> Self {
+        Client { sender }
+    }
+}
 
 #[derive(Debug)]
 struct Worker<DepsT: SchedulerDeps> {
@@ -141,7 +152,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 
     fn receive_client_connected(&mut self, id: ClientId, sender: DepsT::ClientSender) {
         assert!(
-            self.clients.insert(id, sender).is_none(),
+            self.clients.insert(id, Client::new(sender)).is_none(),
             "duplicate client id {id:?}"
         );
     }
@@ -184,7 +195,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
             num_workers: self.workers.0.len() as u64,
             num_requests: self.queued_requests.len() as u64,
         });
-        deps.send_response_to_client(self.clients.get_mut(&client_id).unwrap(), resp);
+        deps.send_response_to_client(&mut self.clients.get_mut(&client_id).unwrap().sender, resp);
     }
 
     fn receive_worker_connected(
@@ -244,7 +255,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         }
 
         deps.send_response_to_client(
-            self.clients.get_mut(&eid.0).unwrap(),
+            &mut self.clients.get_mut(&eid.0).unwrap().sender,
             BrokerToClient::ExecutionResponse(eid.1, result),
         );
 
