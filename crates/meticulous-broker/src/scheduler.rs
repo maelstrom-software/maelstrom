@@ -7,7 +7,7 @@ use meticulous_base::{
     WorkerId,
 };
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -22,7 +22,7 @@ use std::collections::{HashMap, VecDeque};
 pub struct Scheduler<DepsT: SchedulerDeps> {
     clients: HashMap<ClientId, Client<DepsT>>,
     workers: WorkerMap<DepsT>,
-    queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
+    queued_requests: VecDeque<ExecutionId>,
     worker_heap: Heap<WorkerMap<DepsT>>,
 }
 
@@ -81,20 +81,29 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
  */
 
 #[derive(Debug)]
+struct Execution {
+    details: ExecutionDetails,
+}
+
+#[derive(Debug)]
 struct Client<DepsT: SchedulerDeps> {
     sender: DepsT::ClientSender,
+    executions: HashMap<ClientExecutionId, Execution>,
 }
 
 impl<DepsT: SchedulerDeps> Client<DepsT> {
     fn new(sender: DepsT::ClientSender) -> Self {
-        Client { sender }
+        Client {
+            sender,
+            executions: HashMap::default(),
+        }
     }
 }
 
 #[derive(Debug)]
 struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
-    pending: HashMap<ExecutionId, ExecutionDetails>,
+    pending: HashSet<ExecutionId>,
     heap_index: HeapIndex,
     sender: DepsT::WorkerSender,
 }
@@ -138,13 +147,21 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
                 break;
             }
 
-            let (eid, details) = self.queued_requests.pop_front().unwrap();
+            let eid = self.queued_requests.pop_front().unwrap();
+            let details = &self
+                .clients
+                .get(&eid.0)
+                .unwrap()
+                .executions
+                .get(&eid.1)
+                .unwrap()
+                .details;
             deps.send_request_to_worker(
                 &mut worker.sender,
                 BrokerToWorker::EnqueueExecution(eid, details.clone()),
             );
 
-            worker.pending.insert(eid, details);
+            assert!(worker.pending.insert(eid));
             let heap_index = worker.heap_index;
             self.worker_heap.sift_down(&mut self.workers, heap_index);
         }
@@ -160,9 +177,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
         assert!(self.clients.remove(&id).is_some());
         self.queued_requests
-            .retain(|(ExecutionId(cid, _), _)| *cid != id);
+            .retain(|ExecutionId(cid, _)| *cid != id);
         for worker in self.workers.0.values_mut() {
-            worker.pending.retain(|eid, _| {
+            worker.pending.retain(|eid| {
                 eid.0 != id || {
                     deps.send_request_to_worker(
                         &mut worker.sender,
@@ -183,9 +200,12 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         ceid: ClientExecutionId,
         details: ExecutionDetails,
     ) {
-        assert!(self.clients.contains_key(&cid), "unknown client id {cid:?}");
-        self.queued_requests
-            .push_back((ExecutionId(cid, ceid), details));
+        let client = self.clients.get_mut(&cid).unwrap();
+        assert!(client
+            .executions
+            .insert(ceid, Execution { details })
+            .is_none());
+        self.queued_requests.push_back(ExecutionId(cid, ceid));
         self.possibly_start_executions(deps);
     }
 
@@ -212,7 +232,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
                 id,
                 Worker {
                     slots,
-                    pending: HashMap::default(),
+                    pending: HashSet::default(),
                     heap_index: HeapIndex::default(),
                     sender,
                 },
@@ -230,9 +250,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 
         // We sort the requests to keep our tests deterministic.
         let mut vec: Vec<_> = worker.pending.drain().collect();
-        vec.sort_by_key(|x| x.0);
-        for x in vec.into_iter().rev() {
-            self.queued_requests.push_front(x);
+        vec.sort();
+        for eid in vec.into_iter().rev() {
+            self.queued_requests.push_front(eid);
         }
 
         self.possibly_start_executions(deps);
@@ -247,19 +267,29 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     ) {
         let worker = self.workers.0.get_mut(&wid).unwrap();
 
-        if worker.pending.remove(&eid).is_none() {
+        if !worker.pending.remove(&eid) {
             // This indicates that the client isn't around anymore. Just ignore this response from
             // the worker. When the client disconnected, we canceled all of the outstanding
             // requests and updated our version of the worker's pending requests.
             return;
         }
 
+        let client = self.clients.get_mut(&eid.0).unwrap();
+        client.executions.remove(&eid.1).unwrap();
         deps.send_response_to_client(
-            &mut self.clients.get_mut(&eid.0).unwrap().sender,
+            &mut client.sender,
             BrokerToClient::ExecutionResponse(eid.1, result),
         );
 
-        if let Some((eid, details)) = self.queued_requests.pop_front() {
+        if let Some(eid) = self.queued_requests.pop_front() {
+            let details = &self
+                .clients
+                .get(&eid.0)
+                .unwrap()
+                .executions
+                .get(&eid.1)
+                .unwrap()
+                .details;
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
@@ -267,7 +297,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
                 &mut worker.sender,
                 BrokerToWorker::EnqueueExecution(eid, details.clone()),
             );
-            worker.pending.insert(eid, details);
+            worker.pending.insert(eid);
         } else {
             // Since there are no queued_requests, we're going to have to update the
             // worker's position in the workers list.
