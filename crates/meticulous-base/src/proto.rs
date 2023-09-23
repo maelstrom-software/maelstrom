@@ -1,6 +1,9 @@
 //! Messages sent between various binaries, and helper functions related to those messages.
 
-use crate::{ClientExecutionId, ExecutionDetails, ExecutionId, ExecutionResult, Sha256Digest};
+use crate::{
+    BrokerStatistics, ClientExecutionId, ExecutionDetails, ExecutionId, ExecutionResult,
+    Sha256Digest,
+};
 use serde::{Deserialize, Serialize};
 
 /// The first message sent by a client or worker to the broker. It identifies the client/worker and
@@ -42,11 +45,4 @@ pub enum BrokerToClient {
     ExecutionResponse(ClientExecutionId, ExecutionResult),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BrokerStatistics {
-    pub num_clients: u64,
-    pub num_workers: u64,
-    pub num_requests: u64,
 }

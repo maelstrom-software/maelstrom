@@ -7,8 +7,9 @@ mod wasm {
     use futures::{SinkExt as _, StreamExt as _};
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
-    use meticulous_base::proto::{
-        BrokerStatistics, BrokerToClient, ClientToBroker,
+    use meticulous_base::{
+        proto::{BrokerToClient, ClientToBroker},
+        BrokerStatistics,
     };
     use std::{cell::RefCell, time::Duration};
     use wasm_bindgen_futures::spawn_local;
@@ -41,15 +42,11 @@ mod wasm {
                     ui.label("loading..");
                 }
 
-                self.rpc
-                    .send(ClientToBroker::StatisticsRequest)
-                    .unwrap();
+                self.rpc.send(ClientToBroker::StatisticsRequest).unwrap();
 
                 if let Some(msg) = self.rpc.try_recv().unwrap() {
                     match msg {
-                        BrokerToClient::StatisticsResponse(stats) => {
-                            self.stats = Some(stats)
-                        }
+                        BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
                         _ => unimplemented!(),
                     }
                 }

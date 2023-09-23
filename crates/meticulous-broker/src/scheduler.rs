@@ -2,8 +2,9 @@
 //! workers.
 
 use meticulous_base::{
-    proto::{BrokerStatistics, BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
-    ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
+    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    BrokerStatistics, ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult,
+    WorkerId,
 };
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::collections::{HashMap, VecDeque};

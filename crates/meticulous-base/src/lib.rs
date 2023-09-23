@@ -44,6 +44,13 @@ impl From<u32> for WorkerId {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BrokerStatistics {
+    pub num_clients: u64,
+    pub num_workers: u64,
+    pub num_requests: u64,
+}
+
 #[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sha256Digest(pub [u8; 32]);
 
