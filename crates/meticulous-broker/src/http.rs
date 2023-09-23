@@ -17,10 +17,7 @@ use futures::{
 };
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
-use meticulous_base::{
-    proto::{BrokerToClient, ClientToBroker},
-    ClientId,
-};
+use meticulous_base::{proto::BrokerToClient, ClientId};
 use meticulous_util::error::{Error, Result};
 use std::{
     collections::HashMap,
@@ -101,9 +98,6 @@ async fn websocket_writer(
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
-        let BrokerToClient::UiResponse(msg) = msg else {
-            continue;
-        };
         if socket
             .send(Message::binary(bincode::serialize(&msg).unwrap()))
             .await
@@ -126,10 +120,7 @@ async fn websocket_reader(
             break;
         };
         if scheduler_sender
-            .send(SchedulerMessage::FromClient(
-                id,
-                ClientToBroker::UiRequest(msg),
-            ))
+            .send(SchedulerMessage::FromClient(id, msg))
             .is_err()
         {
             break;

@@ -7,13 +7,15 @@ mod wasm {
     use futures::{SinkExt as _, StreamExt as _};
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
-    use meticulous_base::proto::{BrokerStatistics, UiRequest, UiResponse};
+    use meticulous_base::proto::{
+        BrokerStatistics, BrokerToClient, ClientToBroker, UiRequest, UiResponse,
+    };
     use std::{cell::RefCell, time::Duration};
     use wasm_bindgen_futures::spawn_local;
 
-    pub trait ClientRpcConnection {
-        fn send(&self, message: UiRequest) -> Result<()>;
-        fn try_recv(&self) -> Result<Option<UiResponse>>;
+    pub trait ClientConnection {
+        fn send(&self, message: ClientToBroker) -> Result<()>;
+        fn try_recv(&self) -> Result<Option<BrokerToClient>>;
     }
 
     pub struct UiHandler<RpcConnectionT> {
@@ -27,7 +29,7 @@ mod wasm {
         }
     }
 
-    impl<RpcConnectionT: ClientRpcConnection> eframe::App for UiHandler<RpcConnectionT> {
+    impl<RpcConnectionT: ClientConnection> eframe::App for UiHandler<RpcConnectionT> {
         fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
             egui::CentralPanel::default().show(ctx, |ui| {
                 ui.heading("Meticulous UI");
@@ -39,10 +41,17 @@ mod wasm {
                     ui.label("loading..");
                 }
 
-                self.rpc.send(UiRequest::GetStatistics).unwrap();
+                self.rpc
+                    .send(ClientToBroker::UiRequest(UiRequest::GetStatistics))
+                    .unwrap();
 
-                if let Some(UiResponse::GetStatistics(stats)) = self.rpc.try_recv().unwrap() {
-                    self.stats = Some(stats);
+                if let Some(msg) = self.rpc.try_recv().unwrap() {
+                    match msg {
+                        BrokerToClient::UiResponse(UiResponse::GetStatistics(stats)) => {
+                            self.stats = Some(stats)
+                        }
+                        _ => unimplemented!(),
+                    }
                 }
 
                 ctx.request_repaint_after(Duration::from_millis(500));
@@ -72,7 +81,7 @@ mod wasm {
             let (mut task_send, recv) = futures::channel::mpsc::channel(1000);
             spawn_local(async move {
                 while let Some(Ok(msg)) = read.next().await {
-                    if let Err(_) = task_send.send(msg).await {
+                    if task_send.send(msg).await.is_err() {
                         break;
                     }
                 }
@@ -81,7 +90,7 @@ mod wasm {
             let (send, mut task_recv) = futures::channel::mpsc::channel(1000);
             spawn_local(async move {
                 while let Some(message) = task_recv.next().await {
-                    if let Err(_) = write.send(message).await {
+                    if write.send(message).await.is_err() {
                         break;
                     }
                 }
@@ -94,15 +103,15 @@ mod wasm {
         }
     }
 
-    impl ClientRpcConnection for RpcConnection {
-        fn send(&self, message: UiRequest) -> anyhow::Result<()> {
+    impl ClientConnection for RpcConnection {
+        fn send(&self, message: ClientToBroker) -> anyhow::Result<()> {
             self.send
                 .borrow_mut()
                 .try_send(Message::Bytes(bincode::serialize(&message).unwrap()))?;
             Ok(())
         }
 
-        fn try_recv(&self) -> anyhow::Result<Option<UiResponse>> {
+        fn try_recv(&self) -> anyhow::Result<Option<BrokerToClient>> {
             match self.recv.borrow_mut().try_next() {
                 Ok(Some(Message::Bytes(b))) => Ok(Some(bincode::deserialize(&b)?)),
                 Ok(Some(Message::Text(_))) => Err(anyhow::Error::msg("Unexpected Message::Text")),
