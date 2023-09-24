@@ -132,6 +132,7 @@ mod tests {
                     "-c".to_string(),
                     format!($($tokens),*),
                 ],
+                layers: vec![],
             }
         };
     }
@@ -140,6 +141,7 @@ mod tests {
         ExecutionDetails {
             program: "a_program_that_does_not_exist".to_string(),
             arguments: vec![],
+            layers: vec![],
         }
     }
 

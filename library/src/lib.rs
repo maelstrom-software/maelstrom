@@ -28,6 +28,7 @@ pub struct ExecutionId(ClientId, ClientExecutionId);
 pub struct ExecutionDetails {
     pub program: String,
     pub arguments: Vec<String>,
+    pub layers: Vec<Sha256Digest>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

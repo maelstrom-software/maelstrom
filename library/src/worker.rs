@@ -4,7 +4,8 @@ pub mod cache;
 mod dispatcher;
 mod executor;
 
-use crate::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result};
+use crate::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result, Sha256Digest};
+use std::path::PathBuf;
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
@@ -22,6 +23,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
         &mut self,
         id: ExecutionId,
         details: ExecutionDetails,
+        _layers: Vec<PathBuf>,
     ) -> Self::ExecutionHandle {
         let sender = self.dispatcher_sender.clone();
         executor::start(details, move |result| {
@@ -33,6 +35,14 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
 
     fn send_response_to_broker(&mut self, message: proto::WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
+    }
+
+    fn send_get_request_to_cache(&mut self, _id: ExecutionId, _digest: Sha256Digest) {
+        todo!()
+    }
+
+    fn send_decrement_refcount_to_cache(&mut self, _digest: Sha256Digest) {
+        todo!()
     }
 }
 

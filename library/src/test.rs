@@ -32,32 +32,47 @@ macro_rules! details {
         $crate::ExecutionDetails {
             program: "test_1".to_string(),
             arguments: vec![],
+            layers: vec![],
         }
     };
     [2] => {
         $crate::ExecutionDetails {
             program: "test_2".to_string(),
             arguments: vec!["arg_1".to_string()],
+            layers: vec![],
         }
     };
     [3] => {
         $crate::ExecutionDetails {
             program: "test_3".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
+            layers: vec![],
         }
     };
     [4] => {
         $crate::ExecutionDetails {
             program: "test_4".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
+            layers: vec![],
         }
     };
     [$n:literal] => {
         $crate::ExecutionDetails {
             program: concat!("test_", stringify!($n)).to_string(),
             arguments: vec!["arg_1".to_string()],
+            layers: vec![],
         }
     };
+    [$n:literal, [$($digest:expr),*]] => {
+        {
+            let $crate::ExecutionDetails { program, arguments, .. } = details![$n];
+            $crate::ExecutionDetails {
+                program,
+                arguments,
+                layers: vec![$(digest!($digest)),*],
+            }
+        }
+    }
 }
 pub(crate) use details;
 
@@ -90,6 +105,13 @@ macro_rules! path_buf {
     };
 }
 pub(crate) use path_buf;
+
+macro_rules! path_buf_vec {
+    [$($e:expr),*] => {
+        vec![$(path_buf!($e)),*]
+    };
+}
+pub(crate) use path_buf_vec;
 
 macro_rules! long_path {
     ($prefix:expr, $n:expr) => {

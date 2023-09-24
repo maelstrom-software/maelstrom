@@ -54,6 +54,7 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
                 ExecutionDetails {
                     program: binary,
                     arguments: vec!["--exact".to_string(), case],
+                    layers: vec![],
                 },
             ),
         )
