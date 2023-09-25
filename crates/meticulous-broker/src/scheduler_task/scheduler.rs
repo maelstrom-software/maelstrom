@@ -22,16 +22,6 @@ use std::{
  *  FIGLET: public
  */
 
-/// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
-    #[allow(dead_code)]
-    cache: CacheT,
-    clients: HashMap<ClientId, Client<DepsT>>,
-    workers: WorkerMap<DepsT>,
-    queued_requests: VecDeque<ExecutionId>,
-    worker_heap: Heap<WorkerMap<DepsT>>,
-}
-
 /// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait SchedulerDeps {
@@ -47,6 +37,12 @@ pub trait SchedulerDeps {
     );
 }
 
+/// The required interface for the cache that is provided to the [Scheduler]. This mirrors the API
+/// for [Cache]. We just keep them separate so that we can test the [Scheduler] more easily.
+///
+/// Unlike with [SchedulerDeps], all of these functions are immediate. The [Cache] is owned by the
+/// [Scheduler] and the two live on the same task. So these methods sometimes return actual values
+/// which can be handled immediately, unlike [SchedulerDeps].
 pub trait SchedulerCache {
     fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact;
     fn got_artifact(
@@ -105,11 +101,8 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::GotArtifact(digest, path, bytes_used) => {
                 self.receive_got_artifact(deps, digest, path, bytes_used)
             }
-            Message::GetArtifactForWorker(digest, mut sender) => {
-                deps.send_message_to_worker_artifact_fetcher(
-                    &mut sender,
-                    self.cache.get_artifact_for_worker(&digest),
-                );
+            Message::GetArtifactForWorker(digest, sender) => {
+                self.receive_get_artifact_for_worker(deps, digest, sender)
             }
         }
     }
@@ -152,7 +145,6 @@ impl BoolExt for bool {
     }
 }
 
-#[derive(Debug)]
 struct Execution {
     details: ExecutionDetails,
     acquired_artifacts: HashSet<Sha256Digest>,
@@ -169,7 +161,6 @@ impl Execution {
     }
 }
 
-#[derive(Debug)]
 struct Client<DepsT: SchedulerDeps> {
     sender: DepsT::ClientSender,
     executions: HashMap<ClientExecutionId, Execution>,
@@ -184,12 +175,22 @@ impl<DepsT: SchedulerDeps> Client<DepsT> {
     }
 }
 
-#[derive(Debug)]
 struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
     pending: HashSet<ExecutionId>,
     heap_index: HeapIndex,
     sender: DepsT::WorkerSender,
+}
+
+impl<DepsT: SchedulerDeps> Worker<DepsT> {
+    fn new(slots: usize, sender: DepsT::WorkerSender) -> Self {
+        Worker {
+            slots,
+            sender,
+            pending: HashSet::default(),
+            heap_index: HeapIndex::default(),
+        }
+    }
 }
 
 struct WorkerMap<DepsT: SchedulerDeps>(HashMap<WorkerId, Worker<DepsT>>);
@@ -208,6 +209,14 @@ impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
     fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
         self.0.get_mut(elem).unwrap().heap_index = idx;
     }
+}
+
+pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
+    cache: CacheT,
+    clients: HashMap<ClientId, Client<DepsT>>,
+    workers: WorkerMap<DepsT>,
+    queued_requests: VecDeque<ExecutionId>,
+    worker_heap: Heap<WorkerMap<DepsT>>,
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -335,15 +344,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     ) {
         self.workers
             .0
-            .insert(
-                id,
-                Worker {
-                    slots,
-                    pending: HashSet::default(),
-                    heap_index: HeapIndex::default(),
-                    sender,
-                },
-            )
+            .insert(id, Worker::new(slots, sender))
             .assert_is_none();
         self.worker_heap.push(&mut self.workers, id);
         self.possibly_start_executions(deps);
@@ -440,6 +441,18 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             }
         }
         self.possibly_start_executions(deps);
+    }
+
+    fn receive_get_artifact_for_worker(
+        &mut self,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        mut sender: DepsT::WorkerArtifactFetcherSender,
+    ) {
+        deps.send_message_to_worker_artifact_fetcher(
+            &mut sender,
+            self.cache.get_artifact_for_worker(&digest),
+        );
     }
 }
 
