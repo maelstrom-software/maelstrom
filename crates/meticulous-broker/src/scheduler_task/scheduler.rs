@@ -68,6 +68,8 @@ pub enum Message<DepsT: SchedulerDeps> {
     GotArtifact(Sha256Digest, PathBuf, u64),
     #[allow(dead_code)]
     GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
+    #[allow(dead_code)]
+    DecrementRefcount(Sha256Digest),
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -104,6 +106,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::GetArtifactForWorker(digest, sender) => {
                 self.receive_get_artifact_for_worker(deps, digest, sender)
             }
+            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(digest),
         }
     }
 }
@@ -453,6 +456,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             &mut sender,
             self.cache.get_artifact_for_worker(&digest),
         );
+    }
+
+    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
+        self.cache.decrement_refcount(digest);
     }
 }
 
@@ -1214,6 +1221,13 @@ mod tests {
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
             ToWorkerArtifactFetcher(1, Some("/a/good/path".into())),
+        }
+    }
+
+    script_test! {
+        decrement_refcount,
+        DecrementRefcount(digest![42]) => {
+            CacheDecrementRefcount(digest![42]),
         }
     }
 }
