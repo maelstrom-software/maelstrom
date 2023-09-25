@@ -63,7 +63,7 @@ impl SchedulerDeps for PassThroughDeps {
     type ClientSender = UnboundedSender<proto::BrokerToClient>;
     type WorkerSender = UnboundedSender<proto::BrokerToWorker>;
 
-    fn send_response_to_client(
+    fn send_message_to_client(
         &mut self,
         sender: &mut Self::ClientSender,
         response: proto::BrokerToClient,
@@ -71,7 +71,7 @@ impl SchedulerDeps for PassThroughDeps {
         sender.send(response).ok();
     }
 
-    fn send_request_to_worker(
+    fn send_message_to_worker(
         &mut self,
         sender: &mut Self::WorkerSender,
         request: proto::BrokerToWorker,

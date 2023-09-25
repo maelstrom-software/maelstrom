@@ -37,12 +37,8 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
 pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
-    fn send_response_to_client(
-        &mut self,
-        sender: &mut Self::ClientSender,
-        response: BrokerToClient,
-    );
-    fn send_request_to_worker(&mut self, sender: &mut Self::WorkerSender, request: BrokerToWorker);
+    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, response: BrokerToClient);
+    fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, request: BrokerToWorker);
 }
 
 pub trait SchedulerCache {
@@ -214,7 +210,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 .get(&eid.1)
                 .unwrap()
                 .details;
-            deps.send_request_to_worker(
+            deps.send_message_to_worker(
                 &mut worker.sender,
                 BrokerToWorker::EnqueueExecution(eid, details.clone()),
             );
@@ -246,7 +242,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for worker in self.workers.0.values_mut() {
             worker.pending.retain(|eid| {
                 eid.0 != id || {
-                    deps.send_request_to_worker(
+                    deps.send_message_to_worker(
                         &mut worker.sender,
                         BrokerToWorker::CancelExecution(*eid),
                     );
@@ -287,7 +283,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                         .missing_artifacts
                         .insert(layer.clone())
                         .assert_is_true();
-                    deps.send_response_to_client(
+                    deps.send_message_to_client(
                         &mut client.sender,
                         BrokerToClient::TransferArtifact(layer.clone()),
                     );
@@ -308,7 +304,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             num_workers: self.workers.0.len() as u64,
             num_requests: self.queued_requests.len() as u64,
         });
-        deps.send_response_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
+        deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
     }
 
     fn receive_worker_connected(
@@ -367,7 +363,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
 
         let client = self.clients.get_mut(&eid.0).unwrap();
         client.executions.remove(&eid.1).assert_is_some();
-        deps.send_response_to_client(
+        deps.send_message_to_client(
             &mut client.sender,
             BrokerToClient::ExecutionResponse(eid.1, result),
         );
@@ -384,7 +380,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
-            deps.send_request_to_worker(
+            deps.send_message_to_worker(
                 &mut worker.sender,
                 BrokerToWorker::EnqueueExecution(eid, details.clone()),
             );
@@ -472,7 +468,7 @@ mod tests {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
 
-        fn send_response_to_client(
+        fn send_message_to_client(
             &mut self,
             sender: &mut TestClientSender,
             response: BrokerToClient,
@@ -482,7 +478,7 @@ mod tests {
                 .push(ToClient(sender.0, response));
         }
 
-        fn send_request_to_worker(
+        fn send_message_to_worker(
             &mut self,
             sender: &mut TestWorkerSender,
             request: BrokerToWorker,
