@@ -7,14 +7,6 @@ use std::{
 };
 
 pub trait CacheFs {
-    /// Return a random u64. This is used for creating unique path names in the directory removal
-    /// code path.
-    fn rand_u64(&mut self) -> u64;
-
-    /// Return true if a file (or directory, or symlink, etc.) exists with the given path, and
-    /// false otherwise. Panic on file system error.
-    fn file_exists(&mut self, path: &Path) -> bool;
-
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
@@ -32,8 +24,6 @@ pub trait CacheFs {
     fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
 
     fn file_size(&mut self, path: &Path) -> u64;
-
-    fn create(&mut self, path: &Path);
 }
 
 pub enum Message {
@@ -80,7 +70,7 @@ enum CacheEntry {
 pub enum GetArtifact {
     Success,
     Wait,
-    Get(PathBuf),
+    Get,
 }
 
 impl<CacheFsT: CacheFs> Cache<CacheFsT> {
@@ -144,7 +134,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             CacheEntry::Waiting(requests, clients) => {
                 requests.push(eid);
                 if clients.insert(eid.0) {
-                    GetArtifact::Get(self.tmp_path())
+                    GetArtifact::Get
                 } else {
                     GetArtifact::Wait
                 }
@@ -256,21 +246,6 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
 }
 
 impl<CacheFsT: CacheFs> Cache<CacheFsT> {
-    fn tmp_path(&mut self) -> PathBuf {
-        let mut target = self.root.clone();
-        target.push("tmp");
-        loop {
-            let key = self.fs.rand_u64();
-            target.push(format!("{key:016x}.tar"));
-            if !self.fs.file_exists(&target) {
-                self.fs.create(&target);
-                return target;
-            } else {
-                target.pop();
-            }
-        }
-    }
-
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.to_owned();
         path.push("sha256");
@@ -326,13 +301,11 @@ mod tests {
 
     #[derive(Debug, PartialEq)]
     enum TestMessage {
-        FileExists(PathBuf),
         Rename(PathBuf, PathBuf),
         Remove(PathBuf),
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         FileSize(PathBuf),
-        Create(PathBuf),
     }
 
     #[derive(Default)]
@@ -340,20 +313,9 @@ mod tests {
         messages: Vec<TestMessage>,
         files: HashMap<PathBuf, u64>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
-        last_random_number: u64,
     }
 
     impl CacheFs for Rc<RefCell<TestCacheFs>> {
-        fn rand_u64(&mut self) -> u64 {
-            self.borrow_mut().last_random_number += 1;
-            self.borrow().last_random_number
-        }
-
-        fn file_exists(&mut self, path: &Path) -> bool {
-            self.borrow_mut().messages.push(FileExists(path.to_owned()));
-            self.borrow().files.contains_key(path)
-        }
-
         fn rename(&mut self, source: &Path, destination: &Path) {
             self.borrow_mut()
                 .messages
@@ -385,10 +347,6 @@ mod tests {
         fn file_size(&mut self, path: &Path) -> u64 {
             self.borrow_mut().messages.push(FileSize(path.to_owned()));
             *self.borrow().files.get(path).unwrap()
-        }
-
-        fn create(&mut self, path: &Path) {
-            self.borrow_mut().messages.push(Create(path.to_owned()));
         }
     }
 
@@ -576,15 +534,7 @@ mod tests {
     #[test]
     fn test_get_artifact_once() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
-        fixture.get_artifact(
-            eid!(1, 1001),
-            digest!(1),
-            GetArtifact::Get(short_path!("/z/tmp", 1, "tar")),
-            vec![
-                FileExists(short_path!("/z/tmp", 1, "tar")),
-                Create(short_path!("/z/tmp", 1, "tar")),
-            ],
-        );
+        fixture.get_artifact(eid!(1, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
@@ -598,15 +548,7 @@ mod tests {
     fn test_get_artifact_again_from_different_client() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact(
-            eid!(2, 1001),
-            digest!(1),
-            GetArtifact::Get(short_path!("/z/tmp", 2, "tar")),
-            vec![
-                FileExists(short_path!("/z/tmp", 2, "tar")),
-                Create(short_path!("/z/tmp", 2, "tar")),
-            ],
-        );
+        fixture.get_artifact(eid!(2, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
@@ -954,15 +896,7 @@ mod tests {
         fixture.get_artifact_ign(eid!(1, 1002), digest!(1));
         fixture.get_artifact_ign(eid!(3, 1003), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
-        fixture.get_artifact(
-            eid!(1, 1003),
-            digest!(1),
-            GetArtifact::Get(short_path!("/z/tmp", 3, "tar")),
-            vec![
-                FileExists(short_path!("/z/tmp", 3, "tar")),
-                Create(short_path!("/z/tmp", 3, "tar")),
-            ],
-        );
+        fixture.get_artifact(eid!(1, 1003), digest!(1), GetArtifact::Get, vec![]);
         fixture.get_artifact(eid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
         fixture.got_artifact(
             digest!(1),
