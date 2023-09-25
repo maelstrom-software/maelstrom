@@ -1,10 +1,10 @@
 use super::{
-    scheduler_task::{SchedulerMessage, SchedulerSender},
+    scheduler_task::{scheduler::Message, SchedulerMessage, SchedulerSender},
     IdVendor,
 };
 use meticulous_base::proto;
 use meticulous_util::{error::Error, net};
-use std::sync::Arc;
+use std::{net::Shutdown, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -139,7 +139,28 @@ pub async fn listener_main(
                     )
                     .await
                 }
-                proto::Hello::ClientArtifact { .. } | proto::Hello::WorkerArtifact { .. } => {
+                proto::Hello::WorkerArtifact { ref digest } => {
+                    use std::io::Write;
+                    let mut socket = socket.into_std().unwrap();
+                    socket.set_nonblocking(false).unwrap();
+                    socket.shutdown(Shutdown::Read).unwrap();
+                    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
+                    scheduler_sender
+                        .send(Message::GetArtifactForWorker(
+                            digest.clone(),
+                            channel_sender,
+                        ))
+                        .unwrap();
+                    if let Some(path) = channel_receiver.recv().unwrap() {
+                        let mut f = std::fs::File::open(path).unwrap();
+                        socket.write_all(&[1u8]).unwrap();
+                        std::io::copy(&mut f, &mut socket)?;
+                        scheduler_sender
+                            .send(Message::DecrementRefcount(digest.clone()))
+                            .unwrap();
+                    }
+                }
+                proto::Hello::ClientArtifact { .. } => {
                     todo!("artifact handling not yet implemented")
                 }
             }

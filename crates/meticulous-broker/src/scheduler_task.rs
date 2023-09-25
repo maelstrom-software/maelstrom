@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 mod cache;
-mod scheduler;
+pub mod scheduler;
 
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
