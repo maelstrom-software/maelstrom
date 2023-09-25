@@ -2,7 +2,10 @@
 //! workers.
 
 use meticulous_base::{
-    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    proto::{
+        BrokerStatistics, BrokerToClient, BrokerToWorker, ClientToBroker, UiRequest, UiResponse,
+        WorkerToBroker,
+    },
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
 };
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
@@ -177,16 +180,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         self.possibly_start_executions(deps);
     }
 
-    fn receive_ui_request(
-        &mut self,
-        deps: &mut DepsT,
-        client_id: ClientId,
-        request: meticulous_ui::Request,
-    ) {
-        use meticulous_ui::{BrokerStatistics, Request, Response};
-
+    fn receive_ui_request(&mut self, deps: &mut DepsT, client_id: ClientId, request: UiRequest) {
         let resp = match request {
-            Request::GetStatistics => Response::GetStatistics(BrokerStatistics {
+            UiRequest::GetStatistics => UiResponse::GetStatistics(BrokerStatistics {
                 num_clients: self.clients.len() as u64,
                 num_workers: self.workers.0.len() as u64,
                 num_requests: self.queued_requests.len() as u64,

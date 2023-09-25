@@ -7,4 +7,4 @@ edition = "2021"
 anyhow = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
-serde = { workspace = true }
+meticulous-base = { workspace = true }

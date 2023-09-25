@@ -6,6 +6,7 @@ mod wasm {
     use futures::{SinkExt as _, StreamExt as _};
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
+    use meticulous_base::proto;
     use meticulous_ui::UiHandler;
     use std::cell::RefCell;
     use wasm_bindgen_futures::spawn_local;
@@ -55,14 +56,14 @@ mod wasm {
     }
 
     impl meticulous_ui::ClientRpcConnection for RpcConnection {
-        fn send(&self, message: meticulous_ui::Request) -> meticulous_ui::Result<()> {
+        fn send(&self, message: proto::UiRequest) -> meticulous_ui::Result<()> {
             self.send
                 .borrow_mut()
                 .try_send(Message::Bytes(bincode::serialize(&message).unwrap()))?;
             Ok(())
         }
 
-        fn try_recv(&self) -> meticulous_ui::Result<Option<meticulous_ui::Response>> {
+        fn try_recv(&self) -> meticulous_ui::Result<Option<proto::UiResponse>> {
             match self.recv.borrow_mut().try_next() {
                 Ok(Some(Message::Bytes(b))) => Ok(Some(bincode::deserialize(&b)?)),
                 Ok(Some(Message::Text(_))) => Err(anyhow::Error::msg("Unexpected Message::Text")),

@@ -1650,7 +1650,6 @@ dependencies = [
 name = "meticulous-base"
 version = "0.1.0"
 dependencies = [
- "meticulous-ui",
  "serde",
 ]
 
@@ -1667,7 +1666,6 @@ dependencies = [
  "itertools",
  "meticulous-base",
  "meticulous-test",
- "meticulous-ui",
  "meticulous-util",
  "serde",
  "tar",
@@ -1710,7 +1708,7 @@ dependencies = [
  "anyhow",
  "eframe",
  "egui",
- "serde",
+ "meticulous-base",
 ]
 
 [[package]]
@@ -1736,6 +1734,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "gloo-utils",
+ "meticulous-base",
  "meticulous-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",

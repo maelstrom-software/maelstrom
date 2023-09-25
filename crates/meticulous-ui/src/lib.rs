@@ -1,28 +1,11 @@
-use serde::{Deserialize, Serialize};
+use meticulous_base::proto::{BrokerStatistics, UiRequest, UiResponse};
 use std::time::Duration;
 
 pub type Result<T> = std::result::Result<T, anyhow::Error>;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Request {
-    GetStatistics,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BrokerStatistics {
-    pub num_clients: u64,
-    pub num_workers: u64,
-    pub num_requests: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum Response {
-    GetStatistics(BrokerStatistics),
-}
-
 pub trait ClientRpcConnection {
-    fn send(&self, message: Request) -> Result<()>;
-    fn try_recv(&self) -> Result<Option<Response>>;
+    fn send(&self, message: UiRequest) -> Result<()>;
+    fn try_recv(&self) -> Result<Option<UiResponse>>;
 }
 
 pub struct UiHandler<RpcConnectionT> {
@@ -48,9 +31,9 @@ impl<RpcConnectionT: ClientRpcConnection> eframe::App for UiHandler<RpcConnectio
                 ui.label("loading..");
             }
 
-            self.rpc.send(Request::GetStatistics).unwrap();
+            self.rpc.send(UiRequest::GetStatistics).unwrap();
 
-            if let Some(Response::GetStatistics(stats)) = self.rpc.try_recv().unwrap() {
+            if let Some(UiResponse::GetStatistics(stats)) = self.rpc.try_recv().unwrap() {
                 self.stats = Some(stats);
             }
 
