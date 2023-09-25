@@ -21,7 +21,6 @@ use tungstenite::Message;
 
 const WASM_TAR: &[u8] = include_bytes!("../../../target/web.tar");
 
-#[derive(Clone)]
 pub struct TarHandler {
     map: HashMap<String, &'static [u8]>,
 }
@@ -138,7 +137,7 @@ async fn serve_websocket(
 
 #[derive(Clone)]
 struct Handler {
-    tar_handler: TarHandler,
+    tar_handler: Arc<TarHandler>,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
     id_vendor: Arc<IdVendor>,
 }
@@ -182,20 +181,17 @@ pub async fn listener_main(
     http.http1_only(true);
     http.http1_keep_alive(true);
 
-    let tar_handler = TarHandler::from_embedded();
+    let tar_handler = Arc::new(TarHandler::from_embedded());
 
     loop {
         let (stream, _) = listener.accept().await?;
-        let tar_handler = tar_handler.clone();
-        let scheduler_sender = scheduler_sender.clone();
-        let id_vendor = id_vendor.clone();
         let connection = http
             .serve_connection(
                 stream,
                 Handler {
-                    tar_handler,
-                    scheduler_sender,
-                    id_vendor,
+                    tar_handler: tar_handler.clone(),
+                    scheduler_sender: scheduler_sender.clone(),
+                    id_vendor: id_vendor.clone(),
                 },
             )
             .with_upgrades();
