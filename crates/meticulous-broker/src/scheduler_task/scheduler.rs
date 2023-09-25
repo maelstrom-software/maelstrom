@@ -246,8 +246,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         ceid: ClientExecutionId,
         details: ExecutionDetails,
     ) {
-        let client = self.clients.get_mut(&cid).unwrap();
-        client
+        self.clients
+            .get_mut(&cid)
+            .unwrap()
             .executions
             .insert(ceid, Execution { details })
             .assert_is_none();
