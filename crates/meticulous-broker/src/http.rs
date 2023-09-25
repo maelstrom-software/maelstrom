@@ -27,13 +27,13 @@ pub struct TarHandler {
 }
 
 impl TarHandler {
-    pub fn from_memory(bytes: &'static [u8]) -> Self {
+    pub fn from_embedded() -> Self {
+        let bytes = WASM_TAR;
         let mut map = HashMap::new();
         let mut ar = tar::Archive::new(bytes);
         for entry in ar.entries().unwrap() {
             let entry = entry.unwrap();
             let header = entry.header();
-
             let path = header.path().unwrap().to_str().unwrap().into();
             let start = entry.raw_file_position() as usize;
             let end = start + header.size().unwrap() as usize;
@@ -182,7 +182,7 @@ pub async fn main(
     http.http1_only(true);
     http.http1_keep_alive(true);
 
-    let tar_handler = TarHandler::from_memory(WASM_TAR);
+    let tar_handler = TarHandler::from_embedded();
 
     loop {
         let (stream, _) = listener.accept().await?;
