@@ -135,7 +135,6 @@ async fn serve_websocket(
     Ok(())
 }
 
-#[derive(Clone)]
 struct Handler {
     tar_handler: Arc<TarHandler>,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
