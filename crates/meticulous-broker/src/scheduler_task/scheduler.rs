@@ -362,11 +362,14 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
 
         let client = self.clients.get_mut(&eid.0).unwrap();
-        client.executions.remove(&eid.1).assert_is_some();
         deps.send_message_to_client(
             &mut client.sender,
             BrokerToClient::ExecutionResponse(eid.1, result),
         );
+        let execution = client.executions.remove(&eid.1).unwrap();
+        for artifact in execution.acquired_artifacts {
+            self.cache.decrement_refcount(artifact);
+        }
 
         if let Some(eid) = self.queued_requests.pop_front() {
             let details = &self
@@ -1027,5 +1030,32 @@ mod tests {
             CacheClientDisconnected(cid![1]),
             CacheDecrementRefcount(digest![42]),
         }
+    }
+
+    script_test! {
+        request_with_layers_2,
+        {
+            Fixture::new([
+                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((eid![1, 2], digest![43]), vec![GetArtifact::Success]),
+                ((eid![1, 2], digest![44]), vec![GetArtifact::Success]),
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(eid![1, 2], digest![42]),
+            CacheGetArtifact(eid![1, 2], digest![43]),
+            CacheGetArtifact(eid![1, 2], digest![44]),
+            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![1, [42, 43, 44]])),
+        };
+
+        FromWorker(wid![1], WorkerToBroker(eid![1, 2], result![1])) => {
+            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![1])),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+            CacheDecrementRefcount(digest![44]),
+        };
     }
 }
