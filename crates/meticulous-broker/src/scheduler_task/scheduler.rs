@@ -140,6 +140,18 @@ impl BoolExt for bool {
 #[derive(Debug)]
 struct Execution {
     details: ExecutionDetails,
+    acquired_artifacts: HashSet<Sha256Digest>,
+    missing_artifacts: HashSet<Sha256Digest>,
+}
+
+impl Execution {
+    fn new(details: ExecutionDetails) -> Self {
+        Execution {
+            details,
+            acquired_artifacts: HashSet::default(),
+            missing_artifacts: HashSet::default(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -220,7 +232,15 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     }
 
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
-        self.clients.remove(&id).assert_is_some();
+        self.cache.client_disconnected(id);
+
+        let client = self.clients.remove(&id).unwrap();
+        for execution in client.executions.into_values() {
+            for artifact in execution.acquired_artifacts {
+                self.cache.decrement_refcount(artifact);
+            }
+        }
+
         self.queued_requests
             .retain(|ExecutionId(cid, _)| *cid != id);
         for worker in self.workers.0.values_mut() {
@@ -236,7 +256,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
         self.worker_heap.rebuild(&mut self.workers);
         self.possibly_start_executions(deps);
-        self.cache.client_disconnected(id);
     }
 
     fn receiver_client_execution_request(
@@ -246,14 +265,41 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         ceid: ClientExecutionId,
         details: ExecutionDetails,
     ) {
-        self.clients
-            .get_mut(&cid)
-            .unwrap()
-            .executions
-            .insert(ceid, Execution { details })
-            .assert_is_none();
-        self.queued_requests.push_back(ExecutionId(cid, ceid));
-        self.possibly_start_executions(deps);
+        let client = self.clients.get_mut(&cid).unwrap();
+        let mut execution = Execution::new(details);
+        let eid = ExecutionId(cid, ceid);
+        for layer in &execution.details.layers {
+            match self.cache.get_artifact(eid, layer.clone()) {
+                GetArtifact::Success => {
+                    execution
+                        .acquired_artifacts
+                        .insert(layer.clone())
+                        .assert_is_true();
+                }
+                GetArtifact::Wait => {
+                    execution
+                        .missing_artifacts
+                        .insert(layer.clone())
+                        .assert_is_true();
+                }
+                GetArtifact::Get => {
+                    execution
+                        .missing_artifacts
+                        .insert(layer.clone())
+                        .assert_is_true();
+                    deps.send_response_to_client(
+                        &mut client.sender,
+                        BrokerToClient::TransferArtifact(layer.clone()),
+                    );
+                }
+            }
+        }
+        let have_all_artifacts = execution.missing_artifacts.is_empty();
+        client.executions.insert(ceid, execution).assert_is_none();
+        if have_all_artifacts {
+            self.queued_requests.push_back(eid);
+            self.possibly_start_executions(deps);
+        }
     }
 
     fn receiver_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
@@ -372,7 +418,9 @@ mod tests {
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
-        CacheDecrementRefcount(ClientId),
+        CacheGetArtifact(ExecutionId, Sha256Digest),
+        CacheDecrementRefcount(Sha256Digest),
+        CacheClientDisconnected(ClientId),
     }
 
     use TestMessage::*;
@@ -383,11 +431,19 @@ mod tests {
     #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
+        get_artifact_returns: HashMap<(ExecutionId, Sha256Digest), Vec<GetArtifact>>,
     }
 
     impl SchedulerCache for Arc<RefCell<TestState>> {
-        fn get_artifact(&mut self, _eid: ExecutionId, _digest: Sha256Digest) -> GetArtifact {
-            todo!()
+        fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
+            self.borrow_mut()
+                .messages
+                .push(CacheGetArtifact(eid, digest.clone()));
+            self.borrow_mut()
+                .get_artifact_returns
+                .get_mut(&(eid, digest))
+                .unwrap()
+                .remove(0)
         }
         fn got_artifact(
             &mut self,
@@ -397,11 +453,15 @@ mod tests {
         ) -> Vec<ExecutionId> {
             todo!()
         }
-        fn decrement_refcount(&mut self, _digest: Sha256Digest) {
-            todo!()
+        fn decrement_refcount(&mut self, digest: Sha256Digest) {
+            self.borrow_mut()
+                .messages
+                .push(CacheDecrementRefcount(digest));
         }
         fn client_disconnected(&mut self, cid: ClientId) {
-            self.borrow_mut().messages.push(CacheDecrementRefcount(cid));
+            self.borrow_mut()
+                .messages
+                .push(CacheClientDisconnected(cid));
         }
         fn get_artifact_for_worker(&mut self, _digest: &Sha256Digest) -> Option<PathBuf> {
             todo!()
@@ -447,6 +507,15 @@ mod tests {
     }
 
     impl Fixture {
+        fn new<const N: usize>(
+            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); N],
+        ) -> Self {
+            let result = Self::default();
+            result.test_state.borrow_mut().get_artifact_returns =
+                HashMap::from(get_artifact_returns);
+            result
+        }
+
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
             let messages = &mut self.test_state.borrow_mut().messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
@@ -479,6 +548,16 @@ mod tests {
             #[test]
             fn $test_name() {
                 let mut fixture = Fixture::default();
+                $(
+                    fixture.receive_message($in_msg);
+                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
+                )+
+            }
+        };
+        ($test_name:ident, $fixture_expr:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
+            #[test]
+            fn $test_name() {
+                let mut fixture = $fixture_expr;
                 $(
                     fixture.receive_message($in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
@@ -831,7 +910,7 @@ mod tests {
 
         ClientDisconnected(cid![1]) => {
             ToWorker(wid![1], CancelExecution(eid![1, 1])),
-            CacheDecrementRefcount(cid![1]),
+            CacheClientDisconnected(cid![1]),
         };
     }
 
@@ -877,7 +956,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
 
         ClientDisconnected(cid![2]) => {
-            CacheDecrementRefcount(cid![2]),
+            CacheClientDisconnected(cid![2]),
         };
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
@@ -925,7 +1004,32 @@ mod tests {
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
 
-            CacheDecrementRefcount(cid![2]),
+            CacheClientDisconnected(cid![2]),
         };
+    }
+
+    script_test! {
+        request_with_layers,
+        {
+            Fixture::new([
+                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(eid![1, 2], digest![42]),
+            CacheGetArtifact(eid![1, 2], digest![43]),
+            CacheGetArtifact(eid![1, 2], digest![44]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+        }
     }
 }
