@@ -173,7 +173,7 @@ async fn serve_websocket(
     Ok(())
 }
 
-pub async fn main(
+pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: UnboundedSender<SchedulerMessage>,
     id_vendor: Arc<IdVendor>,

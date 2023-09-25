@@ -80,7 +80,7 @@ pub async fn main(
     let id_vendor = Arc::new(connection::IdVendor::default());
 
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(http::main(
+    join_set.spawn(http::listener_main(
         http_listener,
         scheduler_sender.clone(),
         id_vendor.clone(),
