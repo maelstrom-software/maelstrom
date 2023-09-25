@@ -79,43 +79,6 @@ impl TarHandler {
     }
 }
 
-#[derive(Clone)]
-struct Handler {
-    tar_handler: TarHandler,
-    scheduler_sender: UnboundedSender<SchedulerMessage>,
-    id_vendor: Arc<IdVendor>,
-}
-
-impl Service<Request<Body>> for Handler {
-    type Response = Response<Body>;
-    type Error = crate::Error;
-    type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
-
-    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
-        let resp = (|| {
-            if hyper_tungstenite::is_upgrade_request(&request) {
-                let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
-                let scheduler_sender = self.scheduler_sender.clone();
-                let id_vendor = self.id_vendor.clone();
-                tokio::spawn(async move {
-                    serve_websocket(websocket, scheduler_sender, id_vendor)
-                        .await
-                        .ok()
-                });
-                Ok(response)
-            } else {
-                Ok(self.tar_handler.get_file(&request.uri().to_string()))
-            }
-        })();
-
-        Box::pin(async { resp })
-    }
-}
-
 async fn websocket_writer(
     mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
@@ -171,6 +134,43 @@ async fn serve_websocket(
     .await;
 
     Ok(())
+}
+
+#[derive(Clone)]
+struct Handler {
+    tar_handler: TarHandler,
+    scheduler_sender: UnboundedSender<SchedulerMessage>,
+    id_vendor: Arc<IdVendor>,
+}
+
+impl Service<Request<Body>> for Handler {
+    type Response = Response<Body>;
+    type Error = crate::Error;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response>> + Send>>;
+
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
+        let resp = (|| {
+            if hyper_tungstenite::is_upgrade_request(&request) {
+                let (response, websocket) = hyper_tungstenite::upgrade(&mut request, None)?;
+                let scheduler_sender = self.scheduler_sender.clone();
+                let id_vendor = self.id_vendor.clone();
+                tokio::spawn(async move {
+                    serve_websocket(websocket, scheduler_sender, id_vendor)
+                        .await
+                        .ok()
+                });
+                Ok(response)
+            } else {
+                Ok(self.tar_handler.get_file(&request.uri().to_string()))
+            }
+        })();
+
+        Box::pin(async { resp })
+    }
 }
 
 pub async fn listener_main(
