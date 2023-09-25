@@ -256,13 +256,13 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.possibly_start_executions(deps);
     }
 
-    fn receiver_client_statistics_request(&mut self, deps: &mut DepsT, client_id: ClientId) {
+    fn receiver_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
         let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
             num_clients: self.clients.len() as u64,
             num_workers: self.workers.0.len() as u64,
             num_requests: self.queued_requests.len() as u64,
         });
-        deps.send_response_to_client(&mut self.clients.get_mut(&client_id).unwrap().sender, resp);
+        deps.send_response_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
     }
 
     fn receive_worker_connected(
