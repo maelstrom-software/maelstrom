@@ -62,6 +62,8 @@ pub enum Message<DepsT: SchedulerDeps> {
     WorkerConnected(WorkerId, usize, DepsT::WorkerSender),
     WorkerDisconnected(WorkerId),
     FromWorker(WorkerId, WorkerToBroker),
+    #[allow(dead_code)]
+    GotArtifact(Sha256Digest, PathBuf, u64),
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -91,6 +93,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
             Message::FromWorker(wid, WorkerToBroker(eid, result)) => {
                 self.receive_worker_response(deps, wid, eid, result)
+            }
+            Message::GotArtifact(digest, path, bytes_used) => {
+                self.receive_got_artifact(deps, digest, path, bytes_used)
             }
         }
     }
@@ -395,6 +400,33 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             self.worker_heap.sift_up(&mut self.workers, heap_index);
         }
     }
+
+    fn receive_got_artifact(
+        &mut self,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        path: PathBuf,
+        bytes_used: u64,
+    ) {
+        for eid in self.cache.got_artifact(digest.clone(), &path, bytes_used) {
+            let execution = self
+                .clients
+                .get_mut(&eid.0)
+                .unwrap()
+                .executions
+                .get_mut(&eid.1)
+                .unwrap();
+            execution
+                .acquired_artifacts
+                .insert(digest.clone())
+                .assert_is_true();
+            execution.missing_artifacts.remove(&digest).assert_is_true();
+            if execution.missing_artifacts.is_empty() {
+                self.queued_requests.push_back(eid);
+            }
+        }
+        self.possibly_start_executions(deps);
+    }
 }
 
 /*  _            _
@@ -418,6 +450,7 @@ mod tests {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
         CacheGetArtifact(ExecutionId, Sha256Digest),
+        CacheGotArtifact(Sha256Digest, PathBuf, u64),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
     }
@@ -431,6 +464,7 @@ mod tests {
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(ExecutionId, Sha256Digest), Vec<GetArtifact>>,
+        got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<ExecutionId>>>,
     }
 
     impl SchedulerCache for Arc<RefCell<TestState>> {
@@ -446,11 +480,20 @@ mod tests {
         }
         fn got_artifact(
             &mut self,
-            _digest: Sha256Digest,
-            _path: &Path,
-            _bytes_used: u64,
+            digest: Sha256Digest,
+            path: &Path,
+            bytes_used: u64,
         ) -> Vec<ExecutionId> {
-            todo!()
+            self.borrow_mut().messages.push(CacheGotArtifact(
+                digest.clone(),
+                path.to_owned(),
+                bytes_used,
+            ));
+            self.borrow_mut()
+                .got_artifact_returns
+                .get_mut(&digest)
+                .unwrap()
+                .remove(0)
         }
         fn decrement_refcount(&mut self, digest: Sha256Digest) {
             self.borrow_mut()
@@ -506,12 +549,15 @@ mod tests {
     }
 
     impl Fixture {
-        fn new<const N: usize>(
-            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); N],
+        fn new<const M: usize, const N: usize>(
+            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); M],
+            got_artifact_returns: [(Sha256Digest, Vec<Vec<ExecutionId>>); N],
         ) -> Self {
             let result = Self::default();
             result.test_state.borrow_mut().get_artifact_returns =
                 HashMap::from(get_artifact_returns);
+            result.test_state.borrow_mut().got_artifact_returns =
+                HashMap::from(got_artifact_returns);
             result
         }
 
@@ -1014,7 +1060,8 @@ mod tests {
                 ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
                 ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ])
+            ],
+            [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1039,7 +1086,8 @@ mod tests {
                 ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
                 ((eid![1, 2], digest![43]), vec![GetArtifact::Success]),
                 ((eid![1, 2], digest![44]), vec![GetArtifact::Success]),
-            ])
+            ],
+            [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1057,5 +1105,45 @@ mod tests {
             CacheDecrementRefcount(digest![43]),
             CacheDecrementRefcount(digest![44]),
         };
+    }
+
+    script_test! {
+        request_with_layers_3,
+        {
+            Fixture::new([
+                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
+            ],
+            [
+                (digest![43], vec![vec![eid![1, 2]]]),
+                (digest![44], vec![vec![eid![1, 2]]]),
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(eid![1, 2], digest![42]),
+            CacheGetArtifact(eid![1, 2], digest![43]),
+            CacheGetArtifact(eid![1, 2], digest![44]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
+        };
+
+        GotArtifact(digest![43], "/z/tmp/foo".into(), 100) => {
+            CacheGotArtifact(digest![43], "/z/tmp/foo".into(),100),
+        };
+        GotArtifact(digest![44], "/z/tmp/bar".into(), 100) => {
+            CacheGotArtifact(digest![44], "/z/tmp/bar".into(),100),
+            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![1, [42, 43, 44]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelExecution(eid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+            CacheDecrementRefcount(digest![44]),
+        }
     }
 }
