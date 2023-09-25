@@ -145,6 +145,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             // If it was executing, we need to drop the execution handle, which will
             // tell the executor to kill the process. We also need to clean up all of our layers.
             layers = details.layers;
+            self.possibly_start_execution();
         } else {
             // It may be the queue.
             self.queued.retain_mut(|x| {
@@ -171,8 +172,8 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             for digest in details.layers {
                 self.deps.send_decrement_refcount_to_cache(digest);
             }
+            self.possibly_start_execution();
         }
-        self.possibly_start_execution();
     }
 
     fn receive_cache_response(
@@ -427,31 +428,16 @@ mod tests {
     }
 
     script_test! {
-        enqueue_1_with_layers_with_layer_failure,
-        2,
-        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
-            SendGetRequestToCache(eid![1], digest!(41)),
-            SendGetRequestToCache(eid![1], digest!(42)),
-            SendGetRequestToCache(eid![1], digest!(43)),
-        };
-
-        Cache(eid![1], digest!(43), Some(path_buf!("/c"))) => {};
-        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
-        Cache(eid![1], digest!(42), None) => {
-            SendResponseToBroker(WorkerToBroker(eid![1], ExecutionResult::Error(
-                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
-            SendDecrementRefcountToCache(digest!(41)),
-            SendDecrementRefcountToCache(digest!(43)),
-        };
-    }
-
-    script_test! {
         complete_1,
         2,
-        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![1], details![1, [42]])) =>  {
+            SendGetRequestToCache(eid![1], digest!(42)),
+        };
+        Cache(eid![1], digest!(42), Some(path_buf!("/a"))) => {StartExecution(eid![1], details![1, [42]], path_buf_vec!["/a"]) };
         Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
+            SendDecrementRefcountToCache(digest!(42)),
         };
     }
 
@@ -485,9 +471,20 @@ mod tests {
         2,
         Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
         Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
-        Broker(EnqueueExecution(eid![3], details![3])) => {};
+        Broker(EnqueueExecution(eid![3], details![3, [41, 42, 43]])) => {
+            SendGetRequestToCache(eid![3], digest!(41)),
+            SendGetRequestToCache(eid![3], digest!(42)),
+            SendGetRequestToCache(eid![3], digest!(43)),
+        };
+        Cache(eid![3], digest!(41), Some(path_buf!("/a"))) => {};
+        Cache(eid![3], digest!(42), Some(path_buf!("/b"))) => {};
+        Cache(eid![3], digest!(43), Some(path_buf!("/c"))) => {};
         Broker(EnqueueExecution(eid![4], details![4])) => {};
-        Broker(CancelExecution(eid![3])) => {};
+        Broker(CancelExecution(eid![3])) => {
+            SendDecrementRefcountToCache(digest!(41)),
+            SendDecrementRefcountToCache(digest!(42)),
+            SendDecrementRefcountToCache(digest!(43)),
+        };
         Executor(eid![1], result![1]) => {
             DropExecutionHandle(eid![1]),
             SendResponseToBroker(WorkerToBroker(eid![1], result![1])),
@@ -498,11 +495,40 @@ mod tests {
     script_test! {
         cancel_executing,
         2,
-        Broker(EnqueueExecution(eid![1], details![1])) => { StartExecution(eid![1], details![1], path_buf_vec![]) };
+        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
+            SendGetRequestToCache(eid![1], digest!(41)),
+            SendGetRequestToCache(eid![1], digest!(42)),
+            SendGetRequestToCache(eid![1], digest!(43)),
+        };
+        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
+        Cache(eid![1], digest!(42), Some(path_buf!("/b"))) => {};
+        Cache(eid![1], digest!(43), Some(path_buf!("/c"))) => {
+            StartExecution(eid![1], details![1, [41, 42, 43]], path_buf_vec!["/a", "/b", "/c"])
+        };
         Broker(EnqueueExecution(eid![2], details![2])) => { StartExecution(eid![2], details![2], path_buf_vec![]) };
         Broker(EnqueueExecution(eid![3], details![3])) => {};
-        Broker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
-        Executor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
+        Broker(CancelExecution(eid![1])) => {
+            DropExecutionHandle(eid![1]),
+            SendDecrementRefcountToCache(digest!(41)),
+            SendDecrementRefcountToCache(digest!(42)),
+            SendDecrementRefcountToCache(digest!(43)),
+            StartExecution(eid![3], details![3], path_buf_vec![])
+        };
+        Executor(eid![1], result![2]) => {};
+    }
+
+    script_test! {
+        cancel_awaiting_layers,
+        2,
+        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43]])) => {
+            SendGetRequestToCache(eid![1], digest!(41)),
+            SendGetRequestToCache(eid![1], digest!(42)),
+            SendGetRequestToCache(eid![1], digest!(43)),
+        };
+        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
+        Broker(CancelExecution(eid![1])) => {
+            SendDecrementRefcountToCache(digest!(41))
+        }
     }
 
     script_test! {
@@ -517,12 +543,36 @@ mod tests {
         Broker(CancelExecution(eid![4])) => {};
         Broker(CancelExecution(eid![4])) => {};
         Broker(CancelExecution(eid![4])) => {};
-        Broker(CancelExecution(eid![2])) => { DropExecutionHandle(eid![2]) };
+        Broker(CancelExecution(eid![2])) => {
+            DropExecutionHandle(eid![2]),
+            StartExecution(eid![3], details![3], path_buf_vec![]),
+        };
         Broker(CancelExecution(eid![2])) => {};
         Broker(CancelExecution(eid![2])) => {};
-        Executor(eid![2], result![2]) => { StartExecution(eid![3], details![3], path_buf_vec![]) };
+        Executor(eid![2], result![2]) => {};
         Broker(CancelExecution(eid![2])) => {};
         Broker(CancelExecution(eid![2])) => {};
+    }
+
+    script_test! {
+        error_cache_responses,
+        2,
+        Broker(EnqueueExecution(eid![1], details![1, [41, 42, 43, 44]])) => {
+            SendGetRequestToCache(eid![1], digest!(41)),
+            SendGetRequestToCache(eid![1], digest!(42)),
+            SendGetRequestToCache(eid![1], digest!(43)),
+            SendGetRequestToCache(eid![1], digest!(44)),
+        };
+        Cache(eid![1], digest!(41), Some(path_buf!("/a"))) => {};
+        Cache(eid![1], digest!(42), None) => {
+            SendResponseToBroker(WorkerToBroker(eid![1], ExecutionResult::Error(
+                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
+            SendDecrementRefcountToCache(digest!(41))
+        };
+        Cache(eid![1], digest!(43), Some(path_buf!("/c"))) => {
+            SendDecrementRefcountToCache(digest!(43))
+        };
+        Cache(eid![1], digest!(44), None) => {};
     }
 
     #[test]
