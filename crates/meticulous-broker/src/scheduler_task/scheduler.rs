@@ -1,13 +1,17 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
+use super::GetArtifact;
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     BrokerStatistics, ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult,
-    WorkerId,
+    Sha256Digest, WorkerId,
 };
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::{
+    collections::{HashMap, HashSet, VecDeque},
+    path::{Path, PathBuf},
+};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -37,6 +41,19 @@ pub trait SchedulerDeps {
         response: BrokerToClient,
     );
     fn send_request_to_worker(&mut self, sender: &mut Self::WorkerSender, request: BrokerToWorker);
+}
+
+pub trait SchedulerCache {
+    fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact;
+    fn got_artifact(
+        &mut self,
+        digest: Sha256Digest,
+        path: &Path,
+        bytes_used: u64,
+    ) -> Vec<ExecutionId>;
+    fn decrement_refcount(&mut self, digest: Sha256Digest);
+    fn client_disconnected(&mut self, cid: ClientId);
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf>;
 }
 
 #[derive(Debug)]
