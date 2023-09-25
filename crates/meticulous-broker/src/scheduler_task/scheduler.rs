@@ -209,6 +209,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
         self.worker_heap.rebuild(&mut self.workers);
         self.possibly_start_executions(deps);
+        self.cache.client_disconnected(id);
     }
 
     fn receiver_client_execution_request(
@@ -339,11 +340,13 @@ mod tests {
     use itertools::Itertools;
     use meticulous_base::proto::BrokerToWorker::{self, *};
     use meticulous_test::*;
+    use std::{cell::RefCell, sync::Arc};
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
+        CacheDecrementRefcount(ClientId),
     }
 
     use TestMessage::*;
@@ -352,9 +355,11 @@ mod tests {
     struct TestWorkerSender(WorkerId);
 
     #[derive(Default)]
-    struct CrashingTestCache;
+    struct TestState {
+        messages: Vec<TestMessage>,
+    }
 
-    impl SchedulerCache for CrashingTestCache {
+    impl SchedulerCache for Arc<RefCell<TestState>> {
         fn get_artifact(&mut self, _eid: ExecutionId, _digest: Sha256Digest) -> GetArtifact {
             todo!()
         }
@@ -369,20 +374,15 @@ mod tests {
         fn decrement_refcount(&mut self, _digest: Sha256Digest) {
             todo!()
         }
-        fn client_disconnected(&mut self, _cid: ClientId) {
-            todo!()
+        fn client_disconnected(&mut self, cid: ClientId) {
+            self.borrow_mut().messages.push(CacheDecrementRefcount(cid));
         }
         fn get_artifact_for_worker(&mut self, _digest: &Sha256Digest) -> Option<PathBuf> {
             todo!()
         }
     }
 
-    #[derive(Default)]
-    struct TestState {
-        messages: Vec<TestMessage>,
-    }
-
-    impl SchedulerDeps for TestState {
+    impl SchedulerDeps for Arc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
 
@@ -391,7 +391,9 @@ mod tests {
             sender: &mut TestClientSender,
             response: BrokerToClient,
         ) {
-            self.messages.push(ToClient(sender.0, response));
+            self.borrow_mut()
+                .messages
+                .push(ToClient(sender.0, response));
         }
 
         fn send_request_to_worker(
@@ -399,27 +401,28 @@ mod tests {
             sender: &mut TestWorkerSender,
             request: BrokerToWorker,
         ) {
-            self.messages.push(ToWorker(sender.0, request));
+            self.borrow_mut().messages.push(ToWorker(sender.0, request));
         }
     }
 
     struct Fixture {
-        test_state: TestState,
-        scheduler: Scheduler<CrashingTestCache, TestState>,
+        test_state: Arc<RefCell<TestState>>,
+        scheduler: Scheduler<Arc<RefCell<TestState>>, Arc<RefCell<TestState>>>,
     }
 
     impl Default for Fixture {
         fn default() -> Self {
+            let test_state = Arc::new(RefCell::new(TestState::default()));
             Fixture {
-                test_state: TestState::default(),
-                scheduler: Scheduler::new(CrashingTestCache),
+                test_state: test_state.clone(),
+                scheduler: Scheduler::new(test_state),
             }
         }
     }
 
     impl Fixture {
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.test_state.messages;
+            let messages = &mut self.test_state.borrow_mut().messages;
             for perm in expected.clone().into_iter().permutations(expected.len()) {
                 if perm == *messages {
                     messages.clear();
@@ -432,7 +435,7 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message<TestState>) {
+        fn receive_message(&mut self, msg: Message<Arc<RefCell<TestState>>>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }
@@ -802,6 +805,7 @@ mod tests {
 
         ClientDisconnected(cid![1]) => {
             ToWorker(wid![1], CancelExecution(eid![1, 1])),
+            CacheDecrementRefcount(cid![1]),
         };
     }
 
@@ -846,7 +850,9 @@ mod tests {
         FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
         FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
 
-        ClientDisconnected(cid![2]) => {};
+        ClientDisconnected(cid![2]) => {
+            CacheDecrementRefcount(cid![2]),
+        };
 
         FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
             ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
@@ -892,6 +898,8 @@ mod tests {
             ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
             ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
             ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
+
+            CacheDecrementRefcount(cid![2]),
         };
     }
 }
