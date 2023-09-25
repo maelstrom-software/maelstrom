@@ -3,10 +3,18 @@ use meticulous_util::net;
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
-pub mod cache;
+mod cache;
 mod scheduler;
 
 pub struct PassThroughDeps;
+
+#[derive(Debug, PartialEq)]
+#[allow(dead_code)]
+pub enum GetArtifact {
+    Success,
+    Wait,
+    Get,
+}
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.

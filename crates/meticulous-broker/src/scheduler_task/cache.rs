@@ -1,3 +1,4 @@
+use super::GetArtifact;
 use meticulous_base::{ClientId, ExecutionId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
@@ -67,14 +68,6 @@ enum CacheEntry {
         priority: u64,
         heap_index: HeapIndex,
     },
-}
-
-#[derive(Debug, PartialEq)]
-#[allow(dead_code)]
-pub enum GetArtifact {
-    Success,
-    Wait,
-    Get,
 }
 
 #[allow(dead_code)]
