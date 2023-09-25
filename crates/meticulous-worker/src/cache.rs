@@ -1,6 +1,6 @@
 //! Manage downloading, extracting, and storing of image files specified by executions.
 
-use crate::{
+use meticulous::{
     heap::{Heap, HeapDeps, HeapIndex},
     Result, Sha256Digest,
 };
@@ -131,8 +131,8 @@ pub enum Message<RequestIdT> {
 /// grown too large.
 pub struct Cache<CacheDepsT: CacheDeps> {
     root: PathBuf,
-    entries: HashMap<Sha256Digest, CacheEntry<CacheDepsT>>,
-    heap: Heap<HashMap<Sha256Digest, CacheEntry<CacheDepsT>>>,
+    entries: CacheMap<CacheDepsT>,
+    heap: Heap<CacheMap<CacheDepsT>>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_goal: u64,
@@ -167,7 +167,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
 
         Cache {
             root: root.to_owned(),
-            entries: HashMap::default(),
+            entries: CacheMap(HashMap::default()),
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
@@ -267,7 +267,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
         request_id: CacheDepsT::RequestId,
         digest: Sha256Digest,
     ) {
-        match self.entries.entry(digest) {
+        match self.entries.0.entry(digest) {
             hash_map::Entry::Vacant(entry) => {
                 let cache_path = Self::cache_path(&self.root, entry.key());
                 deps.download_and_extract(entry.key().clone(), cache_path);
@@ -303,7 +303,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     }
 
     fn receive_download_and_extract_error(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
-        let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.remove(&digest)
+        let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.0.remove(&digest)
         else {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
@@ -321,7 +321,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
+            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.0.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             Self::remove_in_background(
@@ -341,6 +341,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     ) {
         let entry = self
             .entries
+            .0
             .get_mut(&digest)
             .expect("Got DownloadingAndExtracting in unexpected state");
         let CacheEntry::DownloadingAndExtracting(requests) = entry else {
@@ -363,6 +364,7 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     fn receive_decrement_refcount(&mut self, deps: &mut CacheDepsT, digest: Sha256Digest) {
         let entry = self
             .entries
+            .0
             .get_mut(&digest)
             .expect("Got DecrementRefcount in unexpected state");
         let CacheEntry::InUse {
@@ -388,15 +390,17 @@ impl<CacheDepsT: CacheDeps> Cache<CacheDepsT> {
     }
 }
 
-impl<CacheDepsT: CacheDeps> HeapDeps for HashMap<Sha256Digest, CacheEntry<CacheDepsT>> {
+struct CacheMap<CacheDepsT: CacheDeps>(HashMap<Sha256Digest, CacheEntry<CacheDepsT>>);
+
+impl<CacheDepsT: CacheDeps> HeapDeps for CacheMap<CacheDepsT> {
     type Element = Sha256Digest;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        let lhs_priority = match self.get(lhs) {
+        let lhs_priority = match self.0.get(lhs) {
             Some(CacheEntry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
-        let rhs_priority = match self.get(rhs) {
+        let rhs_priority = match self.0.get(rhs) {
             Some(CacheEntry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
@@ -404,7 +408,7 @@ impl<CacheDepsT: CacheDeps> HeapDeps for HashMap<Sha256Digest, CacheEntry<CacheD
     }
 
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
-        match self.get_mut(elem) {
+        match self.0.get_mut(elem) {
             Some(CacheEntry::InHeap { heap_index, .. }) => *heap_index = idx,
             _ => panic!("Element should be in heap"),
         };
@@ -423,7 +427,7 @@ impl<CacheDepsT: CacheDeps> HeapDeps for HashMap<Sha256Digest, CacheEntry<CacheD
 mod tests {
     use super::Message::*;
     use super::*;
-    use crate::test::*;
+    use meticulous::*;
     use anyhow::anyhow;
     use itertools::Itertools;
     use std::collections::HashSet;

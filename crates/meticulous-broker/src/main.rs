@@ -44,9 +44,9 @@ fn main() -> meticulous::Result<()> {
         println!("web UI listing on {:?}", http_listener.local_addr()?);
 
         tokio::spawn(
-            async move { meticulous::broker::http::main(broker_addr, http_listener).await },
+            async move { meticulous_broker::http::main(broker_addr, http_listener).await },
         );
-        meticulous::broker::main(broker_listener).await
+        meticulous_broker::main(broker_listener).await
     })?;
     Ok(())
 }

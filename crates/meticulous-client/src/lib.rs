@@ -1,6 +1,6 @@
 //! Code for the client binary.
 
-use crate::{proto, ClientExecutionId, ExecutionDetails, Result};
+use meticulous::{proto, ClientExecutionId, ExecutionDetails, Result};
 use std::collections::HashMap;
 
 async fn get_test_binaries() -> Result<Vec<String>> {

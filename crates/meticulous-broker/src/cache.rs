@@ -1,4 +1,4 @@
-use crate::{
+use meticulous::{
     heap::{Heap, HeapDeps, HeapIndex},
     ClientId, ExecutionId, Sha256Digest,
 };
@@ -45,8 +45,8 @@ pub enum Message {
 pub struct Cache<CacheFsT> {
     fs: CacheFsT,
     root: PathBuf,
-    entries: HashMap<Sha256Digest, CacheEntry>,
-    heap: Heap<HashMap<Sha256Digest, CacheEntry>>,
+    entries: CacheMap,
+    heap: Heap<CacheMap>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_goal: u64,
@@ -99,7 +99,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         let mut result = Cache {
             fs,
             root: root.to_owned(),
-            entries: HashMap::default(),
+            entries: CacheMap(HashMap::default()),
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
@@ -114,7 +114,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
                 if right == "tar" {
                     if let Ok(digest) = left.parse::<Sha256Digest>() {
                         let bytes_used = result.fs.file_size(&child);
-                        result.entries.insert(
+                        result.entries.0.insert(
                             digest.clone(),
                             CacheEntry::InHeap {
                                 bytes_used,
@@ -139,6 +139,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     pub fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
         let entry = self
             .entries
+            .0
             .entry(digest)
             .or_insert(CacheEntry::Waiting(Vec::default(), HashSet::default()));
         match entry {
@@ -178,7 +179,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     ) -> Vec<ExecutionId> {
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
-        match self.entries.entry(digest.clone()) {
+        match self.entries.0.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
                     bytes_used,
@@ -213,7 +214,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     }
 
     pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
-        let entry = self.entries.get_mut(&digest).unwrap();
+        let entry = self.entries.0.get_mut(&digest).unwrap();
         let CacheEntry::InUse {
             bytes_used,
             refcount,
@@ -237,7 +238,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     }
 
     pub fn client_disconnected(&mut self, cid: ClientId) {
-        self.entries.retain(|_, e| {
+        self.entries.0.retain(|_, e| {
             let CacheEntry::Waiting(eids, clients) = e else {
                 return true;
             };
@@ -248,7 +249,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     }
 
     pub fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf> {
-        let Some(CacheEntry::InUse { refcount, .. }) = self.entries.get_mut(digest) else {
+        let Some(CacheEntry::InUse { refcount, .. }) = self.entries.0.get_mut(digest) else {
             return None;
         };
         *refcount = refcount.checked_add(1).unwrap();
@@ -284,7 +285,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
+            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.0.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             self.fs.remove(&self.cache_path(&digest));
@@ -293,15 +294,17 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     }
 }
 
-impl HeapDeps for HashMap<Sha256Digest, CacheEntry> {
+struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
+
+impl HeapDeps for CacheMap {
     type Element = Sha256Digest;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        let lhs_priority = match self.get(lhs) {
+        let lhs_priority = match self.0.get(lhs) {
             Some(CacheEntry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
-        let rhs_priority = match self.get(rhs) {
+        let rhs_priority = match self.0.get(rhs) {
             Some(CacheEntry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
@@ -309,7 +312,7 @@ impl HeapDeps for HashMap<Sha256Digest, CacheEntry> {
     }
 
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
-        match self.get_mut(elem) {
+        match self.0.get_mut(elem) {
             Some(CacheEntry::InHeap { heap_index, .. }) => *heap_index = idx,
             _ => panic!("Element should be in heap"),
         };
@@ -319,7 +322,7 @@ impl HeapDeps for HashMap<Sha256Digest, CacheEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test::*;
+    use meticulous::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 

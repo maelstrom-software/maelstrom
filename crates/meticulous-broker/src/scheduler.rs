@@ -1,7 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::{
+use meticulous::{
     heap::{Heap, HeapDeps, HeapIndex},
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult, WorkerId,
@@ -20,9 +20,9 @@ use std::collections::{HashMap, VecDeque};
 /// All methods are completely nonblocking. They will never block the task or the thread.
 pub struct Scheduler<DepsT: SchedulerDeps> {
     clients: HashMap<ClientId, DepsT::ClientSender>,
-    workers: HashMap<WorkerId, Worker<DepsT>>,
+    workers: WorkerMap<DepsT>,
     queued_requests: VecDeque<(ExecutionId, ExecutionDetails)>,
-    worker_heap: Heap<HashMap<WorkerId, Worker<DepsT>>>,
+    worker_heap: Heap<WorkerMap<DepsT>>,
 }
 
 /// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
@@ -91,34 +91,36 @@ impl<DepsT: SchedulerDeps> Default for Scheduler<DepsT> {
     fn default() -> Self {
         Scheduler {
             clients: HashMap::default(),
-            workers: HashMap::default(),
+            workers: WorkerMap(HashMap::default()),
             queued_requests: VecDeque::default(),
             worker_heap: Heap::default(),
         }
     }
 }
 
-impl<DepsT: SchedulerDeps> HeapDeps for HashMap<WorkerId, Worker<DepsT>> {
+struct WorkerMap<DepsT: SchedulerDeps>(HashMap<WorkerId, Worker<DepsT>>);
+
+impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
     type Element = WorkerId;
 
     fn is_element_less_than(&self, lhs_id: &WorkerId, rhs_id: &WorkerId) -> bool {
-        let lhs_worker = self.get(lhs_id).unwrap();
-        let rhs_worker = self.get(rhs_id).unwrap();
+        let lhs_worker = self.0.get(lhs_id).unwrap();
+        let rhs_worker = self.0.get(rhs_id).unwrap();
         let lhs = (lhs_worker.pending.len() * rhs_worker.slots, *lhs_id);
         let rhs = (rhs_worker.pending.len() * lhs_worker.slots, *rhs_id);
         lhs.cmp(&rhs) == std::cmp::Ordering::Less
     }
 
     fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
-        self.get_mut(elem).unwrap().heap_index = idx;
+        self.0.get_mut(elem).unwrap().heap_index = idx;
     }
 }
 
 impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     fn possibly_start_executions(&mut self, deps: &mut DepsT) {
-        while !self.queued_requests.is_empty() && !self.workers.is_empty() {
+        while !self.queued_requests.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
-            let worker = self.workers.get_mut(wid).unwrap();
+            let worker = self.workers.0.get_mut(wid).unwrap();
 
             if worker.pending.len() == 2 * worker.slots {
                 break;
@@ -147,7 +149,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         assert!(self.clients.remove(&id).is_some());
         self.queued_requests
             .retain(|(ExecutionId(cid, _), _)| *cid != id);
-        for worker in self.workers.values_mut() {
+        for worker in self.workers.0.values_mut() {
             worker.pending.retain(|eid, _| {
                 eid.0 != id || {
                     deps.send_request_to_worker(
@@ -186,7 +188,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         let resp = match request {
             Request::GetStatistics => Response::GetStatistics(BrokerStatistics {
                 num_clients: self.clients.len() as u64,
-                num_workers: self.workers.len() as u64,
+                num_workers: self.workers.0.len() as u64,
                 num_requests: self.queued_requests.len() as u64,
             }),
         };
@@ -205,6 +207,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     ) {
         let unique = self
             .workers
+            .0
             .insert(
                 id,
                 Worker {
@@ -221,7 +224,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
     }
 
     fn receive_worker_disconnected(&mut self, deps: &mut DepsT, id: WorkerId) {
-        let mut worker = self.workers.remove(&id).unwrap();
+        let mut worker = self.workers.0.remove(&id).unwrap();
         self.worker_heap
             .remove(&mut self.workers, worker.heap_index);
 
@@ -242,7 +245,7 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
         eid: ExecutionId,
         result: ExecutionResult,
     ) {
-        let worker = self.workers.get_mut(&wid).unwrap();
+        let worker = self.workers.0.get_mut(&wid).unwrap();
 
         if worker.pending.remove(&eid).is_none() {
             // This indicates that the client isn't around anymore. Just ignore this response from
@@ -285,9 +288,9 @@ impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
-    use crate::{
+    use meticulous::{
         proto::BrokerToWorker::{self, *},
-        test::*,
+        *
     };
     use itertools::Itertools;
 

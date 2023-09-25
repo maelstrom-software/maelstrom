@@ -4,7 +4,7 @@ mod cache;
 mod dispatcher;
 mod executor;
 
-use crate::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result, Sha256Digest};
+use meticulous::{channel_reader, proto, Error, ExecutionDetails, ExecutionId, Result, Sha256Digest};
 use std::path::PathBuf;
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;

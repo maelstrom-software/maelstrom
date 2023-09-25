@@ -1667,7 +1667,51 @@ dependencies = [
 ]
 
 [[package]]
-name = "meticulous_cli"
+name = "meticulous-broker"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "clap",
+ "futures",
+ "hyper",
+ "hyper-tungstenite",
+ "itertools",
+ "meticulous",
+ "meticulous_ui",
+ "serde",
+ "tar",
+ "tokio",
+]
+
+[[package]]
+name = "meticulous-client"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "gethostname 0.4.2",
+ "meticulous",
+ "regex",
+ "tokio",
+]
+
+[[package]]
+name = "meticulous-worker"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "gethostname 0.4.2",
+ "itertools",
+ "meticulous",
+ "nix 0.26.2",
+ "num_cpus",
+ "rand",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "meticulous_bin"
 version = "0.1.0"
 dependencies = [
  "clap",

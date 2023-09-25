@@ -1,0 +1,16 @@
+[package]
+name = "meticulous-worker"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.71"
+clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
+gethostname = "0.4.2"
+meticulous = { path = "../../library", version = "^0.1" }
+nix = { version = "0.26.2", features = ["signal"] }
+num_cpus = "1.15.0"
+rand = "0.8.5"
+tempfile = "3.5.0"
+tokio = { version = "1.28", features = ["full"] }
+itertools = "0.10.5"

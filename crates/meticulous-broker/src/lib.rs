@@ -4,7 +4,7 @@ pub mod cache;
 pub mod http;
 mod scheduler;
 
-use crate::{channel_reader, proto, ClientId, Error, Result, WorkerId};
+use meticulous::{channel_reader, proto, ClientId, Error, Result, WorkerId};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 struct PassThroughDeps;

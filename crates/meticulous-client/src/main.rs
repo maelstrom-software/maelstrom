@@ -30,7 +30,7 @@ struct Cli {
 fn main() -> meticulous::Result<()> {
     let cli = Cli::parse();
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async { meticulous::client::main(cli.name, cli.broker).await })?;
+    runtime.block_on(async { meticulous_client::main(cli.name, cli.broker).await })?;
     Ok(())
 }
 
