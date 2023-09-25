@@ -37,8 +37,14 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
 pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
-    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, response: BrokerToClient);
-    fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, request: BrokerToWorker);
+    type WorkerArtifactFetcherSender;
+    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient);
+    fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker);
+    fn send_message_to_worker_artifact_fetcher(
+        &mut self,
+        sender: &mut Self::WorkerArtifactFetcherSender,
+        message: Option<PathBuf>,
+    );
 }
 
 pub trait SchedulerCache {
@@ -64,6 +70,8 @@ pub enum Message<DepsT: SchedulerDeps> {
     FromWorker(WorkerId, WorkerToBroker),
     #[allow(dead_code)]
     GotArtifact(Sha256Digest, PathBuf, u64),
+    #[allow(dead_code)]
+    GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -96,6 +104,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             }
             Message::GotArtifact(digest, path, bytes_used) => {
                 self.receive_got_artifact(deps, digest, path, bytes_used)
+            }
+            Message::GetArtifactForWorker(digest, mut sender) => {
+                deps.send_message_to_worker_artifact_fetcher(
+                    &mut sender,
+                    self.cache.get_artifact_for_worker(&digest),
+                );
             }
         }
     }
@@ -449,22 +463,26 @@ mod tests {
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
+        ToWorkerArtifactFetcher(u32, Option<PathBuf>),
         CacheGetArtifact(ExecutionId, Sha256Digest),
         CacheGotArtifact(Sha256Digest, PathBuf, u64),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
+        CacheGetArtifactForWorker(Sha256Digest),
     }
 
     use TestMessage::*;
 
     struct TestClientSender(ClientId);
     struct TestWorkerSender(WorkerId);
+    struct TestWorkerArtifactFetcherSender(u32);
 
     #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(ExecutionId, Sha256Digest), Vec<GetArtifact>>,
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<ExecutionId>>>,
+        get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<PathBuf>>>,
     }
 
     impl SchedulerCache for Arc<RefCell<TestState>> {
@@ -505,31 +523,47 @@ mod tests {
                 .messages
                 .push(CacheClientDisconnected(cid));
         }
-        fn get_artifact_for_worker(&mut self, _digest: &Sha256Digest) -> Option<PathBuf> {
-            todo!()
+        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf> {
+            self.borrow_mut()
+                .messages
+                .push(CacheGetArtifactForWorker(digest.clone()));
+            self.borrow_mut()
+                .get_artifact_for_worker_returns
+                .get_mut(&digest)
+                .unwrap()
+                .remove(0)
         }
     }
 
     impl SchedulerDeps for Arc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
+        type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
 
         fn send_message_to_client(
             &mut self,
             sender: &mut TestClientSender,
-            response: BrokerToClient,
+            message: BrokerToClient,
         ) {
-            self.borrow_mut()
-                .messages
-                .push(ToClient(sender.0, response));
+            self.borrow_mut().messages.push(ToClient(sender.0, message));
         }
 
         fn send_message_to_worker(
             &mut self,
             sender: &mut TestWorkerSender,
-            request: BrokerToWorker,
+            message: BrokerToWorker,
         ) {
-            self.borrow_mut().messages.push(ToWorker(sender.0, request));
+            self.borrow_mut().messages.push(ToWorker(sender.0, message));
+        }
+
+        fn send_message_to_worker_artifact_fetcher(
+            &mut self,
+            sender: &mut TestWorkerArtifactFetcherSender,
+            message: Option<PathBuf>,
+        ) {
+            self.borrow_mut()
+                .messages
+                .push(ToWorkerArtifactFetcher(sender.0, message));
         }
     }
 
@@ -549,15 +583,20 @@ mod tests {
     }
 
     impl Fixture {
-        fn new<const M: usize, const N: usize>(
-            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); M],
-            got_artifact_returns: [(Sha256Digest, Vec<Vec<ExecutionId>>); N],
+        fn new<const L: usize, const M: usize, const N: usize>(
+            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); L],
+            got_artifact_returns: [(Sha256Digest, Vec<Vec<ExecutionId>>); M],
+            get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<PathBuf>>); N],
         ) -> Self {
             let result = Self::default();
             result.test_state.borrow_mut().get_artifact_returns =
                 HashMap::from(get_artifact_returns);
             result.test_state.borrow_mut().got_artifact_returns =
                 HashMap::from(got_artifact_returns);
+            result
+                .test_state
+                .borrow_mut()
+                .get_artifact_for_worker_returns = HashMap::from(get_artifact_for_worker_returns);
             result
         }
 
@@ -586,6 +625,10 @@ mod tests {
 
     macro_rules! worker_sender {
         [$n:expr] => { TestWorkerSender(wid![$n]) };
+    }
+
+    macro_rules! worker_artifact_fetcher_sender {
+        [$n:expr] => { TestWorkerArtifactFetcherSender($n) };
     }
 
     macro_rules! script_test {
@@ -1061,6 +1104,7 @@ mod tests {
                 ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
                 ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
             ],
+            [],
             [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1087,6 +1131,7 @@ mod tests {
                 ((eid![1, 2], digest![43]), vec![GetArtifact::Success]),
                 ((eid![1, 2], digest![44]), vec![GetArtifact::Success]),
             ],
+            [],
             [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1118,7 +1163,8 @@ mod tests {
             [
                 (digest![43], vec![vec![eid![1, 2]]]),
                 (digest![44], vec![vec![eid![1, 2]]]),
-            ])
+            ],
+            [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1144,6 +1190,17 @@ mod tests {
             CacheDecrementRefcount(digest![42]),
             CacheDecrementRefcount(digest![43]),
             CacheDecrementRefcount(digest![44]),
+        }
+    }
+
+    script_test! {
+        get_artifact_for_worker,
+        {
+            Fixture::new([], [], [(digest![42], vec![Some("/a/good/path".into())])])
+        },
+        GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
+            CacheGetArtifactForWorker(digest![42]),
+            ToWorkerArtifactFetcher(1, Some("/a/good/path".into())),
         }
     }
 }

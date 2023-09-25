@@ -62,21 +62,30 @@ pub struct PassThroughDeps;
 impl SchedulerDeps for PassThroughDeps {
     type ClientSender = UnboundedSender<proto::BrokerToClient>;
     type WorkerSender = UnboundedSender<proto::BrokerToWorker>;
+    type WorkerArtifactFetcherSender = std::sync::mpsc::Sender<Option<PathBuf>>;
 
     fn send_message_to_client(
         &mut self,
         sender: &mut Self::ClientSender,
-        response: proto::BrokerToClient,
+        message: proto::BrokerToClient,
     ) {
-        sender.send(response).ok();
+        sender.send(message).ok();
     }
 
     fn send_message_to_worker(
         &mut self,
         sender: &mut Self::WorkerSender,
-        request: proto::BrokerToWorker,
+        message: proto::BrokerToWorker,
     ) {
-        sender.send(request).ok();
+        sender.send(message).ok();
+    }
+
+    fn send_message_to_worker_artifact_fetcher(
+        &mut self,
+        sender: &mut Self::WorkerArtifactFetcherSender,
+        message: Option<PathBuf>,
+    ) {
+        sender.send(message).ok();
     }
 }
 
