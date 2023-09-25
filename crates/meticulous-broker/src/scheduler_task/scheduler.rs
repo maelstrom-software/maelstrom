@@ -109,6 +109,34 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  *  FIGLET: private
  */
 
+trait OptionExt {
+    fn assert_is_none(self);
+    fn assert_is_some(self);
+}
+
+impl<T> OptionExt for Option<T> {
+    fn assert_is_none(self) {
+        assert!(self.is_none());
+    }
+    fn assert_is_some(self) {
+        assert!(self.is_some());
+    }
+}
+
+trait BoolExt {
+    fn assert_is_true(self);
+    fn assert_is_false(self);
+}
+
+impl BoolExt for bool {
+    fn assert_is_true(self) {
+        assert!(self);
+    }
+    fn assert_is_false(self) {
+        assert!(!self);
+    }
+}
+
 #[derive(Debug)]
 struct Execution {
     details: ExecutionDetails,
@@ -179,21 +207,20 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 BrokerToWorker::EnqueueExecution(eid, details.clone()),
             );
 
-            assert!(worker.pending.insert(eid));
+            worker.pending.insert(eid).assert_is_true();
             let heap_index = worker.heap_index;
             self.worker_heap.sift_down(&mut self.workers, heap_index);
         }
     }
 
     fn receive_client_connected(&mut self, id: ClientId, sender: DepsT::ClientSender) {
-        assert!(
-            self.clients.insert(id, Client::new(sender)).is_none(),
-            "duplicate client id {id:?}"
-        );
+        self.clients
+            .insert(id, Client::new(sender))
+            .assert_is_none();
     }
 
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
-        assert!(self.clients.remove(&id).is_some());
+        self.clients.remove(&id).assert_is_some();
         self.queued_requests
             .retain(|ExecutionId(cid, _)| *cid != id);
         for worker in self.workers.0.values_mut() {
@@ -220,10 +247,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         details: ExecutionDetails,
     ) {
         let client = self.clients.get_mut(&cid).unwrap();
-        assert!(client
+        client
             .executions
             .insert(ceid, Execution { details })
-            .is_none());
+            .assert_is_none();
         self.queued_requests.push_back(ExecutionId(cid, ceid));
         self.possibly_start_executions(deps);
     }
@@ -244,8 +271,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         slots: usize,
         sender: DepsT::WorkerSender,
     ) {
-        let unique = self
-            .workers
+        self.workers
             .0
             .insert(
                 id,
@@ -256,8 +282,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                     sender,
                 },
             )
-            .is_none();
-        assert!(unique, "duplicate worker id {id:?}");
+            .assert_is_none();
         self.worker_heap.push(&mut self.workers, id);
         self.possibly_start_executions(deps);
     }
@@ -294,7 +319,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
 
         let client = self.clients.get_mut(&eid.0).unwrap();
-        client.executions.remove(&eid.1).unwrap();
+        client.executions.remove(&eid.1).assert_is_some();
         deps.send_response_to_client(
             &mut client.sender,
             BrokerToClient::ExecutionResponse(eid.1, result),
