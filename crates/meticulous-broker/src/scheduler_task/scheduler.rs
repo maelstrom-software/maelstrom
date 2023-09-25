@@ -84,10 +84,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
             Message::FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
-                self.receiver_client_execution_request(deps, cid, ceid, details)
+                self.receive_client_execution_request(deps, cid, ceid, details)
             }
             Message::FromClient(cid, ClientToBroker::StatisticsRequest) => {
-                self.receiver_client_statistics_request(deps, cid)
+                self.receive_client_statistics_request(deps, cid)
             }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
@@ -258,7 +258,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.possibly_start_executions(deps);
     }
 
-    fn receiver_client_execution_request(
+    fn receive_client_execution_request(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
@@ -302,7 +302,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
     }
 
-    fn receiver_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
+    fn receive_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
         let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
             num_clients: self.clients.len() as u64,
             num_workers: self.workers.0.len() as u64,
