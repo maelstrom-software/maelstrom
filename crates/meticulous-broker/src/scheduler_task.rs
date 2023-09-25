@@ -46,7 +46,7 @@ impl Default for SchedulerTask {
     fn default() -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         SchedulerTask {
-            scheduler: Default::default(),
+            scheduler: Scheduler::default(),
             sender,
             receiver,
         }

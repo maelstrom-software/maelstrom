@@ -1,32 +1,11 @@
-use super::scheduler_task::{SchedulerMessage, SchedulerSender};
+use super::{
+    scheduler_task::{SchedulerMessage, SchedulerSender},
+    IdVendor,
+};
 use meticulous_base::proto;
-use meticulous_util::{
-    error::{Error, Result},
-    net,
-};
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
-};
+use meticulous_util::{error::Error, net};
+use std::sync::Arc;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-
-pub struct IdVendor {
-    id: AtomicU32,
-}
-
-impl Default for IdVendor {
-    fn default() -> Self {
-        IdVendor {
-            id: AtomicU32::new(0),
-        }
-    }
-}
-
-impl IdVendor {
-    pub fn vend<T: From<u32>>(&self) -> T {
-        self.id.fetch_add(1, Ordering::SeqCst).into()
-    }
-}
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
 /// of these for each connected client or worker socket. This function will run until the client or
@@ -68,8 +47,7 @@ impl IdVendor {
 /// messages from the supplied scheduler receiver and write them to the socket-like object.
 /// The scheduler receiver will be a newly-created FromSchedulerMessageT receiver
 ///
-// XXX: Unit test this function.
-pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT>(
+pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFutureT>(
     scheduler_sender: SchedulerSender,
     id: IdT,
     connected_msg_builder: impl FnOnce(IdT, UnboundedSender<FromSchedulerMessageT>) -> SchedulerMessage,
@@ -112,14 +90,12 @@ pub async fn socket_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFuture
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
-// XXX: Unit test this function.
 pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
-) -> Result<()> {
-    loop {
-        let (mut socket, peer_addr) = listener.accept().await?;
+) {
+    while let Ok((mut socket, peer_addr)) = listener.accept().await {
         let scheduler_sender = scheduler_sender.clone();
         let id_vendor = id_vendor.clone();
 
@@ -131,7 +107,7 @@ pub async fn listener_main(
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
                     let id = id_vendor.vend();
-                    socket_main(
+                    connection_main(
                         scheduler_sender,
                         id,
                         SchedulerMessage::ClientConnected,
@@ -149,7 +125,7 @@ pub async fn listener_main(
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
                     let id = id_vendor.vend();
-                    socket_main(
+                    connection_main(
                         scheduler_sender,
                         id,
                         |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),

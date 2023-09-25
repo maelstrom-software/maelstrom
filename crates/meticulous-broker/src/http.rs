@@ -7,8 +7,9 @@
 //!
 //! Second, it handles WebSockets. These are treated just like client connections.
 use super::{
-    connection::{self, IdVendor},
+    connection,
     scheduler_task::{SchedulerMessage, SchedulerSender},
+    IdVendor,
 };
 use futures::{
     sink::SinkExt,
@@ -147,7 +148,7 @@ async fn websocket_main(
     };
     let (write_stream, read_stream) = websocket.split();
     let id = id_vendor.vend();
-    connection::socket_main(
+    connection::connection_main(
         scheduler_sender,
         id,
         SchedulerMessage::ClientConnected,
@@ -196,15 +197,14 @@ pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
-) -> Result<()> {
+) {
     let mut http = Http::new();
     http.http1_only(true);
     http.http1_keep_alive(true);
 
     let tar_handler = Arc::new(TarHandler::from_embedded());
 
-    loop {
-        let (stream, _) = listener.accept().await?;
+    while let Ok((stream, _)) = listener.accept().await {
         let connection = http
             .serve_connection(
                 stream,
