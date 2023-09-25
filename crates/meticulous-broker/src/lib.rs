@@ -1,9 +1,12 @@
 //! Code for the broker binary.
 
 use scheduler_task::SchedulerTask;
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
 };
 use tokio::{
     net::TcpListener,
@@ -38,8 +41,13 @@ async fn signal_handler(kind: SignalKind) {
 /// The main function for the broker. This should be called on a task of its own. It will return
 /// when a signal is received, or when the broker or http listener socket returns an error at
 /// accept time.
-pub async fn main(listener: TcpListener, http_listener: TcpListener) {
-    let scheduler_task = SchedulerTask::default();
+pub async fn main(
+    listener: TcpListener,
+    http_listener: TcpListener,
+    cache_root: PathBuf,
+    cache_bytes_used_goal: u64,
+) {
+    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_goal);
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
     });

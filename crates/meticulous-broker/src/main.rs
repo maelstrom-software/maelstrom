@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{value_parser, Parser};
-use std::net::SocketAddrV6;
+use std::{net::SocketAddrV6, path::PathBuf};
 
 /// The meticulous worker. This process executes subprocesses as directed by the broker.
 #[derive(Parser)]
@@ -19,6 +19,15 @@ struct Cli {
         value_parser = value_parser!(u16).range(1..)
     )]
     http_port: Option<u16>,
+
+    /// The directory to use for the cache.
+    #[arg(short = 'd', long, default_value = "./worker")]
+    cache_directory: PathBuf,
+
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative.
+    #[arg(short = 'c', long, default_value_t = 100000000)]
+    cache_bytes_used_target: u64,
 }
 
 fn main() -> Result<()> {
@@ -42,7 +51,13 @@ fn main() -> Result<()> {
         let http_listener = tokio::net::TcpListener::bind(sock_addr).await?;
         println!("web UI listing on {:?}", http_listener.local_addr()?);
 
-        meticulous_broker::main(broker_listener, http_listener).await;
+        meticulous_broker::main(
+            broker_listener,
+            http_listener,
+            cli.cache_directory,
+            cli.cache_bytes_used_target,
+        )
+        .await;
         Ok(())
     })
 }

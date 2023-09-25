@@ -27,6 +27,35 @@ pub trait CacheFs {
     fn file_size(&mut self, path: &Path) -> u64;
 }
 
+pub struct StdCacheFs;
+
+impl CacheFs for StdCacheFs {
+    fn rename(&mut self, source: &Path, destination: &Path) {
+        std::fs::rename(source, destination).unwrap()
+    }
+
+    fn remove(&mut self, path: &Path) {
+        std::fs::remove_file(path).unwrap()
+    }
+
+    fn mkdir_recursively(&mut self, path: &Path) {
+        std::fs::create_dir_all(path).unwrap();
+    }
+
+    fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
+        Box::new(
+            std::fs::read_dir(path)
+                .unwrap()
+                .map(|de| de.unwrap().path()),
+        )
+    }
+
+    fn file_size(&mut self, path: &Path) -> u64 {
+        let metadata = std::fs::metadata(path).unwrap();
+        metadata.len()
+    }
+}
+
 #[allow(dead_code)]
 pub enum Message {
     GotArtifact(Sha256Digest, PathBuf, u64),
@@ -72,8 +101,8 @@ enum CacheEntry {
 
 #[allow(dead_code)]
 impl<CacheFsT: CacheFs> Cache<CacheFsT> {
-    pub fn new(mut fs: CacheFsT, root: &Path, bytes_used_goal: u64) -> Self {
-        let mut path = root.to_owned();
+    pub fn new(mut fs: CacheFsT, root: PathBuf, bytes_used_goal: u64) -> Self {
+        let mut path = root.clone();
 
         path.push("tmp");
         fs.mkdir_recursively(&path);
@@ -84,7 +113,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
 
         let mut result = Cache {
             fs,
-            root: root.to_owned(),
+            root,
             entries: CacheMap(HashMap::default()),
             heap: Heap::default(),
             next_priority: 0,
@@ -356,7 +385,7 @@ mod tests {
     impl Fixture {
         fn new(fs: TestCacheFs, bytes_used_goal: u64) -> Self {
             let fs = Rc::new(RefCell::new(fs));
-            let cache = Cache::new(fs.clone(), Path::new("/z"), bytes_used_goal);
+            let cache = Cache::new(fs.clone(), Path::new("/z").into(), bytes_used_goal);
             Fixture { fs, cache }
         }
 

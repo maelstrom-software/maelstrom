@@ -23,7 +23,9 @@ use std::{
  */
 
 /// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Scheduler<DepsT: SchedulerDeps> {
+pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
+    #[allow(dead_code)]
+    cache: CacheT,
     clients: HashMap<ClientId, Client<DepsT>>,
     workers: WorkerMap<DepsT>,
     queued_requests: VecDeque<ExecutionId>,
@@ -66,7 +68,17 @@ pub enum Message<DepsT: SchedulerDeps> {
     FromWorker(WorkerId, WorkerToBroker),
 }
 
-impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
+impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
+    pub fn new(cache: CacheT) -> Self {
+        Scheduler {
+            cache,
+            clients: HashMap::default(),
+            workers: WorkerMap(HashMap::default()),
+            queued_requests: VecDeque::default(),
+            worker_heap: Heap::default(),
+        }
+    }
+
     pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT>) {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
@@ -125,17 +137,6 @@ struct Worker<DepsT: SchedulerDeps> {
     sender: DepsT::WorkerSender,
 }
 
-impl<DepsT: SchedulerDeps> Default for Scheduler<DepsT> {
-    fn default() -> Self {
-        Scheduler {
-            clients: HashMap::default(),
-            workers: WorkerMap(HashMap::default()),
-            queued_requests: VecDeque::default(),
-            worker_heap: Heap::default(),
-        }
-    }
-}
-
 struct WorkerMap<DepsT: SchedulerDeps>(HashMap<WorkerId, Worker<DepsT>>);
 
 impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
@@ -154,7 +155,7 @@ impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
     }
 }
 
-impl<DepsT: SchedulerDeps> Scheduler<DepsT> {
+impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn possibly_start_executions(&mut self, deps: &mut DepsT) {
         while !self.queued_requests.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
@@ -351,6 +352,32 @@ mod tests {
     struct TestWorkerSender(WorkerId);
 
     #[derive(Default)]
+    struct CrashingTestCache;
+
+    impl SchedulerCache for CrashingTestCache {
+        fn get_artifact(&mut self, _eid: ExecutionId, _digest: Sha256Digest) -> GetArtifact {
+            todo!()
+        }
+        fn got_artifact(
+            &mut self,
+            _digest: Sha256Digest,
+            _path: &Path,
+            _bytes_used: u64,
+        ) -> Vec<ExecutionId> {
+            todo!()
+        }
+        fn decrement_refcount(&mut self, _digest: Sha256Digest) {
+            todo!()
+        }
+        fn client_disconnected(&mut self, _cid: ClientId) {
+            todo!()
+        }
+        fn get_artifact_for_worker(&mut self, _digest: &Sha256Digest) -> Option<PathBuf> {
+            todo!()
+        }
+    }
+
+    #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
     }
@@ -376,10 +403,18 @@ mod tests {
         }
     }
 
-    #[derive(Default)]
     struct Fixture {
         test_state: TestState,
-        scheduler: Scheduler<TestState>,
+        scheduler: Scheduler<CrashingTestCache, TestState>,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            Fixture {
+                test_state: TestState::default(),
+                scheduler: Scheduler::new(CrashingTestCache),
+            }
+        }
     }
 
     impl Fixture {

@@ -1,12 +1,12 @@
-use meticulous_base::proto;
+use cache::{Cache, StdCacheFs};
+use meticulous_base::{proto, ClientId, ExecutionId, Sha256Digest};
 use meticulous_util::net;
-use scheduler::{Message, Scheduler, SchedulerDeps};
+use scheduler::{Message, Scheduler, SchedulerCache, SchedulerDeps};
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 mod cache;
 mod scheduler;
-
-pub struct PassThroughDeps;
 
 #[derive(Debug, PartialEq)]
 #[allow(dead_code)]
@@ -15,6 +15,47 @@ pub enum GetArtifact {
     Wait,
     Get,
 }
+
+struct PassThroughCache {
+    cache: Cache<StdCacheFs>,
+}
+
+impl PassThroughCache {
+    fn new(root: PathBuf, bytes_used_goal: u64) -> Self {
+        PassThroughCache {
+            cache: Cache::new(StdCacheFs, root, bytes_used_goal),
+        }
+    }
+}
+
+impl SchedulerCache for PassThroughCache {
+    fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
+        self.cache.get_artifact(eid, digest)
+    }
+
+    fn got_artifact(
+        &mut self,
+        digest: Sha256Digest,
+        path: &Path,
+        bytes_used: u64,
+    ) -> Vec<ExecutionId> {
+        self.cache.got_artifact(digest, path, bytes_used)
+    }
+
+    fn decrement_refcount(&mut self, digest: Sha256Digest) {
+        self.cache.decrement_refcount(digest)
+    }
+
+    fn client_disconnected(&mut self, cid: ClientId) {
+        self.cache.client_disconnected(cid)
+    }
+
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf> {
+        self.cache.get_artifact_for_worker(digest)
+    }
+}
+
+pub struct PassThroughDeps;
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
@@ -48,23 +89,22 @@ pub type SchedulerMessage = Message<PassThroughDeps>;
 pub type SchedulerSender = UnboundedSender<SchedulerMessage>;
 
 pub struct SchedulerTask {
-    scheduler: Scheduler<PassThroughDeps>,
+    scheduler: Scheduler<PassThroughCache, PassThroughDeps>,
     sender: SchedulerSender,
     receiver: UnboundedReceiver<SchedulerMessage>,
 }
 
-impl Default for SchedulerTask {
-    fn default() -> Self {
+impl SchedulerTask {
+    pub fn new(cache_root: PathBuf, cache_bytes_used_goal: u64) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
+        let cache = PassThroughCache::new(cache_root, cache_bytes_used_goal);
         SchedulerTask {
-            scheduler: Scheduler::default(),
+            scheduler: Scheduler::new(cache),
             sender,
             receiver,
         }
     }
-}
 
-impl SchedulerTask {
     pub fn scheduler_sender(&self) -> &SchedulerSender {
         &self.sender
     }
