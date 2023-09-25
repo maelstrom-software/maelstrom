@@ -62,7 +62,7 @@ impl TarHandler {
         }
 
         self.map
-            .get(&path[..])
+            .get(&path)
             .map(|&b| {
                 Response::builder()
                     .status(200)
