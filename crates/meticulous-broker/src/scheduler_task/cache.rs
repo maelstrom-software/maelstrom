@@ -26,10 +26,12 @@ pub trait CacheFs {
     fn file_size(&mut self, path: &Path) -> u64;
 }
 
+#[allow(dead_code)]
 pub enum Message {
     GotArtifact(Sha256Digest, PathBuf, u64),
 }
 
+#[allow(dead_code)]
 pub struct Cache<CacheFsT> {
     fs: CacheFsT,
     root: PathBuf,
@@ -42,6 +44,7 @@ pub struct Cache<CacheFsT> {
 
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
 /// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
+#[allow(dead_code)]
 enum CacheEntry {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
     /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
@@ -67,12 +70,14 @@ enum CacheEntry {
 }
 
 #[derive(Debug, PartialEq)]
+#[allow(dead_code)]
 pub enum GetArtifact {
     Success,
     Wait,
     Get,
 }
 
+#[allow(dead_code)]
 impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     pub fn new(mut fs: CacheFsT, root: &Path, bytes_used_goal: u64) -> Self {
         let mut path = root.to_owned();

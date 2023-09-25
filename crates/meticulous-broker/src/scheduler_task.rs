@@ -1,7 +1,10 @@
-use super::scheduler::{Message, Scheduler, SchedulerDeps};
 use meticulous_base::proto;
 use meticulous_util::net;
+use scheduler::{Message, Scheduler, SchedulerDeps};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+
+pub mod cache;
+mod scheduler;
 
 pub struct PassThroughDeps;
 

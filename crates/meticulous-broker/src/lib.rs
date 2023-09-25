@@ -10,10 +10,8 @@ use tokio::{
     signal::unix::{self, SignalKind},
 };
 
-pub mod cache;
 mod connection;
 mod http;
-mod scheduler;
 mod scheduler_task;
 
 /// Simple wrapper around a [AtomicU32] used to vend [meticulous_base::ClientId]s and
