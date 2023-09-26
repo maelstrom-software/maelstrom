@@ -46,10 +46,7 @@ where
     Ok(bincode::deserialize_from(&mut &buf[..])?)
 }
 
-/// Loop reading messages from a socket and writing them to an mpsc channel. If this function
-/// encounters an error reading from the socket, it will return that error. On the other hand, if
-/// it encounters an error writing to the sender -- which indicates that there is no longer a
-/// receiver for the channel -- it will return Ok(()).
+/// Loop reading messages from a socket and writing them to an mpsc channel.
 pub async fn async_socket_reader<MessageT, TransformedT>(
     mut socket: (impl tokio::io::AsyncRead + Unpin),
     channel: tokio::sync::mpsc::UnboundedSender<TransformedT>,
@@ -64,9 +61,7 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
     }
 }
 
-/// Loop reading messages from an mpsc channel and writing them to a socket. This will return
-/// Ok(()) when all producers have closed their mpsc channel senders and there are no more messages
-/// to read.
+/// Loop reading messages from an mpsc channel and writing them to a socket.
 pub async fn async_socket_writer(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<impl Serialize>,
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
@@ -76,6 +71,63 @@ pub async fn async_socket_writer(
             .await
             .is_err()
         {
+            break;
+        }
+    }
+}
+
+/// Write a message to a normal (threaded) writer. Each message is framed by sending a leading
+/// 4-byte, little-endian message size.
+pub fn write_message_to_socket(
+    stream: &mut impl std::io::Write,
+    msg: impl Serialize,
+) -> Result<()> {
+    let msg_len = bincode::serialized_size(&msg)? as u32;
+
+    let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
+    std::io::Write::write_all(&mut buf, &msg_len.to_le_bytes())?;
+    bincode::serialize_into(&mut buf, &msg)?;
+
+    Ok(stream.write_all(&buf)?)
+}
+
+/// Read a message from a normal (threaded) reader. The framing must match that of
+/// [write_message_to_socket].
+pub fn read_message_from_socket<MessageT>(stream: &mut impl std::io::Read) -> Result<MessageT>
+where
+    MessageT: DeserializeOwned,
+{
+    let mut msg_len: [u8; 4] = [0; 4];
+    stream.read_exact(&mut msg_len)?;
+    let msg_len = u32::from_le_bytes(msg_len) as usize;
+
+    let mut buf = vec![0; msg_len];
+    stream.read_exact(&mut buf)?;
+    Ok(bincode::deserialize_from(&mut &buf[..])?)
+}
+
+/// Loop reading messages from a socket and writing them to an mpsc channel.
+pub fn socket_reader<MessageT, TransformedT>(
+    mut socket: impl std::io::Read,
+    channel: std::sync::mpsc::Sender<TransformedT>,
+    transform: impl Fn(MessageT) -> TransformedT,
+) where
+    MessageT: DeserializeOwned,
+{
+    while let Ok(msg) = read_message_from_socket(&mut socket) {
+        if channel.send(transform(msg)).is_err() {
+            break;
+        }
+    }
+}
+
+/// Loop reading messages from an mpsc channel and writing them to a socket.
+pub fn socket_writer(
+    channel: std::sync::mpsc::Receiver<impl Serialize>,
+    mut socket: impl std::io::Write,
+) {
+    while let Ok(msg) = channel.recv() {
+        if write_message_to_socket(&mut socket, msg).is_err() {
             break;
         }
     }
