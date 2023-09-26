@@ -44,12 +44,12 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
         .into_split();
     let mut read_stream = tokio::io::BufReader::new(read_stream);
 
-    net::write_message_to_socket(&mut write_stream, proto::Hello::Client).await?;
+    net::write_message_to_async_socket(&mut write_stream, proto::Hello::Client).await?;
     let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
         let id = ClientExecutionId(id as u32);
         map.insert(id, case.clone());
-        net::write_message_to_socket(
+        net::write_message_to_async_socket(
             &mut write_stream,
             proto::ClientToBroker::ExecutionRequest(
                 id,
@@ -64,7 +64,7 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
     }
 
     while !map.is_empty() {
-        match net::read_message_from_socket(&mut read_stream).await? {
+        match net::read_message_from_async_socket(&mut read_stream).await? {
             proto::BrokerToClient::ExecutionResponse(id, result) => {
                 let case = map.remove(&id).unwrap();
                 println!("{case}: {result:?}");

@@ -100,7 +100,7 @@ pub async fn listener_main(
         let id_vendor = id_vendor.clone();
 
         tokio::task::spawn(async move {
-            let hello = net::read_message_from_socket(&mut socket).await?;
+            let hello = net::read_message_from_async_socket(&mut socket).await?;
             println!("{hello:?} from {peer_addr} connected");
             match hello {
                 proto::Hello::Client => {

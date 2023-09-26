@@ -16,7 +16,7 @@ pub async fn channel_reader<MessageT>(
 
 /// Write a message to a Tokio output stream. Each message is framed by sending a leading 4-byte,
 /// little-endian message size.
-pub async fn write_message_to_socket(
+pub async fn write_message_to_async_socket(
     stream: &mut (impl tokio::io::AsyncWrite + Unpin),
     msg: impl Serialize,
 ) -> Result<()> {
@@ -30,8 +30,8 @@ pub async fn write_message_to_socket(
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of
-/// [write_message_to_socket].
-pub async fn read_message_from_socket<MessageT>(
+/// [write_message_to_async_socket].
+pub async fn read_message_from_async_socket<MessageT>(
     stream: &mut (impl tokio::io::AsyncRead + Unpin),
 ) -> Result<MessageT>
 where
@@ -57,7 +57,7 @@ pub async fn socket_reader<MessageT, TransformedT>(
 ) where
     MessageT: DeserializeOwned,
 {
-    while let Ok(msg) = read_message_from_socket(&mut socket).await {
+    while let Ok(msg) = read_message_from_async_socket(&mut socket).await {
         if channel.send(transform(msg)).is_err() {
             break;
         }
@@ -72,7 +72,10 @@ pub async fn socket_writer(
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
 ) {
     while let Some(msg) = channel.recv().await {
-        if write_message_to_socket(&mut socket, msg).await.is_err() {
+        if write_message_to_async_socket(&mut socket, msg)
+            .await
+            .is_err()
+        {
             break;
         }
     }

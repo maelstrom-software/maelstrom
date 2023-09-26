@@ -139,7 +139,7 @@ pub async fn main(
         .into_split();
     let read_stream = tokio::io::BufReader::new(read_stream);
 
-    net::write_message_to_socket(
+    net::write_message_to_async_socket(
         &mut write_stream,
         proto::Hello::Worker {
             slots: slots as u32,
