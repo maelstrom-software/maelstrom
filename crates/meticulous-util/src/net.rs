@@ -50,7 +50,7 @@ where
 /// encounters an error reading from the socket, it will return that error. On the other hand, if
 /// it encounters an error writing to the sender -- which indicates that there is no longer a
 /// receiver for the channel -- it will return Ok(()).
-pub async fn socket_reader<MessageT, TransformedT>(
+pub async fn async_socket_reader<MessageT, TransformedT>(
     mut socket: (impl tokio::io::AsyncRead + Unpin),
     channel: tokio::sync::mpsc::UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
@@ -67,7 +67,7 @@ pub async fn socket_reader<MessageT, TransformedT>(
 /// Loop reading messages from an mpsc channel and writing them to a socket. This will return
 /// Ok(()) when all producers have closed their mpsc channel senders and there are no more messages
 /// to read.
-pub async fn socket_writer(
+pub async fn async_socket_writer(
     mut channel: tokio::sync::mpsc::UnboundedReceiver<impl Serialize>,
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
 ) {

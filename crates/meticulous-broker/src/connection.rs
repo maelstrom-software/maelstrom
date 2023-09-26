@@ -113,11 +113,13 @@ pub async fn listener_main(
                         SchedulerMessage::ClientConnected,
                         SchedulerMessage::ClientDisconnected,
                         |scheduler_sender| {
-                            net::socket_reader(read_stream, scheduler_sender, move |req| {
+                            net::async_socket_reader(read_stream, scheduler_sender, move |req| {
                                 SchedulerMessage::FromClient(id, req)
                             })
                         },
-                        |scheduler_receiver| net::socket_writer(scheduler_receiver, write_stream),
+                        |scheduler_receiver| {
+                            net::async_socket_writer(scheduler_receiver, write_stream)
+                        },
                     )
                     .await
                 }
@@ -131,11 +133,13 @@ pub async fn listener_main(
                         |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                         SchedulerMessage::WorkerDisconnected,
                         |scheduler_sender| {
-                            net::socket_reader(read_stream, scheduler_sender, move |req| {
+                            net::async_socket_reader(read_stream, scheduler_sender, move |req| {
                                 SchedulerMessage::FromWorker(id, req)
                             })
                         },
-                        |scheduler_receiver| net::socket_writer(scheduler_receiver, write_stream),
+                        |scheduler_receiver| {
+                            net::async_socket_writer(scheduler_receiver, write_stream)
+                        },
                     )
                     .await
                 }

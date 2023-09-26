@@ -153,12 +153,15 @@ pub async fn main(
     let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
 
     let mut join_set = tokio::task::JoinSet::new();
-    join_set.spawn(net::socket_reader(
+    join_set.spawn(net::async_socket_reader(
         read_stream,
         dispatcher_sender_clone,
         dispatcher::Message::Broker,
     ));
-    join_set.spawn(net::socket_writer(broker_socket_receiver, write_stream));
+    join_set.spawn(net::async_socket_writer(
+        broker_socket_receiver,
+        write_stream,
+    ));
     join_set.spawn(dispatcher_main(
         slots,
         cache_root,
