@@ -93,8 +93,11 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
             .receive_message(self.cache_adapter, cache::Message::GetRequest(id, digest))
     }
 
-    fn send_decrement_refcount_to_cache(&mut self, _digest: Sha256Digest) {
-        todo!()
+    fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest) {
+        self.cache.receive_message(
+            self.cache_adapter,
+            cache::Message::DecrementRefcount(digest),
+        );
     }
 }
 
