@@ -7,7 +7,7 @@ use meticulous_base::{
     BrokerStatistics, ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult,
     Sha256Digest, WorkerId,
 };
-use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use meticulous_util::{heap::{Heap, HeapDeps, HeapIndex}, OptionExt, BoolExt};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
@@ -119,34 +119,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  * |_|
  *  FIGLET: private
  */
-
-trait OptionExt {
-    fn assert_is_none(self);
-    fn assert_is_some(self);
-}
-
-impl<T> OptionExt for Option<T> {
-    fn assert_is_none(self) {
-        assert!(self.is_none());
-    }
-    fn assert_is_some(self) {
-        assert!(self.is_some());
-    }
-}
-
-trait BoolExt {
-    fn assert_is_true(self);
-    fn assert_is_false(self);
-}
-
-impl BoolExt for bool {
-    fn assert_is_true(self) {
-        assert!(self);
-    }
-    fn assert_is_false(self) {
-        assert!(!self);
-    }
-}
 
 struct Execution {
     details: ExecutionDetails,
