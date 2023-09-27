@@ -37,7 +37,7 @@ impl cache::CacheDeps for CacheAdapter {
 struct DispatcherAdapter<'a> {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    cache: &'a mut cache::Cache,
+    cache: &'a mut cache::Cache<cache::StdCacheFs>,
     cache_adapter: &'a mut CacheAdapter,
 }
 
@@ -45,7 +45,7 @@ impl<'a> DispatcherAdapter<'a> {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        cache: &'a mut cache::Cache,
+        cache: &'a mut cache::Cache<cache::StdCacheFs>,
         cache_adapter: &'a mut CacheAdapter,
     ) -> Self {
         DispatcherAdapter {
@@ -77,17 +77,13 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
     }
 
     fn send_get_request_to_cache(&mut self, id: JobId, digest: Sha256Digest) {
-        self.cache.receive_message(
-            self.cache_adapter,
-            &mut cache::StdCacheFs,
-            cache::Message::GetRequest(id, digest),
-        )
+        self.cache
+            .receive_message(self.cache_adapter, cache::Message::GetRequest(id, digest))
     }
 
     fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest) {
         self.cache.receive_message(
             self.cache_adapter,
-            &mut cache::StdCacheFs,
             cache::Message::DecrementRefcount(digest),
         );
     }
@@ -102,7 +98,7 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
 ) {
     let mut cache_adapter = CacheAdapter::new(dispatcher_sender.clone());
-    let mut cache = cache::Cache::new(&cache_root, &mut cache::StdCacheFs, cache_bytes_used_goal);
+    let mut cache = cache::Cache::new(&cache_root, cache::StdCacheFs, cache_bytes_used_goal);
     let adapter = DispatcherAdapter::new(
         dispatcher_sender,
         broker_socket_sender,

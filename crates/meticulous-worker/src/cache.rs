@@ -114,7 +114,8 @@ pub enum Message {
 /// Manage a directory of downloaded, extracted images. Coordinate fetching of these images, and
 /// removing them when they are no longer in use and the amount of space used by the directory has
 /// grown too large.
-pub struct Cache {
+pub struct Cache<FsT> {
+    fs: FsT,
     root: PathBuf,
     entries: CacheMap,
     heap: Heap<CacheMap>,
@@ -123,7 +124,7 @@ pub struct Cache {
     bytes_used_goal: u64,
 }
 
-impl Cache {
+impl<FsT: CacheFs> Cache<FsT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/sha256`. Any pre-existing entries
     /// in `{root}/removing` and `{root}/sha256` will be removed. That implies that the [Cache]
@@ -132,7 +133,7 @@ impl Cache {
     /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(root: &Path, fs: &mut impl CacheFs, bytes_used_goal: u64) -> Self {
+    pub fn new(root: &Path, mut fs: FsT, bytes_used_goal: u64) -> Self {
         let mut path = root.to_owned();
 
         path.push("removing");
@@ -144,12 +145,13 @@ impl Cache {
 
         path.push("sha256");
         if fs.file_exists(&path) {
-            Self::remove_in_background(fs, root, &path);
+            Self::remove_in_background(&mut fs, root, &path);
         }
         fs.mkdir_recursively(&path);
         path.pop();
 
         Cache {
+            fs,
             root: root.to_owned(),
             entries: CacheMap(HashMap::default()),
             heap: Heap::default(),
@@ -160,23 +162,18 @@ impl Cache {
     }
 
     /// Receive a message and act on it. See [Message].
-    pub fn receive_message(
-        &mut self,
-        deps: &mut impl CacheDeps,
-        fs: &mut impl CacheFs,
-        msg: Message,
-    ) {
+    pub fn receive_message(&mut self, deps: &mut impl CacheDeps, msg: Message) {
         match msg {
             Message::GetRequest(request_id, digest) => {
                 self.receive_get_request(deps, request_id, digest)
             }
             Message::DownloadAndExtractCompleted(digest, Err(_)) => {
-                self.receive_download_and_extract_error(deps, fs, digest)
+                self.receive_download_and_extract_error(deps, digest)
             }
             Message::DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
-                self.receive_download_and_extract_success(deps, fs, digest, bytes_used)
+                self.receive_download_and_extract_success(deps, digest, bytes_used)
             }
-            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(fs, digest),
+            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(digest),
         }
     }
 }
@@ -216,7 +213,7 @@ enum CacheEntry {
     },
 }
 
-impl Cache {
+impl<FsT: CacheFs> Cache<FsT> {
     fn remove_in_background(fs: &mut impl CacheFs, root: &Path, source: &Path) {
         let mut target = root.to_owned();
         target.push("removing");
@@ -294,7 +291,6 @@ impl Cache {
     fn receive_download_and_extract_error(
         &mut self,
         deps: &mut impl CacheDeps,
-        fs: &mut impl CacheFs,
         digest: Sha256Digest,
     ) {
         let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.0.remove(&digest)
@@ -305,12 +301,12 @@ impl Cache {
             deps.get_completed(*request_id, digest.clone(), None);
         }
         let cache_path = Self::cache_path(&self.root, &digest);
-        if fs.file_exists(&cache_path) {
-            Self::remove_in_background(fs, &self.root, &cache_path);
+        if self.fs.file_exists(&cache_path) {
+            Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
         }
     }
 
-    fn possibly_remove_some(&mut self, fs: &mut impl CacheFs) {
+    fn possibly_remove_some(&mut self) {
         while self.bytes_used > self.bytes_used_goal {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
@@ -318,7 +314,11 @@ impl Cache {
             let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.0.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            Self::remove_in_background(fs, &self.root, &Self::cache_path(&self.root, &digest));
+            Self::remove_in_background(
+                &mut self.fs,
+                &self.root,
+                &Self::cache_path(&self.root, &digest),
+            );
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
         }
     }
@@ -326,7 +326,6 @@ impl Cache {
     fn receive_download_and_extract_success(
         &mut self,
         deps: &mut impl CacheDeps,
-        fs: &mut impl CacheFs,
         digest: Sha256Digest,
         bytes_used: u64,
     ) {
@@ -349,10 +348,10 @@ impl Cache {
             refcount: NonZeroU32::new(refcount).unwrap(),
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
-        self.possibly_remove_some(fs);
+        self.possibly_remove_some();
     }
 
-    fn receive_decrement_refcount(&mut self, fs: &mut impl CacheFs, digest: Sha256Digest) {
+    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
         let entry = self
             .entries
             .0
@@ -375,7 +374,7 @@ impl Cache {
                 };
                 self.heap.push(&mut self.entries, digest);
                 self.next_priority = self.next_priority.checked_add(1).unwrap();
-                self.possibly_remove_some(fs);
+                self.possibly_remove_some();
             }
         }
     }
@@ -518,28 +517,29 @@ mod tests {
 
     struct Fixture {
         test_cache_deps: TestCacheDeps,
-        test_cache_fs: TestCacheFs,
         messages: Rc<RefCell<Vec<TestMessage>>>,
-        cache: Cache,
+        cache: Cache<TestCacheFs>,
     }
 
     impl Fixture {
-        fn new_and_clear_messages(bytes_used_goal: u64) -> Self {
-            let mut fixture = Fixture::new(TestCacheFs::default(), bytes_used_goal);
+        fn new_with_fs_and_clear_messages(
+            test_cache_fs: TestCacheFs,
+            bytes_used_goal: u64,
+        ) -> Self {
+            let mut fixture = Fixture::new(test_cache_fs, bytes_used_goal);
             fixture.clear_messages();
             fixture
         }
 
-        fn new(mut test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
-            let cache = Cache::new(
-                Path::new("/cache/root"),
-                &mut test_cache_fs,
-                bytes_used_goal,
-            );
+        fn new_and_clear_messages(bytes_used_goal: u64) -> Self {
+            Self::new_with_fs_and_clear_messages(TestCacheFs::default(), bytes_used_goal)
+        }
+
+        fn new(test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
             let messages = test_cache_fs.messages.clone();
+            let cache = Cache::new(Path::new("/cache/root"), test_cache_fs, bytes_used_goal);
             Fixture {
                 test_cache_deps: TestCacheDeps::new(messages.clone()),
-                test_cache_fs,
                 messages,
                 cache,
             }
@@ -581,7 +581,7 @@ mod tests {
             fn $test_name() {
                 let mut fixture = $fixture;
                 $(
-                    fixture.cache.receive_message(&mut fixture.test_cache_deps, &mut fixture.test_cache_fs, $in_msg);
+                    fixture.cache.receive_message(&mut fixture.test_cache_deps, $in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )+
             }
@@ -821,9 +821,9 @@ mod tests {
     script_test! {
         get_request_for_empty_with_download_and_extract_failure_and_files_created;
         {
-            let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            fixture
+            let mut test_cache_fs = TestCacheFs::default();
+            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
         };
 
         GetRequest(jid!(1), digest!(42)) => {
@@ -842,9 +842,9 @@ mod tests {
     script_test! {
         multiple_get_requests_for_empty_with_download_and_extract_failure;
         {
-            let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            fixture
+            let mut test_cache_fs = TestCacheFs::default();
+            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
         };
 
         GetRequest(jid!(1), digest!(42)) => {
@@ -886,12 +886,12 @@ mod tests {
     script_test! {
         rename_retries_until_unique_path_name;
         {
-            let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 1));
-            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 2));
-            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 3));
-            fixture
+            let mut test_cache_fs = TestCacheFs::default();
+            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 1));
+            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 2));
+            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 3));
+            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
         };
 
         GetRequest(jid!(1), digest!(42)) => {
