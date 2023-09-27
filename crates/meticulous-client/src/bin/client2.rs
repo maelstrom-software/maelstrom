@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
-    ClientExecutionId, ExecutionDetails, ExecutionResult, Sha256Digest,
+    ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
 use meticulous_util::{error::Result, net, net::read_message_from_socket, OptionExt};
 use serde::Deserialize;
@@ -48,21 +48,21 @@ foo = "target/web.tar"
 
 struct Client {
     stream: TcpStream,
-    next_client_execution_id: u32,
+    next_client_job_id: u32,
     shared: Arc<ClientShared>,
 }
 
 struct ClientShared {
     lock: Mutex<ClientLocked>,
-    no_outstanding_executions: Condvar,
+    no_outstanding_jobs: Condvar,
     broker_addr: SocketAddr,
 }
 
 #[derive(Default)]
 struct ClientLocked {
-    executions: HashMap<ClientExecutionId, ExecutionResult>,
+    jobs: HashMap<ClientJobId, JobResult>,
     artifacts: HashMap<Sha256Digest, PathBuf>,
-    outstanding_executions: u32,
+    outstanding_jobs: u32,
 }
 
 #[allow(dead_code)]
@@ -73,12 +73,12 @@ impl Client {
 
         let shared = ClientShared {
             lock: Mutex::default(),
-            no_outstanding_executions: Condvar::default(),
+            no_outstanding_jobs: Condvar::default(),
             broker_addr,
         };
         let client = Client {
             stream,
-            next_client_execution_id: 0,
+            next_client_job_id: 0,
             shared: Arc::new(shared),
         };
 
@@ -92,13 +92,12 @@ impl Client {
     fn receiver_main(shared: Arc<ClientShared>, mut stream: TcpStream) -> Result<()> {
         loop {
             match read_message_from_socket::<BrokerToClient>(&mut stream)? {
-                BrokerToClient::ExecutionResponse(ceid, result) => {
+                BrokerToClient::JobResponse(cjid, result) => {
                     let mut locked = shared.lock.lock().unwrap();
-                    locked.executions.insert(ceid, result).assert_is_none();
-                    locked.outstanding_executions =
-                        locked.outstanding_executions.checked_sub(1).unwrap();
-                    if locked.outstanding_executions == 0 {
-                        shared.no_outstanding_executions.notify_all();
+                    locked.jobs.insert(cjid, result).assert_is_none();
+                    locked.outstanding_jobs = locked.outstanding_jobs.checked_sub(1).unwrap();
+                    if locked.outstanding_jobs == 0 {
+                        shared.no_outstanding_jobs.notify_all();
                     }
                 }
                 BrokerToClient::TransferArtifact(digest) => {
@@ -165,26 +164,23 @@ impl Client {
         Ok(digest)
     }
 
-    fn add_execution(&mut self, details: ExecutionDetails) -> Result<()> {
-        let ceid = self.next_client_execution_id.into();
-        self.next_client_execution_id = self.next_client_execution_id.checked_add(1).unwrap();
+    fn add_job(&mut self, details: JobDetails) -> Result<()> {
+        let cjid = self.next_client_job_id.into();
+        self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
         {
             let mut locked = self.shared.lock.lock().unwrap();
-            locked.outstanding_executions = locked.outstanding_executions.checked_add(1).unwrap();
+            locked.outstanding_jobs = locked.outstanding_jobs.checked_add(1).unwrap();
         }
-        net::write_message_to_socket(
-            &mut self.stream,
-            ClientToBroker::ExecutionRequest(ceid, details),
-        )?;
+        net::write_message_to_socket(&mut self.stream, ClientToBroker::JobRequest(cjid, details))?;
         Ok(())
     }
 
     fn wait_for_oustanding_jobs(&mut self) {
         let _ = self
             .shared
-            .no_outstanding_executions
+            .no_outstanding_jobs
             .wait_while(self.shared.lock.lock().unwrap(), |locked| {
-                locked.outstanding_executions != 0
+                locked.outstanding_jobs != 0
             });
     }
 }
@@ -200,7 +196,7 @@ fn main() -> Result<()> {
         layer_map.insert(name, client.add_artifact(path.into())?);
     }
     for job in config.jobs {
-        client.add_execution(ExecutionDetails {
+        client.add_job(JobDetails {
             program: job.program,
             arguments: if let Some(args) = job.arguments {
                 args

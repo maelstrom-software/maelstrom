@@ -4,8 +4,7 @@
 use super::GetArtifact;
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
-    BrokerStatistics, ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult,
-    Sha256Digest, WorkerId,
+    BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
 };
 use meticulous_util::{
     heap::{Heap, HeapDeps, HeapIndex},
@@ -47,13 +46,8 @@ pub trait SchedulerDeps {
 /// [Scheduler] and the two live on the same task. So these methods sometimes return actual values
 /// which can be handled immediately, unlike [SchedulerDeps].
 pub trait SchedulerCache {
-    fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact;
-    fn got_artifact(
-        &mut self,
-        digest: Sha256Digest,
-        path: &Path,
-        bytes_used: u64,
-    ) -> Vec<ExecutionId>;
+    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
+    fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId>;
     fn decrement_refcount(&mut self, digest: Sha256Digest);
     fn client_disconnected(&mut self, cid: ClientId);
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf>;
@@ -90,8 +84,8 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
             Message::ClientDisconnected(id) => self.receive_client_disconnected(deps, id),
-            Message::FromClient(cid, ClientToBroker::ExecutionRequest(ceid, details)) => {
-                self.receive_client_execution_request(deps, cid, ceid, details)
+            Message::FromClient(cid, ClientToBroker::JobRequest(cjid, details)) => {
+                self.receive_client_job_request(deps, cid, cjid, details)
             }
             Message::FromClient(cid, ClientToBroker::StatisticsRequest) => {
                 self.receive_client_statistics_request(deps, cid)
@@ -100,8 +94,8 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
             Message::WorkerDisconnected(id) => self.receive_worker_disconnected(deps, id),
-            Message::FromWorker(wid, WorkerToBroker(eid, result)) => {
-                self.receive_worker_response(deps, wid, eid, result)
+            Message::FromWorker(wid, WorkerToBroker(jid, result)) => {
+                self.receive_worker_response(deps, wid, jid, result)
             }
             Message::GotArtifact(digest, path, bytes_used) => {
                 self.receive_got_artifact(deps, digest, path, bytes_used)
@@ -123,15 +117,15 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  *  FIGLET: private
  */
 
-struct Execution {
-    details: ExecutionDetails,
+struct Job {
+    details: JobDetails,
     acquired_artifacts: HashSet<Sha256Digest>,
     missing_artifacts: HashSet<Sha256Digest>,
 }
 
-impl Execution {
-    fn new(details: ExecutionDetails) -> Self {
-        Execution {
+impl Job {
+    fn new(details: JobDetails) -> Self {
+        Job {
             details,
             acquired_artifacts: HashSet::default(),
             missing_artifacts: HashSet::default(),
@@ -141,21 +135,21 @@ impl Execution {
 
 struct Client<DepsT: SchedulerDeps> {
     sender: DepsT::ClientSender,
-    executions: HashMap<ClientExecutionId, Execution>,
+    jobs: HashMap<ClientJobId, Job>,
 }
 
 impl<DepsT: SchedulerDeps> Client<DepsT> {
     fn new(sender: DepsT::ClientSender) -> Self {
         Client {
             sender,
-            executions: HashMap::default(),
+            jobs: HashMap::default(),
         }
     }
 }
 
 struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
-    pending: HashSet<ExecutionId>,
+    pending: HashSet<JobId>,
     heap_index: HeapIndex,
     sender: DepsT::WorkerSender,
 }
@@ -193,12 +187,12 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
     cache: CacheT,
     clients: HashMap<ClientId, Client<DepsT>>,
     workers: WorkerMap<DepsT>,
-    queued_requests: VecDeque<ExecutionId>,
+    queued_requests: VecDeque<JobId>,
     worker_heap: Heap<WorkerMap<DepsT>>,
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
-    fn possibly_start_executions(&mut self, deps: &mut DepsT) {
+    fn possibly_start_jobs(&mut self, deps: &mut DepsT) {
         while !self.queued_requests.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
             let worker = self.workers.0.get_mut(wid).unwrap();
@@ -207,21 +201,21 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 break;
             }
 
-            let eid = self.queued_requests.pop_front().unwrap();
+            let jid = self.queued_requests.pop_front().unwrap();
             let details = &self
                 .clients
-                .get(&eid.0)
+                .get(&jid.0)
                 .unwrap()
-                .executions
-                .get(&eid.1)
+                .jobs
+                .get(&jid.1)
                 .unwrap()
                 .details;
             deps.send_message_to_worker(
                 &mut worker.sender,
-                BrokerToWorker::EnqueueExecution(eid, details.clone()),
+                BrokerToWorker::EnqueueJob(jid, details.clone()),
             );
 
-            worker.pending.insert(eid).assert_is_true();
+            worker.pending.insert(jid).assert_is_true();
             let heap_index = worker.heap_index;
             self.worker_heap.sift_down(&mut self.workers, heap_index);
         }
@@ -237,58 +231,50 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.cache.client_disconnected(id);
 
         let client = self.clients.remove(&id).unwrap();
-        for execution in client.executions.into_values() {
-            for artifact in execution.acquired_artifacts {
+        for job in client.jobs.into_values() {
+            for artifact in job.acquired_artifacts {
                 self.cache.decrement_refcount(artifact);
             }
         }
 
-        self.queued_requests
-            .retain(|ExecutionId(cid, _)| *cid != id);
+        self.queued_requests.retain(|JobId(cid, _)| *cid != id);
         for worker in self.workers.0.values_mut() {
-            worker.pending.retain(|eid| {
-                eid.0 != id || {
+            worker.pending.retain(|jid| {
+                jid.0 != id || {
                     deps.send_message_to_worker(
                         &mut worker.sender,
-                        BrokerToWorker::CancelExecution(*eid),
+                        BrokerToWorker::CancelJob(*jid),
                     );
                     false
                 }
             });
         }
         self.worker_heap.rebuild(&mut self.workers);
-        self.possibly_start_executions(deps);
+        self.possibly_start_jobs(deps);
     }
 
-    fn receive_client_execution_request(
+    fn receive_client_job_request(
         &mut self,
         deps: &mut DepsT,
         cid: ClientId,
-        ceid: ClientExecutionId,
-        details: ExecutionDetails,
+        cjid: ClientJobId,
+        details: JobDetails,
     ) {
         let client = self.clients.get_mut(&cid).unwrap();
-        let mut execution = Execution::new(details);
-        let eid = ExecutionId(cid, ceid);
-        for layer in &execution.details.layers {
-            match self.cache.get_artifact(eid, layer.clone()) {
+        let mut job = Job::new(details);
+        let jid = JobId(cid, cjid);
+        for layer in &job.details.layers {
+            match self.cache.get_artifact(jid, layer.clone()) {
                 GetArtifact::Success => {
-                    execution
-                        .acquired_artifacts
+                    job.acquired_artifacts
                         .insert(layer.clone())
                         .assert_is_true();
                 }
                 GetArtifact::Wait => {
-                    execution
-                        .missing_artifacts
-                        .insert(layer.clone())
-                        .assert_is_true();
+                    job.missing_artifacts.insert(layer.clone()).assert_is_true();
                 }
                 GetArtifact::Get => {
-                    execution
-                        .missing_artifacts
-                        .insert(layer.clone())
-                        .assert_is_true();
+                    job.missing_artifacts.insert(layer.clone()).assert_is_true();
                     deps.send_message_to_client(
                         &mut client.sender,
                         BrokerToClient::TransferArtifact(layer.clone()),
@@ -296,11 +282,11 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 }
             }
         }
-        let have_all_artifacts = execution.missing_artifacts.is_empty();
-        client.executions.insert(ceid, execution).assert_is_none();
+        let have_all_artifacts = job.missing_artifacts.is_empty();
+        client.jobs.insert(cjid, job).assert_is_none();
         if have_all_artifacts {
-            self.queued_requests.push_back(eid);
-            self.possibly_start_executions(deps);
+            self.queued_requests.push_back(jid);
+            self.possibly_start_jobs(deps);
         }
     }
 
@@ -325,7 +311,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             .insert(id, Worker::new(slots, sender))
             .assert_is_none();
         self.worker_heap.push(&mut self.workers, id);
-        self.possibly_start_executions(deps);
+        self.possibly_start_jobs(deps);
     }
 
     fn receive_worker_disconnected(&mut self, deps: &mut DepsT, id: WorkerId) {
@@ -336,46 +322,46 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         // We sort the requests to keep our tests deterministic.
         let mut vec: Vec<_> = worker.pending.drain().collect();
         vec.sort();
-        for eid in vec.into_iter().rev() {
-            self.queued_requests.push_front(eid);
+        for jid in vec.into_iter().rev() {
+            self.queued_requests.push_front(jid);
         }
 
-        self.possibly_start_executions(deps);
+        self.possibly_start_jobs(deps);
     }
 
     fn receive_worker_response(
         &mut self,
         deps: &mut DepsT,
         wid: WorkerId,
-        eid: ExecutionId,
-        result: ExecutionResult,
+        jid: JobId,
+        result: JobResult,
     ) {
         let worker = self.workers.0.get_mut(&wid).unwrap();
 
-        if !worker.pending.remove(&eid) {
+        if !worker.pending.remove(&jid) {
             // This indicates that the client isn't around anymore. Just ignore this response from
             // the worker. When the client disconnected, we canceled all of the outstanding
             // requests and updated our version of the worker's pending requests.
             return;
         }
 
-        let client = self.clients.get_mut(&eid.0).unwrap();
+        let client = self.clients.get_mut(&jid.0).unwrap();
         deps.send_message_to_client(
             &mut client.sender,
-            BrokerToClient::ExecutionResponse(eid.1, result),
+            BrokerToClient::JobResponse(jid.1, result),
         );
-        let execution = client.executions.remove(&eid.1).unwrap();
-        for artifact in execution.acquired_artifacts {
+        let job = client.jobs.remove(&jid.1).unwrap();
+        for artifact in job.acquired_artifacts {
             self.cache.decrement_refcount(artifact);
         }
 
-        if let Some(eid) = self.queued_requests.pop_front() {
+        if let Some(jid) = self.queued_requests.pop_front() {
             let details = &self
                 .clients
-                .get(&eid.0)
+                .get(&jid.0)
                 .unwrap()
-                .executions
-                .get(&eid.1)
+                .jobs
+                .get(&jid.1)
                 .unwrap()
                 .details;
             // If there are any queued_requests, we can just pop one off of the front of
@@ -383,9 +369,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             // workers list.
             deps.send_message_to_worker(
                 &mut worker.sender,
-                BrokerToWorker::EnqueueExecution(eid, details.clone()),
+                BrokerToWorker::EnqueueJob(jid, details.clone()),
             );
-            worker.pending.insert(eid);
+            worker.pending.insert(jid);
         } else {
             // Since there are no queued_requests, we're going to have to update the
             // worker's position in the workers list.
@@ -401,24 +387,23 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         path: PathBuf,
         bytes_used: u64,
     ) {
-        for eid in self.cache.got_artifact(digest.clone(), &path, bytes_used) {
-            let execution = self
+        for jid in self.cache.got_artifact(digest.clone(), &path, bytes_used) {
+            let job = self
                 .clients
-                .get_mut(&eid.0)
+                .get_mut(&jid.0)
                 .unwrap()
-                .executions
-                .get_mut(&eid.1)
+                .jobs
+                .get_mut(&jid.1)
                 .unwrap();
-            execution
-                .acquired_artifacts
+            job.acquired_artifacts
                 .insert(digest.clone())
                 .assert_is_true();
-            execution.missing_artifacts.remove(&digest).assert_is_true();
-            if execution.missing_artifacts.is_empty() {
-                self.queued_requests.push_back(eid);
+            job.missing_artifacts.remove(&digest).assert_is_true();
+            if job.missing_artifacts.is_empty() {
+                self.queued_requests.push_back(jid);
             }
         }
-        self.possibly_start_executions(deps);
+        self.possibly_start_jobs(deps);
     }
 
     fn receive_get_artifact_for_worker(
@@ -459,7 +444,7 @@ mod tests {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
         ToWorkerArtifactFetcher(u32, Option<PathBuf>),
-        CacheGetArtifact(ExecutionId, Sha256Digest),
+        CacheGetArtifact(JobId, Sha256Digest),
         CacheGotArtifact(Sha256Digest, PathBuf, u64),
         CacheDecrementRefcount(Sha256Digest),
         CacheClientDisconnected(ClientId),
@@ -475,19 +460,19 @@ mod tests {
     #[derive(Default)]
     struct TestState {
         messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<(ExecutionId, Sha256Digest), Vec<GetArtifact>>,
-        got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<ExecutionId>>>,
+        get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
+        got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
         get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<PathBuf>>>,
     }
 
     impl SchedulerCache for Arc<RefCell<TestState>> {
-        fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
+        fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
                 .messages
-                .push(CacheGetArtifact(eid, digest.clone()));
+                .push(CacheGetArtifact(jid, digest.clone()));
             self.borrow_mut()
                 .get_artifact_returns
-                .get_mut(&(eid, digest))
+                .get_mut(&(jid, digest))
                 .unwrap()
                 .remove(0)
         }
@@ -496,7 +481,7 @@ mod tests {
             digest: Sha256Digest,
             path: &Path,
             bytes_used: u64,
-        ) -> Vec<ExecutionId> {
+        ) -> Vec<JobId> {
             self.borrow_mut().messages.push(CacheGotArtifact(
                 digest.clone(),
                 path.to_owned(),
@@ -579,8 +564,8 @@ mod tests {
 
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize>(
-            get_artifact_returns: [((ExecutionId, Sha256Digest), Vec<GetArtifact>); L],
-            got_artifact_returns: [(Sha256Digest, Vec<Vec<ExecutionId>>); M],
+            get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
+            got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
             get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<PathBuf>>); N],
         ) -> Self {
             let result = Self::default();
@@ -652,7 +637,7 @@ mod tests {
     script_test! {
         message_from_known_client_ok,
         ClientConnected(cid![1], client_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
     }
 
     #[test]
@@ -661,7 +646,7 @@ mod tests {
         let mut fixture = Fixture::default();
         fixture.receive_message(FromClient(
             cid![1],
-            ClientToBroker::ExecutionRequest(ceid![1], details![1]),
+            ClientToBroker::JobRequest(cjid![1], details![1]),
         ));
     }
 
@@ -687,7 +672,7 @@ mod tests {
         // The response will be ignored unless we use a valid ClientId.
         fixture.receive_message(ClientConnected(cid![1], client_sender![1]));
 
-        fixture.receive_message(FromWorker(wid![1], WorkerToBroker(eid![1], result![1])));
+        fixture.receive_message(FromWorker(wid![1], WorkerToBroker(jid![1], result![1])));
     }
 
     #[test]
@@ -706,27 +691,27 @@ mod tests {
     }
 
     script_test! {
-        response_from_known_worker_for_unknown_execution_ignored,
+        response_from_known_worker_for_unknown_job_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker(eid![1], result![1])) => {};
+        FromWorker(wid![1], WorkerToBroker(jid![1], result![1])) => {};
     }
 
     script_test! {
         one_client_one_worker,
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1], details![1])),
         };
-        FromWorker(wid![1], WorkerToBroker(eid![1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
+        FromWorker(wid![1], WorkerToBroker(jid![1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
         };
     }
 
     script_test! {
         response_from_worker_for_disconnected_client_ignored,
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
-        FromWorker(wid![1], WorkerToBroker(eid![1], result![1])) => {};
+        FromWorker(wid![1], WorkerToBroker(jid![1], result![1])) => {};
     }
 
     script_test! {
@@ -737,59 +722,59 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
         // 1/2 0/2 0/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         };
 
         // 1/2 1/2 0/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 3], details![3])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {
+            ToWorker(wid![3], EnqueueJob(jid![1, 3], details![3])),
         };
 
         // 1/2 1/2 1/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 4], details![4])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {
+            ToWorker(wid![3], EnqueueJob(jid![1, 4], details![4])),
         };
 
         // 1/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 5], details![5])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], details![5])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 5], details![5])),
         };
 
         // 2/2 1/2 2/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 6], details![6])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], details![6])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 6], details![6])),
         };
 
         // 2/2 2/2 2/3
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![7], details![7])) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 7], details![7])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![7], details![7])) => {
+            ToWorker(wid![3], EnqueueJob(jid![1, 7], details![7])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
         };
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![8], details![8])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 8], details![8])),
-        };
-
-        FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
-        };
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![9], details![9])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 9], details![9])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![8], details![8])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 8], details![8])),
         };
 
-        FromWorker(wid![3], WorkerToBroker(eid![1, 3], result![3])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![3], result![3])),
+        FromWorker(wid![2], WorkerToBroker(jid![1, 2], result![2])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![2])),
         };
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![10], details![10])) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 10], details![10])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![9], details![9])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 9], details![9])),
+        };
+
+        FromWorker(wid![3], WorkerToBroker(jid![1, 3], result![3])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![3], result![3])),
+        };
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![10], details![10])) => {
+            ToWorker(wid![3], EnqueueJob(jid![1, 10], details![10])),
         };
     }
 
@@ -800,39 +785,39 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
 
         // 0/1 0/1
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
         // 1/1 0/1
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         };
 
         // 1/1 1/1
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], details![3])),
         };
 
         // 2/1 1/1
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], details![4])),
         };
 
         // 2/1 2/1
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], details![6])) => {};
 
         // 2/2 1/2
-        FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
+        FromWorker(wid![2], WorkerToBroker(jid![1, 2], result![2])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![2])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 5], details![5])),
         };
 
         // 1/2 2/2
-        FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 6], details![6])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 6], details![6])),
         };
     }
 
@@ -840,23 +825,23 @@ mod tests {
         queued_requests_go_to_workers_on_connect,
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![6], details![6])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], details![6])) => {};
 
         WorkerConnected(wid![1], 2, worker_sender![1]) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 4], details![4])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![2])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], details![3])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 4], details![4])),
         };
 
         WorkerConnected(wid![2], 2, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 6], details![6])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 5], details![5])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 6], details![6])),
         };
     }
 
@@ -867,33 +852,33 @@ mod tests {
         WorkerConnected(wid![3], 1, worker_sender![3]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 3], details![3])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {
+            ToWorker(wid![3], EnqueueJob(jid![1, 3], details![3])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 4], details![4])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 4], details![4])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 5], details![5])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], details![5])) => {
+            ToWorker(wid![2], EnqueueJob(jid![1, 5], details![5])),
         };
 
         WorkerDisconnected(wid![1]) => {
-            ToWorker(wid![3], EnqueueExecution(eid![1, 1], details![1])),
+            ToWorker(wid![3], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
+        FromWorker(wid![2], WorkerToBroker(jid![1, 2], result![2])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![2])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], details![4])),
         };
     }
 
@@ -902,33 +887,33 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {};
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], details![3])),
         };
 
         WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], details![4])),
         };
 
         WorkerDisconnected(wid![1]) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         };
 
-        FromWorker(wid![2], WorkerToBroker(eid![1, 2], result![2])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![2])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 3], details![3])),
+        FromWorker(wid![2], WorkerToBroker(jid![1, 2], result![2])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![2])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 3], details![3])),
         };
     }
 
@@ -937,22 +922,22 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![2])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {};
 
         WorkerDisconnected(wid![1]) => {};
 
         WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueExecution(eid![1, 1], details![1])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 1], details![1])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         };
     }
 
@@ -962,20 +947,20 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![2])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 2], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![1])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 2], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![1])),
         };
 
         WorkerDisconnected(wid![1]) => {};
@@ -987,12 +972,12 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
         ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelExecution(eid![1, 1])),
+            ToWorker(wid![1], CancelJob(jid![1, 1])),
             CacheClientDisconnected(cid![1]),
         };
     }
@@ -1004,20 +989,20 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![2, 1], details![1])),
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![2], EnqueueJob(jid![2, 1], details![1])),
         };
 
         //ClientDisconnected(cid![2]) => {
-        //    ToWorker(wid![2], CancelExecution(eid![2, 1])),
+        //    ToWorker(wid![2], CancelJob(jid![2, 1])),
         //};
 
-        //FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-        //    ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
+        //FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+        //    ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
         //};
     }
 
@@ -1026,25 +1011,25 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![2])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![2])),
         };
 
         ClientConnected(cid![2], client_sender![2]) => {};
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {};
 
         ClientDisconnected(cid![2]) => {
             CacheClientDisconnected(cid![2]),
         };
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 1], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![1], result![1])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], details![3])),
         };
     }
 
@@ -1055,37 +1040,37 @@ mod tests {
         ClientConnected(cid![1], client_sender![1]) => {};
         ClientConnected(cid![2], client_sender![2]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![1, 1], details![1])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![1], details![1])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![2, 1], details![1])),
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![2], EnqueueJob(jid![2, 1], details![1])),
         };
 
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {
-            ToWorker(wid![1], EnqueueExecution(eid![2, 2], details![2])),
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![2], details![2])) => {
+            ToWorker(wid![1], EnqueueJob(jid![2, 2], details![2])),
         };
 
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {
-            ToWorker(wid![2], EnqueueExecution(eid![2, 3], details![3])),
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![3], details![3])) => {
+            ToWorker(wid![2], EnqueueJob(jid![2, 3], details![3])),
         };
 
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![2])) => {};
-        FromClient(cid![2], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![3], details![3])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![4], details![4])) => {};
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![5], details![5])) => {};
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![2])) => {};
+        FromClient(cid![2], ClientToBroker::JobRequest(cjid![5], details![5])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], details![3])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], details![4])) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], details![5])) => {};
 
         ClientDisconnected(cid![2]) => {
-            ToWorker(wid![2], CancelExecution(eid![2, 1])),
-            ToWorker(wid![1], CancelExecution(eid![2, 2])),
-            ToWorker(wid![2], CancelExecution(eid![2, 3])),
+            ToWorker(wid![2], CancelJob(jid![2, 1])),
+            ToWorker(wid![1], CancelJob(jid![2, 2])),
+            ToWorker(wid![2], CancelJob(jid![2, 3])),
 
-            ToWorker(wid![2], EnqueueExecution(eid![1, 2], details![2])),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 3], details![3])),
-            ToWorker(wid![2], EnqueueExecution(eid![1, 4], details![4])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 2], details![2])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], details![3])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], details![4])),
 
             CacheClientDisconnected(cid![2]),
         };
@@ -1095,9 +1080,9 @@ mod tests {
         request_with_layers,
         {
             Fixture::new([
-                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
             ],
             [],
             [])
@@ -1105,10 +1090,10 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
-            CacheGetArtifact(eid![1, 2], digest![42]),
-            CacheGetArtifact(eid![1, 2], digest![43]),
-            CacheGetArtifact(eid![1, 2], digest![44]),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            CacheGetArtifact(jid![1, 2], digest![44]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
         };
 
@@ -1122,9 +1107,9 @@ mod tests {
         request_with_layers_2,
         {
             Fixture::new([
-                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((eid![1, 2], digest![43]), vec![GetArtifact::Success]),
-                ((eid![1, 2], digest![44]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Success]),
             ],
             [],
             [])
@@ -1132,15 +1117,15 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
-            CacheGetArtifact(eid![1, 2], digest![42]),
-            CacheGetArtifact(eid![1, 2], digest![43]),
-            CacheGetArtifact(eid![1, 2], digest![44]),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![1, [42, 43, 44]])),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            CacheGetArtifact(jid![1, 2], digest![44]),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![1, [42, 43, 44]])),
         };
 
-        FromWorker(wid![1], WorkerToBroker(eid![1, 2], result![1])) => {
-            ToClient(cid![1], BrokerToClient::ExecutionResponse(ceid![2], result![1])),
+        FromWorker(wid![1], WorkerToBroker(jid![1, 2], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], result![1])),
             CacheDecrementRefcount(digest![42]),
             CacheDecrementRefcount(digest![43]),
             CacheDecrementRefcount(digest![44]),
@@ -1151,23 +1136,23 @@ mod tests {
         request_with_layers_3,
         {
             Fixture::new([
-                ((eid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((eid![1, 2], digest![43]), vec![GetArtifact::Wait]),
-                ((eid![1, 2], digest![44]), vec![GetArtifact::Get]),
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
             ],
             [
-                (digest![43], vec![vec![eid![1, 2]]]),
-                (digest![44], vec![vec![eid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+                (digest![44], vec![vec![jid![1, 2]]]),
             ],
             [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::ExecutionRequest(ceid![2], details![1, [42, 43, 44]])) => {
-            CacheGetArtifact(eid![1, 2], digest![42]),
-            CacheGetArtifact(eid![1, 2], digest![43]),
-            CacheGetArtifact(eid![1, 2], digest![44]),
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], details![1, [42, 43, 44]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            CacheGetArtifact(jid![1, 2], digest![44]),
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
         };
 
@@ -1176,11 +1161,11 @@ mod tests {
         };
         GotArtifact(digest![44], "/z/tmp/bar".into(), 100) => {
             CacheGotArtifact(digest![44], "/z/tmp/bar".into(),100),
-            ToWorker(wid![1], EnqueueExecution(eid![1, 2], details![1, [42, 43, 44]])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], details![1, [42, 43, 44]])),
         };
 
         ClientDisconnected(cid![1]) => {
-            ToWorker(wid![1], CancelExecution(eid![1, 2])),
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
             CacheClientDisconnected(cid![1]),
             CacheDecrementRefcount(digest![42]),
             CacheDecrementRefcount(digest![43]),

@@ -1,7 +1,7 @@
 #[macro_export]
-macro_rules! ceid {
+macro_rules! cjid {
     [$n:expr] => {
-        meticulous_base::ClientExecutionId($n)
+        meticulous_base::ClientJobId($n)
     };
 }
 
@@ -16,47 +16,47 @@ macro_rules! wid {
 }
 
 #[macro_export]
-macro_rules! eid {
+macro_rules! jid {
     [$n:expr] => {
-        eid!($n, $n)
+        jid!($n, $n)
     };
-    [$cid:expr, $ceid:expr] => {
-        meticulous_base::ExecutionId(cid![$cid], ceid![$ceid])
+    [$cid:expr, $cjid:expr] => {
+        meticulous_base::JobId(cid![$cid], cjid![$cjid])
     };
 }
 
 #[macro_export]
 macro_rules! details {
     [1] => {
-        meticulous_base::ExecutionDetails {
+        meticulous_base::JobDetails {
             program: "test_1".to_string(),
             arguments: vec![],
             layers: vec![],
         }
     };
     [2] => {
-        meticulous_base::ExecutionDetails {
+        meticulous_base::JobDetails {
             program: "test_2".to_string(),
             arguments: vec!["arg_1".to_string()],
             layers: vec![],
         }
     };
     [3] => {
-        meticulous_base::ExecutionDetails {
+        meticulous_base::JobDetails {
             program: "test_3".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
             layers: vec![],
         }
     };
     [4] => {
-        meticulous_base::ExecutionDetails {
+        meticulous_base::JobDetails {
             program: "test_4".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
             layers: vec![],
         }
     };
     [$n:literal] => {
-        meticulous_base::ExecutionDetails {
+        meticulous_base::JobDetails {
             program: concat!("test_", stringify!($n)).to_string(),
             arguments: vec!["arg_1".to_string()],
             layers: vec![],
@@ -64,8 +64,8 @@ macro_rules! details {
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let meticulous_base::ExecutionDetails { program, arguments, .. } = details![$n];
-            meticulous_base::ExecutionDetails {
+            let meticulous_base::JobDetails { program, arguments, .. } = details![$n];
+            meticulous_base::JobDetails {
                 program,
                 arguments,
                 layers: vec![$(digest!($digest)),*],
@@ -77,16 +77,16 @@ macro_rules! details {
 #[macro_export]
 macro_rules! result {
     [1] => {
-        meticulous_base::ExecutionResult::Exited(0)
+        meticulous_base::JobResult::Exited(0)
     };
     [2] => {
-        meticulous_base::ExecutionResult::Exited(1)
+        meticulous_base::JobResult::Exited(1)
     };
     [3] => {
-        meticulous_base::ExecutionResult::Signalled(15)
+        meticulous_base::JobResult::Signalled(15)
     };
     [$n:expr] => {
-        meticulous_base::ExecutionResult::Exited($n)
+        meticulous_base::JobResult::Exited($n)
     };
 }
 

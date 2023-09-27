@@ -14,26 +14,26 @@ impl From<u32> for ClientId {
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ClientExecutionId(pub u32);
+pub struct ClientJobId(pub u32);
 
-impl From<u32> for ClientExecutionId {
+impl From<u32> for ClientJobId {
     fn from(input: u32) -> Self {
-        ClientExecutionId(input)
+        ClientJobId(input)
     }
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ExecutionId(pub ClientId, pub ClientExecutionId);
+pub struct JobId(pub ClientId, pub ClientJobId);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ExecutionDetails {
+pub struct JobDetails {
     pub program: String,
     pub arguments: Vec<String>,
     pub layers: Vec<Sha256Digest>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum ExecutionResult {
+pub enum JobResult {
     Exited(u8),
     Signalled(u8),
     Error(String),

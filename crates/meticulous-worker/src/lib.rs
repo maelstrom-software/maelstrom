@@ -4,7 +4,7 @@ mod cache;
 mod dispatcher;
 mod executor;
 
-use meticulous_base::{proto, ExecutionDetails, ExecutionId, Sha256Digest};
+use meticulous_base::{proto, JobDetails, JobId, Sha256Digest};
 use meticulous_util::{error::Result, net};
 use std::path::PathBuf;
 
@@ -27,7 +27,7 @@ impl CacheAdapter {
 }
 
 impl cache::CacheDeps for CacheAdapter {
-    type RequestId = ExecutionId;
+    type RequestId = JobId;
 
     fn download_and_extract(&mut self, _digest: Sha256Digest, _path: PathBuf) {
         todo!()
@@ -70,14 +70,14 @@ impl<'a> DispatcherAdapter<'a> {
 }
 
 impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
-    type ExecutionHandle = executor::Handle;
+    type JobHandle = executor::Handle;
 
-    fn start_execution(
+    fn start_job(
         &mut self,
-        id: ExecutionId,
-        details: &ExecutionDetails,
+        id: JobId,
+        details: &JobDetails,
         _layers: Vec<PathBuf>,
-    ) -> Self::ExecutionHandle {
+    ) -> Self::JobHandle {
         let sender = self.dispatcher_sender.clone();
         executor::start(details, move |result| {
             sender.send(dispatcher::Message::Executor(id, result)).ok();
@@ -88,7 +88,7 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
         self.broker_socket_sender.send(message).ok();
     }
 
-    fn send_get_request_to_cache(&mut self, id: ExecutionId, digest: Sha256Digest) {
+    fn send_get_request_to_cache(&mut self, id: JobId, digest: Sha256Digest) {
         self.cache
             .receive_message(self.cache_adapter, cache::Message::GetRequest(id, digest))
     }

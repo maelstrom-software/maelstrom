@@ -1,6 +1,6 @@
 //! Easily start and stop processes.
 
-use meticulous_base::{ExecutionDetails, ExecutionResult};
+use meticulous_base::{JobDetails, JobResult};
 use nix::{sys::signal::Signal, unistd::Pid};
 
 /*              _     _ _
@@ -12,13 +12,10 @@ use nix::{sys::signal::Signal, unistd::Pid};
  *  FIGLET: public
  */
 
-/// Start a process (i.e. execution) and call the provided callback when it completes. The process
+/// Start a process (i.e. job) and call the provided callback when it completes. The process
 /// will be killed when the returned [Handle] is dropped, unless it has already completed. The
 /// provided callback is always called on a separate task, even if an error occurs immediately.
-pub fn start(
-    details: &ExecutionDetails,
-    done: impl FnOnce(ExecutionResult) + Send + 'static,
-) -> Handle {
+pub fn start(details: &JobDetails, done: impl FnOnce(JobResult) + Send + 'static) -> Handle {
     Handle(start_with_killer(details, done, ()))
 }
 
@@ -65,22 +62,22 @@ impl<K: Killer> Drop for GenericHandle<K> {
 async fn waiter(
     mut child: tokio::process::Child,
     done_sender: tokio::sync::oneshot::Sender<()>,
-    done: impl FnOnce(ExecutionResult) + Send + 'static,
+    done: impl FnOnce(JobResult) + Send + 'static,
 ) {
     use std::os::unix::process::ExitStatusExt;
     done(match child.wait().await {
-        Err(error) => ExecutionResult::Error(error.to_string()),
+        Err(error) => JobResult::Error(error.to_string()),
         Ok(status) => match status.code() {
-            Some(code) => ExecutionResult::Exited(code as u8),
-            None => ExecutionResult::Signalled(status.signal().unwrap() as u8),
+            Some(code) => JobResult::Exited(code as u8),
+            None => JobResult::Signalled(status.signal().unwrap() as u8),
         },
     });
     done_sender.send(()).ok();
 }
 
 fn start_with_killer<K: Killer>(
-    details: &ExecutionDetails,
-    done: impl FnOnce(ExecutionResult) + Send + 'static,
+    details: &JobDetails,
+    done: impl FnOnce(JobResult) + Send + 'static,
     killer: K,
 ) -> GenericHandle<K> {
     let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
@@ -91,7 +88,7 @@ fn start_with_killer<K: Killer>(
     match result {
         Err(error) => {
             done_sender.send(()).ok();
-            tokio::task::spawn(async move { done(ExecutionResult::Error(error.to_string())) });
+            tokio::task::spawn(async move { done(JobResult::Error(error.to_string())) });
             GenericHandle {
                 pid: Pid::from_raw(0),
                 done_receiver,
@@ -126,7 +123,7 @@ mod tests {
 
     macro_rules! bash {
         ($($tokens:expr),*) => {
-            ExecutionDetails {
+            JobDetails {
                 program: "bash".to_string(),
                 arguments: vec![
                     "-c".to_string(),
@@ -137,15 +134,15 @@ mod tests {
         };
     }
 
-    fn bad_program() -> ExecutionDetails {
-        ExecutionDetails {
+    fn bad_program() -> JobDetails {
+        JobDetails {
             program: "a_program_that_does_not_exist".to_string(),
             arguments: vec![],
             layers: vec![],
         }
     }
 
-    async fn start_and_await(details: ExecutionDetails) -> ExecutionResult {
+    async fn start_and_await(details: JobDetails) -> JobResult {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _handle = start(&details, move |result| tx.send(result).unwrap());
         rx.await.unwrap()
@@ -159,8 +156,8 @@ mod tests {
     }
 
     async fn start_and_await_with_logging_killer(
-        details: ExecutionDetails,
-    ) -> (ExecutionResult, Option<Signal>) {
+        details: JobDetails,
+    ) -> (JobResult, Option<Signal>) {
         let killer = Arc::new(Mutex::new(None));
         let (tx, rx) = tokio::sync::oneshot::channel();
         let _handle = start_with_killer(
@@ -193,37 +190,31 @@ mod tests {
             move |result| tx.send(result).unwrap(),
         );
         let result = rx.await.unwrap();
-        assert_eq!(result, ExecutionResult::Signalled(9));
+        assert_eq!(result, JobResult::Signalled(9));
         assert!(!tempfile.exists());
     }
 
     #[tokio::test]
     async fn exited_0_result() {
-        assert_eq!(
-            start_and_await(bash!("exit 0")).await,
-            ExecutionResult::Exited(0)
-        );
+        assert_eq!(start_and_await(bash!("exit 0")).await, JobResult::Exited(0));
     }
 
     #[tokio::test]
     async fn exited_1_result() {
-        assert_eq!(
-            start_and_await(bash!("exit 1")).await,
-            ExecutionResult::Exited(1)
-        );
+        assert_eq!(start_and_await(bash!("exit 1")).await, JobResult::Exited(1));
     }
 
     #[tokio::test]
     async fn signalled_15_result() {
         assert_eq!(
             start_and_await(bash!("kill $$")).await,
-            ExecutionResult::Signalled(15)
+            JobResult::Signalled(15)
         );
     }
 
     #[tokio::test]
     async fn unable_to_execute_result() {
-        if let ExecutionResult::Error(_) = start_and_await(bad_program()).await {
+        if let JobResult::Error(_) = start_and_await(bad_program()).await {
         } else {
             panic!("expected error");
         }
@@ -240,7 +231,7 @@ mod tests {
             tx.send(result).unwrap()
         });
         drop(guard);
-        if let ExecutionResult::Error(_) = rx.await.unwrap() {
+        if let JobResult::Error(_) = rx.await.unwrap() {
         } else {
             panic!("expected error");
         }
@@ -249,21 +240,21 @@ mod tests {
     #[tokio::test]
     async fn handle_does_not_signal_if_process_exited() {
         let (result, killed) = start_and_await_with_logging_killer(bash!("exit 1")).await;
-        assert_eq!(result, ExecutionResult::Exited(1));
+        assert_eq!(result, JobResult::Exited(1));
         assert!(killed.is_none());
     }
 
     #[tokio::test]
     async fn handle_does_not_signal_if_process_killed() {
         let (result, killed) = start_and_await_with_logging_killer(bash!("kill $$")).await;
-        assert_eq!(result, ExecutionResult::Signalled(15));
+        assert_eq!(result, JobResult::Signalled(15));
         assert!(killed.is_none());
     }
 
     #[tokio::test]
     async fn handle_does_not_signal_if_process_does_not_start() {
         let (result, killed) = start_and_await_with_logging_killer(bad_program()).await;
-        if let ExecutionResult::Error(_) = result {
+        if let JobResult::Error(_) = result {
         } else {
             panic!("expected error");
         }
@@ -281,7 +272,7 @@ mod tests {
         );
         drop(handle);
         let result = rx.await.unwrap();
-        assert_eq!(result, ExecutionResult::Signalled(9));
+        assert_eq!(result, JobResult::Signalled(9));
         assert_eq!(*killer.lock().unwrap(), Some(Signal::SIGKILL));
     }
 }

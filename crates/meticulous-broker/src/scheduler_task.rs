@@ -1,5 +1,5 @@
 use cache::{Cache, StdCacheFs};
-use meticulous_base::{proto, ClientId, ExecutionId, Sha256Digest};
+use meticulous_base::{proto, ClientId, JobId, Sha256Digest};
 use meticulous_util::net;
 use scheduler::{Message, Scheduler, SchedulerCache, SchedulerDeps};
 use std::path::{Path, PathBuf};
@@ -29,16 +29,11 @@ impl PassThroughCache {
 }
 
 impl SchedulerCache for PassThroughCache {
-    fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
-        self.cache.get_artifact(eid, digest)
+    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
+        self.cache.get_artifact(jid, digest)
     }
 
-    fn got_artifact(
-        &mut self,
-        digest: Sha256Digest,
-        path: &Path,
-        bytes_used: u64,
-    ) -> Vec<ExecutionId> {
+    fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId> {
         self.cache.got_artifact(digest, path, bytes_used)
     }
 

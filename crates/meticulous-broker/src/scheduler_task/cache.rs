@@ -1,5 +1,5 @@
 use super::GetArtifact;
-use meticulous_base::{ClientId, ExecutionId, Sha256Digest};
+use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -79,17 +79,17 @@ enum CacheEntry {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
     /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
     /// on where the extraction process is.
-    Waiting(Vec<ExecutionId>, HashSet<ClientId>),
+    Waiting(Vec<JobId>, HashSet<ClientId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
-    /// currently being used by at least one execution. We refcount this state since there may be
-    /// multiple executions that use the same artifact.
+    /// currently being used by at least one job. We refcount this state since there may be
+    /// multiple jobs that use the same artifact.
     InUse {
         bytes_used: u64,
         refcount: NonZeroU32,
     },
 
-    /// The artifact has been successfully downloaded and extracted, but no executions are
+    /// The artifact has been successfully downloaded and extracted, but no jobs are
     /// currently using it. The `priority` is provided by [Cache] and is used by the [Heap] to
     /// determine which entry should be removed first when freeing up space.
     InHeap {
@@ -152,7 +152,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         result
     }
 
-    pub fn get_artifact(&mut self, eid: ExecutionId, digest: Sha256Digest) -> GetArtifact {
+    pub fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
         let entry = self
             .entries
             .0
@@ -160,8 +160,8 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             .or_insert(CacheEntry::Waiting(Vec::default(), HashSet::default()));
         match entry {
             CacheEntry::Waiting(requests, clients) => {
-                requests.push(eid);
-                if clients.insert(eid.0) {
+                requests.push(jid);
+                if clients.insert(jid.0) {
                     GetArtifact::Get
                 } else {
                     GetArtifact::Wait
@@ -192,7 +192,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         digest: Sha256Digest,
         path: &Path,
         bytes_used: u64,
-    ) -> Vec<ExecutionId> {
+    ) -> Vec<JobId> {
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
         match self.entries.0.entry(digest.clone()) {
@@ -208,9 +208,9 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             hash_map::Entry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 match entry {
-                    CacheEntry::Waiting(eids, _) => {
-                        let refcount = NonZeroU32::new(u32::try_from(eids.len()).unwrap()).unwrap();
-                        std::mem::swap(eids, &mut result);
+                    CacheEntry::Waiting(jids, _) => {
+                        let refcount = NonZeroU32::new(u32::try_from(jids.len()).unwrap()).unwrap();
+                        std::mem::swap(jids, &mut result);
                         *entry = CacheEntry::InUse {
                             bytes_used,
                             refcount,
@@ -255,12 +255,12 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
 
     pub fn client_disconnected(&mut self, cid: ClientId) {
         self.entries.0.retain(|_, e| {
-            let CacheEntry::Waiting(eids, clients) = e else {
+            let CacheEntry::Waiting(jids, clients) = e else {
                 return true;
             };
-            eids.retain(|eid| eid.0 != cid);
+            jids.retain(|jid| jid.0 != cid);
             clients.retain(|c| *c != cid);
-            !eids.is_empty()
+            !jids.is_empty()
         })
     }
 
@@ -413,18 +413,18 @@ mod tests {
 
         fn get_artifact(
             &mut self,
-            eid: ExecutionId,
+            jid: JobId,
             digest: Sha256Digest,
             expected: GetArtifact,
             expected_fs_operations: Vec<TestMessage>,
         ) {
-            let result = self.cache.get_artifact(eid, digest);
+            let result = self.cache.get_artifact(jid, digest);
             assert_eq!(result, expected);
             self.expect_fs_operations(expected_fs_operations);
         }
 
-        fn get_artifact_ign(&mut self, eid: ExecutionId, digest: Sha256Digest) {
-            _ = self.cache.get_artifact(eid, digest);
+        fn get_artifact_ign(&mut self, jid: JobId, digest: Sha256Digest) {
+            _ = self.cache.get_artifact(jid, digest);
             self.clear_fs_operations();
         }
 
@@ -433,7 +433,7 @@ mod tests {
             digest: Sha256Digest,
             path: PathBuf,
             bytes_used: u64,
-            expected: Vec<ExecutionId>,
+            expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
             let result = self.cache.got_artifact(digest, &path, bytes_used);
@@ -566,29 +566,29 @@ mod tests {
     #[test]
     fn test_get_artifact_once() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
-        fixture.get_artifact(eid!(1, 1001), digest!(1), GetArtifact::Get, vec![]);
+        fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
     fn test_get_artifact_again_from_same_client() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact(eid!(1, 1002), digest!(1), GetArtifact::Wait, vec![]);
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
+        fixture.get_artifact(jid!(1, 1002), digest!(1), GetArtifact::Wait, vec![]);
     }
 
     #[test]
     fn test_get_artifact_again_from_different_client() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact(eid!(2, 1001), digest!(1), GetArtifact::Get, vec![]);
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
+        fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
     fn test_get_artifact_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
-        fixture.get_artifact(eid!(2, 1001), digest!(1), GetArtifact::Success, vec![]);
+        fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Success, vec![]);
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
@@ -607,7 +607,7 @@ mod tests {
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 11);
         fixture.get_artifact(
-            eid!(1, 112358),
+            jid!(1, 112358),
             digest!(112358),
             GetArtifact::Success,
             vec![],
@@ -655,9 +655,9 @@ mod tests {
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
-        fixture.get_artifact(eid!(1, 1001), digest!(1), GetArtifact::Success, vec![]);
+        fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Success, vec![]);
 
-        fixture.get_artifact_ign(eid!(1, 1002), digest!(2));
+        fixture.get_artifact_ign(jid!(1, 1002), digest!(2));
         fixture.got_artifact_ign(digest!(2), short_path!("/z/tmp", 2, "tar"), 1);
 
         fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
@@ -741,15 +741,15 @@ mod tests {
     #[test]
     fn test_got_artifact_with_waiters() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact_ign(eid!(2, 1001), digest!(1));
-        fixture.get_artifact_ign(eid!(1, 1002), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(2, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
 
         fixture.got_artifact(
             digest!(1),
             short_path!("/z/tmp", 1, "tar"),
             10,
-            vec![eid!(1, 1001), eid!(2, 1001), eid!(1, 1002)],
+            vec![jid!(1, 1001), jid!(2, 1001), jid!(1, 1002)],
             vec![Rename(
                 short_path!("/z/tmp", 1, "tar"),
                 long_path!("/z/sha256", 1, "tar"),
@@ -774,12 +774,12 @@ mod tests {
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(2));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(2));
         fixture.got_artifact(
             digest!(2),
             short_path!("/z/tmp", 1, "tar"),
             1,
-            vec![eid!(1, 1001)],
+            vec![jid!(1, 1001)],
             vec![
                 Rename(
                     short_path!("/z/tmp", 1, "tar"),
@@ -794,7 +794,7 @@ mod tests {
     #[test]
     fn test_got_artifact_already_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 10);
 
         fixture.got_artifact(
@@ -833,17 +833,17 @@ mod tests {
     fn test_decrement_refcount_sets_priority_properly() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 0..10 {
-            fixture.get_artifact_ign(eid!(1, 1000 + i), digest!(i));
+            fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact_ign(digest!(i), short_path!("/z/tmp", i, "tar"), 1);
             fixture.decrement_refcount(digest!(i), vec![]);
         }
         for i in 10..100 {
-            fixture.get_artifact_ign(eid!(1, 1000 + i), digest!(i));
+            fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact(
                 digest!(i),
                 short_path!("/z/tmp", i, "tar"),
                 1,
-                vec![eid!(1, 1000 + i)],
+                vec![jid!(1, 1000 + i)],
                 vec![
                     Rename(
                         short_path!("/z/tmp", i, "tar"),
@@ -867,7 +867,7 @@ mod tests {
     #[should_panic]
     fn test_decrement_refcount_waiting_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.decrement_refcount_ign(digest!(1));
     }
 
@@ -880,9 +880,9 @@ mod tests {
     }
 
     #[test]
-    fn test_client_disconnected_one_client_one_eid() {
+    fn test_client_disconnected_one_client_one_jid() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
             digest!(1),
@@ -900,11 +900,11 @@ mod tests {
     }
 
     #[test]
-    fn test_client_disconnected_one_client_three_eids() {
+    fn test_client_disconnected_one_client_three_jids() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact_ign(eid!(1, 1002), digest!(1));
-        fixture.get_artifact_ign(eid!(1, 1003), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1003), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
             digest!(1),
@@ -924,17 +924,17 @@ mod tests {
     #[test]
     fn test_client_disconnected_many_clients() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
-        fixture.get_artifact_ign(eid!(1, 1002), digest!(1));
-        fixture.get_artifact_ign(eid!(3, 1003), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
+        fixture.get_artifact_ign(jid!(3, 1003), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
-        fixture.get_artifact(eid!(1, 1003), digest!(1), GetArtifact::Get, vec![]);
-        fixture.get_artifact(eid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
+        fixture.get_artifact(jid!(1, 1003), digest!(1), GetArtifact::Get, vec![]);
+        fixture.get_artifact(jid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
         fixture.got_artifact(
             digest!(1),
             short_path!("/z/tmp", 1, "tar"),
             1,
-            vec![eid!(3, 1003), eid!(1, 1003), eid!(3, 1003)],
+            vec![jid!(3, 1003), jid!(1, 1003), jid!(3, 1003)],
             vec![Rename(
                 short_path!("/z/tmp", 1, "tar"),
                 long_path!("/z/sha256", 1, "tar"),
@@ -954,7 +954,7 @@ mod tests {
     #[test]
     fn test_get_artifact_for_worker_waiting() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact_for_worker(digest!(1), None);
     }
 
@@ -968,7 +968,7 @@ mod tests {
     #[test]
     fn test_get_artifact_for_worker_in_use() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_ign(eid!(1, 1001), digest!(1));
+        fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
         fixture.get_artifact_for_worker(digest!(1), Some(long_path!("/z/sha256", 1, "tar")));
 

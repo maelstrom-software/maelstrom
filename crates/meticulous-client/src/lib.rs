@@ -1,7 +1,7 @@
 //! Code for the client binary.
 
 use anyhow::Result;
-use meticulous_base::{proto, ClientExecutionId, ExecutionDetails};
+use meticulous_base::{proto, ClientJobId, JobDetails};
 use meticulous_util::net;
 use std::collections::HashMap;
 
@@ -47,13 +47,13 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
     net::write_message_to_async_socket(&mut write_stream, proto::Hello::Client).await?;
     let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
-        let id = ClientExecutionId(id as u32);
+        let id = ClientJobId(id as u32);
         map.insert(id, case.clone());
         net::write_message_to_async_socket(
             &mut write_stream,
-            proto::ClientToBroker::ExecutionRequest(
+            proto::ClientToBroker::JobRequest(
                 id,
-                ExecutionDetails {
+                JobDetails {
                     program: binary,
                     arguments: vec!["--exact".to_string(), case],
                     layers: vec![],
@@ -65,7 +65,7 @@ pub async fn main(_name: String, broker_addr: std::net::SocketAddr) -> Result<()
 
     while !map.is_empty() {
         match net::read_message_from_async_socket(&mut read_stream).await? {
-            proto::BrokerToClient::ExecutionResponse(id, result) => {
+            proto::BrokerToClient::JobResponse(id, result) => {
                 let case = map.remove(&id).unwrap();
                 println!("{case}: {result:?}");
             }

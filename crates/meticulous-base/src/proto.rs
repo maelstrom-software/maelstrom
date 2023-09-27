@@ -1,9 +1,6 @@
 //! Messages sent between various binaries, and helper functions related to those messages.
 
-use crate::{
-    BrokerStatistics, ClientExecutionId, ExecutionDetails, ExecutionId, ExecutionResult,
-    Sha256Digest,
-};
+use crate::{BrokerStatistics, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest};
 use serde::{Deserialize, Serialize};
 
 /// The first message sent by a client or worker to the broker. It identifies the client/worker and
@@ -20,21 +17,21 @@ pub enum Hello {
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToWorker {
-    EnqueueExecution(ExecutionId, ExecutionDetails),
-    CancelExecution(ExecutionId),
+    EnqueueJob(JobId, JobDetails),
+    CancelJob(JobId),
 }
 
 /// Message sent from a worker to the broker. These are responses to previous
-/// [BrokerToWorker::EnqueueExecution] messages. After sending the initial [Hello], a worker will
+/// [BrokerToWorker::EnqueueJob] messages. After sending the initial [Hello], a worker will
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct WorkerToBroker(pub ExecutionId, pub ExecutionResult);
+pub struct WorkerToBroker(pub JobId, pub JobResult);
 
 /// Message sent from a client to the broker. After sending the initial [Hello], a client will
 /// exclusively send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
-    ExecutionRequest(ClientExecutionId, ExecutionDetails),
+    JobRequest(ClientJobId, JobDetails),
     StatisticsRequest,
 }
 
@@ -42,7 +39,7 @@ pub enum ClientToBroker {
 /// a [Hello] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
-    ExecutionResponse(ClientExecutionId, ExecutionResult),
+    JobResponse(ClientJobId, JobResult),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
 }

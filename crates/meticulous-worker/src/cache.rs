@@ -1,4 +1,4 @@
-//! Manage downloading, extracting, and storing of image files specified by executions.
+//! Manage downloading, extracting, and storing of image files specified by jobs.
 
 use meticulous_base::Sha256Digest;
 use meticulous_util::{
@@ -211,14 +211,14 @@ enum CacheEntry<CacheDepsT: CacheDeps> {
     DownloadingAndExtracting(Vec<CacheDepsT::RequestId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
-    /// currently being used by at least one execution. We refcount this state since there may be
-    /// multiple executions that use the same artifact.
+    /// currently being used by at least one job. We refcount this state since there may be
+    /// multiple jobs that use the same artifact.
     InUse {
         bytes_used: u64,
         refcount: NonZeroU32,
     },
 
-    /// The artifact has been successfully downloaded and extracted, but no executions are
+    /// The artifact has been successfully downloaded and extracted, but no jobs are
     /// currently using it. The `priority` is provided by [Cache] and is used by the [Heap] to
     /// determine which entry should be removed first when freeing up space.
     InHeap {

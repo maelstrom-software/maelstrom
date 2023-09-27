@@ -28,7 +28,7 @@ struct Cli {
     )]
     name: String,
 
-    /// The number of execution slots available. Most program executions will take one job slot.
+    /// The number of job slots available. Most program jobs will take one job slot.
     #[arg(
         short,
         long,
