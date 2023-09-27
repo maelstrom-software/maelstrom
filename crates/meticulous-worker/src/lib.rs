@@ -27,13 +27,11 @@ impl CacheAdapter {
 }
 
 impl cache::CacheDeps for CacheAdapter {
-    type RequestId = JobId;
-
     fn download_and_extract(&mut self, _digest: Sha256Digest, _path: PathBuf) {
         todo!()
     }
 
-    fn get_completed(&mut self, id: Self::RequestId, digest: Sha256Digest, path: Option<PathBuf>) {
+    fn get_completed(&mut self, id: JobId, digest: Sha256Digest, path: Option<PathBuf>) {
         self.dispatcher_sender
             .send(dispatcher::Message::Cache(id, digest, path))
             .ok();
@@ -49,7 +47,7 @@ impl cache::CacheDeps for CacheAdapter {
 struct DispatcherAdapter<'a> {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    cache: &'a mut cache::Cache<CacheAdapter>,
+    cache: &'a mut cache::Cache,
     cache_adapter: &'a mut CacheAdapter,
 }
 
@@ -57,7 +55,7 @@ impl<'a> DispatcherAdapter<'a> {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        cache: &'a mut cache::Cache<CacheAdapter>,
+        cache: &'a mut cache::Cache,
         cache_adapter: &'a mut CacheAdapter,
     ) -> Self {
         DispatcherAdapter {
