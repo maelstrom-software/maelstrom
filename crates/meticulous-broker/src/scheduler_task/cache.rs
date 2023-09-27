@@ -122,6 +122,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         };
 
         path.push("sha256");
+        result.fs.mkdir_recursively(&path);
         for child in result.fs.read_dir(&path) {
             if let Some((left, right)) =
                 child.file_name().unwrap().to_string_lossy().split_once('.')
@@ -470,6 +471,7 @@ mod tests {
         fixture.expect_fs_operations(vec![
             MkdirRecursively(path_buf!("/z/tmp")),
             ReadDir(path_buf!("/z/tmp")),
+            MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
         ]);
     }
@@ -489,6 +491,7 @@ mod tests {
             ReadDir(path_buf!("/z/tmp")),
             Remove(path_buf!("/z/tmp/one")),
             Remove(path_buf!("/z/tmp/two")),
+            MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
         ]);
     }
@@ -516,6 +519,7 @@ mod tests {
         fixture.expect_fs_operations(vec![
             MkdirRecursively(path_buf!("/z/tmp")),
             ReadDir(path_buf!("/z/tmp")),
+            MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             Remove(path_buf!("/z/sha256/one")),
             FileSize(long_path!("/z/sha256", 1, "tar")),
@@ -548,6 +552,7 @@ mod tests {
         fixture.expect_fs_operations(vec![
             MkdirRecursively(path_buf!("/z/tmp")),
             ReadDir(path_buf!("/z/tmp")),
+            MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             FileSize(long_path!("/z/sha256", 1, "tar")),
             FileSize(long_path!("/z/sha256", 2, "tar")),

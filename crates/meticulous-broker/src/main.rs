@@ -21,7 +21,7 @@ struct Cli {
     http_port: Option<u16>,
 
     /// The directory to use for the cache.
-    #[arg(short = 'd', long, default_value = "./worker")]
+    #[arg(short = 'd', long, default_value = "./run/broker")]
     cache_directory: PathBuf,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed

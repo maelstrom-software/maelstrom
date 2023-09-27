@@ -55,6 +55,7 @@ impl SchedulerCache for PassThroughCache {
     }
 }
 
+#[derive(Debug)]
 pub struct PassThroughDeps;
 
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
@@ -69,6 +70,7 @@ impl SchedulerDeps for PassThroughDeps {
         sender: &mut Self::ClientSender,
         message: proto::BrokerToClient,
     ) {
+        println!("sending: {:?}", message);
         sender.send(message).ok();
     }
 
@@ -77,6 +79,7 @@ impl SchedulerDeps for PassThroughDeps {
         sender: &mut Self::WorkerSender,
         message: proto::BrokerToWorker,
     ) {
+        println!("sending: {:?}", message);
         sender.send(message).ok();
     }
 
@@ -85,6 +88,7 @@ impl SchedulerDeps for PassThroughDeps {
         sender: &mut Self::WorkerArtifactFetcherSender,
         message: Option<PathBuf>,
     ) {
+        println!("sending: {:?}", message);
         sender.send(message).ok();
     }
 }
@@ -131,6 +135,7 @@ impl SchedulerTask {
     /// for precisely this reason.
     pub async fn run(mut self) {
         net::channel_reader(self.receiver, |msg| {
+            println!("received: {:?}", msg);
             self.scheduler.receive_message(&mut PassThroughDeps, msg)
         })
         .await;

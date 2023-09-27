@@ -164,8 +164,20 @@ pub async fn listener_main(
                             .unwrap();
                     }
                 }
-                proto::Hello::ClientArtifact { .. } => {
-                    todo!("artifact handling not yet implemented")
+                proto::Hello::ClientArtifact { ref digest } => {
+                    use std::io::Write;
+                    let mut socket = socket.into_std().unwrap();
+                    socket.set_nonblocking(false).unwrap();
+                    // XXX get the cache's preferred directory and use tempfile_in().
+                    let mut tmp = tempfile::Builder::new()
+                        .prefix(&digest.to_string())
+                        .suffix(".tar.gz")
+                        .tempfile()?;
+                    // XXX Validate the file.
+                    let size = std::io::copy(&mut socket, &mut tmp)?;
+                    let (_, path) = tmp.keep()?;
+                    scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
+                    socket.write_all(&[1u8]).unwrap();
                 }
             }
             println!("{hello:?} from {peer_addr} disconnected");

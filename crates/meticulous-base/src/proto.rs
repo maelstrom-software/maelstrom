@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub enum Hello {
     Client,
     Worker { slots: u32 },
-    ClientArtifact { digest: Sha256Digest, length: u64 },
+    ClientArtifact { digest: Sha256Digest },
     WorkerArtifact { digest: Sha256Digest },
 }
 

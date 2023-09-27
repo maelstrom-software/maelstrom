@@ -6,8 +6,11 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
+gethostname = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }
-gethostname = { workspace = true }
-tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
 regex = { workspace = true }
+serde = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
+toml = { workspace = true }

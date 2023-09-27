@@ -7,7 +7,10 @@ use meticulous_base::{
     BrokerStatistics, ClientExecutionId, ClientId, ExecutionDetails, ExecutionId, ExecutionResult,
     Sha256Digest, WorkerId,
 };
-use meticulous_util::{heap::{Heap, HeapDeps, HeapIndex}, OptionExt, BoolExt};
+use meticulous_util::{
+    heap::{Heap, HeapDeps, HeapIndex},
+    BoolExt, OptionExt,
+};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},

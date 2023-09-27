@@ -16,6 +16,12 @@ impl From<u32> for ClientId {
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientExecutionId(pub u32);
 
+impl From<u32> for ClientExecutionId {
+    fn from(input: u32) -> Self {
+        ClientExecutionId(input)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ExecutionId(pub ClientId, pub ClientExecutionId);
 
