@@ -92,11 +92,6 @@ pub trait CacheDeps {
     /// remain available at the given `path` until a [Message::DecrementRefcount] is sent to the
     /// cache.
     fn get_completed(&mut self, request_id: JobId, digest: Sha256Digest, path: Option<PathBuf>);
-
-    type Fs: CacheFs;
-
-    /// Get a reference to the CacheFs being used.
-    fn fs(&mut self) -> &mut Self::Fs;
 }
 
 /// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
@@ -137,11 +132,10 @@ impl Cache {
     /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(root: &Path, deps: &mut impl CacheDeps, bytes_used_goal: u64) -> Self {
+    pub fn new(root: &Path, fs: &mut impl CacheFs, bytes_used_goal: u64) -> Self {
         let mut path = root.to_owned();
 
         path.push("removing");
-        let fs = deps.fs();
         fs.mkdir_recursively(&path);
         for child in fs.read_dir(&path) {
             fs.remove_recursively_on_thread(child);
@@ -166,18 +160,23 @@ impl Cache {
     }
 
     /// Receive a message and act on it. See [Message].
-    pub fn receive_message(&mut self, deps: &mut impl CacheDeps, msg: Message) {
+    pub fn receive_message(
+        &mut self,
+        deps: &mut impl CacheDeps,
+        fs: &mut impl CacheFs,
+        msg: Message,
+    ) {
         match msg {
             Message::GetRequest(request_id, digest) => {
                 self.receive_get_request(deps, request_id, digest)
             }
             Message::DownloadAndExtractCompleted(digest, Err(_)) => {
-                self.receive_download_and_extract_error(deps, digest)
+                self.receive_download_and_extract_error(deps, fs, digest)
             }
             Message::DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
-                self.receive_download_and_extract_success(deps, digest, bytes_used)
+                self.receive_download_and_extract_success(deps, fs, digest, bytes_used)
             }
-            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(deps, digest),
+            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(fs, digest),
         }
     }
 }
@@ -295,6 +294,7 @@ impl Cache {
     fn receive_download_and_extract_error(
         &mut self,
         deps: &mut impl CacheDeps,
+        fs: &mut impl CacheFs,
         digest: Sha256Digest,
     ) {
         let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.0.remove(&digest)
@@ -305,12 +305,12 @@ impl Cache {
             deps.get_completed(*request_id, digest.clone(), None);
         }
         let cache_path = Self::cache_path(&self.root, &digest);
-        if deps.fs().file_exists(&cache_path) {
-            Self::remove_in_background(deps.fs(), &self.root, &cache_path);
+        if fs.file_exists(&cache_path) {
+            Self::remove_in_background(fs, &self.root, &cache_path);
         }
     }
 
-    fn possibly_remove_some(&mut self, deps: &mut impl CacheDeps) {
+    fn possibly_remove_some(&mut self, fs: &mut impl CacheFs) {
         while self.bytes_used > self.bytes_used_goal {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
@@ -318,11 +318,7 @@ impl Cache {
             let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.0.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            Self::remove_in_background(
-                deps.fs(),
-                &self.root,
-                &Self::cache_path(&self.root, &digest),
-            );
+            Self::remove_in_background(fs, &self.root, &Self::cache_path(&self.root, &digest));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
         }
     }
@@ -330,6 +326,7 @@ impl Cache {
     fn receive_download_and_extract_success(
         &mut self,
         deps: &mut impl CacheDeps,
+        fs: &mut impl CacheFs,
         digest: Sha256Digest,
         bytes_used: u64,
     ) {
@@ -352,10 +349,10 @@ impl Cache {
             refcount: NonZeroU32::new(refcount).unwrap(),
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
-        self.possibly_remove_some(deps);
+        self.possibly_remove_some(fs);
     }
 
-    fn receive_decrement_refcount(&mut self, deps: &mut impl CacheDeps, digest: Sha256Digest) {
+    fn receive_decrement_refcount(&mut self, fs: &mut impl CacheFs, digest: Sha256Digest) {
         let entry = self
             .entries
             .0
@@ -378,7 +375,7 @@ impl Cache {
                 };
                 self.heap.push(&mut self.entries, digest);
                 self.next_priority = self.next_priority.checked_add(1).unwrap();
-                self.possibly_remove_some(deps);
+                self.possibly_remove_some(fs);
             }
         }
     }
@@ -424,7 +421,7 @@ mod tests {
     use anyhow::anyhow;
     use itertools::Itertools;
     use meticulous_test::*;
-    use std::collections::HashSet;
+    use std::{cell::RefCell, collections::HashSet, rc::Rc};
     use TestMessage::*;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -441,38 +438,74 @@ mod tests {
 
     #[derive(Default)]
     struct TestCacheDeps {
-        messages: Vec<TestMessage>,
+        messages: Rc<RefCell<Vec<TestMessage>>>,
+    }
+
+    impl TestCacheDeps {
+        fn new(messages: Rc<RefCell<Vec<TestMessage>>>) -> Self {
+            TestCacheDeps { messages }
+        }
+    }
+
+    impl CacheDeps for TestCacheDeps {
+        fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
+            self.messages
+                .borrow_mut()
+                .push(DownloadAndExtract(digest, prefix))
+        }
+
+        fn get_completed(
+            &mut self,
+            request_id: JobId,
+            digest: Sha256Digest,
+            path: Option<PathBuf>,
+        ) {
+            self.messages.borrow_mut().push(match path {
+                Some(path) => GetRequestSucceeded(request_id, digest, path),
+                None => GetRequestFailed(request_id, digest),
+            });
+        }
+    }
+
+    #[derive(Default)]
+    struct TestCacheFs {
+        messages: Rc<RefCell<Vec<TestMessage>>>,
         existing_files: HashSet<PathBuf>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
         last_random_number: u64,
     }
 
-    impl CacheFs for TestCacheDeps {
+    impl CacheFs for TestCacheFs {
         fn rand_u64(&mut self) -> u64 {
             self.last_random_number += 1;
             self.last_random_number
         }
 
         fn file_exists(&mut self, path: &Path) -> bool {
-            self.messages.push(FileExists(path.to_owned()));
+            self.messages.borrow_mut().push(FileExists(path.to_owned()));
             self.existing_files.contains(path)
         }
 
         fn rename(&mut self, source: &Path, destination: &Path) {
             self.messages
+                .borrow_mut()
                 .push(Rename(source.to_owned(), destination.to_owned()));
         }
 
         fn remove_recursively_on_thread(&mut self, path: PathBuf) {
-            self.messages.push(RemoveRecursively(path.to_owned()));
+            self.messages
+                .borrow_mut()
+                .push(RemoveRecursively(path.to_owned()));
         }
 
         fn mkdir_recursively(&mut self, path: &Path) {
-            self.messages.push(MkdirRecursively(path.to_owned()));
+            self.messages
+                .borrow_mut()
+                .push(MkdirRecursively(path.to_owned()));
         }
 
         fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
-            self.messages.push(ReadDir(path.to_owned()));
+            self.messages.borrow_mut().push(ReadDir(path.to_owned()));
             Box::new(
                 self.directories
                     .get(path)
@@ -483,56 +516,37 @@ mod tests {
         }
     }
 
-    impl CacheDeps for TestCacheDeps {
-        fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
-            self.messages.push(DownloadAndExtract(digest, prefix))
-        }
-
-        fn get_completed(
-            &mut self,
-            request_id: JobId,
-            digest: Sha256Digest,
-            path: Option<PathBuf>,
-        ) {
-            self.messages.push(match path {
-                Some(path) => GetRequestSucceeded(request_id, digest, path),
-                None => GetRequestFailed(request_id, digest),
-            });
-        }
-
-        type Fs = Self;
-
-        fn fs(&mut self) -> &mut Self::Fs {
-            self
-        }
-    }
-
     struct Fixture {
         test_cache_deps: TestCacheDeps,
+        test_cache_fs: TestCacheFs,
+        messages: Rc<RefCell<Vec<TestMessage>>>,
         cache: Cache,
     }
 
     impl Fixture {
         fn new_and_clear_messages(bytes_used_goal: u64) -> Self {
-            let mut fixture = Fixture::new(TestCacheDeps::default(), bytes_used_goal);
+            let mut fixture = Fixture::new(TestCacheFs::default(), bytes_used_goal);
             fixture.clear_messages();
             fixture
         }
 
-        fn new(mut test_cache_deps: TestCacheDeps, bytes_used_goal: u64) -> Self {
+        fn new(mut test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
             let cache = Cache::new(
                 Path::new("/cache/root"),
-                &mut test_cache_deps,
+                &mut test_cache_fs,
                 bytes_used_goal,
             );
+            let messages = test_cache_fs.messages.clone();
             Fixture {
-                test_cache_deps,
+                test_cache_deps: TestCacheDeps::new(messages.clone()),
+                test_cache_fs,
+                messages,
                 cache,
             }
         }
 
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
-            let messages = &mut self.test_cache_deps.messages;
+            let mut messages = self.messages.borrow_mut();
             for perm in expected.clone().into_iter().permutations(expected.len()) {
                 if perm == *messages {
                     messages.clear();
@@ -547,17 +561,17 @@ mod tests {
 
         fn expect_messages_in_specific_order(&mut self, expected: Vec<TestMessage>) {
             assert!(
-                *self.test_cache_deps.messages == expected,
+                *self.messages.borrow() == expected,
                 "Expected messages didn't match actual messages in specific order.\n\
                  Expected: {:#?}\nActual: {:#?}",
                 expected,
-                self.test_cache_deps.messages
+                self.messages.borrow()
             );
-            self.test_cache_deps.messages.clear();
+            self.clear_messages();
         }
 
         fn clear_messages(&mut self) {
-            self.test_cache_deps.messages.clear();
+            self.messages.borrow_mut().clear();
         }
     }
 
@@ -567,7 +581,7 @@ mod tests {
             fn $test_name() {
                 let mut fixture = $fixture;
                 $(
-                    fixture.cache.receive_message(&mut fixture.test_cache_deps, $in_msg);
+                    fixture.cache.receive_message(&mut fixture.test_cache_deps, &mut fixture.test_cache_fs, $in_msg);
                     fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
                 )+
             }
@@ -808,7 +822,7 @@ mod tests {
         get_request_for_empty_with_download_and_extract_failure_and_files_created;
         {
             let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_deps.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
             fixture
         };
 
@@ -829,7 +843,7 @@ mod tests {
         multiple_get_requests_for_empty_with_download_and_extract_failure;
         {
             let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_deps.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
             fixture
         };
 
@@ -873,10 +887,10 @@ mod tests {
         rename_retries_until_unique_path_name;
         {
             let mut fixture = Fixture::new_and_clear_messages(1000);
-            fixture.test_cache_deps.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            fixture.test_cache_deps.existing_files.insert(short_path!("/cache/root/removing", 1));
-            fixture.test_cache_deps.existing_files.insert(short_path!("/cache/root/removing", 2));
-            fixture.test_cache_deps.existing_files.insert(short_path!("/cache/root/removing", 3));
+            fixture.test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
+            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 1));
+            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 2));
+            fixture.test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 3));
             fixture
         };
 
@@ -898,7 +912,7 @@ mod tests {
 
     #[test]
     fn new_ensures_directories_exist() {
-        let mut fixture = Fixture::new(TestCacheDeps::default(), 1000);
+        let mut fixture = Fixture::new(TestCacheFs::default(), 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/cache/root/removing")),
             ReadDir(path_buf!("/cache/root/removing")),
@@ -909,15 +923,15 @@ mod tests {
 
     #[test]
     fn new_restarts_old_removes() {
-        let mut test_cache_deps = TestCacheDeps::default();
-        test_cache_deps.directories.insert(
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs.directories.insert(
             path_buf!("/cache/root/removing"),
             vec![
                 short_path!("/cache/root/removing", 10),
                 short_path!("/cache/root/removing", 20),
             ],
         );
-        let mut fixture = Fixture::new(test_cache_deps, 1000);
+        let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/cache/root/removing")),
             ReadDir(path_buf!("/cache/root/removing")),
@@ -930,11 +944,11 @@ mod tests {
 
     #[test]
     fn new_removes_old_sha256_if_it_exists() {
-        let mut test_cache_deps = TestCacheDeps::default();
-        test_cache_deps
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs
             .existing_files
             .insert(path_buf!("/cache/root/sha256"));
-        let mut fixture = Fixture::new(test_cache_deps, 1000);
+        let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/cache/root/removing")),
             ReadDir(path_buf!("/cache/root/removing")),
