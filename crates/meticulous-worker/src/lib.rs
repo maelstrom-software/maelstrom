@@ -47,6 +47,10 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
         })
     }
 
+    fn start_artifact_fetch(&mut self, _digest: Sha256Digest, _path: PathBuf) {
+        todo!()
+    }
+
     fn send_response_to_broker(&mut self, message: proto::WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
@@ -57,6 +61,18 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
 
     fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest) {
         self.cache.decrement_refcount(digest);
+    }
+
+    fn send_got_artifact_success_to_cache(
+        &mut self,
+        digest: Sha256Digest,
+        bytes_used: u64,
+    ) -> Vec<(JobId, PathBuf)> {
+        self.cache.got_artifact_success(digest, bytes_used)
+    }
+
+    fn send_got_artifact_failure_to_cache(&mut self, digest: Sha256Digest) -> Vec<JobId> {
+        self.cache.got_artifact_failure(digest)
     }
 }
 

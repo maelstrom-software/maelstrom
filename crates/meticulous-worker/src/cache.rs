@@ -231,8 +231,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
     }
 
-    #[allow(dead_code)]
-    fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
+    pub fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
         let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.0.remove(&digest)
         else {
             panic!("Got got_artifact in unexpected state");
@@ -261,8 +260,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
     }
 
-    #[allow(dead_code)]
-    fn got_artifact_success(
+    pub fn got_artifact_success(
         &mut self,
         digest: Sha256Digest,
         bytes_used: u64,
