@@ -12,27 +12,21 @@ type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Messa
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
 type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerToBroker>;
 
-struct DispatcherAdapter<'a> {
+struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    cache: &'a mut cache::Cache<cache::StdCacheFs>,
 }
 
-impl<'a> DispatcherAdapter<'a> {
-    fn new(
-        dispatcher_sender: DispatcherSender,
-        broker_socket_sender: BrokerSocketSender,
-        cache: &'a mut cache::Cache<cache::StdCacheFs>,
-    ) -> Self {
+impl DispatcherAdapter {
+    fn new(dispatcher_sender: DispatcherSender, broker_socket_sender: BrokerSocketSender) -> Self {
         DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
-            cache,
         }
     }
 }
 
-impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
+impl dispatcher::DispatcherDeps for DispatcherAdapter {
     type JobHandle = executor::Handle;
 
     fn start_job(
@@ -54,26 +48,6 @@ impl<'a> dispatcher::DispatcherDeps for DispatcherAdapter<'a> {
     fn send_response_to_broker(&mut self, message: proto::WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
-
-    fn send_get_request_to_cache(&mut self, id: JobId, digest: Sha256Digest) -> cache::GetArtifact {
-        self.cache.get_artifact(id, digest)
-    }
-
-    fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest) {
-        self.cache.decrement_refcount(digest);
-    }
-
-    fn send_got_artifact_success_to_cache(
-        &mut self,
-        digest: Sha256Digest,
-        bytes_used: u64,
-    ) -> Vec<(JobId, PathBuf)> {
-        self.cache.got_artifact_success(digest, bytes_used)
-    }
-
-    fn send_got_artifact_failure_to_cache(&mut self, digest: Sha256Digest) -> Vec<JobId> {
-        self.cache.got_artifact_failure(digest)
-    }
 }
 
 async fn dispatcher_main(
@@ -84,9 +58,9 @@ async fn dispatcher_main(
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
 ) {
-    let mut cache = cache::Cache::new(&cache_root, cache::StdCacheFs, cache_bytes_used_goal);
-    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, &mut cache);
-    let mut dispatcher = dispatcher::Dispatcher::new(adapter, slots);
+    let cache = cache::Cache::new(&cache_root, cache::StdCacheFs, cache_bytes_used_goal);
+    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender);
+    let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, slots);
     net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
 

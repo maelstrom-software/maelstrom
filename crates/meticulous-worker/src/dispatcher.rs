@@ -1,7 +1,7 @@
 //! Central processing module for the worker. Receive messages from the broker and executors, and
 //! start or cancel jobs as appropriate.
 
-use super::cache::GetArtifact;
+use super::cache::{Cache, CacheFs, GetArtifact};
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     JobDetails, JobId, JobResult, Sha256Digest,
@@ -21,19 +21,6 @@ use std::{
  * |_|
  *  FIGLET: public
  */
-
-/// Manage jobs based on the slot count and requests from the broker. If the broker
-/// sends more job requests than there are slots, the extra requests are queued in a FIFO
-/// queue. It's up to the broker to order the requests properly.
-///
-/// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<D: DispatcherDeps> {
-    deps: D,
-    slots: usize,
-    awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
-    queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
-    executing: HashMap<JobId, (JobDetails, D::JobHandle)>,
-}
 
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
@@ -59,20 +46,39 @@ pub trait DispatcherDeps {
 
     /// Send a message to the broker.
     fn send_response_to_broker(&mut self, message: WorkerToBroker);
+}
 
-    /// Send a [super::cache::Message::GetRequest] to the cache.
-    fn send_get_request_to_cache(&mut self, id: JobId, digest: Sha256Digest) -> GetArtifact;
-
-    fn send_got_artifact_success_to_cache(
+pub trait DispatcherCache {
+    fn get_artifact(&mut self, request_id: JobId, artifact: Sha256Digest) -> GetArtifact;
+    fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId>;
+    fn got_artifact_success(
         &mut self,
         digest: Sha256Digest,
         bytes_used: u64,
     ) -> Vec<(JobId, PathBuf)>;
+    fn decrement_refcount(&mut self, digest: Sha256Digest);
+}
 
-    fn send_got_artifact_failure_to_cache(&mut self, digest: Sha256Digest) -> Vec<JobId>;
+impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
+    fn get_artifact(&mut self, request_id: JobId, artifact: Sha256Digest) -> GetArtifact {
+        self.get_artifact(request_id, artifact)
+    }
 
-    /// Send a [super::cache::Message::DecrementRefcount] to the cache.
-    fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest);
+    fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
+        self.got_artifact_failure(digest)
+    }
+
+    fn got_artifact_success(
+        &mut self,
+        digest: Sha256Digest,
+        bytes_used: u64,
+    ) -> Vec<(JobId, PathBuf)> {
+        self.got_artifact_success(digest, bytes_used)
+    }
+
+    fn decrement_refcount(&mut self, digest: Sha256Digest) {
+        self.decrement_refcount(digest)
+    }
 }
 
 /// An input message for the dispatcher. These come from either the broker or from an executor.
@@ -84,13 +90,28 @@ pub enum Message {
     ArtifactFetcher(Sha256Digest, Option<u64>),
 }
 
-impl<D: DispatcherDeps> Dispatcher<D> {
+/// Manage jobs based on the slot count and requests from the broker. If the broker
+/// sends more job requests than there are slots, the extra requests are queued in a FIFO
+/// queue. It's up to the broker to order the requests properly.
+///
+/// All methods are completely nonblocking. They will never block the task or the thread.
+pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
+    deps: DepsT,
+    cache: CacheT,
+    slots: usize,
+    awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
+    queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
+    executing: HashMap<JobId, (JobDetails, DepsT::JobHandle)>,
+}
+
+impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
-    pub fn new(deps: D, slots: usize) -> Self {
+    pub fn new(deps: DepsT, cache: CacheT, slots: usize) -> Self {
         assert!(slots > 0);
         Dispatcher {
             deps,
+            cache,
             slots,
             awaiting_layers: HashMap::new(),
             queued: VecDeque::new(),
@@ -124,7 +145,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
  *  FIGLET: private
  */
 
-impl<D: DispatcherDeps> Dispatcher<D> {
+impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         if self.executing.len() < self.slots {
             if let Some((id, details, layer_paths)) = self.queued.pop_front() {
@@ -137,7 +158,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
     fn receive_enqueue_job(&mut self, id: JobId, details: JobDetails) {
         let mut entry = AwaitingLayersEntry::new(details);
         for digest in &entry.details.layers {
-            match self.deps.send_get_request_to_cache(id, digest.clone()) {
+            match self.cache.get_artifact(id, digest.clone()) {
                 GetArtifact::Success(path) => {
                     entry.layers.insert(digest.clone(), path).assert_is_none()
                 }
@@ -182,7 +203,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             });
         }
         for digest in layers {
-            self.deps.send_decrement_refcount_to_cache(digest);
+            self.cache.decrement_refcount(digest);
         }
     }
 
@@ -193,14 +214,14 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             self.deps
                 .send_response_to_broker(WorkerToBroker(id, result));
             for digest in details.layers {
-                self.deps.send_decrement_refcount_to_cache(digest);
+                self.cache.decrement_refcount(digest);
             }
             self.possibly_start_job();
         }
     }
 
     fn receive_artifact_failure(&mut self, digest: Sha256Digest) {
-        for jid in self.deps.send_got_artifact_failure_to_cache(digest.clone()) {
+        for jid in self.cache.got_artifact_failure(digest.clone()) {
             // If this was the first layer error for this request, then we'll find something in the
             // hash table, and we'll need to clean up.
             //
@@ -215,17 +236,14 @@ impl<D: DispatcherDeps> Dispatcher<D> {
                     )),
                 ));
                 for digest in entry.layers.into_keys() {
-                    self.deps.send_decrement_refcount_to_cache(digest);
+                    self.cache.decrement_refcount(digest);
                 }
             }
         }
     }
 
     fn receive_artifact_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
-        for (jid, path) in self
-            .deps
-            .send_got_artifact_success_to_cache(digest.clone(), bytes_used)
-        {
+        for (jid, path) in self.cache.got_artifact_success(digest.clone(), bytes_used) {
             // If there were previous errors for this job, then we'll find
             // nothing in the hash table, and we'll need to release this layer.
             //
@@ -234,7 +252,7 @@ impl<D: DispatcherDeps> Dispatcher<D> {
             // the job.
             match self.awaiting_layers.entry(jid) {
                 hash_map::Entry::Vacant(_) => {
-                    self.deps.send_decrement_refcount_to_cache(digest.clone());
+                    self.cache.decrement_refcount(digest.clone());
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry
@@ -359,8 +377,10 @@ mod tests {
                 .messages
                 .push(SendResponseToBroker(message));
         }
+    }
 
-        fn send_get_request_to_cache(&mut self, id: JobId, digest: Sha256Digest) -> GetArtifact {
+    impl DispatcherCache for Rc<RefCell<TestState>> {
+        fn get_artifact(&mut self, id: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifact(id, digest.clone()));
@@ -371,13 +391,18 @@ mod tests {
                 .remove(0)
         }
 
-        fn send_decrement_refcount_to_cache(&mut self, digest: Sha256Digest) {
+        fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
             self.borrow_mut()
                 .messages
-                .push(CacheDecrementRefcount(digest))
+                .push(CacheGotArtifactFailure(digest.clone()));
+            self.borrow_mut()
+                .got_artifact_failure_returns
+                .get_mut(&digest)
+                .unwrap()
+                .remove(0)
         }
 
-        fn send_got_artifact_success_to_cache(
+        fn got_artifact_success(
             &mut self,
             digest: Sha256Digest,
             bytes_used: u64,
@@ -392,21 +417,16 @@ mod tests {
                 .remove(0)
         }
 
-        fn send_got_artifact_failure_to_cache(&mut self, digest: Sha256Digest) -> Vec<JobId> {
+        fn decrement_refcount(&mut self, digest: Sha256Digest) {
             self.borrow_mut()
                 .messages
-                .push(CacheGotArtifactFailure(digest.clone()));
-            self.borrow_mut()
-                .got_artifact_failure_returns
-                .get_mut(&digest)
-                .unwrap()
-                .remove(0)
+                .push(CacheDecrementRefcount(digest))
         }
     }
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
-        dispatcher: Dispatcher<Rc<RefCell<TestState>>>,
+        dispatcher: Dispatcher<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
     }
 
     impl Fixture {
@@ -422,7 +442,7 @@ mod tests {
                 got_artifact_success_returns: HashMap::from(got_artifact_success_returns),
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
             }));
-            let dispatcher = Dispatcher::new(test_state.clone(), slots);
+            let dispatcher = Dispatcher::new(test_state.clone(), test_state.clone(), slots);
             Fixture {
                 test_state,
                 dispatcher,
