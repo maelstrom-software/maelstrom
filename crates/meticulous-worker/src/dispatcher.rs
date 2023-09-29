@@ -1,5 +1,5 @@
-//! Central processing module for the worker. Receive messages from the broker and executors, and
-//! start or cancel jobs as appropriate.
+//! Central processing module for the worker. Receive messages from the broker, executors, and
+//! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
 use super::cache::{Cache, CacheFs, GetArtifact};
 use meticulous_base::{
@@ -11,6 +11,15 @@ use std::{
     collections::{hash_map, HashMap, VecDeque},
     path::PathBuf,
 };
+
+/*              _     _ _
+ *  _ __  _   _| |__ | (_) ___
+ * | '_ \| | | | '_ \| | |/ __|
+ * | |_) | |_| | |_) | | | (__
+ * | .__/ \__,_|_.__/|_|_|\___|
+ * |_|
+ *  FIGLET: public
+ */
 
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
@@ -39,6 +48,8 @@ pub trait DispatcherDeps {
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
 }
 
+/// The [Cache] dependency for [Dispatcher]. This should be exactly the same as [Cache]'s public
+/// interface. We have this so we can isolate [Dispatcher] when testing.
 pub trait DispatcherCache {
     fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact;
     fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId>;
@@ -50,6 +61,7 @@ pub trait DispatcherCache {
     fn decrement_ref_count(&mut self, digest: &Sha256Digest);
 }
 
+/// The standard implementation of [DispatcherCache] that just calls into [Cache].
 impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
     fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
         self.get_artifact(artifact, jid)
@@ -72,7 +84,8 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
     }
 }
 
-/// An input message for the dispatcher. These come from either the broker or from an executor.
+/// An input message for the dispatcher. These come from the broker, an executor, or an artifact
+/// fetcher.
 #[derive(Debug)]
 pub enum Message {
     Broker(BrokerToWorker),
