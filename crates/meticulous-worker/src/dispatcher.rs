@@ -36,7 +36,7 @@ pub trait DispatcherDeps {
     /// a [Message::Executor] message.
     fn start_job(
         &mut self,
-        id: JobId,
+        jid: JobId,
         details: &JobDetails,
         layers: Vec<PathBuf>,
     ) -> Self::JobHandle;
@@ -114,11 +114,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// [Message] for more information.
     pub fn receive_message(&mut self, msg: Message) {
         match msg {
-            Message::Broker(BrokerToWorker::EnqueueJob(id, details)) => {
-                self.receive_enqueue_job(id, details)
+            Message::Broker(BrokerToWorker::EnqueueJob(jid, details)) => {
+                self.receive_enqueue_job(jid, details)
             }
-            Message::Broker(BrokerToWorker::CancelJob(id)) => self.receive_cancel_job(id),
-            Message::Executor(id, result) => self.receive_job_result(id, result),
+            Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
+            Message::Executor(jid, result) => self.receive_job_result(jid, result),
             Message::ArtifactFetcher(digest, None) => self.receive_artifact_failure(digest),
             Message::ArtifactFetcher(digest, Some(bytes_used)) => {
                 self.receive_artifact_success(digest, bytes_used)
@@ -172,17 +172,28 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         if self.executing.len() < self.slots {
-            if let Some((id, details, layer_paths)) = self.queued.pop_front() {
-                let handle = self.deps.start_job(id, &details, layer_paths);
-                assert!(self.executing.insert(id, (details, handle)).is_none());
+            if let Some((jid, details, layer_paths)) = self.queued.pop_front() {
+                let handle = self.deps.start_job(jid, &details, layer_paths);
+                assert!(self.executing.insert(jid, (details, handle)).is_none());
             }
         }
     }
 
-    fn receive_enqueue_job(&mut self, id: JobId, details: JobDetails) {
+    fn enqueue_job_with_all_layers(&mut self, jid: JobId, mut entry: AwaitingLayersEntry) {
+        let layers = entry
+            .details
+            .layers
+            .iter()
+            .map(|digest| entry.layers.remove(digest).unwrap())
+            .collect();
+        self.queued.push_back((jid, entry.details, layers));
+        self.possibly_start_job();
+    }
+
+    fn receive_enqueue_job(&mut self, jid: JobId, details: JobDetails) {
         let mut entry = AwaitingLayersEntry::new(details);
         for digest in &entry.details.layers {
-            match self.cache.get_artifact(digest.clone(), id) {
+            match self.cache.get_artifact(digest.clone(), jid) {
                 GetArtifact::Success(path) => {
                     entry.layers.insert(digest.clone(), path).assert_is_none()
                 }
@@ -191,36 +202,29 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
         }
         if entry.has_all_layers() {
-            let layers = entry
-                .details
-                .layers
-                .iter()
-                .map(|digest| entry.layers.remove(digest).unwrap())
-                .collect();
-            self.queued.push_back((id, entry.details, layers));
-            self.possibly_start_job();
+            self.enqueue_job_with_all_layers(jid, entry);
         } else {
-            self.awaiting_layers.insert(id, entry).assert_is_none();
+            self.awaiting_layers.insert(jid, entry).assert_is_none();
         }
     }
 
-    fn receive_cancel_job(&mut self, id: JobId) {
+    fn receive_cancel_job(&mut self, jid: JobId) {
         let mut layers = vec![];
-        if let Some(entry) = self.awaiting_layers.remove(&id) {
+        if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
             layers = entry.layers.into_keys().collect();
-        } else if let Some((details, _)) = self.executing.remove(&id) {
+        } else if let Some((details, _)) = self.executing.remove(&jid) {
             // The job was executing. We (implicitly) drop the job handle, which will tell the
             // executor to kill the process. We also will start a new job if possible. However, we
             // wait to release the layers until the execution has completed. If we didn't it would
             // be possible for us to try to remove a directory that was still in use, which would
             // fail.
-            self.canceled.insert(id, details.layers).assert_is_none();
+            self.canceled.insert(jid, details.layers).assert_is_none();
             self.possibly_start_job();
         } else {
             // It may be the queue.
             self.queued.retain_mut(|x| {
-                if x.0 != id {
+                if x.0 != jid {
                     true
                 } else {
                     assert!(layers.is_empty());
@@ -234,11 +238,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
-    fn receive_job_result(&mut self, id: JobId, result: JobResult) {
+    fn receive_job_result(&mut self, jid: JobId, result: JobResult) {
         // If there is no entry in the executing map, then the job has been canceled
         // and we don't need to send any message to the broker.
-        if let Some((details, _)) = self.executing.remove(&id) {
-            self.deps.send_message_to_broker(WorkerToBroker(id, result));
+        if let Some((details, _)) = self.executing.remove(&jid) {
+            self.deps
+                .send_message_to_broker(WorkerToBroker(jid, result));
             for digest in details.layers {
                 self.cache.decrement_ref_count(&digest);
             }
@@ -246,7 +251,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         } else {
             // If there is no entry in the executing map, then the job has been canceled. We should
             // find it's layers in the canceled map.
-            let layers = self.canceled.remove(&id).unwrap();
+            let layers = self.canceled.remove(&jid).unwrap();
             for digest in layers {
                 self.cache.decrement_ref_count(&digest);
             }
@@ -295,15 +300,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                         .insert(digest.clone(), path.clone())
                         .assert_is_none();
                     if entry.get().has_all_layers() {
-                        let mut entry = entry.remove();
-                        let layers = entry
-                            .details
-                            .layers
-                            .iter()
-                            .map(|digest| entry.layers.remove(digest).unwrap())
-                            .collect();
-                        self.queued.push_back((jid, entry.details, layers));
-                        self.possibly_start_job();
+                        let entry = entry.remove();
+                        self.enqueue_job_with_all_layers(jid, entry);
                     }
                 }
             }
@@ -351,7 +349,7 @@ mod tests {
     }
 
     struct JobHandle {
-        id: JobId,
+        jid: JobId,
         test_state: Rc<RefCell<TestState>>,
     }
 
@@ -360,7 +358,7 @@ mod tests {
             self.test_state
                 .borrow_mut()
                 .messages
-                .push(DropJobHandle(self.id))
+                .push(DropJobHandle(self.jid))
         }
     }
 
@@ -369,15 +367,15 @@ mod tests {
 
         fn start_job(
             &mut self,
-            id: JobId,
+            jid: JobId,
             details: &JobDetails,
             layers: Vec<PathBuf>,
         ) -> JobHandle {
             self.borrow_mut()
                 .messages
-                .push(StartJob(id, details.clone(), layers));
+                .push(StartJob(jid, details.clone(), layers));
             JobHandle {
-                id,
+                jid,
                 test_state: self.clone(),
             }
         }
@@ -396,10 +394,10 @@ mod tests {
     }
 
     impl DispatcherCache for Rc<RefCell<TestState>> {
-        fn get_artifact(&mut self, digest: Sha256Digest, id: JobId) -> GetArtifact {
+        fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
             self.borrow_mut()
                 .messages
-                .push(CacheGetArtifact(digest.clone(), id));
+                .push(CacheGetArtifact(digest.clone(), jid));
             self.borrow_mut()
                 .get_artifact_returns
                 .remove(&digest)
