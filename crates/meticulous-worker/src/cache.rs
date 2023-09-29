@@ -1,4 +1,4 @@
-//! Manage downloading, extracting, and storing of image files specified by jobs.
+//! Manage downloading, extracting, and storing of artifacts specified by jobs.
 
 use meticulous_base::{JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
@@ -117,7 +117,7 @@ enum CacheEntry {
     },
 }
 
-/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a HashMap.
+/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
 #[derive(Default)]
 struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
 
@@ -158,9 +158,9 @@ impl HeapDeps for CacheMap {
     }
 }
 
-/// Manage a directory of downloaded, extracted images. Coordinate fetching of these images, and
-/// removing them when they are no longer in use and the amount of space used by the directory has
-/// grown too large.
+/// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
+/// and removing them when they are no longer in use and the amount of space used by the directory
+/// has grown too large.
 pub struct Cache<FsT> {
     fs: FsT,
     root: PathBuf,
