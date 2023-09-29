@@ -1,10 +1,7 @@
 //! Manage downloading, extracting, and storing of image files specified by jobs.
 
 use meticulous_base::{JobId, Sha256Digest};
-use meticulous_util::{
-    error::Result,
-    heap::{Heap, HeapDeps, HeapIndex},
-};
+use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
     collections::{hash_map, HashMap},
     num::NonZeroU32,
@@ -80,37 +77,6 @@ impl CacheFs for StdCacheFs {
     }
 }
 
-/// [Cache]'s external dependencies that must be fulfilled by its caller.
-pub trait CacheDeps {
-    /// Download `digest` from somewhere and extract it into `path`. Assume that `path` does not exist, but
-    /// that its parent directory does. Validate the digest while downloading and extracting. When
-    /// finished, deliver a [Message::DownloadAndExtractCompleted].
-    fn download_and_extract(&mut self, digest: Sha256Digest, path: PathBuf);
-
-    /// Receive notification that a [Message::GetRequest] has completed. If `path` is [None],
-    /// then there was an error and the artifact isn't available. Otherwise, the artifact will
-    /// remain available at the given `path` until a [Message::DecrementRefcount] is sent to the
-    /// cache.
-    fn get_completed(&mut self, request_id: JobId, digest: Sha256Digest, path: Option<PathBuf>);
-}
-
-/// Messages sent to [Cache::receive_message]. This is the primary way to interact with the
-/// [Cache].
-pub enum Message {
-    /// Request a reference for a given [Sha256Digest]. Eventually, the [Cache] will call
-    /// [CacheDeps::get_completed] in response to this message.
-    GetRequest(JobId, Sha256Digest),
-
-    /// Tell the [Cache] that a [CacheDeps::download_and_extract] has completed.
-    #[allow(dead_code)]
-    DownloadAndExtractCompleted(Sha256Digest, Result<u64>),
-
-    /// Tell the [Cache] to decrement the refcount on a digest and path. Once the refcount reaches
-    /// zero, the cache is free to delete the underlying directory.
-    #[allow(dead_code)]
-    DecrementRefcount(Sha256Digest),
-}
-
 /// Manage a directory of downloaded, extracted images. Coordinate fetching of these images, and
 /// removing them when they are no longer in use and the amount of space used by the directory has
 /// grown too large.
@@ -160,22 +126,6 @@ impl<FsT: CacheFs> Cache<FsT> {
             bytes_used_goal,
         }
     }
-
-    /// Receive a message and act on it. See [Message].
-    pub fn receive_message(&mut self, deps: &mut impl CacheDeps, msg: Message) {
-        match msg {
-            Message::GetRequest(request_id, digest) => {
-                self.receive_get_request(deps, request_id, digest)
-            }
-            Message::DownloadAndExtractCompleted(digest, Err(_)) => {
-                self.receive_download_and_extract_error(deps, digest)
-            }
-            Message::DownloadAndExtractCompleted(digest, Ok(bytes_used)) => {
-                self.receive_download_and_extract_success(deps, digest, bytes_used)
-            }
-            Message::DecrementRefcount(digest) => self.receive_decrement_refcount(digest),
-        }
-    }
 }
 
 /*             _            _
@@ -213,6 +163,14 @@ enum CacheEntry {
     },
 }
 
+#[allow(dead_code)]
+#[derive(Debug, PartialEq)]
+pub enum GetArtifact {
+    Success(PathBuf),
+    Wait,
+    Get(PathBuf),
+}
+
 impl<FsT: CacheFs> Cache<FsT> {
     fn remove_in_background(fs: &mut impl CacheFs, root: &Path, source: &Path) {
         let mut target = root.to_owned();
@@ -237,38 +195,23 @@ impl<FsT: CacheFs> Cache<FsT> {
         path
     }
 
-    fn send_get_completed_successfully(
-        deps: &mut impl CacheDeps,
-        root: &Path,
-        request_id: JobId,
-        digest: Sha256Digest,
-    ) {
-        let path = Self::cache_path(root, &digest);
-        deps.get_completed(request_id, digest, Some(path));
-    }
-
-    fn receive_get_request(
-        &mut self,
-        deps: &mut impl CacheDeps,
-        request_id: JobId,
-        digest: Sha256Digest,
-    ) {
-        match self.entries.0.entry(digest) {
+    pub fn get_artifact(&mut self, request_id: JobId, artifact: Sha256Digest) -> GetArtifact {
+        let cache_path = Self::cache_path(&self.root, &artifact);
+        match self.entries.0.entry(artifact) {
             hash_map::Entry::Vacant(entry) => {
-                let cache_path = Self::cache_path(&self.root, entry.key());
-                deps.download_and_extract(entry.key().clone(), cache_path);
-                entry.insert(CacheEntry::DownloadingAndExtracting(Vec::from([
-                    request_id,
-                ])));
+                entry.insert(CacheEntry::DownloadingAndExtracting(vec![request_id]));
+                GetArtifact::Get(cache_path)
             }
             hash_map::Entry::Occupied(entry) => {
-                let digest = entry.key().clone();
                 let entry = entry.into_mut();
                 match entry {
-                    CacheEntry::DownloadingAndExtracting(requests) => requests.push(request_id),
+                    CacheEntry::DownloadingAndExtracting(requests) => {
+                        requests.push(request_id);
+                        GetArtifact::Wait
+                    }
                     CacheEntry::InUse { refcount, .. } => {
                         *refcount = refcount.checked_add(1).unwrap();
-                        Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
+                        GetArtifact::Success(cache_path)
                     }
                     CacheEntry::InHeap {
                         bytes_used,
@@ -281,29 +224,24 @@ impl<FsT: CacheFs> Cache<FsT> {
                             bytes_used: *bytes_used,
                         };
                         self.heap.remove(&mut self.entries, heap_index);
-                        Self::send_get_completed_successfully(deps, &self.root, request_id, digest);
+                        GetArtifact::Success(cache_path)
                     }
                 }
             }
         }
     }
 
-    fn receive_download_and_extract_error(
-        &mut self,
-        deps: &mut impl CacheDeps,
-        digest: Sha256Digest,
-    ) {
+    #[allow(dead_code)]
+    fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
         let Some(CacheEntry::DownloadingAndExtracting(requests)) = self.entries.0.remove(&digest)
         else {
-            panic!("Got DownloadingAndExtracting in unexpected state");
+            panic!("Got got_artifact in unexpected state");
         };
-        for request_id in requests.iter() {
-            deps.get_completed(*request_id, digest.clone(), None);
-        }
         let cache_path = Self::cache_path(&self.root, &digest);
         if self.fs.file_exists(&cache_path) {
             Self::remove_in_background(&mut self.fs, &self.root, &cache_path);
         }
+        requests
     }
 
     fn possibly_remove_some(&mut self) {
@@ -323,12 +261,12 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
     }
 
-    fn receive_download_and_extract_success(
+    #[allow(dead_code)]
+    fn got_artifact_success(
         &mut self,
-        deps: &mut impl CacheDeps,
         digest: Sha256Digest,
         bytes_used: u64,
-    ) {
+    ) -> Vec<(JobId, PathBuf)> {
         let entry = self
             .entries
             .0
@@ -337,11 +275,11 @@ impl<FsT: CacheFs> Cache<FsT> {
         let CacheEntry::DownloadingAndExtracting(requests) = entry else {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
-        let mut refcount = 0;
-        for request_id in requests.iter() {
-            refcount += 1;
-            Self::send_get_completed_successfully(deps, &self.root, *request_id, digest.clone());
-        }
+        let refcount = requests.len().try_into().unwrap();
+        let result: Vec<_> = requests
+            .drain(..)
+            .map(|jid| (jid, Self::cache_path(&self.root, &digest)))
+            .collect();
         // Refcount must be > 0 since we don't allow cancellation of gets.
         *entry = CacheEntry::InUse {
             bytes_used,
@@ -349,9 +287,10 @@ impl<FsT: CacheFs> Cache<FsT> {
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         self.possibly_remove_some();
+        result
     }
 
-    fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
+    pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
         let entry = self
             .entries
             .0
@@ -415,9 +354,7 @@ impl HeapDeps for CacheMap {
 
 #[cfg(test)]
 mod tests {
-    use super::Message::*;
     use super::*;
-    use anyhow::anyhow;
     use itertools::Itertools;
     use meticulous_test::*;
     use std::{cell::RefCell, collections::HashSet, rc::Rc};
@@ -430,40 +367,6 @@ mod tests {
         RemoveRecursively(PathBuf),
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
-        DownloadAndExtract(Sha256Digest, PathBuf),
-        GetRequestSucceeded(JobId, Sha256Digest, PathBuf),
-        GetRequestFailed(JobId, Sha256Digest),
-    }
-
-    #[derive(Default)]
-    struct TestCacheDeps {
-        messages: Rc<RefCell<Vec<TestMessage>>>,
-    }
-
-    impl TestCacheDeps {
-        fn new(messages: Rc<RefCell<Vec<TestMessage>>>) -> Self {
-            TestCacheDeps { messages }
-        }
-    }
-
-    impl CacheDeps for TestCacheDeps {
-        fn download_and_extract(&mut self, digest: Sha256Digest, prefix: PathBuf) {
-            self.messages
-                .borrow_mut()
-                .push(DownloadAndExtract(digest, prefix))
-        }
-
-        fn get_completed(
-            &mut self,
-            request_id: JobId,
-            digest: Sha256Digest,
-            path: Option<PathBuf>,
-        ) {
-            self.messages.borrow_mut().push(match path {
-                Some(path) => GetRequestSucceeded(request_id, digest, path),
-                None => GetRequestFailed(request_id, digest),
-            });
-        }
     }
 
     #[derive(Default)]
@@ -516,7 +419,6 @@ mod tests {
     }
 
     struct Fixture {
-        test_cache_deps: TestCacheDeps,
         messages: Rc<RefCell<Vec<TestMessage>>>,
         cache: Cache<TestCacheFs>,
     }
@@ -538,11 +440,7 @@ mod tests {
         fn new(test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
             let messages = test_cache_fs.messages.clone();
             let cache = Cache::new(Path::new("/cache/root"), test_cache_fs, bytes_used_goal);
-            Fixture {
-                test_cache_deps: TestCacheDeps::new(messages.clone()),
-                messages,
-                cache,
-            }
+            Fixture { messages, cache }
         }
 
         fn expect_messages_in_any_order(&mut self, expected: Vec<TestMessage>) {
@@ -573,341 +471,429 @@ mod tests {
         fn clear_messages(&mut self) {
             self.messages.borrow_mut().clear();
         }
+
+        fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest, expected: GetArtifact) {
+            let result = self.cache.get_artifact(jid, digest);
+            assert_eq!(result, expected);
+            self.expect_messages_in_any_order(vec![]);
+        }
+
+        fn get_artifact_ign(&mut self, jid: JobId, digest: Sha256Digest) {
+            self.cache.get_artifact(jid, digest);
+            self.expect_messages_in_any_order(vec![]);
+        }
+
+        fn got_artifact_success(
+            &mut self,
+            digest: Sha256Digest,
+            bytes_used: u64,
+            expected: Vec<(JobId, PathBuf)>,
+            expected_fs_operations: Vec<TestMessage>,
+        ) {
+            let result = self.cache.got_artifact_success(digest, bytes_used);
+            assert_eq!(result, expected);
+            self.expect_messages_in_any_order(expected_fs_operations);
+        }
+
+        fn got_artifact_failure(
+            &mut self,
+            digest: Sha256Digest,
+            expected: Vec<JobId>,
+            expected_fs_operations: Vec<TestMessage>,
+        ) {
+            let result = self.cache.got_artifact_failure(digest);
+            assert_eq!(result, expected);
+            self.expect_messages_in_any_order(expected_fs_operations);
+        }
+
+        fn got_artifact_success_ign(&mut self, digest: Sha256Digest, bytes_used: u64) {
+            self.cache.got_artifact_success(digest, bytes_used);
+            self.clear_messages();
+        }
+
+        fn decrement_refcount(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
+            self.cache.decrement_refcount(digest);
+            self.expect_messages_in_any_order(expected);
+        }
+
+        fn decrement_refcount_ign(&mut self, digest: Sha256Digest) {
+            self.cache.decrement_refcount(digest);
+            self.clear_messages();
+        }
     }
 
-    macro_rules! script_test {
-        ($test_name:ident; $fixture:expr; $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
-            #[test]
-            fn $test_name() {
-                let mut fixture = $fixture;
-                $(
-                    fixture.cache.receive_message(&mut fixture.test_cache_deps, $in_msg);
-                    fixture.expect_messages_in_any_order(vec![$($out_msg,)*]);
-                )+
-            }
-        };
+    #[test]
+    fn get_request_for_empty() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
+
+        fixture.get_artifact(
+            jid!(1),
+            digest!(42),
+            GetArtifact::Get(long_path!("/cache/root/sha256", 42)),
+        );
+        fixture.got_artifact_success(
+            digest!(42),
+            100,
+            vec![(jid!(1), long_path!("/cache/root/sha256", 42))],
+            vec![],
+        );
     }
 
-    script_test! {
-        get_request_for_empty;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_refcount() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.got_artifact_success(
+            digest!(42),
+            10000,
+            vec![(jid!(1), long_path!("/cache/root/sha256", 42))],
+            vec![],
+        );
 
-        DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.decrement_refcount(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_refcount;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn cache_entries_are_removed_in_lru_order() {
+        let mut fixture = Fixture::new_and_clear_messages(10);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(1));
+        fixture.got_artifact_success_ign(digest!(1), 4);
+        fixture.decrement_refcount(digest!(1), vec![]);
 
-        DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(2), digest!(2));
+        fixture.got_artifact_success_ign(digest!(2), 4);
+        fixture.decrement_refcount(digest!(2), vec![]);
 
-        DecrementRefcount(digest!(42)) => {
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
+        fixture.get_artifact_ign(jid!(3), digest!(3));
+        fixture.got_artifact_success(
+            digest!(3),
+            4,
+            vec![(jid!(3), long_path!("/cache/root/sha256", 3))],
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 1),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
+        fixture.decrement_refcount(digest!(3), vec![]);
+
+        fixture.get_artifact_ign(jid!(4), digest!(4));
+        fixture.got_artifact_success(
+            digest!(4),
+            4,
+            vec![(jid!(4), long_path!("/cache/root/sha256", 4))],
+            vec![
+                FileExists(short_path!("/cache/root/removing", 2)),
+                Rename(
+                    long_path!("/cache/root/sha256", 2),
+                    short_path!("/cache/root/removing", 2),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 2)),
+            ],
+        );
+        fixture.decrement_refcount(digest!(4), vec![]);
     }
 
-    script_test! {
-        cache_entries_are_removed_in_lru_order;
-        Fixture::new_and_clear_messages(10);
+    #[test]
+    fn lru_order_augmented_by_last_use() {
+        let mut fixture = Fixture::new_and_clear_messages(10);
 
-        GetRequest(jid!(1), digest!(1)) => {
-            DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
-        };
-        DownloadAndExtractCompleted(digest!(1), Ok(4)) => {
-            GetRequestSucceeded(jid!(1), digest!(1), long_path!("/cache/root/sha256", 1)),
-        };
-        DecrementRefcount(digest!(1)) => {};
+        fixture.get_artifact_ign(jid!(1), digest!(1));
+        fixture.got_artifact_success_ign(digest!(1), 3);
 
-        GetRequest(jid!(2), digest!(2)) => {
-            DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
-        };
-        DownloadAndExtractCompleted(digest!(2), Ok(4)) => {
-            GetRequestSucceeded(jid!(2), digest!(2), long_path!("/cache/root/sha256", 2)),
-        };
-        DecrementRefcount(digest!(2)) => {};
+        fixture.get_artifact_ign(jid!(2), digest!(2));
+        fixture.got_artifact_success_ign(digest!(2), 3);
 
-        GetRequest(jid!(3), digest!(3)) => {
-            DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
-        };
-        DownloadAndExtractCompleted(digest!(3), Ok(4)) => {
-            GetRequestSucceeded(jid!(3), digest!(3), long_path!("/cache/root/sha256", 3)),
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 1), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
-        DecrementRefcount(digest!(3)) => {};
+        fixture.get_artifact_ign(jid!(3), digest!(3));
+        fixture.got_artifact_success_ign(digest!(3), 3);
 
-        GetRequest(jid!(4), digest!(4)) => {
-            DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
-        };
-        DownloadAndExtractCompleted(digest!(4), Ok(4)) => {
-            GetRequestSucceeded(jid!(4), digest!(4), long_path!("/cache/root/sha256", 4)),
-            FileExists(short_path!("/cache/root/removing", 2)),
-            Rename(long_path!("/cache/root/sha256", 2), short_path!("/cache/root/removing", 2)),
-            RemoveRecursively(short_path!("/cache/root/removing", 2)),
-        };
-        DecrementRefcount(digest!(4)) => {};
+        fixture.decrement_refcount(digest!(3), vec![]);
+        fixture.decrement_refcount(digest!(2), vec![]);
+        fixture.decrement_refcount(digest!(1), vec![]);
+
+        fixture.get_artifact_ign(jid!(4), digest!(4));
+        fixture.got_artifact_success(
+            digest!(4),
+            3,
+            vec![(jid!(4), long_path!("/cache/root/sha256", 4))],
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 3),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        lru_order_augmented_by_last_use;
-        Fixture::new_and_clear_messages(10);
+    #[test]
+    fn multiple_get_requests_for_empty() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        GetRequest(jid!(1), digest!(1)) => {
-            DownloadAndExtract(digest!(1), long_path!("/cache/root/sha256", 1)),
-        };
-        DownloadAndExtractCompleted(digest!(1), Ok(3)) => {
-            GetRequestSucceeded(jid!(1), digest!(1), long_path!("/cache/root/sha256", 1)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.get_artifact(jid!(2), digest!(42), GetArtifact::Wait);
+        fixture.get_artifact(jid!(3), digest!(42), GetArtifact::Wait);
 
-        GetRequest(jid!(2), digest!(2)) => {
-            DownloadAndExtract(digest!(2), long_path!("/cache/root/sha256", 2)),
-        };
-        DownloadAndExtractCompleted(digest!(2), Ok(3)) => {
-            GetRequestSucceeded(jid!(2), digest!(2), long_path!("/cache/root/sha256", 2)),
-        };
-
-        GetRequest(jid!(3), digest!(3)) => {
-            DownloadAndExtract(digest!(3), long_path!("/cache/root/sha256", 3)),
-        };
-        DownloadAndExtractCompleted(digest!(3), Ok(3)) => {
-            GetRequestSucceeded(jid!(3), digest!(3), long_path!("/cache/root/sha256", 3)),
-        };
-
-        DecrementRefcount(digest!(3)) => {};
-        DecrementRefcount(digest!(2)) => {};
-        DecrementRefcount(digest!(1)) => {};
-
-        GetRequest(jid!(4), digest!(4)) => {
-            DownloadAndExtract(digest!(4), long_path!("/cache/root/sha256", 4)),
-        };
-        DownloadAndExtractCompleted(digest!(4), Ok(3)) => {
-            GetRequestSucceeded(jid!(4), digest!(4), long_path!("/cache/root/sha256", 4)),
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 3), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
+        fixture.got_artifact_success(
+            digest!(42),
+            100,
+            vec![
+                (jid!(1), long_path!("/cache/root/sha256", 42)),
+                (jid!(2), long_path!("/cache/root/sha256", 42)),
+                (jid!(3), long_path!("/cache/root/sha256", 42)),
+            ],
+            vec![],
+        );
     }
 
-    script_test! {
-        multiple_get_requests_for_empty;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42))
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.get_artifact(jid!(2), digest!(42), GetArtifact::Wait);
+        fixture.get_artifact(jid!(3), digest!(42), GetArtifact::Wait);
 
-        GetRequest(jid!(2), digest!(42)) => {};
-        GetRequest(jid!(3), digest!(42)) => {};
+        fixture.got_artifact_success(
+            digest!(42),
+            10000,
+            vec![
+                (jid!(1), long_path!("/cache/root/sha256", 42)),
+                (jid!(2), long_path!("/cache/root/sha256", 42)),
+                (jid!(3), long_path!("/cache/root/sha256", 42)),
+            ],
+            vec![],
+        );
 
-        DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(jid!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(jid!(3), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.decrement_refcount(digest!(42), vec![]);
+        fixture.decrement_refcount(digest!(42), vec![]);
+        fixture.decrement_refcount(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        multiple_get_requests_for_empty_larger_than_goal_remove_on_last_decrement;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn get_request_for_currently_used() {
+        let mut fixture = Fixture::new_and_clear_messages(10);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42))
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.got_artifact_success_ign(digest!(42), 100);
 
-        GetRequest(jid!(2), digest!(42)) => {};
-        GetRequest(jid!(3), digest!(42)) => {};
+        fixture.get_artifact(
+            jid!(1),
+            digest!(42),
+            GetArtifact::Success(long_path!("/cache/root/sha256", 42)),
+        );
 
-        DownloadAndExtractCompleted(digest!(42), Ok(10000)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(jid!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
-            GetRequestSucceeded(jid!(3), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DecrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
+        fixture.decrement_refcount(digest!(42), vec![]);
+        fixture.decrement_refcount(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        get_request_for_currently_used;
-        Fixture::new_and_clear_messages(10);
+    #[test]
+    fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_refcount() {
+        let mut fixture = Fixture::new_and_clear_messages(100);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.got_artifact_success_ign(digest!(42), 10);
+        fixture.decrement_refcount_ign(digest!(42));
 
-        DownloadAndExtractCompleted(digest!(42), Ok(100)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact(
+            jid!(2),
+            digest!(42),
+            GetArtifact::Success(long_path!("/cache/root/sha256", 42)),
+        );
+        fixture.get_artifact(
+            jid!(3),
+            digest!(43),
+            GetArtifact::Get(long_path!("/cache/root/sha256", 43)),
+        );
+        fixture.got_artifact_success(
+            digest!(43),
+            100,
+            vec![(jid!(3), long_path!("/cache/root/sha256", 43))],
+            vec![],
+        );
 
-        GetRequest(jid!(2), digest!(42)) => {
-            GetRequestSucceeded(jid!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DecrementRefcount(digest!(42)) => {};
-        DecrementRefcount(digest!(42)) => {
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
+        fixture.decrement_refcount(
+            digest!(42),
+            vec![
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_refcount;
-        Fixture::new_and_clear_messages(100);
+    #[test]
+    fn get_request_for_empty_with_download_and_extract_failure_and_no_files_created() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DownloadAndExtractCompleted(digest!(42), Ok(10)) => {
-            GetRequestSucceeded(jid!(1), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DecrementRefcount(digest!(42)) => {};
-
-        GetRequest(jid!(2), digest!(42)) => {
-            GetRequestSucceeded(jid!(2), digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        GetRequest(jid!(3), digest!(43)) => {
-            DownloadAndExtract(digest!(43), long_path!("/cache/root/sha256", 43)),
-        };
-
-        DownloadAndExtractCompleted(digest!(43), Ok(100)) => {
-            GetRequestSucceeded(jid!(3), digest!(43), long_path!("/cache/root/sha256", 43)),
-        };
-
-        DecrementRefcount(digest!(42)) => {
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.got_artifact_failure(
+            digest!(42),
+            vec![jid!(1)],
+            vec![FileExists(long_path!("/cache/root/sha256", 42))],
+        );
     }
 
-    script_test! {
-        get_request_for_empty_with_download_and_extract_failure_and_no_files_created;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn preexisting_directories_do_not_affect_get_request() {
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs
+            .existing_files
+            .insert(long_path!("/cache/root/sha256", 42));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
-
-        DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
-            FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(jid!(1), digest!(42)),
-        };
+        fixture.get_artifact(
+            jid!(1),
+            digest!(42),
+            GetArtifact::Get(long_path!("/cache/root/sha256", 42)),
+        );
     }
 
-    script_test! {
-        get_request_for_empty_with_download_and_extract_failure_and_files_created;
-        {
-            let mut test_cache_fs = TestCacheFs::default();
-            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
-        };
+    #[test]
+    fn get_request_for_empty_with_download_and_extract_failure_and_files_created() {
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs
+            .existing_files
+            .insert(long_path!("/cache/root/sha256", 42));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
 
-        DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
-            FileExists(long_path!("/cache/root/sha256", 42)),
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(jid!(1), digest!(42)),
-        };
+        fixture.got_artifact_failure(
+            digest!(42),
+            vec![jid!(1)],
+            vec![
+                FileExists(long_path!("/cache/root/sha256", 42)),
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        multiple_get_requests_for_empty_with_download_and_extract_failure;
-        {
-            let mut test_cache_fs = TestCacheFs::default();
-            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
-        };
+    #[test]
+    fn multiple_get_requests_for_empty_with_download_and_extract_failure() {
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs
+            .existing_files
+            .insert(long_path!("/cache/root/sha256", 42));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
+        fixture.get_artifact_ign(jid!(2), digest!(42));
+        fixture.get_artifact_ign(jid!(3), digest!(42));
 
-        GetRequest(jid!(2), digest!(42)) => {};
-        GetRequest(jid!(3), digest!(42)) => {};
-
-        DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
-            FileExists(long_path!("/cache/root/sha256", 42)),
-            FileExists(short_path!("/cache/root/removing", 1)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 1)),
-            RemoveRecursively(short_path!("/cache/root/removing", 1)),
-            GetRequestFailed(jid!(1), digest!(42)),
-            GetRequestFailed(jid!(2), digest!(42)),
-            GetRequestFailed(jid!(3), digest!(42)),
-        };
+        fixture.got_artifact_failure(
+            digest!(42),
+            vec![jid!(1), jid!(2), jid!(3)],
+            vec![
+                FileExists(long_path!("/cache/root/sha256", 42)),
+                FileExists(short_path!("/cache/root/removing", 1)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 1),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 1)),
+            ],
+        );
     }
 
-    script_test! {
-        get_after_error_retries;
-        Fixture::new_and_clear_messages(1000);
+    #[test]
+    fn get_after_error_retries() {
+        let mut fixture = Fixture::new_and_clear_messages(1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
 
-        DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
-            FileExists(long_path!("/cache/root/sha256", 42)),
-            GetRequestFailed(jid!(1), digest!(42)),
-        };
+        fixture.got_artifact_failure(
+            digest!(42),
+            vec![jid!(1)],
+            vec![FileExists(long_path!("/cache/root/sha256", 42))],
+        );
 
-        GetRequest(jid!(2), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact(
+            jid!(2),
+            digest!(42),
+            GetArtifact::Get(long_path!("/cache/root/sha256", 42)),
+        );
     }
 
-    script_test! {
-        rename_retries_until_unique_path_name;
-        {
-            let mut test_cache_fs = TestCacheFs::default();
-            test_cache_fs.existing_files.insert(long_path!("/cache/root/sha256", 42));
-            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 1));
-            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 2));
-            test_cache_fs.existing_files.insert(short_path!("/cache/root/removing", 3));
-            Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000)
-        };
+    #[test]
+    fn rename_retries_until_unique_path_name() {
+        let mut test_cache_fs = TestCacheFs::default();
+        test_cache_fs
+            .existing_files
+            .insert(long_path!("/cache/root/sha256", 42));
+        test_cache_fs
+            .existing_files
+            .insert(short_path!("/cache/root/removing", 1));
+        test_cache_fs
+            .existing_files
+            .insert(short_path!("/cache/root/removing", 2));
+        test_cache_fs
+            .existing_files
+            .insert(short_path!("/cache/root/removing", 3));
+        let mut fixture = Fixture::new_with_fs_and_clear_messages(test_cache_fs, 1000);
 
-        GetRequest(jid!(1), digest!(42)) => {
-            DownloadAndExtract(digest!(42), long_path!("/cache/root/sha256", 42)),
-        };
+        fixture.get_artifact_ign(jid!(1), digest!(42));
 
-        DownloadAndExtractCompleted(digest!(42), Err(anyhow!("foo"))) => {
-            FileExists(long_path!("/cache/root/sha256", 42)),
-            FileExists(short_path!("/cache/root/removing", 1)),
-            FileExists(short_path!("/cache/root/removing", 2)),
-            FileExists(short_path!("/cache/root/removing", 3)),
-            FileExists(short_path!("/cache/root/removing", 4)),
-            Rename(long_path!("/cache/root/sha256", 42), short_path!("/cache/root/removing", 4)),
-            RemoveRecursively(short_path!("/cache/root/removing", 4)),
-            GetRequestFailed(jid!(1), digest!(42)),
-        };
+        fixture.got_artifact_failure(
+            digest!(42),
+            vec![jid!(1)],
+            vec![
+                FileExists(long_path!("/cache/root/sha256", 42)),
+                FileExists(short_path!("/cache/root/removing", 1)),
+                FileExists(short_path!("/cache/root/removing", 2)),
+                FileExists(short_path!("/cache/root/removing", 3)),
+                FileExists(short_path!("/cache/root/removing", 4)),
+                Rename(
+                    long_path!("/cache/root/sha256", 42),
+                    short_path!("/cache/root/removing", 4),
+                ),
+                RemoveRecursively(short_path!("/cache/root/removing", 4)),
+            ],
+        );
     }
 
     #[test]
