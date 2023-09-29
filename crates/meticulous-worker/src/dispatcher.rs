@@ -56,7 +56,7 @@ pub trait DispatcherCache {
         &mut self,
         digest: &Sha256Digest,
         bytes_used: u64,
-    ) -> Vec<(JobId, PathBuf)>;
+    ) -> (PathBuf, Vec<JobId>);
     fn decrement_refcount(&mut self, digest: &Sha256Digest);
 }
 
@@ -73,7 +73,7 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
         &mut self,
         digest: &Sha256Digest,
         bytes_used: u64,
-    ) -> Vec<(JobId, PathBuf)> {
+    ) -> (PathBuf, Vec<JobId>) {
         self.got_artifact_success(digest, bytes_used)
     }
 
@@ -262,7 +262,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_artifact_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
-        for (jid, path) in self.cache.got_artifact_success(&digest, bytes_used) {
+        let (path, jobs) = self.cache.got_artifact_success(&digest, bytes_used);
+        for jid in jobs {
             // If there were previous errors for this job, then we'll find
             // nothing in the hash table, and we'll need to release this layer.
             //
@@ -277,7 +278,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     entry
                         .get_mut()
                         .layers
-                        .insert(digest.clone(), path)
+                        .insert(digest.clone(), path.clone())
                         .assert_is_none();
                     if entry.get().has_all_layers() {
                         let mut entry = entry.remove();
@@ -331,7 +332,7 @@ mod tests {
     struct TestState {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<Sha256Digest, GetArtifact>,
-        got_artifact_success_returns: HashMap<Sha256Digest, Vec<(JobId, PathBuf)>>,
+        got_artifact_success_returns: HashMap<Sha256Digest, (PathBuf, Vec<JobId>)>,
         got_artifact_failure_returns: HashMap<Sha256Digest, Vec<JobId>>,
     }
 
@@ -405,7 +406,7 @@ mod tests {
             &mut self,
             digest: &Sha256Digest,
             bytes_used: u64,
-        ) -> Vec<(JobId, PathBuf)> {
+        ) -> (PathBuf, Vec<JobId>) {
             self.borrow_mut()
                 .messages
                 .push(CacheGotArtifactSuccess(digest.clone(), bytes_used));
@@ -431,7 +432,7 @@ mod tests {
         fn new<const L: usize, const M: usize, const N: usize>(
             slots: usize,
             get_artifact_returns: [(Sha256Digest, GetArtifact); L],
-            got_artifact_success_returns: [(Sha256Digest, Vec<(JobId, PathBuf)>); M],
+            got_artifact_success_returns: [(Sha256Digest, (PathBuf, Vec<JobId>)); M],
             got_artifact_failure_returns: [(Sha256Digest, Vec<JobId>); N],
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
@@ -519,8 +520,8 @@ mod tests {
                 (digest!(42), GetArtifact::Wait),
                 (digest!(43), GetArtifact::Get(path_buf!("/c")))
             ], [
-                (digest!(42), vec![(jid![1], path_buf!("/b"))]),
-                (digest!(43), vec![(jid![1], path_buf!("/c"))]),
+                (digest!(42), (path_buf!("/b"), vec![jid![1]])),
+                (digest!(43), (path_buf!("/c"), vec![jid![1]])),
             ], []),
         Broker(EnqueueJob(jid![1], details![1, [41, 42, 43]])) => {
             CacheGetArtifact(digest!(41), jid![1]),
@@ -680,8 +681,8 @@ mod tests {
             (digest!(43), GetArtifact::Wait),
             (digest!(44), GetArtifact::Wait),
         ], [
-            (digest!(41), vec![(jid![1], path_buf!("/a"))]),
-            (digest!(43), vec![(jid![1], path_buf!("/c"))]),
+            (digest!(41), (path_buf!("/a"), vec![jid![1]])),
+            (digest!(43), (path_buf!("/c"), vec![jid![1]])),
         ], [
             (digest!(42), vec![jid![1]]),
             (digest!(44), vec![jid![1]]),

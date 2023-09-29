@@ -275,7 +275,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         &mut self,
         digest: &Sha256Digest,
         bytes_used: u64,
-    ) -> Vec<(JobId, PathBuf)> {
+    ) -> (PathBuf, Vec<JobId>) {
         let entry = self
             .entries
             .get_mut(digest)
@@ -284,10 +284,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
         let refcount = jobs.len().try_into().unwrap();
-        let result: Vec<_> = jobs
-            .drain(..)
-            .map(|jid| (jid, Self::cache_path(&self.root, digest)))
-            .collect();
+        let jobs = std::mem::take(jobs);
         // Refcount must be > 0 since we don't allow cancellation of gets.
         *entry = CacheEntry::InUse {
             bytes_used,
@@ -295,7 +292,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         self.possibly_remove_some();
-        result
+        (Self::cache_path(&self.root, digest), jobs)
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
@@ -514,7 +511,7 @@ mod tests {
             &mut self,
             digest: Sha256Digest,
             bytes_used: u64,
-            expected: Vec<(JobId, PathBuf)>,
+            expected: (PathBuf, Vec<JobId>),
             expected_fs_operations: Vec<TestMessage>,
         ) {
             let result = self.cache.got_artifact_success(&digest, bytes_used);
@@ -561,7 +558,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(42),
             100,
-            vec![(jid!(1), long_path!("/cache/root/sha256", 42))],
+            (long_path!("/cache/root/sha256", 42), vec![jid!(1)]),
             vec![],
         );
     }
@@ -574,7 +571,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(42),
             10000,
-            vec![(jid!(1), long_path!("/cache/root/sha256", 42))],
+            (long_path!("/cache/root/sha256", 42), vec![jid!(1)]),
             vec![],
         );
 
@@ -607,7 +604,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(3),
             4,
-            vec![(jid!(3), long_path!("/cache/root/sha256", 3))],
+            (long_path!("/cache/root/sha256", 3), vec![jid!(3)]),
             vec![
                 FileExists(short_path!("/cache/root/removing", 1)),
                 Rename(
@@ -623,7 +620,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             4,
-            vec![(jid!(4), long_path!("/cache/root/sha256", 4))],
+            (long_path!("/cache/root/sha256", 4), vec![jid!(4)]),
             vec![
                 FileExists(short_path!("/cache/root/removing", 2)),
                 Rename(
@@ -657,7 +654,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(4),
             3,
-            vec![(jid!(4), long_path!("/cache/root/sha256", 4))],
+            (long_path!("/cache/root/sha256", 4), vec![jid!(4)]),
             vec![
                 FileExists(short_path!("/cache/root/removing", 1)),
                 Rename(
@@ -680,11 +677,10 @@ mod tests {
         fixture.got_artifact_success(
             digest!(42),
             100,
-            vec![
-                (jid!(1), long_path!("/cache/root/sha256", 42)),
-                (jid!(2), long_path!("/cache/root/sha256", 42)),
-                (jid!(3), long_path!("/cache/root/sha256", 42)),
-            ],
+            (
+                long_path!("/cache/root/sha256", 42),
+                vec![jid!(1), jid!(2), jid!(3)],
+            ),
             vec![],
         );
     }
@@ -700,11 +696,10 @@ mod tests {
         fixture.got_artifact_success(
             digest!(42),
             10000,
-            vec![
-                (jid!(1), long_path!("/cache/root/sha256", 42)),
-                (jid!(2), long_path!("/cache/root/sha256", 42)),
-                (jid!(3), long_path!("/cache/root/sha256", 42)),
-            ],
+            (
+                long_path!("/cache/root/sha256", 42),
+                vec![jid!(1), jid!(2), jid!(3)],
+            ),
             vec![],
         );
 
@@ -771,7 +766,7 @@ mod tests {
         fixture.got_artifact_success(
             digest!(43),
             100,
-            vec![(jid!(3), long_path!("/cache/root/sha256", 43))],
+            (long_path!("/cache/root/sha256", 43), vec![jid!(3)]),
             vec![],
         );
 
