@@ -17,6 +17,7 @@ use std::{
  *  FIGLET: public
  */
 
+/// Dependencies that [Cache] has on the file system.
 pub trait CacheFs {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
@@ -45,6 +46,7 @@ pub trait CacheFs {
     fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
 }
 
+/// The standard implementation of CacheFs that uses [std] and [rand].
 pub struct StdCacheFs;
 
 impl CacheFs for StdCacheFs {
