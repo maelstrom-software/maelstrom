@@ -128,7 +128,7 @@ async fn websocket_reader(
     }
 }
 
-/// Task main loop for handing a websocket. This just calls into [connection::socket_main].
+/// Task main loop for handing a websocket. This just calls into [connection::connection_main].
 async fn websocket_main(
     websocket: HyperWebsocket,
     scheduler_sender: SchedulerSender,

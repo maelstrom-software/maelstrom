@@ -5,18 +5,8 @@ use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
     collections::{hash_map, HashMap},
     num::NonZeroU32,
-    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
 };
-
-/*              _     _ _
- *  _ __  _   _| |__ | (_) ___
- * | '_ \| | | | '_ \| | |/ __|
- * | |_) | |_| | |_) | | | (__
- * | .__/ \__,_|_.__/|_|_|\___|
- * |_|
- *  FIGLET: public
- */
 
 /// Dependencies that [Cache] has on the file system.
 pub trait CacheFs {
@@ -127,11 +117,11 @@ enum CacheEntry {
     },
 }
 
-/// An implementation of the "newtype" pattern so that we can implement HeapDeps on a HashMap.
+/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a HashMap.
 #[derive(Default)]
 struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
 
-impl Deref for CacheMap {
+impl std::ops::Deref for CacheMap {
     type Target = HashMap<Sha256Digest, CacheEntry>;
 
     fn deref(&self) -> &Self::Target {
@@ -139,7 +129,7 @@ impl Deref for CacheMap {
     }
 }
 
-impl DerefMut for CacheMap {
+impl std::ops::DerefMut for CacheMap {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }

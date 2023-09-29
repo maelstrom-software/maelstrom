@@ -40,11 +40,12 @@ pub trait SchedulerDeps {
 }
 
 /// The required interface for the cache that is provided to the [Scheduler]. This mirrors the API
-/// for [Cache]. We just keep them separate so that we can test the [Scheduler] more easily.
+/// for [super::cache::Cache]. We just keep them separate so that we can test the [Scheduler] more
+/// easily.
 ///
-/// Unlike with [SchedulerDeps], all of these functions are immediate. The [Cache] is owned by the
-/// [Scheduler] and the two live on the same task. So these methods sometimes return actual values
-/// which can be handled immediately, unlike [SchedulerDeps].
+/// Unlike with [SchedulerDeps], all of these functions are immediate. The [super::cache::Cache] is
+/// owned by the [Scheduler] and the two live on the same task. So these methods sometimes return
+/// actual values which can be handled immediately, unlike [SchedulerDeps].
 pub trait SchedulerCache {
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
     fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId>;
