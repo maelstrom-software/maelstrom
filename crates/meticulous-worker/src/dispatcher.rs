@@ -36,7 +36,7 @@ pub trait DispatcherDeps {
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 
     /// Send a message to the broker.
-    fn send_response_to_broker(&mut self, message: WorkerToBroker);
+    fn send_message_to_broker(&mut self, message: WorkerToBroker);
 }
 
 pub trait DispatcherCache {
@@ -220,8 +220,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         // If there is no entry in the executing map, then the job has been canceled
         // and we don't need to send any message to the broker.
         if let Some((details, _)) = self.executing.remove(&id) {
-            self.deps
-                .send_response_to_broker(WorkerToBroker(id, result));
+            self.deps.send_message_to_broker(WorkerToBroker(id, result));
             for digest in details.layers {
                 self.cache.decrement_ref_count(&digest);
             }
@@ -237,7 +236,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // Otherwise, it means that there were previous errors for this entry, and there's
             // nothing to do here.
             if let Some(entry) = self.awaiting_layers.remove(&jid) {
-                self.deps.send_response_to_broker(WorkerToBroker(
+                self.deps.send_message_to_broker(WorkerToBroker(
                     jid,
                     JobResult::Error(format!(
                         "Failed to download and extract layer artifact {}",
@@ -309,7 +308,7 @@ mod tests {
     enum TestMessage {
         StartJob(JobId, JobDetails, Vec<PathBuf>),
         DropJobHandle(JobId),
-        SendResponseToBroker(WorkerToBroker),
+        SendMessageToBroker(WorkerToBroker),
         StartArtifactFetch(Sha256Digest, PathBuf),
         CacheGetArtifact(Sha256Digest, JobId),
         CacheGotArtifactSuccess(Sha256Digest, u64),
@@ -364,10 +363,10 @@ mod tests {
                 .push(StartArtifactFetch(digest, path));
         }
 
-        fn send_response_to_broker(&mut self, message: WorkerToBroker) {
+        fn send_message_to_broker(&mut self, message: WorkerToBroker) {
             self.borrow_mut()
                 .messages
-                .push(SendResponseToBroker(message));
+                .push(SendMessageToBroker(message));
         }
     }
 
@@ -541,7 +540,7 @@ mod tests {
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
         Executor(jid!(1), result!(1)) => {
             DropJobHandle(jid!(1)),
-            SendResponseToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
     }
@@ -554,7 +553,7 @@ mod tests {
         Broker(EnqueueJob(jid!(3), details!(3))) => {};
         Executor(jid!(1), result!(1)) => {
             DropJobHandle(jid!(1)),
-            SendResponseToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(3), details!(3), vec![]),
         };
     }
@@ -566,7 +565,7 @@ mod tests {
         Broker(EnqueueJob(jid!(2), details!(2))) => { StartJob(jid!(2), details!(2), vec![]) };
         Executor(jid!(1), result!(1)) => {
             DropJobHandle(jid!(1)),
-            SendResponseToBroker(WorkerToBroker(jid!(1), result!(1)))
+            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1)))
         };
         Broker(EnqueueJob(jid!(3), details!(3))) => { StartJob(jid!(3), details!(3), vec![]) };
     }
@@ -593,7 +592,7 @@ mod tests {
         };
         Executor(jid!(1), result!(1)) => {
             DropJobHandle(jid!(1)),
-            SendResponseToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(4), details!(4), vec![]),
         };
     }
@@ -688,7 +687,7 @@ mod tests {
         };
         ArtifactFetcher(digest!(42), None) => {
             CacheGotArtifactFailure(digest!(42)),
-            SendResponseToBroker(WorkerToBroker(jid!(1), JobResult::Error(
+            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Error(
                 "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
             CacheDecrementRefCount(digest!(41))
         };

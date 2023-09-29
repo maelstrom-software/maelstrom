@@ -45,7 +45,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
         todo!()
     }
 
-    fn send_response_to_broker(&mut self, message: proto::WorkerToBroker) {
+    fn send_message_to_broker(&mut self, message: proto::WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
 }
