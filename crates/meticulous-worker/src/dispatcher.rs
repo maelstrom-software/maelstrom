@@ -41,11 +41,11 @@ pub trait DispatcherDeps {
         layers: Vec<PathBuf>,
     ) -> Self::JobHandle;
 
-    /// Start a thread that will download an artifact from the broker and extract it into `path`.
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
-
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
+
+    /// Start a thread that will download an artifact from the broker and extract it into `path`.
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 }
 
 /// The [Cache] dependency for [Dispatcher]. This should be exactly the same as [Cache]'s public
@@ -106,6 +106,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             awaiting_layers: HashMap::default(),
             queued: VecDeque::default(),
             executing: HashMap::default(),
+            canceled: HashMap::default(),
         }
     }
 
@@ -144,7 +145,7 @@ impl AwaitingLayersEntry {
     fn new(details: JobDetails) -> Self {
         AwaitingLayersEntry {
             details,
-            layers: HashMap::new(),
+            layers: HashMap::default(),
         }
     }
 
@@ -165,6 +166,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
     queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
     executing: HashMap<JobId, (JobDetails, DepsT::JobHandle)>,
+    canceled: HashMap<JobId, Vec<Sha256Digest>>,
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -208,9 +210,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // We may have already gotten some layers. Make sure we release those.
             layers = entry.layers.into_keys().collect();
         } else if let Some((details, _)) = self.executing.remove(&id) {
-            // If it was executing, we need to drop the job handle, which will
-            // tell the executor to kill the process. We also need to clean up all of our layers.
-            layers = details.layers;
+            // The job was executing. We (implicitly) drop the job handle, which will tell the
+            // executor to kill the process. We also will start a new job if possible. However, we
+            // wait to release the layers until the execution has completed. If we didn't it would
+            // be possible for us to try to remove a directory that was still in use, which would
+            // fail.
+            self.canceled.insert(id, details.layers).assert_is_none();
             self.possibly_start_job();
         } else {
             // It may be the queue.
@@ -238,6 +243,13 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 self.cache.decrement_ref_count(&digest);
             }
             self.possibly_start_job();
+        } else {
+            // If there is no entry in the executing map, then the job has been canceled. We should
+            // find it's layers in the canceled map.
+            let layers = self.canceled.remove(&id).unwrap();
+            for digest in layers {
+                self.cache.decrement_ref_count(&digest);
+            }
         }
     }
 
@@ -627,12 +639,13 @@ mod tests {
         Broker(EnqueueJob(jid!(3), details!(3))) => {};
         Broker(CancelJob(jid!(1))) => {
             DropJobHandle(jid!(1)),
+            StartJob(jid!(3), details!(3), vec![])
+        };
+        Executor(jid!(1), result!(2)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
             CacheDecrementRefCount(digest!(43)),
-            StartJob(jid!(3), details!(3), vec![])
         };
-        Executor(jid!(1), result!(2)) => {};
     }
 
     script_test! {
