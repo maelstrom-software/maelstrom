@@ -57,7 +57,7 @@ pub trait DispatcherCache {
         digest: &Sha256Digest,
         bytes_used: u64,
     ) -> (PathBuf, Vec<JobId>);
-    fn decrement_refcount(&mut self, digest: &Sha256Digest);
+    fn decrement_ref_count(&mut self, digest: &Sha256Digest);
 }
 
 impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
@@ -77,8 +77,8 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
         self.got_artifact_success(digest, bytes_used)
     }
 
-    fn decrement_refcount(&mut self, digest: &Sha256Digest) {
-        self.decrement_refcount(digest)
+    fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
+        self.decrement_ref_count(digest)
     }
 }
 
@@ -222,7 +222,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             });
         }
         for digest in layers {
-            self.cache.decrement_refcount(&digest);
+            self.cache.decrement_ref_count(&digest);
         }
     }
 
@@ -233,7 +233,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             self.deps
                 .send_response_to_broker(WorkerToBroker(id, result));
             for digest in details.layers {
-                self.cache.decrement_refcount(&digest);
+                self.cache.decrement_ref_count(&digest);
             }
             self.possibly_start_job();
         }
@@ -255,7 +255,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     )),
                 ));
                 for digest in entry.layers.into_keys() {
-                    self.cache.decrement_refcount(&digest);
+                    self.cache.decrement_ref_count(&digest);
                 }
             }
         }
@@ -272,7 +272,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // the job.
             match self.awaiting_layers.entry(jid) {
                 hash_map::Entry::Vacant(_) => {
-                    self.cache.decrement_refcount(&digest);
+                    self.cache.decrement_ref_count(&digest);
                 }
                 hash_map::Entry::Occupied(mut entry) => {
                     entry
@@ -324,7 +324,7 @@ mod tests {
         CacheGetArtifact(Sha256Digest, JobId),
         CacheGotArtifactSuccess(Sha256Digest, u64),
         CacheGotArtifactFailure(Sha256Digest),
-        CacheDecrementRefcount(Sha256Digest),
+        CacheDecrementRefCount(Sha256Digest),
     }
 
     use TestMessage::*;
@@ -416,10 +416,10 @@ mod tests {
                 .unwrap()
         }
 
-        fn decrement_refcount(&mut self, digest: &Sha256Digest) {
+        fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
             self.borrow_mut()
                 .messages
-                .push(CacheDecrementRefcount(digest.clone()))
+                .push(CacheDecrementRefCount(digest.clone()))
         }
     }
 
@@ -552,7 +552,7 @@ mod tests {
         Executor(jid![1], result![1]) => {
             DropJobHandle(jid![1]),
             SendResponseToBroker(WorkerToBroker(jid![1], result![1])),
-            CacheDecrementRefcount(digest!(42)),
+            CacheDecrementRefCount(digest!(42)),
         };
     }
 
@@ -597,9 +597,9 @@ mod tests {
         };
         Broker(EnqueueJob(jid![4], details![4])) => {};
         Broker(CancelJob(jid![3])) => {
-            CacheDecrementRefcount(digest!(41)),
-            CacheDecrementRefcount(digest!(42)),
-            CacheDecrementRefcount(digest!(43)),
+            CacheDecrementRefCount(digest!(41)),
+            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(digest!(43)),
         };
         Executor(jid![1], result![1]) => {
             DropJobHandle(jid![1]),
@@ -625,9 +625,9 @@ mod tests {
         Broker(EnqueueJob(jid![3], details![3])) => {};
         Broker(CancelJob(jid![1])) => {
             DropJobHandle(jid![1]),
-            CacheDecrementRefcount(digest!(41)),
-            CacheDecrementRefcount(digest!(42)),
-            CacheDecrementRefcount(digest!(43)),
+            CacheDecrementRefCount(digest!(41)),
+            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(digest!(43)),
             StartJob(jid![3], details![3], path_buf_vec![])
         };
         Executor(jid![1], result![2]) => {};
@@ -646,7 +646,7 @@ mod tests {
             CacheGetArtifact(digest!(43), jid![1]),
         };
         Broker(CancelJob(jid![1])) => {
-            CacheDecrementRefcount(digest!(41))
+            CacheDecrementRefCount(digest!(41))
         }
     }
 
@@ -700,11 +700,11 @@ mod tests {
             CacheGotArtifactFailure(digest!(42)),
             SendResponseToBroker(WorkerToBroker(jid![1], JobResult::Error(
                 "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
-            CacheDecrementRefcount(digest!(41))
+            CacheDecrementRefCount(digest!(41))
         };
         ArtifactFetcher(digest!(43), Some(103)) => {
             CacheGotArtifactSuccess(digest!(43), 103),
-            CacheDecrementRefcount(digest!(43))
+            CacheDecrementRefCount(digest!(43))
         };
         ArtifactFetcher(digest!(44), None) => {
             CacheGotArtifactFailure(digest!(44)),

@@ -85,7 +85,7 @@ impl CacheFs for StdCacheFs {
 #[derive(Debug, PartialEq)]
 pub enum GetArtifact {
     /// The artifact in the cache. The caller has been given a reference that must later be
-    /// released by calling [Cache::decrement_refcount]. The provided [PathBuf] contains the
+    /// released by calling [Cache::decrement_ref_count]. The provided [PathBuf] contains the
     /// location of the artifact.
     Success(PathBuf),
 
@@ -110,11 +110,11 @@ enum CacheEntry {
     DownloadingAndExtracting(Vec<JobId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
-    /// currently being used by at least one job. We refcount this state since there may be
+    /// currently being used by at least one job. We reference count this state since there may be
     /// multiple jobs using the same artifact.
     InUse {
         bytes_used: u64,
-        refcount: NonZeroU32,
+        ref_count: NonZeroU32,
     },
 
     /// The artifact has been successfully downloaded and extracted, but no jobs are
@@ -234,8 +234,8 @@ impl<FsT: CacheFs> Cache<FsT> {
                         jobs.push(jid);
                         GetArtifact::Wait
                     }
-                    CacheEntry::InUse { refcount, .. } => {
-                        *refcount = refcount.checked_add(1).unwrap();
+                    CacheEntry::InUse { ref_count, .. } => {
+                        *ref_count = ref_count.checked_add(1).unwrap();
                         GetArtifact::Success(cache_path)
                     }
                     CacheEntry::InHeap {
@@ -245,7 +245,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                     } => {
                         let heap_index = *heap_index;
                         *entry = CacheEntry::InUse {
-                            refcount: NonZeroU32::new(1).unwrap(),
+                            ref_count: NonZeroU32::new(1).unwrap(),
                             bytes_used: *bytes_used,
                         };
                         self.heap.remove(&mut self.entries, heap_index);
@@ -283,12 +283,12 @@ impl<FsT: CacheFs> Cache<FsT> {
         let CacheEntry::DownloadingAndExtracting(jobs) = entry else {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
-        let refcount = jobs.len().try_into().unwrap();
+        let ref_count = jobs.len().try_into().unwrap();
         let jobs = std::mem::take(jobs);
-        // Refcount must be > 0 since we don't allow cancellation of gets.
+        // Reference count must be > 0 since we don't allow cancellation of gets.
         *entry = CacheEntry::InUse {
             bytes_used,
-            refcount: NonZeroU32::new(refcount).unwrap(),
+            ref_count: NonZeroU32::new(ref_count).unwrap(),
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         self.possibly_remove_some();
@@ -296,20 +296,20 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
-    pub fn decrement_refcount(&mut self, digest: &Sha256Digest) {
+    pub fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
         let entry = self
             .entries
             .get_mut(digest)
-            .expect("Got DecrementRefcount in unexpected state");
+            .expect("Got decrement_ref_count in unexpected state");
         let CacheEntry::InUse {
             bytes_used,
-            refcount,
+            ref_count,
         } = entry
         else {
-            panic!("Got DecrementRefcount with existing zero refcount");
+            panic!("Got decrement_ref_count with existing zero reference count");
         };
-        match NonZeroU32::new(refcount.get() - 1) {
-            Some(new_refcount) => *refcount = new_refcount,
+        match NonZeroU32::new(ref_count.get() - 1) {
+            Some(new_ref_count) => *ref_count = new_ref_count,
             None => {
                 *entry = CacheEntry::InHeap {
                     bytes_used: *bytes_used,
@@ -535,13 +535,13 @@ mod tests {
             self.clear_messages();
         }
 
-        fn decrement_refcount(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
-            self.cache.decrement_refcount(&digest);
+        fn decrement_ref_count(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
+            self.cache.decrement_ref_count(&digest);
             self.expect_messages_in_any_order(expected);
         }
 
-        fn decrement_refcount_ign(&mut self, digest: Sha256Digest) {
-            self.cache.decrement_refcount(&digest);
+        fn decrement_ref_count_ign(&mut self, digest: Sha256Digest) {
+            self.cache.decrement_ref_count(&digest);
             self.clear_messages();
         }
     }
@@ -564,7 +564,7 @@ mod tests {
     }
 
     #[test]
-    fn get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_refcount() {
+    fn get_request_for_empty_larger_than_goal_ok_then_removes_on_decrement_ref_count() {
         let mut fixture = Fixture::new_and_clear_messages(1000);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
@@ -575,7 +575,7 @@ mod tests {
             vec![],
         );
 
-        fixture.decrement_refcount(
+        fixture.decrement_ref_count(
             digest!(42),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
@@ -591,11 +591,11 @@ mod tests {
 
         fixture.get_artifact_ign(digest!(1), jid!(1));
         fixture.got_artifact_success_ign(digest!(1), 4);
-        fixture.decrement_refcount(digest!(1), vec![]);
+        fixture.decrement_ref_count(digest!(1), vec![]);
 
         fixture.get_artifact_ign(digest!(2), jid!(2));
         fixture.got_artifact_success_ign(digest!(2), 4);
-        fixture.decrement_refcount(digest!(2), vec![]);
+        fixture.decrement_ref_count(digest!(2), vec![]);
 
         fixture.get_artifact_ign(digest!(3), jid!(3));
         fixture.got_artifact_success(
@@ -608,7 +608,7 @@ mod tests {
                 RemoveRecursively(short_path!("/z/removing", 1)),
             ],
         );
-        fixture.decrement_refcount(digest!(3), vec![]);
+        fixture.decrement_ref_count(digest!(3), vec![]);
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
         fixture.got_artifact_success(
@@ -621,7 +621,7 @@ mod tests {
                 RemoveRecursively(short_path!("/z/removing", 2)),
             ],
         );
-        fixture.decrement_refcount(digest!(4), vec![]);
+        fixture.decrement_ref_count(digest!(4), vec![]);
     }
 
     #[test]
@@ -637,9 +637,9 @@ mod tests {
         fixture.get_artifact_ign(digest!(3), jid!(3));
         fixture.got_artifact_success_ign(digest!(3), 3);
 
-        fixture.decrement_refcount(digest!(3), vec![]);
-        fixture.decrement_refcount(digest!(2), vec![]);
-        fixture.decrement_refcount(digest!(1), vec![]);
+        fixture.decrement_ref_count(digest!(3), vec![]);
+        fixture.decrement_ref_count(digest!(2), vec![]);
+        fixture.decrement_ref_count(digest!(1), vec![]);
 
         fixture.get_artifact_ign(digest!(4), jid!(4));
         fixture.got_artifact_success(
@@ -685,9 +685,9 @@ mod tests {
             vec![],
         );
 
-        fixture.decrement_refcount(digest!(42), vec![]);
-        fixture.decrement_refcount(digest!(42), vec![]);
-        fixture.decrement_refcount(
+        fixture.decrement_ref_count(digest!(42), vec![]);
+        fixture.decrement_ref_count(digest!(42), vec![]);
+        fixture.decrement_ref_count(
             digest!(42),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
@@ -710,8 +710,8 @@ mod tests {
             GetArtifact::Success(long_path!("/z/sha256", 42)),
         );
 
-        fixture.decrement_refcount(digest!(42), vec![]);
-        fixture.decrement_refcount(
+        fixture.decrement_ref_count(digest!(42), vec![]);
+        fixture.decrement_ref_count(
             digest!(42),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
@@ -722,12 +722,12 @@ mod tests {
     }
 
     #[test]
-    fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_refcount() {
+    fn get_request_for_cached_followed_by_big_get_does_not_evict_until_decrement_ref_count() {
         let mut fixture = Fixture::new_and_clear_messages(100);
 
         fixture.get_artifact_ign(digest!(42), jid!(1));
         fixture.got_artifact_success_ign(digest!(42), 10);
-        fixture.decrement_refcount_ign(digest!(42));
+        fixture.decrement_ref_count_ign(digest!(42));
 
         fixture.get_artifact(
             digest!(42),
@@ -746,7 +746,7 @@ mod tests {
             vec![],
         );
 
-        fixture.decrement_refcount(
+        fixture.decrement_ref_count(
             digest!(42),
             vec![
                 FileExists(short_path!("/z/removing", 1)),
