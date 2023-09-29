@@ -58,7 +58,7 @@ async fn dispatcher_main(
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
 ) {
-    let cache = cache::Cache::new(&cache_root, cache::StdCacheFs, cache_bytes_used_goal);
+    let cache = cache::Cache::new(cache::StdCacheFs, cache_root, cache_bytes_used_goal);
     let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender);
     let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, slots);
     net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
