@@ -42,6 +42,7 @@ pub trait DispatcherDeps {
         layers: Vec<PathBuf>,
     ) -> Self::JobHandle;
 
+    /// Start a thread that will download an artifact from the broker and extract it into `path`.
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 
     /// Send a message to the broker.
@@ -49,7 +50,7 @@ pub trait DispatcherDeps {
 }
 
 pub trait DispatcherCache {
-    fn get_artifact(&mut self, request_id: JobId, artifact: Sha256Digest) -> GetArtifact;
+    fn get_artifact(&mut self, jid: JobId, artifact: Sha256Digest) -> GetArtifact;
     fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId>;
     fn got_artifact_success(
         &mut self,
@@ -60,8 +61,8 @@ pub trait DispatcherCache {
 }
 
 impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
-    fn get_artifact(&mut self, request_id: JobId, artifact: Sha256Digest) -> GetArtifact {
-        self.get_artifact(request_id, artifact)
+    fn get_artifact(&mut self, jid: JobId, artifact: Sha256Digest) -> GetArtifact {
+        self.get_artifact(jid, artifact)
     }
 
     fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
@@ -90,20 +91,6 @@ pub enum Message {
     ArtifactFetcher(Sha256Digest, Option<u64>),
 }
 
-/// Manage jobs based on the slot count and requests from the broker. If the broker
-/// sends more job requests than there are slots, the extra requests are queued in a FIFO
-/// queue. It's up to the broker to order the requests properly.
-///
-/// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
-    deps: DepsT,
-    cache: CacheT,
-    slots: usize,
-    awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
-    queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
-    executing: HashMap<JobId, (JobDetails, DepsT::JobHandle)>,
-}
-
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
@@ -113,9 +100,9 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             deps,
             cache,
             slots,
-            awaiting_layers: HashMap::new(),
-            queued: VecDeque::new(),
-            executing: HashMap::new(),
+            awaiting_layers: HashMap::default(),
+            queued: VecDeque::default(),
+            executing: HashMap::default(),
         }
     }
 
@@ -144,6 +131,38 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
  * |_|
  *  FIGLET: private
  */
+
+struct AwaitingLayersEntry {
+    details: JobDetails,
+    layers: HashMap<Sha256Digest, PathBuf>,
+}
+
+impl AwaitingLayersEntry {
+    fn new(details: JobDetails) -> Self {
+        AwaitingLayersEntry {
+            details,
+            layers: HashMap::new(),
+        }
+    }
+
+    fn has_all_layers(&self) -> bool {
+        self.layers.len() == self.details.layers.len()
+    }
+}
+
+/// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
+/// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
+/// broker to order the requests properly.
+///
+/// All methods are completely nonblocking. They will never block the task or the thread.
+pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
+    deps: DepsT,
+    cache: CacheT,
+    slots: usize,
+    awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
+    queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
+    executing: HashMap<JobId, (JobDetails, DepsT::JobHandle)>,
+}
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
@@ -274,24 +293,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 }
             }
         }
-    }
-}
-
-struct AwaitingLayersEntry {
-    details: JobDetails,
-    layers: HashMap<Sha256Digest, PathBuf>,
-}
-
-impl AwaitingLayersEntry {
-    fn new(details: JobDetails) -> Self {
-        AwaitingLayersEntry {
-            details,
-            layers: HashMap::new(),
-        }
-    }
-
-    fn has_all_layers(&self) -> bool {
-        self.layers.len() == self.details.layers.len()
     }
 }
 
