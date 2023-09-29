@@ -3,10 +3,11 @@
 mod cache;
 mod dispatcher;
 mod executor;
+mod fetcher;
 
 use meticulous_base::{proto, JobDetails, JobId, Sha256Digest};
 use meticulous_util::{error::Result, net};
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
@@ -15,13 +16,19 @@ type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerToBrok
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
+    broker_addr: SocketAddr,
 }
 
 impl DispatcherAdapter {
-    fn new(dispatcher_sender: DispatcherSender, broker_socket_sender: BrokerSocketSender) -> Self {
+    fn new(
+        dispatcher_sender: DispatcherSender,
+        broker_socket_sender: BrokerSocketSender,
+        broker_addr: SocketAddr,
+    ) -> Self {
         DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
+            broker_addr,
         }
     }
 }
@@ -41,8 +48,15 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
         })
     }
 
-    fn start_artifact_fetch(&mut self, _digest: Sha256Digest, _path: PathBuf) {
-        todo!()
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+        let sender = self.dispatcher_sender.clone();
+        let broker_addr = self.broker_addr;
+        std::thread::spawn(move || {
+            let result = fetcher::main(&digest, path, broker_addr).ok();
+            sender
+                .send(dispatcher::Message::ArtifactFetcher(digest, result))
+                .ok();
+        });
     }
 
     fn send_message_to_broker(&mut self, message: proto::WorkerToBroker) {
@@ -57,9 +71,10 @@ async fn dispatcher_main(
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
+    broker_addr: SocketAddr,
 ) {
     let cache = cache::Cache::new(cache::StdCacheFs, cache_root, cache_bytes_used_goal);
-    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender);
+    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, broker_addr);
     let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, slots);
     net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
@@ -78,7 +93,7 @@ pub async fn main(
     slots: usize,
     cache_root: PathBuf,
     cache_bytes_used_goal: u64,
-    broker_addr: std::net::SocketAddr,
+    broker_addr: SocketAddr,
 ) -> Result<()> {
     let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(&broker_addr)
         .await?
@@ -114,6 +129,7 @@ pub async fn main(
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_sender,
+        broker_addr,
     ));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::terminate()));

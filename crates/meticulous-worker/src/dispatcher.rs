@@ -90,7 +90,6 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 pub enum Message {
     Broker(BrokerToWorker),
     Executor(JobId, JobResult),
-    #[allow(dead_code)]
     ArtifactFetcher(Sha256Digest, Option<u64>),
 }
 

@@ -71,7 +71,6 @@ impl CacheFs for StdCacheFs {
 }
 
 /// Type returned from [Cache::get_artifact].
-#[allow(dead_code)]
 #[derive(Debug, PartialEq)]
 pub enum GetArtifact {
     /// The artifact in the cache. The caller has been given a reference that must later be

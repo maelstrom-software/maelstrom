@@ -1772,6 +1772,8 @@ dependencies = [
  "nix 0.26.4",
  "num_cpus",
  "rand",
+ "sha2",
+ "tar",
  "tempfile",
  "tokio",
 ]

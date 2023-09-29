@@ -3,7 +3,10 @@ use super::{
     IdVendor,
 };
 use meticulous_base::proto;
-use meticulous_util::{error::Error, net};
+use meticulous_util::{
+    error::{Error, Result},
+    net,
+};
 use std::{net::Shutdown, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -143,44 +146,48 @@ pub async fn listener_main(
                     )
                     .await
                 }
-                proto::Hello::WorkerArtifact { ref digest } => {
-                    use std::io::Write;
-                    let mut socket = socket.into_std().unwrap();
-                    socket.set_nonblocking(false).unwrap();
-                    socket.shutdown(Shutdown::Read).unwrap();
-                    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
-                    scheduler_sender
-                        .send(Message::GetArtifactForWorker(
-                            digest.clone(),
-                            channel_sender,
-                        ))
-                        .unwrap();
-                    if let Some(path) = channel_receiver.recv().unwrap() {
-                        let mut f = std::fs::File::open(path).unwrap();
-                        socket.write_all(&[1u8]).unwrap();
-                        std::io::copy(&mut f, &mut socket)?;
+                proto::Hello::WorkerArtifact { digest } => {
+                    std::thread::spawn(move || -> Result<()> {
+                        let mut socket = socket.into_std().unwrap();
+                        socket.set_nonblocking(false).unwrap();
+                        socket.shutdown(Shutdown::Read).unwrap();
+                        let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
                         scheduler_sender
-                            .send(Message::DecrementRefcount(digest.clone()))
+                            .send(Message::GetArtifactForWorker(
+                                digest.clone(),
+                                channel_sender,
+                            ))
                             .unwrap();
-                    }
+                        if let Some(path) = channel_receiver.recv().unwrap() {
+                            let mut f = std::fs::File::open(path).unwrap();
+                            std::io::copy(&mut f, &mut socket)?;
+                            scheduler_sender
+                                .send(Message::DecrementRefcount(digest.clone()))
+                                .unwrap();
+                        }
+                        Ok(())
+                    });
                 }
-                proto::Hello::ClientArtifact { ref digest } => {
-                    use std::io::Write;
-                    let mut socket = socket.into_std().unwrap();
-                    socket.set_nonblocking(false).unwrap();
-                    // XXX get the cache's preferred directory and use tempfile_in().
-                    let mut tmp = tempfile::Builder::new()
-                        .prefix(&digest.to_string())
-                        .suffix(".tar.gz")
-                        .tempfile()?;
-                    // XXX Validate the file.
-                    let size = std::io::copy(&mut socket, &mut tmp)?;
-                    let (_, path) = tmp.keep()?;
-                    scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
-                    socket.write_all(&[1u8]).unwrap();
+                proto::Hello::ClientArtifact { digest } => {
+                    std::thread::spawn(move || -> Result<()> {
+                        use std::io::Write;
+                        let mut socket = socket.into_std().unwrap();
+                        socket.set_nonblocking(false).unwrap();
+                        // XXX get the cache's preferred directory and use tempfile_in().
+                        let mut tmp = tempfile::Builder::new()
+                            .prefix(&digest.to_string())
+                            .suffix(".tar.gz")
+                            .tempfile()?;
+                        // XXX Validate the file.
+                        let size = std::io::copy(&mut socket, &mut tmp)?;
+                        let (_, path) = tmp.keep()?;
+                        scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
+                        socket.write_all(&[1u8]).unwrap();
+                        Ok(())
+                    });
                 }
             }
-            println!("{hello:?} from {peer_addr} disconnected");
+            println!("{peer_addr} disconnected");
             Ok::<(), Error>(())
         });
     }

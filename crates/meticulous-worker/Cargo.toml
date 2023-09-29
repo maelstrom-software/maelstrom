@@ -12,6 +12,8 @@ meticulous-util = { workspace = true }
 nix = { workspace = true }
 num_cpus = { workspace = true }
 rand = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "signal"] }
 
 [dev-dependencies]
