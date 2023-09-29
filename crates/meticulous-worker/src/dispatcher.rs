@@ -9,18 +9,8 @@ use meticulous_base::{
 use meticulous_util::OptionExt;
 use std::{
     collections::{hash_map, HashMap, VecDeque},
-    mem,
     path::PathBuf,
 };
-
-/*              _     _ _
- *  _ __  _   _| |__ | (_) ___
- * | '_ \| | | | '_ \| | |/ __|
- * | |_) | |_| | |_) | | | (__
- * | .__/ \__,_|_.__/|_|_|\___|
- * |_|
- *  FIGLET: public
- */
 
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
@@ -216,7 +206,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     true
                 } else {
                     assert!(layers.is_empty());
-                    mem::swap(&mut x.1.layers, &mut layers);
+                    std::mem::swap(&mut x.1.layers, &mut layers);
                     false
                 }
             });
