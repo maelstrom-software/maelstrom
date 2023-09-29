@@ -330,9 +330,9 @@ mod tests {
 
     struct TestState {
         messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<Sha256Digest, Vec<GetArtifact>>,
-        got_artifact_success_returns: HashMap<Sha256Digest, Vec<Vec<(JobId, PathBuf)>>>,
-        got_artifact_failure_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
+        get_artifact_returns: HashMap<Sha256Digest, GetArtifact>,
+        got_artifact_success_returns: HashMap<Sha256Digest, Vec<(JobId, PathBuf)>>,
+        got_artifact_failure_returns: HashMap<Sha256Digest, Vec<JobId>>,
     }
 
     struct JobHandle {
@@ -387,9 +387,8 @@ mod tests {
                 .push(CacheGetArtifact(id, digest.clone()));
             self.borrow_mut()
                 .get_artifact_returns
-                .get_mut(&digest)
+                .remove(&digest)
                 .unwrap()
-                .remove(0)
         }
 
         fn got_artifact_failure(&mut self, digest: Sha256Digest) -> Vec<JobId> {
@@ -398,9 +397,8 @@ mod tests {
                 .push(CacheGotArtifactFailure(digest.clone()));
             self.borrow_mut()
                 .got_artifact_failure_returns
-                .get_mut(&digest)
+                .remove(&digest)
                 .unwrap()
-                .remove(0)
         }
 
         fn got_artifact_success(
@@ -413,9 +411,8 @@ mod tests {
                 .push(CacheGotArtifactSuccess(digest.clone(), bytes_used));
             self.borrow_mut()
                 .got_artifact_success_returns
-                .get_mut(&digest)
+                .remove(&digest)
                 .unwrap()
-                .remove(0)
         }
 
         fn decrement_refcount(&mut self, digest: Sha256Digest) {
@@ -433,9 +430,9 @@ mod tests {
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize>(
             slots: usize,
-            get_artifact_returns: [(Sha256Digest, Vec<GetArtifact>); L],
-            got_artifact_success_returns: [(Sha256Digest, Vec<Vec<(JobId, PathBuf)>>); M],
-            got_artifact_failure_returns: [(Sha256Digest, Vec<Vec<JobId>>); N],
+            get_artifact_returns: [(Sha256Digest, GetArtifact); L],
+            got_artifact_success_returns: [(Sha256Digest, Vec<(JobId, PathBuf)>); M],
+            got_artifact_failure_returns: [(Sha256Digest, Vec<JobId>); N],
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
@@ -502,9 +499,9 @@ mod tests {
     script_test! {
         enqueue_1_with_layers_all_available,
         Fixture::new(2, [
-            (digest!(41), vec![GetArtifact::Success(path_buf!("/a"))]),
-            (digest!(42), vec![GetArtifact::Success(path_buf!("/b"))]),
-            (digest!(43), vec![GetArtifact::Success(path_buf!("/c"))])
+            (digest!(41), GetArtifact::Success(path_buf!("/a"))),
+            (digest!(42), GetArtifact::Success(path_buf!("/b"))),
+            (digest!(43), GetArtifact::Success(path_buf!("/c")))
         ], [], []),
         Broker(EnqueueJob(jid![1], details![1, [41, 42, 43]])) => {
             CacheGetArtifact(jid![1], digest!(41)),
@@ -518,12 +515,12 @@ mod tests {
         enqueue_1_with_layers_some_available,
         Fixture::new(
             2, [
-                (digest!(41), vec![GetArtifact::Success(path_buf!("/a"))]),
-                (digest!(42), vec![GetArtifact::Wait]),
-                (digest!(43), vec![GetArtifact::Get(path_buf!("/c"))])
+                (digest!(41), GetArtifact::Success(path_buf!("/a"))),
+                (digest!(42), GetArtifact::Wait),
+                (digest!(43), GetArtifact::Get(path_buf!("/c")))
             ], [
-                (digest!(42), vec![vec![(jid![1], path_buf!("/b"))]]),
-                (digest!(43), vec![vec![(jid![1], path_buf!("/c"))]]),
+                (digest!(42), vec![(jid![1], path_buf!("/b"))]),
+                (digest!(43), vec![(jid![1], path_buf!("/c"))]),
             ], []),
         Broker(EnqueueJob(jid![1], details![1, [41, 42, 43]])) => {
             CacheGetArtifact(jid![1], digest!(41)),
@@ -545,7 +542,7 @@ mod tests {
         complete_1,
         Fixture::new(
             2,
-            [(digest!(42), vec![GetArtifact::Success(path_buf!("/a"))])],
+            [(digest!(42), GetArtifact::Success(path_buf!("/a")))],
             [],
             []),
         Broker(EnqueueJob(jid![1], details![1, [42]])) =>  {
@@ -586,9 +583,9 @@ mod tests {
     script_test! {
         cancel_queued,
         Fixture::new(2, [
-            (digest!(41), vec![GetArtifact::Success(path_buf!("/a"))]),
-            (digest!(42), vec![GetArtifact::Success(path_buf!("/b"))]),
-            (digest!(43), vec![GetArtifact::Success(path_buf!("/c"))]),
+            (digest!(41), GetArtifact::Success(path_buf!("/a"))),
+            (digest!(42), GetArtifact::Success(path_buf!("/b"))),
+            (digest!(43), GetArtifact::Success(path_buf!("/c"))),
         ], [], []),
         Broker(EnqueueJob(jid![1], details![1])) => { StartJob(jid![1], details![1], path_buf_vec![]) };
         Broker(EnqueueJob(jid![2], details![2])) => { StartJob(jid![2], details![2], path_buf_vec![]) };
@@ -613,9 +610,9 @@ mod tests {
     script_test! {
         cancel_executing,
         Fixture::new(2, [
-            (digest!(41), vec![GetArtifact::Success(path_buf!("/a"))]),
-            (digest!(42), vec![GetArtifact::Success(path_buf!("/b"))]),
-            (digest!(43), vec![GetArtifact::Success(path_buf!("/c"))]),
+            (digest!(41), GetArtifact::Success(path_buf!("/a"))),
+            (digest!(42), GetArtifact::Success(path_buf!("/b"))),
+            (digest!(43), GetArtifact::Success(path_buf!("/c"))),
         ], [], []),
         Broker(EnqueueJob(jid![1], details![1, [41, 42, 43]])) => {
             CacheGetArtifact(jid![1], digest!(41)),
@@ -638,9 +635,9 @@ mod tests {
     script_test! {
         cancel_awaiting_layers,
         Fixture::new(2, [
-            (digest!(41), vec![GetArtifact::Success(path_buf!("/a"))]),
-            (digest!(42), vec![GetArtifact::Wait]),
-            (digest!(43), vec![GetArtifact::Wait]),
+            (digest!(41), GetArtifact::Success(path_buf!("/a"))),
+            (digest!(42), GetArtifact::Wait),
+            (digest!(43), GetArtifact::Wait),
         ], [], []),
         Broker(EnqueueJob(jid![1], details![1, [41, 42, 43]])) => {
             CacheGetArtifact(jid![1], digest!(41)),
@@ -676,42 +673,42 @@ mod tests {
     }
 
     script_test! {
-            error_cache_responses,
-            Fixture::new(2, [
-                (digest!(41), vec![GetArtifact::Wait]),
-                (digest!(42), vec![GetArtifact::Wait]),
-                (digest!(43), vec![GetArtifact::Wait]),
-                (digest!(44), vec![GetArtifact::Wait]),
-            ], [
-                (digest!(41), vec![vec![(jid![1], path_buf!("/a"))]]),
-                (digest!(43), vec![vec![(jid![1], path_buf!("/c"))]]),
-            ], [
-                (digest!(42), vec![vec![jid![1]]]),
-                (digest!(44), vec![vec![jid![1]]]),
-    ]),
-            Broker(EnqueueJob(jid![1], details![1, [41, 42, 43, 44]])) => {
-                CacheGetArtifact(jid![1], digest!(41)),
-                CacheGetArtifact(jid![1], digest!(42)),
-                CacheGetArtifact(jid![1], digest!(43)),
-                CacheGetArtifact(jid![1], digest!(44)),
-            };
-            ArtifactFetcher(digest!(41), Some(101)) => {
-                CacheGotArtifactSuccess(digest!(41), 101),
-            };
-            ArtifactFetcher(digest!(42), None) => {
-                CacheGotArtifactFailure(digest!(42)),
-                SendResponseToBroker(WorkerToBroker(jid![1], JobResult::Error(
-                    "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
-                CacheDecrementRefcount(digest!(41))
-            };
-            ArtifactFetcher(digest!(43), Some(103)) => {
-                CacheGotArtifactSuccess(digest!(43), 103),
-                CacheDecrementRefcount(digest!(43))
-            };
-            ArtifactFetcher(digest!(44), None) => {
-                CacheGotArtifactFailure(digest!(44)),
-            };
-        }
+        error_cache_responses,
+        Fixture::new(2, [
+            (digest!(41), GetArtifact::Wait),
+            (digest!(42), GetArtifact::Wait),
+            (digest!(43), GetArtifact::Wait),
+            (digest!(44), GetArtifact::Wait),
+        ], [
+            (digest!(41), vec![(jid![1], path_buf!("/a"))]),
+            (digest!(43), vec![(jid![1], path_buf!("/c"))]),
+        ], [
+            (digest!(42), vec![jid![1]]),
+            (digest!(44), vec![jid![1]]),
+        ]),
+        Broker(EnqueueJob(jid![1], details![1, [41, 42, 43, 44]])) => {
+            CacheGetArtifact(jid![1], digest!(41)),
+            CacheGetArtifact(jid![1], digest!(42)),
+            CacheGetArtifact(jid![1], digest!(43)),
+            CacheGetArtifact(jid![1], digest!(44)),
+        };
+        ArtifactFetcher(digest!(41), Some(101)) => {
+            CacheGotArtifactSuccess(digest!(41), 101),
+        };
+        ArtifactFetcher(digest!(42), None) => {
+            CacheGotArtifactFailure(digest!(42)),
+            SendResponseToBroker(WorkerToBroker(jid![1], JobResult::Error(
+                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
+            CacheDecrementRefcount(digest!(41))
+        };
+        ArtifactFetcher(digest!(43), Some(103)) => {
+            CacheGotArtifactSuccess(digest!(43), 103),
+            CacheDecrementRefcount(digest!(43))
+        };
+        ArtifactFetcher(digest!(44), None) => {
+            CacheGotArtifactFailure(digest!(44)),
+        };
+    }
 
     #[test]
     #[should_panic(expected = "assertion failed: slots > 0")]
