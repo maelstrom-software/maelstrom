@@ -9,6 +9,7 @@ clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 console_error_panic_hook = "0.1.7"
 eframe = "0.22"
 egui = "0.22"
+figment = "0.10.10"
 flate2 = "1.0.26"
 futures = "0.3"
 gethostname = "0.4.2"
