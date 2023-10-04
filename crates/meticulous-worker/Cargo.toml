@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = { workspace = true }
 clap = { workspace = true }
-figment = { workspace = true, features = ["env", "toml"] }
+figment = { workspace = true }
 gethostname = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }

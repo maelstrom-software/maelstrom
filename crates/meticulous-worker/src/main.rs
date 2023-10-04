@@ -29,10 +29,10 @@ struct CliOptions {
     config_file: PathBuf,
 
     /// Print configuration and exit
-    #[arg(short = 'p', long)]
+    #[arg(short = 'P', long)]
     print_config: bool,
 
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
+    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000"
     #[arg(short = 'b', long)]
     broker: Option<String>,
 
@@ -41,16 +41,16 @@ struct CliOptions {
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// The number of job slots available. Most program jobs will take one job slot.
+    /// The number of job slots available. Most program jobs will take one job slot
     #[arg(short = 's', long)]
-    slots: Option<u32>,
+    slots: Option<u16>,
 
-    /// The directory to use for the cache.
+    /// The directory to use for the cache
     #[arg(short = 'r', long)]
     cache_root: Option<PathBuf>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative.
+    /// strictly, so it's best to be conservative
     #[arg(short = 'B', long)]
     cache_bytes_used_target: Option<u64>,
 }

@@ -1,4 +1,5 @@
 use super::GetArtifact;
+use crate::config;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
@@ -101,7 +102,12 @@ enum CacheEntry {
 
 #[allow(dead_code)]
 impl<CacheFsT: CacheFs> Cache<CacheFsT> {
-    pub fn new(mut fs: CacheFsT, root: PathBuf, bytes_used_goal: u64) -> Self {
+    pub fn new(
+        mut fs: CacheFsT,
+        root: config::CacheRoot,
+        bytes_used_goal: config::CacheBytesUsedTarget,
+    ) -> Self {
+        let root = root.into_inner();
         let mut path = root.clone();
 
         path.push("tmp");
@@ -118,7 +124,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_goal,
+            bytes_used_goal: bytes_used_goal.into_inner(),
         };
 
         path.push("sha256");
@@ -384,9 +390,13 @@ mod tests {
     }
 
     impl Fixture {
-        fn new(fs: TestCacheFs, bytes_used_goal: u64) -> Self {
+        fn new(fs: TestCacheFs, bytes_used_target: u64) -> Self {
             let fs = Rc::new(RefCell::new(fs));
-            let cache = Cache::new(fs.clone(), Path::new("/z").into(), bytes_used_goal);
+            let cache = Cache::new(
+                fs.clone(),
+                Path::new("/z").to_owned().into(),
+                bytes_used_target.into(),
+            );
             Fixture { fs, cache }
         }
 

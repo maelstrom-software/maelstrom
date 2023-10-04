@@ -1,18 +1,16 @@
 //! Code for the broker binary.
 
 use scheduler_task::SchedulerTask;
-use std::{
-    path::PathBuf,
-    sync::{
-        atomic::{AtomicU32, Ordering},
-        Arc,
-    },
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
 };
 use tokio::{
     net::TcpListener,
     signal::unix::{self, SignalKind},
 };
 
+pub mod config;
 mod connection;
 mod http;
 mod scheduler_task;
@@ -44,8 +42,8 @@ async fn signal_handler(kind: SignalKind) {
 pub async fn main(
     listener: TcpListener,
     http_listener: TcpListener,
-    cache_root: PathBuf,
-    cache_bytes_used_goal: u64,
+    cache_root: config::CacheRoot,
+    cache_bytes_used_goal: config::CacheBytesUsedTarget,
 ) {
     let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_goal);
     let id_vendor = Arc::new(IdVendor {

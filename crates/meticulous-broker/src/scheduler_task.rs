@@ -1,3 +1,4 @@
+use crate::config;
 use cache::{Cache, StdCacheFs};
 use meticulous_base::{proto, ClientId, JobId, Sha256Digest};
 use meticulous_util::net;
@@ -21,9 +22,9 @@ struct PassThroughCache {
 }
 
 impl PassThroughCache {
-    fn new(root: PathBuf, bytes_used_goal: u64) -> Self {
+    fn new(root: config::CacheRoot, bytes_used_target: config::CacheBytesUsedTarget) -> Self {
         PassThroughCache {
-            cache: Cache::new(StdCacheFs, root, bytes_used_goal),
+            cache: Cache::new(StdCacheFs, root, bytes_used_target),
         }
     }
 }
@@ -103,9 +104,12 @@ pub struct SchedulerTask {
 }
 
 impl SchedulerTask {
-    pub fn new(cache_root: PathBuf, cache_bytes_used_goal: u64) -> Self {
+    pub fn new(
+        cache_root: config::CacheRoot,
+        cache_bytes_used_target: config::CacheBytesUsedTarget,
+    ) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let cache = PassThroughCache::new(cache_root, cache_bytes_used_goal);
+        let cache = PassThroughCache::new(cache_root, cache_bytes_used_target);
         SchedulerTask {
             scheduler: Scheduler::new(cache),
             sender,
