@@ -1,7 +1,10 @@
 //! Central processing module for the worker. Receive messages from the broker, executors, and
 //! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
-use super::cache::{Cache, CacheFs, GetArtifact};
+use super::{
+    cache::{Cache, CacheFs, GetArtifact},
+    config::Slots,
+};
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     JobDetails, JobId, JobResult, Sha256Digest,
@@ -96,12 +99,11 @@ pub enum Message {
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
-    pub fn new(deps: DepsT, cache: CacheT, slots: usize) -> Self {
-        assert!(slots > 0);
+    pub fn new(deps: DepsT, cache: CacheT, slots: Slots) -> Self {
         Dispatcher {
             deps,
             cache,
-            slots,
+            slots: slots.into_inner().into(),
             awaiting_layers: HashMap::default(),
             queued: VecDeque::default(),
             executing: HashMap::default(),
@@ -441,7 +443,7 @@ mod tests {
 
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize>(
-            slots: usize,
+            slots: u16,
             get_artifact_returns: [(Sha256Digest, GetArtifact); L],
             got_artifact_success_returns: [(Sha256Digest, (PathBuf, Vec<JobId>)); M],
             got_artifact_failure_returns: [(Sha256Digest, Vec<JobId>); N],
@@ -452,7 +454,11 @@ mod tests {
                 got_artifact_success_returns: HashMap::from(got_artifact_success_returns),
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
             }));
-            let dispatcher = Dispatcher::new(test_state.clone(), test_state.clone(), slots);
+            let dispatcher = Dispatcher::new(
+                test_state.clone(),
+                test_state.clone(),
+                Slots::try_from(slots).unwrap(),
+            );
             Fixture {
                 test_state,
                 dispatcher,
@@ -721,12 +727,6 @@ mod tests {
         ArtifactFetcher(digest!(44), None) => {
             CacheGotArtifactFailure(digest!(44)),
         };
-    }
-
-    #[test]
-    #[should_panic(expected = "assertion failed: slots > 0")]
-    fn slots_must_be_nonzero() {
-        let _ = Fixture::new(0, [], [], []);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 use meticulous_base::{proto::Hello, Sha256Digest};
 use meticulous_util::error::Result;
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 struct Sha256Verifier<'a, DelegateT> {
     hasher: Option<sha2::Sha256>,
@@ -94,8 +94,12 @@ fn read_to_end(mut input: impl std::io::Read) -> std::io::Result<()> {
     Ok(())
 }
 
-pub fn main(digest: &Sha256Digest, path: PathBuf, broker_addr: SocketAddr) -> Result<u64> {
-    let mut socket = std::net::TcpStream::connect(broker_addr)?;
+pub fn main(
+    digest: &Sha256Digest,
+    path: PathBuf,
+    broker_addr: super::config::Broker,
+) -> Result<u64> {
+    let mut socket = std::net::TcpStream::connect(broker_addr.inner())?;
     meticulous_util::net::write_message_to_socket(
         &mut socket,
         Hello::WorkerArtifact {

@@ -1,5 +1,6 @@
 //! Manage downloading, extracting, and storing of artifacts specified by jobs.
 
+use crate::config::{CacheBytesUsedTarget, CacheRoot};
 use meticulous_base::{JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use std::{
@@ -167,7 +168,7 @@ pub struct Cache<FsT> {
     heap: Heap<CacheMap>,
     next_priority: u64,
     bytes_used: u64,
-    bytes_used_goal: u64,
+    bytes_used_target: u64,
 }
 
 impl<FsT: CacheFs> Cache<FsT> {
@@ -179,7 +180,8 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(mut fs: FsT, root: PathBuf, bytes_used_goal: u64) -> Self {
+    pub fn new(mut fs: FsT, root: CacheRoot, bytes_used_target: CacheBytesUsedTarget) -> Self {
+        let root = root.into_inner();
         let mut path = root.clone();
 
         path.push("removing");
@@ -203,7 +205,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_goal,
+            bytes_used_target: bytes_used_target.into_inner(),
         }
     }
 
@@ -340,7 +342,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// Check to see if the cache is over its goal size, and if so, try to remove the least
     /// recently used artifacts.
     fn possibly_remove_some(&mut self) {
-        while self.bytes_used > self.bytes_used_goal {
+        while self.bytes_used > self.bytes_used_target {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
@@ -452,7 +454,11 @@ mod tests {
 
         fn new(test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
             let messages = test_cache_fs.messages.clone();
-            let cache = Cache::new(test_cache_fs, "/z".into(), bytes_used_goal);
+            let cache = Cache::new(
+                test_cache_fs,
+                PathBuf::from("/z").into(),
+                bytes_used_goal.into(),
+            );
             Fixture { messages, cache }
         }
 

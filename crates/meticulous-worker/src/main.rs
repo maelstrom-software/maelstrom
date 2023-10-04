@@ -6,64 +6,29 @@ use figment::{
     Figment,
 };
 use serde::{
-    de::{self, Deserializer, Visitor},
     ser::{SerializeMap, Serializer},
     Deserialize, Serialize,
 };
-use std::{fmt, net::SocketAddr, path::PathBuf};
-
-fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
-    use std::net::ToSocketAddrs as _;
-    let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
-    // It's not clear how we could end up with an empty iterator. We'll assume
-    // that's impossible until proven wrong.
-    Ok(*addrs.get(0).unwrap())
-}
-
-struct SocketAddrDeserializer;
-
-impl<'de> Visitor<'de> for SocketAddrDeserializer {
-    type Value = SocketAddr;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        write!(formatter, "a string that can be parsed as a socket address")
-    }
-
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        parse_socket_addr(s)
-            .map_err(|e| E::custom(format!("parsing \"{s}\" as a socket address: {e}")))
-    }
-}
-
-fn deserialize_socket_addr<'de, D>(deserializer: D) -> Result<SocketAddr, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    deserializer.deserialize_str(SocketAddrDeserializer)
-}
+use std::path::PathBuf;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     /// Socket address of broker.
-    #[serde(deserialize_with = "deserialize_socket_addr")]
-    broker: SocketAddr,
+    broker: meticulous_worker::config::Broker,
 
     /// Name of the worker provided to the broker.
-    name: String,
+    name: meticulous_worker::config::Name,
 
     /// The number of job slots available.
-    slots: u32,
+    slots: meticulous_worker::config::Slots,
 
     /// The directory to use for the cache.
-    cache_directory: PathBuf,
+    cache_root: meticulous_worker::config::CacheRoot,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
-    cache_bytes_used_target: u64,
+    cache_bytes_used_target: meticulous_worker::config::CacheBytesUsedTarget,
 }
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
@@ -101,8 +66,8 @@ struct CliOptions {
     slots: Option<u32>,
 
     /// The directory to use for the cache.
-    #[arg(short = 'd', long)]
-    cache_directory: Option<PathBuf>,
+    #[arg(short = 'r', long)]
+    cache_root: Option<PathBuf>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
@@ -118,7 +83,7 @@ impl Default for CliOptions {
             broker: None,
             name: Some(gethostname::gethostname().into_string().unwrap()),
             slots: Some(num_cpus::get().try_into().unwrap()),
-            cache_directory: Some("var/cache/meticulous-worker".into()),
+            cache_root: Some("var/cache/meticulous-worker".into()),
             cache_bytes_used_target: Some(100000000),
         }
     }
@@ -141,7 +106,7 @@ impl Serialize for CliOptions {
         if let Some(slots) = &self.slots {
             map.serialize_entry("slots", slots)?;
         }
-        if let Some(cache_directory) = &self.cache_directory {
+        if let Some(cache_directory) = &self.cache_root {
             map.serialize_entry("cache_directory", cache_directory)?;
         }
         if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
@@ -156,7 +121,7 @@ fn main() -> Result<()> {
     let print_config = cli_options.print_config;
     let config: Config = Figment::new()
         .merge(Serialized::defaults(CliOptions::default()))
-        .merge(Toml::file(&cli_options.config_file).nested())
+        .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_WORKER_"))
         .merge(Serialized::globals(cli_options))
         .extract()
@@ -176,8 +141,8 @@ fn main() -> Result<()> {
     runtime.block_on(async move {
         meticulous_worker::main(
             config.name,
-            config.slots as usize,
-            config.cache_directory,
+            config.slots,
+            config.cache_root,
             config.cache_bytes_used_target,
             config.broker,
         )

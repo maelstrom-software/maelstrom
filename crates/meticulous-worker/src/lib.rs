@@ -1,13 +1,14 @@
 //! Code for the worker binary.
 
 mod cache;
+pub mod config;
 mod dispatcher;
 mod executor;
 mod fetcher;
 
 use meticulous_base::{proto, JobDetails, JobId, Sha256Digest};
 use meticulous_util::{error::Result, net};
-use std::{net::SocketAddr, path::PathBuf};
+use std::path::PathBuf;
 
 type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
 type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
@@ -16,14 +17,14 @@ type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerToBrok
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: SocketAddr,
+    broker_addr: config::Broker,
 }
 
 impl DispatcherAdapter {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        broker_addr: SocketAddr,
+        broker_addr: config::Broker,
     ) -> Self {
         DispatcherAdapter {
             dispatcher_sender,
@@ -65,13 +66,13 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
 }
 
 async fn dispatcher_main(
-    slots: usize,
-    cache_root: PathBuf,
-    cache_bytes_used_goal: u64,
+    slots: config::Slots,
+    cache_root: config::CacheRoot,
+    cache_bytes_used_goal: config::CacheBytesUsedTarget,
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: SocketAddr,
+    broker_addr: config::Broker,
 ) {
     let cache = cache::Cache::new(cache::StdCacheFs, cache_root, cache_bytes_used_goal);
     let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, broker_addr);
@@ -89,13 +90,13 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) {
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 pub async fn main(
-    _name: String,
-    slots: usize,
-    cache_root: PathBuf,
-    cache_bytes_used_goal: u64,
-    broker_addr: SocketAddr,
+    _name: config::Name,
+    slots: config::Slots,
+    cache_root: config::CacheRoot,
+    cache_bytes_used_goal: config::CacheBytesUsedTarget,
+    broker_addr: config::Broker,
 ) -> Result<()> {
-    let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(&broker_addr)
+    let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(broker_addr.inner())
         .await?
         .into_split();
     let read_stream = tokio::io::BufReader::new(read_stream);
@@ -103,7 +104,7 @@ pub async fn main(
     net::write_message_to_async_socket(
         &mut write_stream,
         proto::Hello::Worker {
-            slots: slots as u32,
+            slots: (*slots.inner()).into(),
         },
     )
     .await?;
