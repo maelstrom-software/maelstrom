@@ -132,3 +132,23 @@ impl Debug for CacheBytesUsedTarget {
         self.0.fmt(f)
     }
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    /// Socket address of broker.
+    pub broker: Broker,
+
+    /// Name of the worker provided to the broker.
+    pub name: Name,
+
+    /// The number of job slots available.
+    pub slots: Slots,
+
+    /// The directory to use for the cache.
+    pub cache_root: CacheRoot,
+
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative.
+    pub cache_bytes_used_target: CacheBytesUsedTarget,
+}

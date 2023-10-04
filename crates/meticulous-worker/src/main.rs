@@ -7,29 +7,9 @@ use figment::{
 };
 use serde::{
     ser::{SerializeMap, Serializer},
-    Deserialize, Serialize,
+    Serialize,
 };
 use std::path::PathBuf;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Config {
-    /// Socket address of broker.
-    broker: meticulous_worker::config::Broker,
-
-    /// Name of the worker provided to the broker.
-    name: meticulous_worker::config::Name,
-
-    /// The number of job slots available.
-    slots: meticulous_worker::config::Slots,
-
-    /// The directory to use for the cache.
-    cache_root: meticulous_worker::config::CacheRoot,
-
-    /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative.
-    cache_bytes_used_target: meticulous_worker::config::CacheBytesUsedTarget,
-}
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
 #[derive(Parser)]
@@ -119,7 +99,7 @@ impl Serialize for CliOptions {
 fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
-    let config: Config = Figment::new()
+    let config: meticulous_worker::config::Config = Figment::new()
         .merge(Serialized::defaults(CliOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_WORKER_"))
@@ -138,16 +118,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async move {
-        meticulous_worker::main(
-            config.name,
-            config.slots,
-            config.cache_root,
-            config.cache_bytes_used_target,
-            config.broker,
-        )
-        .await
-    })?;
+    runtime.block_on(async move { meticulous_worker::main(config).await })?;
     Ok(())
 }
 

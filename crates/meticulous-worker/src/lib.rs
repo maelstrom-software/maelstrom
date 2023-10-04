@@ -66,17 +66,18 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
 }
 
 async fn dispatcher_main(
-    slots: config::Slots,
-    cache_root: config::CacheRoot,
-    cache_bytes_used_goal: config::CacheBytesUsedTarget,
+    config: config::Config,
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: config::Broker,
 ) {
-    let cache = cache::Cache::new(cache::StdCacheFs, cache_root, cache_bytes_used_goal);
-    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, broker_addr);
-    let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, slots);
+    let cache = cache::Cache::new(
+        cache::StdCacheFs,
+        config.cache_root,
+        config.cache_bytes_used_target,
+    );
+    let adapter = DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, config.broker);
+    let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, config.slots);
     net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
 
@@ -89,14 +90,8 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) {
 
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
-pub async fn main(
-    _name: config::Name,
-    slots: config::Slots,
-    cache_root: config::CacheRoot,
-    cache_bytes_used_goal: config::CacheBytesUsedTarget,
-    broker_addr: config::Broker,
-) -> Result<()> {
-    let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(broker_addr.inner())
+pub async fn main(config: config::Config) -> Result<()> {
+    let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(config.broker.inner())
         .await?
         .into_split();
     let read_stream = tokio::io::BufReader::new(read_stream);
@@ -104,7 +99,7 @@ pub async fn main(
     net::write_message_to_async_socket(
         &mut write_stream,
         proto::Hello::Worker {
-            slots: (*slots.inner()).into(),
+            slots: (*config.slots.inner()).into(),
         },
     )
     .await?;
@@ -124,13 +119,10 @@ pub async fn main(
         write_stream,
     ));
     join_set.spawn(dispatcher_main(
-        slots,
-        cache_root,
-        cache_bytes_used_goal,
+        config,
         dispatcher_receiver,
         dispatcher_sender,
         broker_socket_sender,
-        broker_addr,
     ));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::interrupt()));
     join_set.spawn(signal_handler(tokio::signal::unix::SignalKind::terminate()));
