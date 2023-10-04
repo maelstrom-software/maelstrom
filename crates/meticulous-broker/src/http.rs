@@ -19,6 +19,7 @@ use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Reque
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use meticulous_base::{proto::BrokerToClient, ClientId};
 use meticulous_util::error::{Error, Result};
+use slog::{debug, o, Logger};
 use std::{
     collections::HashMap,
     future::Future,
@@ -54,7 +55,7 @@ impl TarHandler {
         Self { map }
     }
 
-    fn get_file(&self, path: &str) -> Response<Body> {
+    fn get_file(&self, path: &str, log: Logger) -> Response<Body> {
         fn mime_for_path(path: &str) -> &'static str {
             if let Some(ext) = Path::new(path).extension() {
                 match &ext.to_str().unwrap().to_lowercase()[..] {
@@ -76,18 +77,20 @@ impl TarHandler {
         self.map
             .get(&path)
             .map(|&b| {
+                debug!(log, "received http get request"; "path" => %path, "resp" => 200);
                 Response::builder()
                     .status(200)
                     .header("Content-Type", mime_for_path(&path))
                     .body(Body::from(b))
                     .unwrap()
             })
-            .unwrap_or(
+            .unwrap_or_else(|| {
+                debug!(log, "received http get request"; "path" => %path, "resp" => 404);
                 Response::builder()
                     .status(404)
                     .body(Body::from(&b""[..]))
-                    .unwrap(),
-            )
+                    .unwrap()
+            })
     }
 }
 
@@ -96,8 +99,10 @@ impl TarHandler {
 async fn websocket_writer(
     mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
+    log: Logger,
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
+        debug!(log, "sending client message"; "msg" => ?msg);
         if socket
             .send(Message::binary(bincode::serialize(&msg).unwrap()))
             .await
@@ -114,11 +119,13 @@ async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: SchedulerSender,
     id: ClientId,
+    log: Logger,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
         let Ok(msg) = bincode::deserialize(&msg) else {
             break;
         };
+        debug!(log, "received client message"; "msg" => ?msg);
         if scheduler_sender
             .send(SchedulerMessage::FromClient(id, msg))
             .is_err()
@@ -133,27 +140,35 @@ async fn websocket_main(
     websocket: HyperWebsocket,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
+    log: Logger,
 ) {
     let Ok(websocket) = websocket.await else {
         return;
     };
     let (write_stream, read_stream) = websocket.split();
-    let id = id_vendor.vend();
+    let id: ClientId = id_vendor.vend();
+    let log = log.new(o!("cid" => id.to_string(), "websocket" => true));
+    debug!(
+        log,
+        "http connection upgraded to websocket client connection"
+    );
     connection::connection_main(
         scheduler_sender,
         id,
         SchedulerMessage::ClientConnected,
         SchedulerMessage::ClientDisconnected,
-        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
-        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
+        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id, log.clone()),
+        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream, log.clone()),
     )
-    .await
+    .await;
+    debug!(log, "received websocket client disconnect")
 }
 
 struct Handler {
     tar_handler: Arc<TarHandler>,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
+    log: Logger,
 }
 
 impl Service<Request<Body>> for Handler {
@@ -173,10 +188,13 @@ impl Service<Request<Body>> for Handler {
                     websocket,
                     self.scheduler_sender.clone(),
                     self.id_vendor.clone(),
+                    self.log.clone(),
                 ));
                 Ok(response)
             } else {
-                Ok(self.tar_handler.get_file(&request.uri().to_string()))
+                Ok(self
+                    .tar_handler
+                    .get_file(&request.uri().to_string(), self.log.clone()))
             }
         })();
 
@@ -188,6 +206,7 @@ pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
+    log: Logger,
 ) {
     let mut http = Http::new();
     http.http1_only(true);
@@ -195,7 +214,9 @@ pub async fn listener_main(
 
     let tar_handler = Arc::new(TarHandler::from_embedded());
 
-    while let Ok((stream, _)) = listener.accept().await {
+    while let Ok((stream, peer_addr)) = listener.accept().await {
+        let log = log.new(o!("peer_addr" => peer_addr));
+        debug!(log, "received http connect");
         let connection = http
             .serve_connection(
                 stream,
@@ -203,6 +224,7 @@ pub async fn listener_main(
                     tar_handler: tar_handler.clone(),
                     scheduler_sender: scheduler_sender.clone(),
                     id_vendor: id_vendor.clone(),
+                    log,
                 },
             )
             .with_upgrades();

@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::fmt::{self, Debug};
-use std::hash::Hash;
+use std::{
+    fmt::{self, Debug, Display, Formatter},
+    hash::Hash,
+};
 
 pub mod proto;
 
@@ -10,6 +12,12 @@ pub struct ClientId(pub u32);
 impl From<u32> for ClientId {
     fn from(input: u32) -> Self {
         ClientId(input)
+    }
+}
+
+impl Display for ClientId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
     }
 }
 
@@ -47,6 +55,12 @@ pub struct WorkerId(pub u32);
 impl From<u32> for WorkerId {
     fn from(input: u32) -> Self {
         WorkerId(input)
+    }
+}
+
+impl Display for WorkerId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
     }
 }
 
@@ -102,8 +116,8 @@ impl std::str::FromStr for Sha256Digest {
     }
 }
 
-impl fmt::Display for Sha256Digest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for Sha256Digest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.pad(
             &self
                 .0
@@ -120,7 +134,7 @@ impl fmt::Display for Sha256Digest {
 }
 
 impl Debug for Sha256Digest {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             f.debug_tuple("Sha256Digest").field(&self.0).finish()
         } else {

@@ -2,11 +2,9 @@ use super::{
     scheduler_task::{scheduler::Message, SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use meticulous_base::proto;
-use meticulous_util::{
-    error::{Error, Result},
-    net,
-};
+use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_util::{error::Result, net};
+use slog::{debug, info, o, warn, Logger};
 use std::{net::Shutdown, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
@@ -97,57 +95,77 @@ pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
+    log: Logger,
 ) {
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         let scheduler_sender = scheduler_sender.clone();
         let id_vendor = id_vendor.clone();
 
+        let log = log.new(o!("peer_addr" => peer_addr));
+        debug!(log, "received connect");
+
         tokio::task::spawn(async move {
-            let hello = net::read_message_from_async_socket(&mut socket).await?;
-            println!("{hello:?} from {peer_addr} connected");
-            match hello {
-                proto::Hello::Client => {
+            match net::read_message_from_async_socket(&mut socket).await {
+                Ok(proto::Hello::Client) => {
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id = id_vendor.vend();
+                    let id: ClientId = id_vendor.vend();
+                    let log = log.new(o!("cid" => id.to_string()));
+                    debug!(log, "connection upgraded to client connection");
+                    let log_clone = log.clone();
+                    let log_clone2 = log.clone();
                     connection_main(
                         scheduler_sender,
                         id,
                         SchedulerMessage::ClientConnected,
                         SchedulerMessage::ClientDisconnected,
                         |scheduler_sender| {
-                            net::async_socket_reader(read_stream, scheduler_sender, move |req| {
-                                SchedulerMessage::FromClient(id, req)
+                            net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                                debug!(log_clone, "received client message"; "msg" => ?msg);
+                                SchedulerMessage::FromClient(id, msg)
                             })
                         },
                         |scheduler_receiver| {
-                            net::async_socket_writer(scheduler_receiver, write_stream)
+                            net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
+                                debug!(log_clone2, "sending client message"; "msg" => ?msg);
+                            })
                         },
                     )
-                    .await
+                    .await;
+                    debug!(log, "received client disconnect");
                 }
-                proto::Hello::Worker { slots } => {
+                Ok(proto::Hello::Worker { slots }) => {
                     let (read_stream, write_stream) = socket.into_split();
                     let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id = id_vendor.vend();
+                    let id: WorkerId = id_vendor.vend();
+                    let log = log.new(o!("wid" => id.to_string()));
+                    info!(log, "connection upgraded to worker connection"; "slots" => slots);
+                    let log_clone = log.clone();
+                    let log_clone2 = log.clone();
                     connection_main(
                         scheduler_sender,
                         id,
                         |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                         SchedulerMessage::WorkerDisconnected,
                         |scheduler_sender| {
-                            net::async_socket_reader(read_stream, scheduler_sender, move |req| {
-                                SchedulerMessage::FromWorker(id, req)
+                            net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                                debug!(log_clone, "received worker message"; "msg" => ?msg);
+                                SchedulerMessage::FromWorker(id, msg)
                             })
                         },
                         |scheduler_receiver| {
-                            net::async_socket_writer(scheduler_receiver, write_stream)
+                            net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
+                                debug!(log_clone2, "sending worker message"; "msg" => ?msg);
+                            })
                         },
                     )
-                    .await
+                    .await;
+                    info!(log, "received worker disconnect");
                 }
-                proto::Hello::WorkerArtifact { digest } => {
+                Ok(proto::Hello::WorkerArtifact { digest }) => {
+                    let log = log.clone();
                     std::thread::spawn(move || -> Result<()> {
+                        debug!(log, "connection upgraded to worker artifact connection"; "digest" => %digest);
                         let mut socket = socket.into_std().unwrap();
                         socket.set_nonblocking(false).unwrap();
                         socket.shutdown(Shutdown::Read).unwrap();
@@ -165,11 +183,14 @@ pub async fn listener_main(
                                 .send(Message::DecrementRefcount(digest.clone()))
                                 .unwrap();
                         }
+                        debug!(log, "received worker artifact disconnect");
                         Ok(())
                     });
                 }
-                proto::Hello::ClientArtifact { digest } => {
+                Ok(proto::Hello::ClientArtifact { digest }) => {
+                    let log = log.clone();
                     std::thread::spawn(move || -> Result<()> {
+                        debug!(log, "connection upgraded to client artifact connection"; "digest" => %digest);
                         use std::io::Write;
                         let mut socket = socket.into_std().unwrap();
                         socket.set_nonblocking(false).unwrap();
@@ -183,12 +204,14 @@ pub async fn listener_main(
                         let (_, path) = tmp.keep()?;
                         scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
                         socket.write_all(&[1u8]).unwrap();
+                        debug!(log, "received client artifact disconnect");
                         Ok(())
                     });
                 }
+                Err(err) => {
+                    warn!(log, "error reading hello message"; "err" => %err);
+                }
             }
-            println!("{peer_addr} disconnected");
-            Ok::<(), Error>(())
         });
     }
 }

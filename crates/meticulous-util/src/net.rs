@@ -62,11 +62,15 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
 }
 
 /// Loop reading messages from an mpsc channel and writing them to a socket.
-pub async fn async_socket_writer(
-    mut channel: tokio::sync::mpsc::UnboundedReceiver<impl Serialize>,
+pub async fn async_socket_writer<MessageT>(
+    mut channel: tokio::sync::mpsc::UnboundedReceiver<MessageT>,
     mut socket: (impl tokio::io::AsyncWrite + Unpin),
-) {
+    mut inspect: impl FnMut(&MessageT),
+) where
+    MessageT: Serialize,
+{
     while let Some(msg) = channel.recv().await {
+        inspect(&msg);
         if write_message_to_async_socket(&mut socket, msg)
             .await
             .is_err()

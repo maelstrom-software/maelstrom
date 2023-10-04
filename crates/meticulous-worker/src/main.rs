@@ -86,8 +86,8 @@ impl Serialize for CliOptions {
         if let Some(slots) = &self.slots {
             map.serialize_entry("slots", slots)?;
         }
-        if let Some(cache_directory) = &self.cache_root {
-            map.serialize_entry("cache_directory", cache_directory)?;
+        if let Some(cache_root) = &self.cache_root {
+            map.serialize_entry("cache_root", cache_root)?;
         }
         if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
             map.serialize_entry("cache_bytes_used_target", cache_bytes_used_target)?;

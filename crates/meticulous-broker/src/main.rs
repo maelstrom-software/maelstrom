@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
@@ -9,7 +9,8 @@ use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
-use std::{net::SocketAddrV6, path::PathBuf};
+use slog::{info, o, Drain};
+use std::{net::SocketAddrV6, path::PathBuf, process};
 
 /// The meticulous broker. This process coordinates between clients and workers.
 #[derive(Parser)]
@@ -103,39 +104,62 @@ fn main() -> Result<()> {
             } else {
                 e
             }
-        })?;
+        })
+        .context("reading configuration")?;
     if print_config {
         println!("{config:#?}");
         return Ok(());
     }
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let sock_addr = std::net::SocketAddrV6::new(
-            std::net::Ipv6Addr::UNSPECIFIED,
-            *config.port.inner(),
-            0,
-            0,
-        );
-        let broker_listener = tokio::net::TcpListener::bind(sock_addr).await?;
-        println!("broker listening on: {:?}", broker_listener.local_addr()?);
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let log = slog::Logger::root(drain, o!());
+    tokio::runtime::Runtime::new()
+        .context("starting tokio runtime")?
+        .block_on(async {
+            let sock_addr = std::net::SocketAddrV6::new(
+                std::net::Ipv6Addr::UNSPECIFIED,
+                *config.port.inner(),
+                0,
+                0,
+            );
+            let listener = tokio::net::TcpListener::bind(sock_addr)
+                .await
+                .context("binding listener socket")?;
 
-        let sock_addr = SocketAddrV6::new(
-            std::net::Ipv6Addr::UNSPECIFIED,
-            *config.http_port.inner(),
-            0,
-            0,
-        );
-        let http_listener = tokio::net::TcpListener::bind(sock_addr).await?;
-        println!("web UI listing on {:?}", http_listener.local_addr()?);
+            let sock_addr = SocketAddrV6::new(
+                std::net::Ipv6Addr::UNSPECIFIED,
+                *config.http_port.inner(),
+                0,
+                0,
+            );
+            let http_listener = tokio::net::TcpListener::bind(sock_addr)
+                .await
+                .context("binding http listener socket")?;
 
-        meticulous_broker::main(
-            broker_listener,
-            http_listener,
-            config.cache_root,
-            config.cache_bytes_used_target,
-        )
-        .await;
-        Ok(())
-    })
+            let listener_addr = listener
+                .local_addr()
+                .context("retrieving listener local address")?;
+            let http_listener_addr = http_listener
+                .local_addr()
+                .context("retrieving listener local address")?;
+            info!(log, "started";
+                "config" => ?config,
+                "addr" => listener_addr,
+                "http_addr" => http_listener_addr,
+                "pid" => process::id());
+
+            meticulous_broker::main(
+                listener,
+                http_listener,
+                config.cache_root,
+                config.cache_bytes_used_target,
+                log.clone(),
+            )
+            .await;
+            info!(log, "exiting");
+            Ok(())
+        })
 }
 
 #[test]

@@ -12,6 +12,7 @@ use meticulous_util::{
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fmt::{self, Debug, Formatter},
     path::{Path, PathBuf},
 };
 
@@ -54,7 +55,6 @@ pub trait SchedulerCache {
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf>;
 }
 
-#[derive(Debug)]
 pub enum Message<DepsT: SchedulerDeps> {
     ClientConnected(ClientId, DepsT::ClientSender),
     ClientDisconnected(ClientId),
@@ -68,6 +68,45 @@ pub enum Message<DepsT: SchedulerDeps> {
     GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
     #[allow(dead_code)]
     DecrementRefcount(Sha256Digest),
+}
+
+impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Message::ClientConnected(cid, _sender) => {
+                f.debug_tuple("ClientConnected").field(cid).finish()
+            }
+            Message::ClientDisconnected(cid) => {
+                f.debug_tuple("ClientDisconnected").field(cid).finish()
+            }
+            Message::FromClient(cid, msg) => {
+                f.debug_tuple("FromClient").field(cid).field(msg).finish()
+            }
+            Message::WorkerConnected(wid, slots, _sender) => f
+                .debug_tuple("WorkerConnected")
+                .field(wid)
+                .field(slots)
+                .finish(),
+            Message::WorkerDisconnected(wid) => {
+                f.debug_tuple("WorkerDisconnected").field(wid).finish()
+            }
+            Message::FromWorker(wid, msg) => {
+                f.debug_tuple("FromWorker").field(wid).field(msg).finish()
+            }
+            Message::GotArtifact(digest, path, size) => f
+                .debug_tuple("GotArtifact")
+                .field(digest)
+                .field(path)
+                .field(size)
+                .finish(),
+            Message::GetArtifactForWorker(digest, _sender) => {
+                f.debug_tuple("GetArtifactForWorker").field(digest).finish()
+            }
+            Message::DecrementRefcount(digest) => {
+                f.debug_tuple("DecrementRefcount").field(digest).finish()
+            }
+        }
+    }
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {

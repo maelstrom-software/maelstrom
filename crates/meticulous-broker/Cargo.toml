@@ -17,6 +17,9 @@ serde = { workspace = true }
 tar = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+slog = "2.7.0"
+slog-term = "2.9.0"
+slog-async = "2.8.0"
 
 [dev-dependencies]
 itertools = { workspace = true }

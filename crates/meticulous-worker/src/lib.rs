@@ -117,6 +117,7 @@ pub async fn main(config: config::Config) -> Result<()> {
     join_set.spawn(net::async_socket_writer(
         broker_socket_receiver,
         write_stream,
+        |_| {},
     ));
     join_set.spawn(dispatcher_main(
         config,
