@@ -2,10 +2,13 @@ use super::{
     scheduler_task::{scheduler::Message, SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_base::{proto, ClientId, Sha256Digest, WorkerId};
 use meticulous_util::{error::Result, net};
 use slog::{debug, info, o, warn, Logger};
-use std::{net::Shutdown, sync::Arc};
+use std::{
+    net::{Shutdown, TcpStream},
+    sync::Arc,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -88,6 +91,32 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
+fn worker_artifact_connection_main(
+    digest: Sha256Digest,
+    mut socket: TcpStream,
+    scheduler_sender: SchedulerSender,
+    log: Logger,
+) -> Result<()> {
+    debug!(log, "connection upgraded to worker artifact connection"; "digest" => %digest);
+    socket.shutdown(Shutdown::Read).unwrap();
+    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
+    scheduler_sender
+        .send(Message::GetArtifactForWorker(
+            digest.clone(),
+            channel_sender,
+        ))
+        .unwrap();
+    if let Some(path) = channel_receiver.recv().unwrap() {
+        let mut f = std::fs::File::open(path).unwrap();
+        std::io::copy(&mut f, &mut socket)?;
+        scheduler_sender
+            .send(Message::DecrementRefcount(digest.clone()))
+            .unwrap();
+    }
+    debug!(log, "received worker artifact disconnect");
+    Ok(())
+}
+
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
@@ -164,27 +193,10 @@ pub async fn listener_main(
                 }
                 Ok(proto::Hello::WorkerArtifact { digest }) => {
                     let log = log.clone();
+                    let socket = socket.into_std().unwrap();
+                    socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        debug!(log, "connection upgraded to worker artifact connection"; "digest" => %digest);
-                        let mut socket = socket.into_std().unwrap();
-                        socket.set_nonblocking(false).unwrap();
-                        socket.shutdown(Shutdown::Read).unwrap();
-                        let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
-                        scheduler_sender
-                            .send(Message::GetArtifactForWorker(
-                                digest.clone(),
-                                channel_sender,
-                            ))
-                            .unwrap();
-                        if let Some(path) = channel_receiver.recv().unwrap() {
-                            let mut f = std::fs::File::open(path).unwrap();
-                            std::io::copy(&mut f, &mut socket)?;
-                            scheduler_sender
-                                .send(Message::DecrementRefcount(digest.clone()))
-                                .unwrap();
-                        }
-                        debug!(log, "received worker artifact disconnect");
-                        Ok(())
+                        worker_artifact_connection_main(digest, socket, scheduler_sender, log)
                     });
                 }
                 Ok(proto::Hello::ClientArtifact { digest }) => {
