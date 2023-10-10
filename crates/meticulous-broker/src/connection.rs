@@ -2,13 +2,13 @@ use super::{
     scheduler_task::{scheduler::Message, SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use meticulous_base::{proto, ClientId, Sha256Digest, WorkerId};
-use meticulous_util::{error::Result, net};
-use slog::{debug, info, o, warn, Logger};
-use std::{
-    net::{Shutdown, TcpStream},
-    sync::Arc,
+use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_util::{
+    error::Result,
+    net::{self, FixedSizeReader},
 };
+use slog::{debug, info, o, warn, Logger};
+use std::{net::TcpStream, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -91,30 +91,50 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
-fn worker_artifact_connection_main(
-    digest: Sha256Digest,
+fn artifact_fetcher_connection_loop(
     mut socket: TcpStream,
     scheduler_sender: SchedulerSender,
-    log: Logger,
+    log: &mut Logger,
 ) -> Result<()> {
-    debug!(log, "connection upgraded to worker artifact connection"; "digest" => %digest);
-    socket.shutdown(Shutdown::Read).unwrap();
     let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
-    scheduler_sender
-        .send(Message::GetArtifactForWorker(
+    loop {
+        let req: proto::ArtifactFetcherToBroker = net::read_message_from_socket(&mut socket)?;
+        let digest = req.0;
+        debug!(log, "received artifact fetcher request"; "digest" => %digest);
+        scheduler_sender.send(Message::GetArtifactForWorker(
             digest.clone(),
-            channel_sender,
-        ))
-        .unwrap();
-    if let Some(path) = channel_receiver.recv().unwrap() {
-        let mut f = std::fs::File::open(path).unwrap();
-        std::io::copy(&mut f, &mut socket)?;
-        scheduler_sender
-            .send(Message::DecrementRefcount(digest.clone()))
-            .unwrap();
+            channel_sender.clone(),
+        ))?;
+
+        match channel_receiver.recv()? {
+            Some((path, size)) => {
+                let f = std::fs::File::open(path)?;
+                let mut f = FixedSizeReader::new(f, size);
+                let resp = proto::BrokerToArtifactFetcher(Some(size));
+                debug!(log, "sending artifact fetcher response"; "digest" => %digest, "resp" => ?resp);
+                net::write_message_to_socket(&mut socket, resp)?;
+                let copied = std::io::copy(&mut f, &mut socket)?;
+                assert_eq!(copied, size);
+                scheduler_sender.send(Message::DecrementRefcount(digest))?;
+            }
+            None => {
+                let resp = proto::BrokerToArtifactFetcher(None);
+                debug!(log, "sending artifact fetcher response"; "digest" => %digest, "resp" => ?resp);
+                net::write_message_to_socket(&mut socket, resp)?;
+            }
+        }
     }
-    debug!(log, "received worker artifact disconnect");
-    Ok(())
+}
+
+fn artifact_fetcher_connection_main(
+    socket: TcpStream,
+    scheduler_sender: SchedulerSender,
+    mut log: Logger,
+) -> Result<()> {
+    debug!(log, "connection upgraded to artifact fetcher connection");
+    let err = artifact_fetcher_connection_loop(socket, scheduler_sender, &mut log).unwrap_err();
+    debug!(log, "artifact fetcher connection ended"; "err" => %err);
+    Err(err)
 }
 
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
@@ -191,12 +211,12 @@ pub async fn listener_main(
                     .await;
                     info!(log, "received worker disconnect");
                 }
-                Ok(proto::Hello::WorkerArtifact { digest }) => {
+                Ok(proto::Hello::ArtifactFetcher) => {
                     let log = log.clone();
                     let socket = socket.into_std().unwrap();
                     socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        worker_artifact_connection_main(digest, socket, scheduler_sender, log)
+                        artifact_fetcher_connection_main(socket, scheduler_sender, log)
                     });
                 }
                 Ok(proto::Hello::ClientArtifact { digest }) => {

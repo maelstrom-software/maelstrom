@@ -137,6 +137,44 @@ pub fn socket_writer(
     }
 }
 
+pub struct FixedSizeReader<DelegateT> {
+    delegate: DelegateT,
+    bytes_remaining: u64,
+    delegate_eof: bool,
+}
+
+impl<DelegateT> FixedSizeReader<DelegateT> {
+    pub fn new(delegate: DelegateT, bytes_remaining: u64) -> Self {
+        FixedSizeReader {
+            delegate,
+            bytes_remaining,
+            delegate_eof: false,
+        }
+    }
+}
+
+impl<DelegateT: std::io::Read> std::io::Read for FixedSizeReader<DelegateT> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.bytes_remaining == 0 {
+            Ok(0)
+        } else if self.delegate_eof {
+            let to_fill = buf.len().min(self.bytes_remaining as usize);
+            buf[..to_fill].fill(0);
+            Ok(to_fill)
+        } else {
+            let buf_limit = buf.len().min(self.bytes_remaining as usize);
+            let count = self.delegate.read(&mut buf[..buf_limit])?;
+            if count == 0 {
+                self.delegate_eof = true;
+                self.read(buf)
+            } else {
+                self.bytes_remaining -= count as u64;
+                Ok(count)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

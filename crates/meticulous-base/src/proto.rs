@@ -10,7 +10,7 @@ pub enum Hello {
     Client,
     Worker { slots: u32 },
     ClientArtifact { digest: Sha256Digest },
-    WorkerArtifact { digest: Sha256Digest },
+    ArtifactFetcher,
 }
 
 /// Message sent from the broker to a worker. The broker won't send a message until it has received
@@ -43,3 +43,9 @@ pub enum BrokerToClient {
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
 }
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ArtifactFetcherToBroker(pub Sha256Digest);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BrokerToArtifactFetcher(pub Option<u64>);

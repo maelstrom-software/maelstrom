@@ -270,12 +270,17 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         })
     }
 
-    pub fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf> {
-        let Some(CacheEntry::InUse { refcount, .. }) = self.entries.0.get_mut(digest) else {
+    pub fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+        let Some(CacheEntry::InUse {
+            refcount,
+            bytes_used,
+        }) = self.entries.0.get_mut(digest)
+        else {
             return None;
         };
         *refcount = refcount.checked_add(1).unwrap();
-        Some(self.cache_path(digest))
+        let bytes_used = *bytes_used;
+        Some((self.cache_path(digest), bytes_used))
     }
 }
 
@@ -470,7 +475,11 @@ mod tests {
             self.clear_fs_operations();
         }
 
-        fn get_artifact_for_worker(&mut self, digest: Sha256Digest, expected: Option<PathBuf>) {
+        fn get_artifact_for_worker(
+            &mut self,
+            digest: Sha256Digest,
+            expected: Option<(PathBuf, u64)>,
+        ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
         }
     }
@@ -979,8 +988,8 @@ mod tests {
     fn test_get_artifact_for_worker_in_use() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
-        fixture.get_artifact_for_worker(digest!(1), Some(long_path!("/z/sha256", 1, "tar")));
+        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 42);
+        fixture.get_artifact_for_worker(digest!(1), Some((long_path!("/z/sha256", 1, "tar"), 42)));
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);

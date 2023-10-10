@@ -46,7 +46,7 @@ impl SchedulerCache for PassThroughCache {
         self.cache.client_disconnected(cid)
     }
 
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<PathBuf> {
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
         self.cache.get_artifact_for_worker(digest)
     }
 }
@@ -59,7 +59,7 @@ pub struct PassThroughDeps;
 impl SchedulerDeps for PassThroughDeps {
     type ClientSender = UnboundedSender<proto::BrokerToClient>;
     type WorkerSender = UnboundedSender<proto::BrokerToWorker>;
-    type WorkerArtifactFetcherSender = std::sync::mpsc::Sender<Option<PathBuf>>;
+    type WorkerArtifactFetcherSender = std::sync::mpsc::Sender<Option<(PathBuf, u64)>>;
 
     fn send_message_to_client(
         &mut self,
@@ -80,7 +80,7 @@ impl SchedulerDeps for PassThroughDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Option<PathBuf>,
+        message: Option<(PathBuf, u64)>,
     ) {
         sender.send(message).ok();
     }

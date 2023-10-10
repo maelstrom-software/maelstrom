@@ -1,6 +1,10 @@
-use meticulous_base::{proto::Hello, Sha256Digest};
-use meticulous_util::error::Result;
-use std::path::PathBuf;
+use anyhow::anyhow;
+use meticulous_base::{proto, Sha256Digest};
+use meticulous_util::{
+    error::Result,
+    net::{self, FixedSizeReader},
+};
+use std::{net::TcpStream, path::PathBuf};
 
 struct Sha256Verifier<'a, DelegateT> {
     hasher: Option<sha2::Sha256>,
@@ -65,29 +69,6 @@ impl<'a, DelegateT: std::io::Read> std::io::Read for Sha256Verifier<'a, Delegate
     }
 }
 
-struct CountingReader<DelegateT> {
-    delegate: DelegateT,
-    count: u64,
-}
-
-impl<DelegateT> CountingReader<DelegateT> {
-    fn new(delegate: DelegateT) -> Self {
-        CountingReader { delegate, count: 0 }
-    }
-
-    fn bytes_read(&self) -> u64 {
-        self.count
-    }
-}
-
-impl<DelegateT: std::io::Read> std::io::Read for CountingReader<DelegateT> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let count = self.delegate.read(buf)?;
-        self.count += count as u64;
-        Ok(count)
-    }
-}
-
 fn read_to_end(mut input: impl std::io::Read) -> std::io::Result<()> {
     let mut buf = [0u8; 4096];
     while input.read(&mut buf)? > 0 {}
@@ -99,18 +80,28 @@ pub fn main(
     path: PathBuf,
     broker_addr: super::config::Broker,
 ) -> Result<u64> {
-    let mut socket = std::net::TcpStream::connect(broker_addr.inner())?;
-    meticulous_util::net::write_message_to_socket(
-        &mut socket,
-        Hello::WorkerArtifact {
-            digest: digest.clone(),
-        },
-    )?;
-
-    let buf_reader = std::io::BufReader::new(socket);
-    let mut counting_reader = CountingReader::new(buf_reader);
-    let mut sha_verifier = Sha256Verifier::new(&mut counting_reader, digest);
-    tar::Archive::new(&mut sha_verifier).unpack(path)?;
-    read_to_end(sha_verifier)?;
-    Ok(counting_reader.bytes_read())
+    println!("fetching {digest}");
+    let mut writer = TcpStream::connect(broker_addr.inner())?;
+    let mut reader = std::io::BufReader::new(writer.try_clone()?);
+    println!("writing hello");
+    net::write_message_to_socket(&mut writer, proto::Hello::ArtifactFetcher)?;
+    println!("writing request");
+    net::write_message_to_socket(&mut writer, proto::ArtifactFetcherToBroker(digest.clone()))?;
+    println!("reading response");
+    match net::read_message_from_socket::<proto::BrokerToArtifactFetcher>(&mut reader)?.0 {
+        None => {
+            println!("got None");
+            Err(anyhow!("Broker error reading artifact {digest}"))
+        }
+        Some(size) => {
+            println!("fetching {digest} of size {size}");
+            let mut reader = FixedSizeReader::new(reader, size);
+            let mut sha_verifier = Sha256Verifier::new(&mut reader, digest);
+            tar::Archive::new(&mut sha_verifier).unpack(path)?;
+            println!("tar ended, reading to end");
+            read_to_end(sha_verifier)?;
+            println!("read to end");
+            Ok(size)
+        }
+    }
 }
