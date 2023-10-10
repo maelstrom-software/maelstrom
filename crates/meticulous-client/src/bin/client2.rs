@@ -1,9 +1,15 @@
 use anyhow::anyhow;
 use meticulous_base::{
-    proto::{BrokerToClient, ClientToBroker, Hello},
+    proto::{
+        ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
+    },
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
-use meticulous_util::{error::Result, net, net::read_message_from_socket, OptionExt};
+use meticulous_util::{
+    error::Result,
+    net::{self, FixedSizeReader},
+    OptionExt,
+};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -91,7 +97,7 @@ impl Client {
 
     fn receiver_main(shared: Arc<ClientShared>, mut stream: TcpStream) -> Result<()> {
         loop {
-            match read_message_from_socket::<BrokerToClient>(&mut stream)? {
+            match net::read_message_from_socket::<BrokerToClient>(&mut stream)? {
                 BrokerToClient::JobResponse(cjid, result) => {
                     let mut locked = shared.lock.lock().unwrap();
                     locked.jobs.insert(cjid, result).assert_is_none();
@@ -126,11 +132,19 @@ impl Client {
         digest: Sha256Digest,
         path: PathBuf,
     ) -> Result<()> {
-        let mut file = std::fs::File::open(path)?;
+        let file = std::fs::File::open(path)?;
         let mut stream = TcpStream::connect(broker_addr)?;
-        net::write_message_to_socket(&mut stream, Hello::ClientArtifact { digest })?;
-        std::io::copy(&mut file, &mut stream)?;
-        Ok(())
+        let size = file.metadata()?.len();
+        let mut file = FixedSizeReader::new(file, size);
+        net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
+        net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
+        let copied = std::io::copy(&mut file, &mut stream)?;
+        assert_eq!(copied, size);
+        let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
+        match resp {
+            None => Ok(()),
+            Some(msg) => Err(anyhow!("Error from broker: {msg}")),
+        }
     }
 
     fn add_artifact(&mut self, path: PathBuf) -> Result<Sha256Digest> {

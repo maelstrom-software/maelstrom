@@ -5,7 +5,7 @@ use super::{
 use meticulous_base::{proto, ClientId, WorkerId};
 use meticulous_util::{
     error::Result,
-    net::{self, FixedSizeReader},
+    net::{self, FixedSizeReader, Sha256Verifier},
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{net::TcpStream, sync::Arc};
@@ -98,8 +98,7 @@ fn artifact_fetcher_connection_loop(
 ) -> Result<()> {
     let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
     loop {
-        let req: proto::ArtifactFetcherToBroker = net::read_message_from_socket(&mut socket)?;
-        let digest = req.0;
+        let proto::ArtifactFetcherToBroker(digest) = net::read_message_from_socket(&mut socket)?;
         debug!(log, "received artifact fetcher request"; "digest" => %digest);
         scheduler_sender.send(Message::GetArtifactForWorker(
             digest.clone(),
@@ -134,6 +133,42 @@ fn artifact_fetcher_connection_main(
     debug!(log, "connection upgraded to artifact fetcher connection");
     let err = artifact_fetcher_connection_loop(socket, scheduler_sender, &mut log).unwrap_err();
     debug!(log, "artifact fetcher connection ended"; "err" => %err);
+    Err(err)
+}
+
+fn artifact_pusher_connection_loop(
+    mut socket: TcpStream,
+    scheduler_sender: SchedulerSender,
+    _log: &mut Logger,
+) -> Result<()> {
+    loop {
+        let proto::ArtifactPusherToBroker(digest, size) =
+            net::read_message_from_socket(&mut socket)?;
+        // XXX get the cache's preferred directory and use tempfile_in().
+        let mut tmp = tempfile::Builder::new()
+            .prefix(&digest.to_string())
+            .suffix(".tar")
+            .tempfile()?;
+        let mut reader = FixedSizeReader::new(socket, size);
+        let mut sha_verifier = Sha256Verifier::new(&mut reader, &digest);
+        let copied = std::io::copy(&mut sha_verifier, &mut tmp)?;
+        assert_eq!(copied, size);
+        let (_, path) = tmp.keep()?;
+        scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
+        drop(sha_verifier);
+        socket = reader.into_inner();
+        net::write_message_to_socket(&mut socket, proto::BrokerToArtifactPusher(None))?;
+    }
+}
+
+fn artifact_pusher_connection_main(
+    socket: TcpStream,
+    scheduler_sender: SchedulerSender,
+    mut log: Logger,
+) -> Result<()> {
+    debug!(log, "connection upgraded to artifact pusher connection");
+    let err = artifact_pusher_connection_loop(socket, scheduler_sender, &mut log).unwrap_err();
+    debug!(log, "artifact pusher connection ended"; "err" => %err);
     Err(err)
 }
 
@@ -219,25 +254,12 @@ pub async fn listener_main(
                         artifact_fetcher_connection_main(socket, scheduler_sender, log)
                     });
                 }
-                Ok(proto::Hello::ClientArtifact { digest }) => {
+                Ok(proto::Hello::ArtifactPusher) => {
                     let log = log.clone();
+                    let socket = socket.into_std().unwrap();
+                    socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        debug!(log, "connection upgraded to client artifact connection"; "digest" => %digest);
-                        use std::io::Write;
-                        let mut socket = socket.into_std().unwrap();
-                        socket.set_nonblocking(false).unwrap();
-                        // XXX get the cache's preferred directory and use tempfile_in().
-                        let mut tmp = tempfile::Builder::new()
-                            .prefix(&digest.to_string())
-                            .suffix(".tar.gz")
-                            .tempfile()?;
-                        // XXX Validate the file.
-                        let size = std::io::copy(&mut socket, &mut tmp)?;
-                        let (_, path) = tmp.keep()?;
-                        scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
-                        socket.write_all(&[1u8]).unwrap();
-                        debug!(log, "received client artifact disconnect");
-                        Ok(())
+                        artifact_pusher_connection_main(socket, scheduler_sender, log)
                     });
                 }
                 Err(err) => {

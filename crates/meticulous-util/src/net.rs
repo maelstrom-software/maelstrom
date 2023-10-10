@@ -1,6 +1,7 @@
 //! Functions that are useful for reading and writing messages, to and from sockets and channels.
 
 use crate::error::Result;
+use meticulous_base::Sha256Digest;
 use serde::{de::DeserializeOwned, Serialize};
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are
@@ -151,6 +152,10 @@ impl<DelegateT> FixedSizeReader<DelegateT> {
             delegate_eof: false,
         }
     }
+
+    pub fn into_inner(self) -> DelegateT {
+        self.delegate
+    }
 }
 
 impl<DelegateT: std::io::Read> std::io::Read for FixedSizeReader<DelegateT> {
@@ -172,6 +177,69 @@ impl<DelegateT: std::io::Read> std::io::Read for FixedSizeReader<DelegateT> {
                 Ok(count)
             }
         }
+    }
+}
+
+pub struct Sha256Verifier<'a, DelegateT> {
+    hasher: Option<sha2::Sha256>,
+    delegate: DelegateT,
+    expected: &'a Sha256Digest,
+}
+
+impl<'a, DelegateT> Sha256Verifier<'a, DelegateT> {
+    pub fn new(delegate: DelegateT, expected: &'a Sha256Digest) -> Self {
+        use sha2::Digest;
+        Sha256Verifier {
+            hasher: Some(sha2::Sha256::new()),
+            delegate,
+            expected,
+        }
+    }
+}
+
+impl<'a, DelegateT> std::ops::Drop for Sha256Verifier<'a, DelegateT> {
+    fn drop(&mut self) {
+        assert!(self.hasher.is_none(), "digest never verified");
+    }
+}
+
+impl<'a, DelegateT: std::io::Read> std::io::Read for Sha256Verifier<'a, DelegateT> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use sha2::Digest;
+
+        // Take the hasher before we read. If there is an error reading, then we'll leave the
+        // struct without a hasher, indicating that it's safe to drop.
+        let hasher = self.hasher.take();
+        let size = self.delegate.read(buf)?;
+        if size > 0 {
+            self.hasher = hasher;
+            match &mut self.hasher {
+                None => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Unexepcted read of non-zero bytes after read of zero bytes or error",
+                    ));
+                }
+                Some(hasher) => {
+                    hasher.update(&buf[..size]);
+                }
+            }
+        } else {
+            match hasher {
+                None => {
+                    // We already validated the digest.
+                }
+                Some(hasher) => {
+                    if Sha256Digest(hasher.finalize().into()) != *self.expected {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            "SHA-256 digest didn't match",
+                        ));
+                    }
+                }
+            }
+        }
+        Ok(size)
     }
 }
 

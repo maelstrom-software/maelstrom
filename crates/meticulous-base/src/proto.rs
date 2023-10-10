@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum Hello {
     Client,
     Worker { slots: u32 },
-    ClientArtifact { digest: Sha256Digest },
+    ArtifactPusher,
     ArtifactFetcher,
 }
 
@@ -49,3 +49,9 @@ pub struct ArtifactFetcherToBroker(pub Sha256Digest);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BrokerToArtifactFetcher(pub Option<u64>);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct BrokerToArtifactPusher(pub Option<String>);
