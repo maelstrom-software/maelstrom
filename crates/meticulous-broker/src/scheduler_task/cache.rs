@@ -89,7 +89,23 @@ enum CacheEntry {
     },
 }
 
+/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
+#[derive(Default)]
 struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
+
+impl std::ops::Deref for CacheMap {
+    type Target = HashMap<Sha256Digest, CacheEntry>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for CacheMap {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 impl HeapDeps for CacheMap {
     type Element = Sha256Digest;
@@ -143,7 +159,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         let mut result = Cache {
             fs,
             root,
-            entries: CacheMap(HashMap::default()),
+            entries: CacheMap::default(),
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
@@ -159,7 +175,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                 if right == "tar" {
                     if let Ok(digest) = left.parse::<Sha256Digest>() {
                         let bytes_used = result.fs.file_size(&child);
-                        result.entries.0.insert(
+                        result.entries.insert(
                             digest.clone(),
                             CacheEntry::InHeap {
                                 bytes_used,
@@ -224,7 +240,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     ) -> Vec<JobId> {
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
-        match self.entries.0.entry(digest.clone()) {
+        match self.entries.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
                     bytes_used,
@@ -259,7 +275,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
-        let entry = self.entries.0.get_mut(&digest).unwrap();
+        let entry = self.entries.get_mut(&digest).unwrap();
         let CacheEntry::InUse {
             bytes_used,
             refcount,
@@ -283,7 +299,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     pub fn client_disconnected(&mut self, cid: ClientId) {
-        self.entries.0.retain(|_, e| {
+        self.entries.retain(|_, e| {
             let CacheEntry::Waiting(jids, clients) = e else {
                 return true;
             };
@@ -297,7 +313,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         let Some(CacheEntry::InUse {
             refcount,
             bytes_used,
-        }) = self.entries.0.get_mut(digest)
+        }) = self.entries.get_mut(digest)
         else {
             return None;
         };
@@ -318,7 +334,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.0.remove(&digest) else {
+            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             self.fs.remove(&self.cache_path(&digest));
