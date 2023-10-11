@@ -3,6 +3,7 @@
 use crate::error::Result;
 use meticulous_base::Sha256Digest;
 use serde::{de::DeserializeOwned, Serialize};
+use std::io::{self, Chain, Read, Repeat, Take, Write};
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are
 /// no more channel senders.
@@ -24,7 +25,7 @@ pub async fn write_message_to_async_socket(
     let msg_len = bincode::serialized_size(&msg)? as u32;
 
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
-    std::io::Write::write(&mut buf, &msg_len.to_le_bytes())?;
+    Write::write(&mut buf, &msg_len.to_le_bytes())?;
     bincode::serialize_into(&mut buf, &msg)?;
 
     Ok(tokio::io::AsyncWriteExt::write_all(stream, &buf).await?)
@@ -83,14 +84,11 @@ pub async fn async_socket_writer<MessageT>(
 
 /// Write a message to a normal (threaded) writer. Each message is framed by sending a leading
 /// 4-byte, little-endian message size.
-pub fn write_message_to_socket(
-    stream: &mut impl std::io::Write,
-    msg: impl Serialize,
-) -> Result<()> {
+pub fn write_message_to_socket(stream: &mut impl Write, msg: impl Serialize) -> Result<()> {
     let msg_len = bincode::serialized_size(&msg)? as u32;
 
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
-    std::io::Write::write_all(&mut buf, &msg_len.to_le_bytes())?;
+    Write::write_all(&mut buf, &msg_len.to_le_bytes())?;
     bincode::serialize_into(&mut buf, &msg)?;
 
     Ok(stream.write_all(&buf)?)
@@ -98,7 +96,7 @@ pub fn write_message_to_socket(
 
 /// Read a message from a normal (threaded) reader. The framing must match that of
 /// [write_message_to_socket].
-pub fn read_message_from_socket<MessageT>(stream: &mut impl std::io::Read) -> Result<MessageT>
+pub fn read_message_from_socket<MessageT>(stream: &mut impl Read) -> Result<MessageT>
 where
     MessageT: DeserializeOwned,
 {
@@ -113,7 +111,7 @@ where
 
 /// Loop reading messages from a socket and writing them to an mpsc channel.
 pub fn socket_reader<MessageT, TransformedT>(
-    mut socket: impl std::io::Read,
+    mut socket: impl Read,
     channel: std::sync::mpsc::Sender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
 ) where
@@ -127,10 +125,7 @@ pub fn socket_reader<MessageT, TransformedT>(
 }
 
 /// Loop reading messages from an mpsc channel and writing them to a socket.
-pub fn socket_writer(
-    channel: std::sync::mpsc::Receiver<impl Serialize>,
-    mut socket: impl std::io::Write,
-) {
+pub fn socket_writer(channel: std::sync::mpsc::Receiver<impl Serialize>, mut socket: impl Write) {
     while let Ok(msg) = channel.recv() {
         if write_message_to_socket(&mut socket, msg).is_err() {
             break;
@@ -138,85 +133,65 @@ pub fn socket_writer(
     }
 }
 
-pub struct FixedSizeReader<DelegateT> {
-    delegate: DelegateT,
-    bytes_remaining: u64,
-    delegate_eof: bool,
-}
+/// A reader wrapper that will always return a specific number of bytes, except on error. If the
+/// inner, wrapped, reader returns EOF before the specified number of bytes have been returned,
+/// this reader will pad the remaining bytes with zeros. If the inner reader returns more bytes
+/// than the specified number, this reader will return EOF early, like [Read::take].
+pub struct FixedSizeReader<InnerT>(Take<Chain<InnerT, Repeat>>);
 
-impl<DelegateT> FixedSizeReader<DelegateT> {
-    pub fn new(delegate: DelegateT, bytes_remaining: u64) -> Self {
-        FixedSizeReader {
-            delegate,
-            bytes_remaining,
-            delegate_eof: false,
-        }
+impl<InnerT: Read> FixedSizeReader<InnerT> {
+    pub fn new(inner: InnerT, limit: u64) -> Self {
+        FixedSizeReader(inner.chain(io::repeat(0)).take(limit))
     }
 
-    pub fn into_inner(self) -> DelegateT {
-        self.delegate
+    pub fn into_inner(self) -> InnerT {
+        self.0.into_inner().into_inner().0
     }
 }
 
-impl<DelegateT: std::io::Read> std::io::Read for FixedSizeReader<DelegateT> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.bytes_remaining == 0 {
-            Ok(0)
-        } else if self.delegate_eof {
-            let to_fill = buf.len().min(self.bytes_remaining as usize);
-            buf[..to_fill].fill(0);
-            Ok(to_fill)
-        } else {
-            let buf_limit = buf.len().min(self.bytes_remaining as usize);
-            let count = self.delegate.read(&mut buf[..buf_limit])?;
-            if count == 0 {
-                self.delegate_eof = true;
-                self.read(buf)
-            } else {
-                self.bytes_remaining -= count as u64;
-                Ok(count)
-            }
-        }
+impl<InnerT: Read> Read for FixedSizeReader<InnerT> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.read(buf)
     }
 }
 
-pub struct Sha256Verifier<'a, DelegateT> {
+pub struct Sha256Verifier<'a, InnerT> {
     hasher: Option<sha2::Sha256>,
-    delegate: DelegateT,
+    inner: InnerT,
     expected: &'a Sha256Digest,
 }
 
-impl<'a, DelegateT> Sha256Verifier<'a, DelegateT> {
-    pub fn new(delegate: DelegateT, expected: &'a Sha256Digest) -> Self {
+impl<'a, InnerT> Sha256Verifier<'a, InnerT> {
+    pub fn new(inner: InnerT, expected: &'a Sha256Digest) -> Self {
         use sha2::Digest;
         Sha256Verifier {
             hasher: Some(sha2::Sha256::new()),
-            delegate,
+            inner,
             expected,
         }
     }
 }
 
-impl<'a, DelegateT> std::ops::Drop for Sha256Verifier<'a, DelegateT> {
+impl<'a, InnerT> std::ops::Drop for Sha256Verifier<'a, InnerT> {
     fn drop(&mut self) {
         assert!(self.hasher.is_none(), "digest never verified");
     }
 }
 
-impl<'a, DelegateT: std::io::Read> std::io::Read for Sha256Verifier<'a, DelegateT> {
-    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+impl<'a, InnerT: Read> Read for Sha256Verifier<'a, InnerT> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         use sha2::Digest;
 
         // Take the hasher before we read. If there is an error reading, then we'll leave the
         // struct without a hasher, indicating that it's safe to drop.
         let hasher = self.hasher.take();
-        let size = self.delegate.read(buf)?;
+        let size = self.inner.read(buf)?;
         if size > 0 {
             self.hasher = hasher;
             match &mut self.hasher {
                 None => {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
                         "Unexepcted read of non-zero bytes after read of zero bytes or error",
                     ));
                 }
@@ -231,8 +206,8 @@ impl<'a, DelegateT: std::io::Read> std::io::Read for Sha256Verifier<'a, Delegate
                 }
                 Some(hasher) => {
                     if Sha256Digest(hasher.finalize().into()) != *self.expected {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
                             "SHA-256 digest didn't match",
                         ));
                     }
