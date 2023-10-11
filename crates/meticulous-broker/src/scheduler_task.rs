@@ -1,47 +1,13 @@
 use crate::config;
 use cache::{Cache, StdCacheFs};
-use meticulous_base::{proto, ClientId, JobId, Sha256Digest};
+use meticulous_base::proto;
 use meticulous_util::net;
-use scheduler::{Message, Scheduler, SchedulerCache, SchedulerDeps};
-use std::path::{Path, PathBuf};
+use scheduler::{Message, Scheduler, SchedulerDeps};
+use std::path::PathBuf;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 mod cache;
 pub mod scheduler;
-
-struct PassThroughCache {
-    cache: Cache<StdCacheFs>,
-}
-
-impl PassThroughCache {
-    fn new(root: config::CacheRoot, bytes_used_target: config::CacheBytesUsedTarget) -> Self {
-        PassThroughCache {
-            cache: Cache::new(StdCacheFs, root, bytes_used_target),
-        }
-    }
-}
-
-impl SchedulerCache for PassThroughCache {
-    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> cache::GetArtifact {
-        self.cache.get_artifact(jid, digest)
-    }
-
-    fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId> {
-        self.cache.got_artifact(digest, path, bytes_used)
-    }
-
-    fn decrement_refcount(&mut self, digest: Sha256Digest) {
-        self.cache.decrement_refcount(digest)
-    }
-
-    fn client_disconnected(&mut self, cid: ClientId) {
-        self.cache.client_disconnected(cid)
-    }
-
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
-        self.cache.get_artifact_for_worker(digest)
-    }
-}
 
 #[derive(Debug)]
 pub struct PassThroughDeps;
@@ -87,7 +53,7 @@ pub type SchedulerMessage = Message<PassThroughDeps>;
 pub type SchedulerSender = UnboundedSender<SchedulerMessage>;
 
 pub struct SchedulerTask {
-    scheduler: Scheduler<PassThroughCache, PassThroughDeps>,
+    scheduler: Scheduler<Cache<StdCacheFs>, PassThroughDeps>,
     sender: SchedulerSender,
     receiver: UnboundedReceiver<SchedulerMessage>,
 }
@@ -98,7 +64,7 @@ impl SchedulerTask {
         cache_bytes_used_target: config::CacheBytesUsedTarget,
     ) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
-        let cache = PassThroughCache::new(cache_root, cache_bytes_used_target);
+        let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target);
         SchedulerTask {
             scheduler: Scheduler::new(cache),
             sender,

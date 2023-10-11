@@ -1,7 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use super::cache::GetArtifact;
+use super::cache::{Cache, CacheFs, GetArtifact};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
@@ -53,6 +53,28 @@ pub trait SchedulerCache {
     fn decrement_refcount(&mut self, digest: Sha256Digest);
     fn client_disconnected(&mut self, cid: ClientId);
     fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
+}
+
+impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
+    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
+        self.get_artifact(jid, digest)
+    }
+
+    fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId> {
+        self.got_artifact(digest, path, bytes_used)
+    }
+
+    fn decrement_refcount(&mut self, digest: Sha256Digest) {
+        self.decrement_refcount(digest)
+    }
+
+    fn client_disconnected(&mut self, cid: ClientId) {
+        self.client_disconnected(cid)
+    }
+
+    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+        self.get_artifact_for_worker(digest)
+    }
 }
 
 pub enum Message<DepsT: SchedulerDeps> {
