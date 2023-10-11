@@ -74,6 +74,22 @@ pub struct BrokerStatistics {
 #[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sha256Digest(pub [u8; 32]);
 
+impl Sha256Digest {
+    pub fn verify(
+        &self,
+        expected: &Self,
+    ) -> std::result::Result<(), Sha256DigestVerificationError> {
+        if *self != *expected {
+            Err(Sha256DigestVerificationError::new(
+                self.clone(),
+                expected.clone(),
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 impl From<u32> for Sha256Digest {
     fn from(input: u32) -> Self {
         let mut bytes = [0; 32];
@@ -142,6 +158,30 @@ impl Debug for Sha256Digest {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct Sha256DigestVerificationError {
+    pub actual: Sha256Digest,
+    pub expected: Sha256Digest,
+}
+
+impl Sha256DigestVerificationError {
+    pub fn new(actual: Sha256Digest, expected: Sha256Digest) -> Self {
+        Sha256DigestVerificationError { actual, expected }
+    }
+}
+
+impl Display for Sha256DigestVerificationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "mismatched SHA-256 digest (expected {}, found {})",
+            self.expected, self.actual,
+        )
+    }
+}
+
+impl std::error::Error for Sha256DigestVerificationError {}
 
 #[cfg(test)]
 mod tests {

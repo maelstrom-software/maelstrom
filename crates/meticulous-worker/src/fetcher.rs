@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use meticulous_base::{proto, Sha256Digest};
 use meticulous_util::{
     error::Result,
-    net::{self, FixedSizeReader, Sha256Verifier},
+    net::{self, FixedSizeReader, Sha256Reader},
 };
 use std::{net::TcpStream, path::PathBuf};
 
@@ -24,10 +24,12 @@ pub fn main(
     match net::read_message_from_socket::<proto::BrokerToArtifactFetcher>(&mut reader)?.0 {
         None => Err(anyhow!("Broker error reading artifact {digest}")),
         Some(size) => {
-            let mut reader = FixedSizeReader::new(reader, size);
-            let mut sha_verifier = Sha256Verifier::new(&mut reader, digest);
-            tar::Archive::new(&mut sha_verifier).unpack(path)?;
-            read_to_end(sha_verifier)?;
+            let reader = FixedSizeReader::new(reader, size);
+            let mut reader = Sha256Reader::new(reader);
+            tar::Archive::new(&mut reader).unpack(path)?;
+            read_to_end(&mut reader)?;
+            let (_, actual_digest) = reader.finalize();
+            actual_digest.verify(digest)?;
             Ok(size)
         }
     }

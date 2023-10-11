@@ -5,7 +5,7 @@ use super::{
 use meticulous_base::{proto, ClientId, WorkerId};
 use meticulous_util::{
     error::Result,
-    net::{self, FixedSizeReader, Sha256Verifier},
+    net::{self, FixedSizeReader, Sha256Reader},
 };
 use slog::{debug, info, o, warn, Logger};
 use std::{net::TcpStream, sync::Arc};
@@ -149,13 +149,14 @@ fn artifact_pusher_connection_loop(
             .prefix(&digest.to_string())
             .suffix(".tar")
             .tempfile()?;
-        let mut reader = FixedSizeReader::new(socket, size);
-        let mut sha_verifier = Sha256Verifier::new(&mut reader, &digest);
-        let copied = std::io::copy(&mut sha_verifier, &mut tmp)?;
+        let reader = FixedSizeReader::new(socket, size);
+        let mut reader = Sha256Reader::new(reader);
+        let copied = std::io::copy(&mut reader, &mut tmp)?;
         assert_eq!(copied, size);
+        let (reader, actual_digest) = reader.finalize();
+        actual_digest.verify(&digest)?;
         let (_, path) = tmp.keep()?;
         scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
-        drop(sha_verifier);
         socket = reader.into_inner();
         net::write_message_to_socket(&mut socket, proto::BrokerToArtifactPusher(None))?;
     }
