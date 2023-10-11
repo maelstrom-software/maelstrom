@@ -1,4 +1,3 @@
-use super::GetArtifact;
 use crate::config;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
@@ -55,6 +54,13 @@ impl CacheFs for StdCacheFs {
         let metadata = std::fs::metadata(path).unwrap();
         metadata.len()
     }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum GetArtifact {
+    Success,
+    Wait,
+    Get,
 }
 
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for

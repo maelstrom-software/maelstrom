@@ -9,13 +9,6 @@ use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 mod cache;
 pub mod scheduler;
 
-#[derive(Debug, PartialEq)]
-pub enum GetArtifact {
-    Success,
-    Wait,
-    Get,
-}
-
 struct PassThroughCache {
     cache: Cache<StdCacheFs>,
 }
@@ -29,7 +22,7 @@ impl PassThroughCache {
 }
 
 impl SchedulerCache for PassThroughCache {
-    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
+    fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> cache::GetArtifact {
         self.cache.get_artifact(jid, digest)
     }
 
