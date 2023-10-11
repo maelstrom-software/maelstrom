@@ -62,11 +62,8 @@ pub enum Message<DepsT: SchedulerDeps> {
     WorkerConnected(WorkerId, usize, DepsT::WorkerSender),
     WorkerDisconnected(WorkerId),
     FromWorker(WorkerId, WorkerToBroker),
-    #[allow(dead_code)]
     GotArtifact(Sha256Digest, PathBuf, u64),
-    #[allow(dead_code)]
     GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
-    #[allow(dead_code)]
     DecrementRefcount(Sha256Digest),
 }
 

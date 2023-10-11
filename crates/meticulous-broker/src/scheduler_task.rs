@@ -10,7 +10,6 @@ mod cache;
 pub mod scheduler;
 
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)]
 pub enum GetArtifact {
     Success,
     Wait,

@@ -71,7 +71,6 @@ struct ClientLocked {
     outstanding_jobs: u32,
 }
 
-#[allow(dead_code)]
 impl Client {
     fn new(broker_addr: SocketAddr, _tmpdir: PathBuf) -> Result<Self> {
         let mut stream = TcpStream::connect(broker_addr)?;

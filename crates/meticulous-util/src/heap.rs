@@ -73,7 +73,6 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     /// Remove the element with the smallest value in the heap, or [None] if the heap is empty.
     /// Note that multiple elements in the heap may have the smallest value. In this case, an
     /// arbitrary element will be returned. O(log(n)).
-    #[allow(dead_code)]
     pub fn pop(&mut self, deps: &mut DepsT) -> Option<DepsT::Element> {
         match self.0.len() {
             0 => None,
