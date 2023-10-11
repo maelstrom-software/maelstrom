@@ -57,16 +57,6 @@ impl CacheFs for StdCacheFs {
     }
 }
 
-pub struct Cache<CacheFsT> {
-    fs: CacheFsT,
-    root: PathBuf,
-    entries: CacheMap,
-    heap: Heap<CacheMap>,
-    next_priority: u64,
-    bytes_used: u64,
-    bytes_used_goal: u64,
-}
-
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
 /// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
 enum CacheEntry {
@@ -93,9 +83,44 @@ enum CacheEntry {
     },
 }
 
-impl<CacheFsT: CacheFs> Cache<CacheFsT> {
+struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
+
+impl HeapDeps for CacheMap {
+    type Element = Sha256Digest;
+
+    fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
+        let lhs_priority = match self.0.get(lhs) {
+            Some(CacheEntry::InHeap { priority, .. }) => *priority,
+            _ => panic!("Element should be in heap"),
+        };
+        let rhs_priority = match self.0.get(rhs) {
+            Some(CacheEntry::InHeap { priority, .. }) => *priority,
+            _ => panic!("Element should be in heap"),
+        };
+        lhs_priority.cmp(&rhs_priority) == std::cmp::Ordering::Less
+    }
+
+    fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
+        match self.0.get_mut(elem) {
+            Some(CacheEntry::InHeap { heap_index, .. }) => *heap_index = idx,
+            _ => panic!("Element should be in heap"),
+        };
+    }
+}
+
+pub struct Cache<FsT> {
+    fs: FsT,
+    root: PathBuf,
+    entries: CacheMap,
+    heap: Heap<CacheMap>,
+    next_priority: u64,
+    bytes_used: u64,
+    bytes_used_goal: u64,
+}
+
+impl<FsT: CacheFs> Cache<FsT> {
     pub fn new(
-        mut fs: CacheFsT,
+        mut fs: FsT,
         root: config::CacheRoot,
         bytes_used_goal: config::CacheBytesUsedTarget,
     ) -> Self {
@@ -274,9 +299,7 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
         let bytes_used = *bytes_used;
         Some((self.cache_path(digest), bytes_used))
     }
-}
 
-impl<CacheFsT: CacheFs> Cache<CacheFsT> {
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.to_owned();
         path.push("sha256");
@@ -295,31 +318,6 @@ impl<CacheFsT: CacheFs> Cache<CacheFsT> {
             self.fs.remove(&self.cache_path(&digest));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
         }
-    }
-}
-
-struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
-
-impl HeapDeps for CacheMap {
-    type Element = Sha256Digest;
-
-    fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
-        let lhs_priority = match self.0.get(lhs) {
-            Some(CacheEntry::InHeap { priority, .. }) => *priority,
-            _ => panic!("Element should be in heap"),
-        };
-        let rhs_priority = match self.0.get(rhs) {
-            Some(CacheEntry::InHeap { priority, .. }) => *priority,
-            _ => panic!("Element should be in heap"),
-        };
-        lhs_priority.cmp(&rhs_priority) == std::cmp::Ordering::Less
-    }
-
-    fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
-        match self.0.get_mut(elem) {
-            Some(CacheEntry::InHeap { heap_index, .. }) => *heap_index = idx,
-            _ => panic!("Element should be in heap"),
-        };
     }
 }
 
