@@ -102,8 +102,9 @@ fn artifact_fetcher_connection_loop(
 ) -> Result<()> {
     let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
     loop {
-        let proto::ArtifactFetcherToBroker(digest) = net::read_message_from_socket(&mut socket)?;
-        debug!(log, "received artifact fetcher request"; "digest" => %digest);
+        let msg = net::read_message_from_socket(&mut socket)?;
+        debug!(log, "received artifact fetcher message"; "msg" => ?msg);
+        let proto::ArtifactFetcherToBroker(digest) = msg;
         scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
             digest.clone(),
             channel_sender.clone(),
@@ -113,17 +114,17 @@ fn artifact_fetcher_connection_loop(
             Some((path, size)) => {
                 let f = std::fs::File::open(path)?;
                 let mut f = FixedSizeReader::new(f, size);
-                let resp = proto::BrokerToArtifactFetcher(Some(size));
-                debug!(log, "sending artifact fetcher response"; "digest" => %digest, "resp" => ?resp);
-                net::write_message_to_socket(&mut socket, resp)?;
+                let msg = proto::BrokerToArtifactFetcher(Some(size));
+                debug!(log, "sending artifact fetcher message"; "digest" => %digest, "msg" => ?msg);
+                net::write_message_to_socket(&mut socket, msg)?;
                 let copied = std::io::copy(&mut f, &mut socket)?;
                 assert_eq!(copied, size);
                 scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
             }
             None => {
-                let resp = proto::BrokerToArtifactFetcher(None);
-                debug!(log, "sending artifact fetcher response"; "digest" => %digest, "resp" => ?resp);
-                net::write_message_to_socket(&mut socket, resp)?;
+                let msg = proto::BrokerToArtifactFetcher(None);
+                debug!(log, "sending artifact fetcher message"; "digest" => %digest, "msg" => ?msg);
+                net::write_message_to_socket(&mut socket, msg)?;
             }
         }
     }
