@@ -1,8 +1,10 @@
 //! Manage downloading, extracting, and storing of artifacts specified by jobs.
 
 use crate::config::{CacheBytesUsedTarget, CacheRoot};
+use bytesize::ByteSize;
 use meticulous_base::{JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use slog::debug;
 use std::{
     collections::{hash_map, HashMap},
     num::NonZeroU32,
@@ -169,6 +171,7 @@ pub struct Cache<FsT> {
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
+    log: slog::Logger,
 }
 
 impl<FsT: CacheFs> Cache<FsT> {
@@ -180,7 +183,12 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(mut fs: FsT, root: CacheRoot, bytes_used_target: CacheBytesUsedTarget) -> Self {
+    pub fn new(
+        mut fs: FsT,
+        root: CacheRoot,
+        bytes_used_target: CacheBytesUsedTarget,
+        log: slog::Logger,
+    ) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
 
@@ -206,6 +214,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             next_priority: 0,
             bytes_used: 0,
             bytes_used_target: bytes_used_target.into_inner(),
+            log,
         }
     }
 
@@ -282,6 +291,13 @@ impl<FsT: CacheFs> Cache<FsT> {
             ref_count: NonZeroU32::new(ref_count).unwrap(),
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+        debug!(self.log, "cache added artifact";
+            "digest" => %digest,
+            "artifact_bytes_used" => %ByteSize::b(bytes_used),
+            "entries" => %self.entries.len(),
+            "bytes_used" => %ByteSize::b(self.bytes_used),
+            "byte_used_target" => %ByteSize::b(self.bytes_used_target)
+        );
         self.possibly_remove_some();
         (Self::cache_path(&self.root, digest), jobs)
     }
@@ -355,6 +371,13 @@ impl<FsT: CacheFs> Cache<FsT> {
                 &Self::cache_path(&self.root, &digest),
             );
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
+            debug!(self.log, "cache removed artifact";
+                "digest" => %digest,
+                "artifact_bytes_used" => %ByteSize::b(bytes_used),
+                "entries" => %self.entries.len(),
+                "bytes_used" => %ByteSize::b(self.bytes_used),
+                "byte_used_target" => %ByteSize::b(self.bytes_used_target)
+            );
         }
     }
 }
@@ -458,6 +481,7 @@ mod tests {
                 test_cache_fs,
                 PathBuf::from("/z").into(),
                 bytes_used_goal.into(),
+                slog::Logger::root(slog::Discard, slog::o!()),
             );
             Fixture { messages, cache }
         }

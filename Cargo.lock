@@ -1858,6 +1858,7 @@ name = "meticulous-worker"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytesize",
  "clap",
  "figment",
  "gethostname 0.4.3",
@@ -1870,6 +1871,9 @@ dependencies = [
  "rand",
  "serde",
  "sha2",
+ "slog",
+ "slog-async",
+ "slog-term",
  "tar",
  "tempfile",
  "tokio",

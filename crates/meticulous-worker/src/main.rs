@@ -9,6 +9,7 @@ use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
+use slog::{o, Drain};
 use std::path::PathBuf;
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
@@ -118,9 +119,13 @@ fn main() -> Result<()> {
         println!("{config:#?}");
         return Ok(());
     }
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let log = slog::Logger::root(drain, o!());
     tokio::runtime::Runtime::new()
         .context("starting tokio runtime")?
-        .block_on(async move { meticulous_worker::main(config).await })?;
+        .block_on(async move { meticulous_worker::main(config, log).await })?;
     Ok(())
 }
 

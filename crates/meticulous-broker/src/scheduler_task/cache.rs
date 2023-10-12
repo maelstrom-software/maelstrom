@@ -438,13 +438,12 @@ mod tests {
 
     impl Fixture {
         fn new(fs: TestCacheFs, bytes_used_target: u64) -> Self {
-            let log = slog::Logger::root(slog::Discard, slog::o!());
             let fs = Rc::new(RefCell::new(fs));
             let cache = Cache::new(
                 fs.clone(),
                 Path::new("/z").to_owned().into(),
                 bytes_used_target.into(),
-                log,
+                slog::Logger::root(slog::Discard, slog::o!()),
             );
             Fixture { fs, cache }
         }
