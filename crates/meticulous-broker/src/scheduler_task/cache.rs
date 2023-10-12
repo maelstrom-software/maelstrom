@@ -322,8 +322,14 @@ impl<FsT: CacheFs> Cache<FsT> {
         Some((self.cache_path(digest), bytes_used))
     }
 
+    pub fn tmp_path(&self) -> PathBuf {
+        let mut path = self.root.clone();
+        path.push("tmp");
+        path
+    }
+
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
-        let mut path = self.root.to_owned();
+        let mut path = self.root.clone();
         path.push("sha256");
         path.push(format!("{digest}.tar"));
         path

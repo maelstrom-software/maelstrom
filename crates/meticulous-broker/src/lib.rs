@@ -65,6 +65,7 @@ pub async fn main(
         listener,
         scheduler_task.scheduler_sender().clone(),
         id_vendor,
+        scheduler_task.cache_tmp_path().to_owned(),
         log.clone(),
     ));
     join_set.spawn(scheduler_task.run());

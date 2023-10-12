@@ -3,7 +3,7 @@ use cache::{Cache, StdCacheFs};
 use meticulous_base::proto;
 use meticulous_util::net;
 use scheduler::{Message, Scheduler, SchedulerDeps};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 mod cache;
@@ -56,6 +56,7 @@ pub struct SchedulerTask {
     scheduler: Scheduler<Cache<StdCacheFs>, PassThroughDeps>,
     sender: SchedulerSender,
     receiver: UnboundedReceiver<SchedulerMessage>,
+    cache_tmp_path: PathBuf,
 }
 
 impl SchedulerTask {
@@ -65,15 +66,21 @@ impl SchedulerTask {
     ) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target);
+        let cache_tmp_path = cache.tmp_path();
         SchedulerTask {
             scheduler: Scheduler::new(cache),
             sender,
             receiver,
+            cache_tmp_path,
         }
     }
 
     pub fn scheduler_sender(&self) -> &SchedulerSender {
         &self.sender
+    }
+
+    pub fn cache_tmp_path(&self) -> &Path {
+        &self.cache_tmp_path
     }
 
     /// Main loop for the scheduler. This should be run on a task of its own. There should be

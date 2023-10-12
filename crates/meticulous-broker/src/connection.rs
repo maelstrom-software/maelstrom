@@ -8,7 +8,11 @@ use meticulous_util::{
     net::{self, FixedSizeReader, Sha256Reader},
 };
 use slog::{debug, info, o, warn, Logger};
-use std::{net::TcpStream, sync::Arc};
+use std::{
+    net::TcpStream,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -139,16 +143,16 @@ fn artifact_fetcher_connection_main(
 fn artifact_pusher_connection_loop(
     mut socket: TcpStream,
     scheduler_sender: SchedulerSender,
+    cache_tmp_path: &Path,
     _log: &mut Logger,
 ) -> Result<()> {
     loop {
         let proto::ArtifactPusherToBroker(digest, size) =
             net::read_message_from_socket(&mut socket)?;
-        // XXX get the cache's preferred directory and use tempfile_in().
         let mut tmp = tempfile::Builder::new()
             .prefix(&digest.to_string())
             .suffix(".tar")
-            .tempfile()?;
+            .tempfile_in(cache_tmp_path)?;
         let reader = FixedSizeReader::new(socket, size);
         let mut reader = Sha256Reader::new(reader);
         let copied = std::io::copy(&mut reader, &mut tmp)?;
@@ -165,10 +169,12 @@ fn artifact_pusher_connection_loop(
 fn artifact_pusher_connection_main(
     socket: TcpStream,
     scheduler_sender: SchedulerSender,
+    cache_tmp_path: PathBuf,
     mut log: Logger,
 ) -> Result<()> {
     debug!(log, "connection upgraded to artifact pusher connection");
-    let err = artifact_pusher_connection_loop(socket, scheduler_sender, &mut log).unwrap_err();
+    let err = artifact_pusher_connection_loop(socket, scheduler_sender, &cache_tmp_path, &mut log)
+        .unwrap_err();
     debug!(log, "artifact pusher connection ended"; "err" => %err);
     Err(err)
 }
@@ -180,11 +186,13 @@ pub async fn listener_main(
     listener: tokio::net::TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
+    cache_tmp_path: PathBuf,
     log: Logger,
 ) {
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         let scheduler_sender = scheduler_sender.clone();
         let id_vendor = id_vendor.clone();
+        let cache_tmp_path = cache_tmp_path.clone();
 
         let log = log.new(o!("peer_addr" => peer_addr));
         debug!(log, "received connect");
@@ -260,7 +268,12 @@ pub async fn listener_main(
                     let socket = socket.into_std().unwrap();
                     socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        artifact_pusher_connection_main(socket, scheduler_sender, log)
+                        artifact_pusher_connection_main(
+                            socket,
+                            scheduler_sender,
+                            cache_tmp_path,
+                            log,
+                        )
                     });
                 }
                 Err(err) => {
