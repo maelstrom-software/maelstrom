@@ -5,6 +5,7 @@ members = [ "crates/*" ]
 [workspace.dependencies]
 anyhow = "1.0.71"
 bincode = "1.3.3"
+bytesize = "1.3.0"
 clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 console_error_panic_hook = "0.1.7"
 eframe = "0.22"
@@ -15,8 +16,8 @@ futures = "0.3"
 gethostname = "0.4.2"
 gloo-net = "0.4"
 gloo-utils = "0.2"
-hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 hyper-tungstenite = "0.11"
+hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 itertools = "0.10.5"
 meticulous-base = { path = "crates/meticulous-base" }
 meticulous-test = { path = "crates/meticulous-test" }
@@ -27,6 +28,9 @@ rand = "0.8.5"
 regex = "1.8.3"
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.10.6"
+slog = "2.7.0"
+slog-async = "2.8.0"
+slog-term = "2.9.0"
 tar = "0.4.38"
 tempfile = "3.5.0"
 tokio = "1.28"
