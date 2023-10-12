@@ -140,10 +140,7 @@ impl Client {
         let copied = std::io::copy(&mut file, &mut stream)?;
         assert_eq!(copied, size);
         let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
-        match resp {
-            None => Ok(()),
-            Some(msg) => Err(anyhow!("Error from broker: {msg}")),
-        }
+        resp.map_err(|e| anyhow!("Error from broker: {e}"))
     }
 
     fn add_artifact(&mut self, path: PathBuf) -> Result<Sha256Digest> {

@@ -54,4 +54,4 @@ pub struct BrokerToArtifactFetcher(pub Option<u64>);
 pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BrokerToArtifactPusher(pub Option<String>);
+pub struct BrokerToArtifactPusher(pub Result<(), String>);
