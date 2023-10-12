@@ -50,7 +50,7 @@ pub async fn main(
     cache_bytes_used_goal: config::CacheBytesUsedTarget,
     log: slog::Logger,
 ) {
-    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_goal);
+    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_goal, log.clone());
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
     });

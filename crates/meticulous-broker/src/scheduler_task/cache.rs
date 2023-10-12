@@ -1,6 +1,8 @@
 use crate::config;
+use bytesize::ByteSize;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use slog::debug;
 use std::{
     collections::{hash_map, HashMap, HashSet},
     num::NonZeroU32,
@@ -138,6 +140,7 @@ pub struct Cache<FsT> {
     next_priority: u64,
     bytes_used: u64,
     bytes_used_goal: u64,
+    log: slog::Logger,
 }
 
 impl<FsT: CacheFs> Cache<FsT> {
@@ -145,6 +148,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         mut fs: FsT,
         root: config::CacheRoot,
         bytes_used_goal: config::CacheBytesUsedTarget,
+        log: slog::Logger,
     ) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
@@ -164,6 +168,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             next_priority: 0,
             bytes_used: 0,
             bytes_used_goal: bytes_used_goal.into_inner(),
+            log,
         };
 
         path.push("sha256");
@@ -193,6 +198,11 @@ impl<FsT: CacheFs> Cache<FsT> {
             result.fs.remove(&child);
         }
         result.possibly_remove_some();
+
+        debug!(result.log, "cache starting";
+            "entries" => %result.entries.len(),
+            "bytes_used" => %ByteSize::b(result.bytes_used),
+            "byte_used_target" => %ByteSize::b(result.bytes_used_goal));
 
         result
     }
@@ -247,7 +257,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
                 });
-                self.heap.push(&mut self.entries, digest);
+                self.heap.push(&mut self.entries, digest.clone());
                 self.next_priority = self.next_priority.checked_add(1).unwrap();
             }
             hash_map::Entry::Occupied(entry) => {
@@ -270,6 +280,13 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
         self.fs.rename(path, &new_path);
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+        debug!(self.log, "cache added artifact";
+            "digest" => %digest,
+            "artifact_bytes_used" => %ByteSize::b(bytes_used),
+            "entries" => %self.entries.len(),
+            "bytes_used" => %ByteSize::b(self.bytes_used),
+            "byte_used_target" => %ByteSize::b(self.bytes_used_goal)
+        );
         self.possibly_remove_some();
         result
     }
@@ -345,6 +362,13 @@ impl<FsT: CacheFs> Cache<FsT> {
             };
             self.fs.remove(&self.cache_path(&digest));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
+            debug!(self.log, "cache removed artifact";
+                "digest" => %digest,
+                "artifact_bytes_used" => %ByteSize::b(bytes_used),
+                "entries" => %self.entries.len(),
+                "bytes_used" => %ByteSize::b(self.bytes_used),
+                "byte_used_target" => %ByteSize::b(self.bytes_used_goal)
+            );
         }
     }
 }
@@ -414,11 +438,13 @@ mod tests {
 
     impl Fixture {
         fn new(fs: TestCacheFs, bytes_used_target: u64) -> Self {
+            let log = slog::Logger::root(slog::Discard, slog::o!());
             let fs = Rc::new(RefCell::new(fs));
             let cache = Cache::new(
                 fs.clone(),
                 Path::new("/z").to_owned().into(),
                 bytes_used_target.into(),
+                log,
             );
             Fixture { fs, cache }
         }

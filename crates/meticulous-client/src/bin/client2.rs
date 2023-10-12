@@ -42,14 +42,14 @@ tmpdir = "run/client/tmp"
 [[jobs]]
 program = "foo"
 arguments = ["arg1", "arg2"]
-layers = ["foo"]
+layers = ["go"]
 
 [[jobs]]
 program = "bar"
 arguments = ["barg1", "barg2"]
 
 [layers]
-foo = "target/web.tar"
+go = "target/web.tar"
 "#;
 
 struct Client {

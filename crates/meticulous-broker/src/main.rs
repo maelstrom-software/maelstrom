@@ -59,7 +59,7 @@ impl Default for CliOptions {
             port: Some(0),
             http_port: Some(0),
             cache_root: Some("var/cache/meticulous-broker".into()),
-            cache_bytes_used_target: Some(100000000),
+            cache_bytes_used_target: Some(1000000000),
         }
     }
 }

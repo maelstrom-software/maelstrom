@@ -66,9 +66,10 @@ impl SchedulerTask {
     pub fn new(
         cache_root: config::CacheRoot,
         cache_bytes_used_target: config::CacheBytesUsedTarget,
+        log: slog::Logger,
     ) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
-        let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target);
+        let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target, log);
         let cache_tmp_path = cache.tmp_path();
         SchedulerTask {
             scheduler: Scheduler::new(cache),
