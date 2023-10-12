@@ -3,8 +3,11 @@ use cache::{Cache, StdCacheFs};
 use meticulous_base::proto;
 use meticulous_util::net;
 use scheduler::{Message, Scheduler, SchedulerDeps};
-use std::path::{Path, PathBuf};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use std::{
+    path::{Path, PathBuf},
+    sync::mpsc as std_mpsc,
+};
+use tokio::sync::mpsc as tokio_mpsc;
 
 mod cache;
 mod scheduler;
@@ -15,9 +18,9 @@ pub struct PassThroughDeps;
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
 impl SchedulerDeps for PassThroughDeps {
-    type ClientSender = UnboundedSender<proto::BrokerToClient>;
-    type WorkerSender = UnboundedSender<proto::BrokerToWorker>;
-    type WorkerArtifactFetcherSender = std::sync::mpsc::Sender<Option<(PathBuf, u64)>>;
+    type ClientSender = tokio_mpsc::UnboundedSender<proto::BrokerToClient>;
+    type WorkerSender = tokio_mpsc::UnboundedSender<proto::BrokerToWorker>;
+    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
 
     fn send_message_to_client(
         &mut self,
@@ -50,12 +53,12 @@ impl SchedulerDeps for PassThroughDeps {
 pub type SchedulerMessage = Message<PassThroughDeps>;
 
 /// This type is used often enough to warrant an alias.
-pub type SchedulerSender = UnboundedSender<SchedulerMessage>;
+pub type SchedulerSender = tokio_mpsc::UnboundedSender<SchedulerMessage>;
 
 pub struct SchedulerTask {
     scheduler: Scheduler<Cache<StdCacheFs>, PassThroughDeps>,
     sender: SchedulerSender,
-    receiver: UnboundedReceiver<SchedulerMessage>,
+    receiver: tokio_mpsc::UnboundedReceiver<SchedulerMessage>,
     cache_tmp_path: PathBuf,
 }
 
@@ -64,7 +67,7 @@ impl SchedulerTask {
         cache_root: config::CacheRoot,
         cache_bytes_used_target: config::CacheBytesUsedTarget,
     ) -> Self {
-        let (sender, receiver) = mpsc::unbounded_channel();
+        let (sender, receiver) = tokio_mpsc::unbounded_channel();
         let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target);
         let cache_tmp_path = cache.tmp_path();
         SchedulerTask {
@@ -88,12 +91,12 @@ impl SchedulerTask {
     /// the receiver are closed, which will happen when the listener and all outstanding worker and
     /// client socket tasks terminate.
     ///
-    /// This function ignores any errors it encounters sending a message to an [UnboundedSender].
-    /// The rationale is that this indicates that the socket connection has closed, and there are
-    /// no more worker tasks to handle that connection. This means that a disconnected message is
-    /// on its way to notify the scheduler. It is best to just ignore the error in that case.
-    /// Besides, the [scheduler::SchedulerDeps] interface doesn't give us a way to return an error,
-    /// for precisely this reason.
+    /// This function ignores any errors it encounters sending a message to an
+    /// [tokio_mpsc::UnboundedSender]. The rationale is that this indicates that the socket
+    /// connection has closed, and there are no more worker tasks to handle that connection. This
+    /// means that a disconnected message is on its way to notify the scheduler. It is best to just
+    /// ignore the error in that case. Besides, the [scheduler::SchedulerDeps] interface doesn't
+    /// give us a way to return an error, for precisely this reason.
     pub async fn run(mut self) {
         net::channel_reader(self.receiver, |msg| {
             self.scheduler.receive_message(&mut PassThroughDeps, msg)
