@@ -48,7 +48,7 @@ pub enum BrokerToClient {
 pub struct ArtifactFetcherToBroker(pub Sha256Digest);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BrokerToArtifactFetcher(pub Option<u64>);
+pub struct BrokerToArtifactFetcher(pub Result<u64, String>);
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);

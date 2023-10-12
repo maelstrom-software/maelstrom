@@ -21,16 +21,14 @@ pub fn main(
     let mut reader = std::io::BufReader::new(writer.try_clone()?);
     net::write_message_to_socket(&mut writer, proto::Hello::ArtifactFetcher)?;
     net::write_message_to_socket(&mut writer, proto::ArtifactFetcherToBroker(digest.clone()))?;
-    match net::read_message_from_socket::<proto::BrokerToArtifactFetcher>(&mut reader)?.0 {
-        None => Err(anyhow!("Broker error reading artifact {digest}")),
-        Some(size) => {
-            let reader = FixedSizeReader::new(reader, size);
-            let mut reader = Sha256Reader::new(reader);
-            tar::Archive::new(&mut reader).unpack(path)?;
-            read_to_end(&mut reader)?;
-            let (_, actual_digest) = reader.finalize();
-            actual_digest.verify(digest)?;
-            Ok(size)
-        }
-    }
+    let size = net::read_message_from_socket::<proto::BrokerToArtifactFetcher>(&mut reader)?
+        .0
+        .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
+    let reader = FixedSizeReader::new(reader, size);
+    let mut reader = Sha256Reader::new(reader);
+    tar::Archive::new(&mut reader).unpack(path)?;
+    read_to_end(&mut reader)?;
+    let (_, actual_digest) = reader.finalize();
+    actual_digest.verify(digest)?;
+    Ok(size)
 }

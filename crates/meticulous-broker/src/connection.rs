@@ -2,7 +2,8 @@ use super::{
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use meticulous_base::{proto, ClientId, WorkerId};
+use anyhow::anyhow;
+use meticulous_base::{proto, ClientId, Sha256Digest, WorkerId};
 use meticulous_util::{
     error::Result,
     net::{self, FixedSizeReader, Sha256Reader},
@@ -95,38 +96,57 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
-fn artifact_fetcher_connection_loop(
-    mut socket: TcpStream,
-    scheduler_sender: SchedulerSender,
+fn artifact_fetcher_get_file(
+    digest: &Sha256Digest,
+    scheduler_sender: &SchedulerSender,
+) -> Result<(std::fs::File, u64)> {
+    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
+    scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
+        digest.clone(),
+        channel_sender,
+    ))?;
+
+    match channel_receiver.recv()? {
+        Some((path, size)) => {
+            let f = std::fs::File::open(path)?;
+            Ok((f, size))
+        }
+        None => Err(anyhow!("Cache doesn't contain artifact {digest}")),
+    }
+}
+
+fn artifact_fetcher_handle_one_message(
+    msg: proto::ArtifactFetcherToBroker,
+    mut socket: &mut TcpStream,
+    scheduler_sender: &SchedulerSender,
     log: &mut Logger,
 ) -> Result<()> {
-    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
+    debug!(log, "received artifact fetcher message"; "msg" => ?msg);
+    let proto::ArtifactFetcherToBroker(digest) = msg;
+    let result = artifact_fetcher_get_file(&digest, scheduler_sender);
+    let msg = proto::BrokerToArtifactFetcher(
+        result
+            .as_ref()
+            .map(|(_, size)| *size)
+            .map_err(|e| e.to_string()),
+    );
+    debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
+    net::write_message_to_socket(&mut socket, msg)?;
+    let (mut f, size) = result?;
+    let copied = std::io::copy(&mut f, &mut socket)?;
+    assert_eq!(copied, size);
+    scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
+    Ok(())
+}
+
+fn artifact_fetcher_connection_loop(
+    mut socket: TcpStream,
+    scheduler_sender: &SchedulerSender,
+    log: &mut Logger,
+) -> Result<()> {
     loop {
         let msg = net::read_message_from_socket(&mut socket)?;
-        debug!(log, "received artifact fetcher message"; "msg" => ?msg);
-        let proto::ArtifactFetcherToBroker(digest) = msg;
-        scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
-            digest.clone(),
-            channel_sender.clone(),
-        ))?;
-
-        match channel_receiver.recv()? {
-            Some((path, size)) => {
-                let f = std::fs::File::open(path)?;
-                let mut f = FixedSizeReader::new(f, size);
-                let msg = proto::BrokerToArtifactFetcher(Some(size));
-                debug!(log, "sending artifact fetcher message"; "digest" => %digest, "msg" => ?msg);
-                net::write_message_to_socket(&mut socket, msg)?;
-                let copied = std::io::copy(&mut f, &mut socket)?;
-                assert_eq!(copied, size);
-                scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
-            }
-            None => {
-                let msg = proto::BrokerToArtifactFetcher(None);
-                debug!(log, "sending artifact fetcher message"; "digest" => %digest, "msg" => ?msg);
-                net::write_message_to_socket(&mut socket, msg)?;
-            }
-        }
+        artifact_fetcher_handle_one_message(msg, &mut socket, scheduler_sender, log)?;
     }
 }
 
@@ -136,7 +156,7 @@ fn artifact_fetcher_connection_main(
     mut log: Logger,
 ) -> Result<()> {
     debug!(log, "connection upgraded to artifact fetcher connection");
-    let err = artifact_fetcher_connection_loop(socket, scheduler_sender, &mut log).unwrap_err();
+    let err = artifact_fetcher_connection_loop(socket, &scheduler_sender, &mut log).unwrap_err();
     debug!(log, "artifact fetcher connection ended"; "err" => %err);
     Err(err)
 }
@@ -144,7 +164,7 @@ fn artifact_fetcher_connection_main(
 fn artifact_pusher_handle_one_message(
     msg: proto::ArtifactPusherToBroker,
     socket: &mut TcpStream,
-    scheduler_sender: &mut SchedulerSender,
+    scheduler_sender: &SchedulerSender,
     cache_tmp_path: &Path,
 ) -> Result<()> {
     let proto::ArtifactPusherToBroker(digest, size) = msg;
@@ -165,19 +185,15 @@ fn artifact_pusher_handle_one_message(
 
 fn artifact_pusher_connection_loop(
     mut socket: TcpStream,
-    mut scheduler_sender: SchedulerSender,
+    scheduler_sender: &SchedulerSender,
     cache_tmp_path: &Path,
     log: &mut Logger,
 ) -> Result<()> {
     loop {
         let msg = net::read_message_from_socket(&mut socket)?;
         debug!(log, "received artifact pusher message"; "msg" => ?msg);
-        let result = artifact_pusher_handle_one_message(
-            msg,
-            &mut socket,
-            &mut scheduler_sender,
-            cache_tmp_path,
-        );
+        let result =
+            artifact_pusher_handle_one_message(msg, &mut socket, scheduler_sender, cache_tmp_path);
         let msg =
             proto::BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
         debug!(log, "sending artifact pusher message"; "msg" => ?msg);
@@ -193,7 +209,7 @@ fn artifact_pusher_connection_main(
     mut log: Logger,
 ) -> Result<()> {
     debug!(log, "connection upgraded to artifact pusher connection");
-    let err = artifact_pusher_connection_loop(socket, scheduler_sender, &cache_tmp_path, &mut log)
+    let err = artifact_pusher_connection_loop(socket, &scheduler_sender, &cache_tmp_path, &mut log)
         .unwrap_err();
     debug!(log, "artifact pusher connection ended"; "err" => %err);
     Err(err)
