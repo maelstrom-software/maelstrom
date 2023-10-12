@@ -59,7 +59,7 @@ impl Default for CliOptions {
             port: Some(0),
             http_port: Some(0),
             cache_root: Some("var/cache/meticulous-broker".into()),
-            cache_bytes_used_target: Some(1000000000),
+            cache_bytes_used_target: Some(1_000_000_000),
         }
     }
 }
@@ -111,7 +111,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     let log = slog::Logger::root(drain, o!());
     tokio::runtime::Runtime::new()
