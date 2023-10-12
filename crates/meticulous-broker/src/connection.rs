@@ -1,19 +1,12 @@
 use super::{
+    artifact_fetcher, artifact_pusher,
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
-use anyhow::anyhow;
-use meticulous_base::{proto, ClientId, Sha256Digest, WorkerId};
-use meticulous_util::{
-    error::Result,
-    net::{self, FixedSizeReader, Sha256Reader},
-};
+use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_util::{error::Result, net};
 use slog::{debug, info, o, warn, Logger};
-use std::{
-    net::TcpStream,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{path::PathBuf, sync::Arc};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -94,125 +87,6 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     // Tell the scheduler we're done. We do this after waiting for all tasks to complete, since we
     // need to ensure that all messages sent by the socket_reader arrive before this one.
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
-}
-
-fn artifact_fetcher_get_file(
-    digest: &Sha256Digest,
-    scheduler_sender: &SchedulerSender,
-) -> Result<(std::fs::File, u64)> {
-    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
-    scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
-        digest.clone(),
-        channel_sender,
-    ))?;
-
-    match channel_receiver.recv()? {
-        Some((path, size)) => {
-            let f = std::fs::File::open(path)?;
-            Ok((f, size))
-        }
-        None => Err(anyhow!("Cache doesn't contain artifact {digest}")),
-    }
-}
-
-fn artifact_fetcher_handle_one_message(
-    msg: proto::ArtifactFetcherToBroker,
-    mut socket: &mut TcpStream,
-    scheduler_sender: &SchedulerSender,
-    log: &mut Logger,
-) -> Result<()> {
-    debug!(log, "received artifact fetcher message"; "msg" => ?msg);
-    let proto::ArtifactFetcherToBroker(digest) = msg;
-    let result = artifact_fetcher_get_file(&digest, scheduler_sender);
-    let msg = proto::BrokerToArtifactFetcher(
-        result
-            .as_ref()
-            .map(|(_, size)| *size)
-            .map_err(|e| e.to_string()),
-    );
-    debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
-    net::write_message_to_socket(&mut socket, msg)?;
-    let (mut f, size) = result?;
-    let copied = std::io::copy(&mut f, &mut socket)?;
-    assert_eq!(copied, size);
-    scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
-    Ok(())
-}
-
-fn artifact_fetcher_connection_loop(
-    mut socket: TcpStream,
-    scheduler_sender: &SchedulerSender,
-    log: &mut Logger,
-) -> Result<()> {
-    loop {
-        let msg = net::read_message_from_socket(&mut socket)?;
-        artifact_fetcher_handle_one_message(msg, &mut socket, scheduler_sender, log)?;
-    }
-}
-
-fn artifact_fetcher_connection_main(
-    socket: TcpStream,
-    scheduler_sender: SchedulerSender,
-    mut log: Logger,
-) -> Result<()> {
-    debug!(log, "connection upgraded to artifact fetcher connection");
-    let err = artifact_fetcher_connection_loop(socket, &scheduler_sender, &mut log).unwrap_err();
-    debug!(log, "artifact fetcher connection ended"; "err" => %err);
-    Err(err)
-}
-
-fn artifact_pusher_handle_one_message(
-    msg: proto::ArtifactPusherToBroker,
-    socket: &mut TcpStream,
-    scheduler_sender: &SchedulerSender,
-    cache_tmp_path: &Path,
-) -> Result<()> {
-    let proto::ArtifactPusherToBroker(digest, size) = msg;
-    let mut tmp = tempfile::Builder::new()
-        .prefix(&digest.to_string())
-        .suffix(".tar")
-        .tempfile_in(cache_tmp_path)?;
-    let fixed_size_reader = FixedSizeReader::new(socket, size);
-    let mut sha_reader = Sha256Reader::new(fixed_size_reader);
-    let copied = std::io::copy(&mut sha_reader, &mut tmp)?;
-    assert_eq!(copied, size);
-    let (_, actual_digest) = sha_reader.finalize();
-    actual_digest.verify(&digest)?;
-    let (_, path) = tmp.keep()?;
-    scheduler_sender.send(SchedulerMessage::GotArtifact(digest.clone(), path, size))?;
-    Ok(())
-}
-
-fn artifact_pusher_connection_loop(
-    mut socket: TcpStream,
-    scheduler_sender: &SchedulerSender,
-    cache_tmp_path: &Path,
-    log: &mut Logger,
-) -> Result<()> {
-    loop {
-        let msg = net::read_message_from_socket(&mut socket)?;
-        debug!(log, "received artifact pusher message"; "msg" => ?msg);
-        let result =
-            artifact_pusher_handle_one_message(msg, &mut socket, scheduler_sender, cache_tmp_path);
-        let msg =
-            proto::BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
-        debug!(log, "sending artifact pusher message"; "msg" => ?msg);
-        net::write_message_to_socket(&mut socket, msg)?;
-        result?;
-    }
-}
-
-fn artifact_pusher_connection_main(
-    socket: TcpStream,
-    scheduler_sender: SchedulerSender,
-    cache_tmp_path: PathBuf,
-    mut log: Logger,
-) -> Result<()> {
-    debug!(log, "connection upgraded to artifact pusher connection");
-    let err = artifact_pusher_connection_loop(socket, &scheduler_sender, &cache_tmp_path, &mut log)
-        .unwrap_err();
-    debug!(log, "artifact pusher connection ended"; "err" => %err);
-    Err(err)
 }
 
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
@@ -296,7 +170,7 @@ pub async fn listener_main(
                     let socket = socket.into_std().unwrap();
                     socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        artifact_fetcher_connection_main(socket, scheduler_sender, log)
+                        artifact_fetcher::connection_main(socket, scheduler_sender, log)
                     });
                 }
                 Ok(proto::Hello::ArtifactPusher) => {
@@ -304,7 +178,7 @@ pub async fn listener_main(
                     let socket = socket.into_std().unwrap();
                     socket.set_nonblocking(false).unwrap();
                     std::thread::spawn(move || -> Result<()> {
-                        artifact_pusher_connection_main(
+                        artifact_pusher::connection_main(
                             socket,
                             scheduler_sender,
                             cache_tmp_path,

@@ -11,6 +11,8 @@ use tokio::{
     signal::unix::{self, SignalKind},
 };
 
+mod artifact_fetcher;
+mod artifact_pusher;
 pub mod config;
 mod connection;
 mod http;
