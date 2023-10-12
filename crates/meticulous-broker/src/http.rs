@@ -19,7 +19,7 @@ use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Reque
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use meticulous_base::{proto::BrokerToClient, ClientId};
 use meticulous_util::error::{Error, Result};
-use slog::{debug, o, Logger};
+use slog::{debug, error, o, Logger};
 use std::{
     collections::HashMap,
     future::Future,
@@ -214,20 +214,28 @@ pub async fn listener_main(
 
     let tar_handler = Arc::new(TarHandler::from_embedded());
 
-    while let Ok((stream, peer_addr)) = listener.accept().await {
-        let log = log.new(o!("peer_addr" => peer_addr));
-        debug!(log, "received http connect");
-        let connection = http
-            .serve_connection(
-                stream,
-                Handler {
-                    tar_handler: tar_handler.clone(),
-                    scheduler_sender: scheduler_sender.clone(),
-                    id_vendor: id_vendor.clone(),
-                    log,
-                },
-            )
-            .with_upgrades();
-        tokio::spawn(async move { connection.await.ok() });
+    loop {
+        match listener.accept().await {
+            Ok((stream, peer_addr)) => {
+                let log = log.new(o!("peer_addr" => peer_addr));
+                debug!(log, "received http connection");
+                let connection = http
+                    .serve_connection(
+                        stream,
+                        Handler {
+                            tar_handler: tar_handler.clone(),
+                            scheduler_sender: scheduler_sender.clone(),
+                            id_vendor: id_vendor.clone(),
+                            log,
+                        },
+                    )
+                    .with_upgrades();
+                tokio::spawn(async move { connection.await.ok() });
+            }
+            Err(err) => {
+                error!(log, "error accepting http connection"; "err" => err);
+                return;
+            }
+        }
     }
 }

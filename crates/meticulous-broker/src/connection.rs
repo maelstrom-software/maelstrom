@@ -5,9 +5,12 @@ use super::{
 };
 use meticulous_base::{proto, ClientId, WorkerId};
 use meticulous_util::{error::Result, net};
-use slog::{debug, info, o, warn, Logger};
+use slog::{debug, error, info, o, warn, Logger};
 use std::{path::PathBuf, sync::Arc};
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::{
+    net::TcpStream,
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+};
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
 /// of these for each connected client or worker socket. This function will run until the client or
@@ -89,6 +92,92 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     scheduler_sender.send(disconnected_msg_builder(id)).ok();
 }
 
+async fn unassigned_connection_main(
+    mut socket: TcpStream,
+    scheduler_sender: SchedulerSender,
+    id_vendor: Arc<IdVendor>,
+    cache_tmp_path: PathBuf,
+    log: Logger,
+) {
+    match net::read_message_from_async_socket(&mut socket).await {
+        Ok(proto::Hello::Client) => {
+            let (read_stream, write_stream) = socket.into_split();
+            let read_stream = tokio::io::BufReader::new(read_stream);
+            let id: ClientId = id_vendor.vend();
+            let log = log.new(o!("cid" => id.to_string()));
+            debug!(log, "connection upgraded to client connection");
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            connection_main(
+                scheduler_sender,
+                id,
+                SchedulerMessage::ClientConnected,
+                SchedulerMessage::ClientDisconnected,
+                |scheduler_sender| {
+                    net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                        debug!(log_clone, "received client message"; "msg" => ?msg);
+                        SchedulerMessage::FromClient(id, msg)
+                    })
+                },
+                |scheduler_receiver| {
+                    net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
+                        debug!(log_clone2, "sending client message"; "msg" => ?msg);
+                    })
+                },
+            )
+            .await;
+            debug!(log, "received client disconnect");
+        }
+        Ok(proto::Hello::Worker { slots }) => {
+            let (read_stream, write_stream) = socket.into_split();
+            let read_stream = tokio::io::BufReader::new(read_stream);
+            let id: WorkerId = id_vendor.vend();
+            let log = log.new(o!("wid" => id.to_string()));
+            info!(log, "connection upgraded to worker connection"; "slots" => slots);
+            let log_clone = log.clone();
+            let log_clone2 = log.clone();
+            connection_main(
+                scheduler_sender,
+                id,
+                |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
+                SchedulerMessage::WorkerDisconnected,
+                |scheduler_sender| {
+                    net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                        debug!(log_clone, "received worker message"; "msg" => ?msg);
+                        SchedulerMessage::FromWorker(id, msg)
+                    })
+                },
+                |scheduler_receiver| {
+                    net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
+                        debug!(log_clone2, "sending worker message"; "msg" => ?msg);
+                    })
+                },
+            )
+            .await;
+            info!(log, "received worker disconnect");
+        }
+        Ok(proto::Hello::ArtifactFetcher) => {
+            let log = log.clone();
+            let socket = socket.into_std().unwrap();
+            socket.set_nonblocking(false).unwrap();
+            std::thread::spawn(move || -> Result<()> {
+                artifact_fetcher::connection_main(socket, scheduler_sender, log)
+            });
+        }
+        Ok(proto::Hello::ArtifactPusher) => {
+            let log = log.clone();
+            let socket = socket.into_std().unwrap();
+            socket.set_nonblocking(false).unwrap();
+            std::thread::spawn(move || -> Result<()> {
+                artifact_pusher::connection_main(socket, scheduler_sender, cache_tmp_path, log)
+            });
+        }
+        Err(err) => {
+            warn!(log, "error reading hello message"; "err" => %err);
+        }
+    }
+}
+
 /// Main loop for the listener. This should be run on a task of its own. There should be at least
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
@@ -99,97 +188,23 @@ pub async fn listener_main(
     cache_tmp_path: PathBuf,
     log: Logger,
 ) {
-    while let Ok((mut socket, peer_addr)) = listener.accept().await {
-        let scheduler_sender = scheduler_sender.clone();
-        let id_vendor = id_vendor.clone();
-        let cache_tmp_path = cache_tmp_path.clone();
-
-        let log = log.new(o!("peer_addr" => peer_addr));
-        debug!(log, "received connect");
-
-        tokio::task::spawn(async move {
-            match net::read_message_from_async_socket(&mut socket).await {
-                Ok(proto::Hello::Client) => {
-                    let (read_stream, write_stream) = socket.into_split();
-                    let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id: ClientId = id_vendor.vend();
-                    let log = log.new(o!("cid" => id.to_string()));
-                    debug!(log, "connection upgraded to client connection");
-                    let log_clone = log.clone();
-                    let log_clone2 = log.clone();
-                    connection_main(
-                        scheduler_sender,
-                        id,
-                        SchedulerMessage::ClientConnected,
-                        SchedulerMessage::ClientDisconnected,
-                        |scheduler_sender| {
-                            net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
-                                debug!(log_clone, "received client message"; "msg" => ?msg);
-                                SchedulerMessage::FromClient(id, msg)
-                            })
-                        },
-                        |scheduler_receiver| {
-                            net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
-                                debug!(log_clone2, "sending client message"; "msg" => ?msg);
-                            })
-                        },
-                    )
-                    .await;
-                    debug!(log, "received client disconnect");
-                }
-                Ok(proto::Hello::Worker { slots }) => {
-                    let (read_stream, write_stream) = socket.into_split();
-                    let read_stream = tokio::io::BufReader::new(read_stream);
-                    let id: WorkerId = id_vendor.vend();
-                    let log = log.new(o!("wid" => id.to_string()));
-                    info!(log, "connection upgraded to worker connection"; "slots" => slots);
-                    let log_clone = log.clone();
-                    let log_clone2 = log.clone();
-                    connection_main(
-                        scheduler_sender,
-                        id,
-                        |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
-                        SchedulerMessage::WorkerDisconnected,
-                        |scheduler_sender| {
-                            net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
-                                debug!(log_clone, "received worker message"; "msg" => ?msg);
-                                SchedulerMessage::FromWorker(id, msg)
-                            })
-                        },
-                        |scheduler_receiver| {
-                            net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
-                                debug!(log_clone2, "sending worker message"; "msg" => ?msg);
-                            })
-                        },
-                    )
-                    .await;
-                    info!(log, "received worker disconnect");
-                }
-                Ok(proto::Hello::ArtifactFetcher) => {
-                    let log = log.clone();
-                    let socket = socket.into_std().unwrap();
-                    socket.set_nonblocking(false).unwrap();
-                    std::thread::spawn(move || -> Result<()> {
-                        artifact_fetcher::connection_main(socket, scheduler_sender, log)
-                    });
-                }
-                Ok(proto::Hello::ArtifactPusher) => {
-                    let log = log.clone();
-                    let socket = socket.into_std().unwrap();
-                    socket.set_nonblocking(false).unwrap();
-                    std::thread::spawn(move || -> Result<()> {
-                        artifact_pusher::connection_main(
-                            socket,
-                            scheduler_sender,
-                            cache_tmp_path,
-                            log,
-                        )
-                    });
-                }
-                Err(err) => {
-                    warn!(log, "error reading hello message"; "err" => %err);
-                }
+    loop {
+        match listener.accept().await {
+            Ok((socket, peer_addr)) => {
+                let log = log.new(o!("peer_addr" => peer_addr));
+                debug!(log, "received connection");
+                tokio::task::spawn(unassigned_connection_main(
+                    socket,
+                    scheduler_sender.clone(),
+                    id_vendor.clone(),
+                    cache_tmp_path.clone(),
+                    log,
+                ));
             }
-        });
+            Err(err) => {
+                error!(log, "error accepting connection"; "err" => err);
+                return;
+            }
+        }
     }
 }
