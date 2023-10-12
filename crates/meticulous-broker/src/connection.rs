@@ -1,5 +1,5 @@
 use super::{
-    scheduler_task::{scheduler::Message, SchedulerMessage, SchedulerSender},
+    scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
 use meticulous_base::{proto, ClientId, WorkerId};
@@ -100,7 +100,7 @@ fn artifact_fetcher_connection_loop(
     loop {
         let proto::ArtifactFetcherToBroker(digest) = net::read_message_from_socket(&mut socket)?;
         debug!(log, "received artifact fetcher request"; "digest" => %digest);
-        scheduler_sender.send(Message::GetArtifactForWorker(
+        scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
             digest.clone(),
             channel_sender.clone(),
         ))?;
@@ -114,7 +114,7 @@ fn artifact_fetcher_connection_loop(
                 net::write_message_to_socket(&mut socket, resp)?;
                 let copied = std::io::copy(&mut f, &mut socket)?;
                 assert_eq!(copied, size);
-                scheduler_sender.send(Message::DecrementRefcount(digest))?;
+                scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
             }
             None => {
                 let resp = proto::BrokerToArtifactFetcher(None);
@@ -156,7 +156,7 @@ fn artifact_pusher_connection_loop(
         let (reader, actual_digest) = reader.finalize();
         actual_digest.verify(&digest)?;
         let (_, path) = tmp.keep()?;
-        scheduler_sender.send(Message::GotArtifact(digest.clone(), path, size))?;
+        scheduler_sender.send(SchedulerMessage::GotArtifact(digest.clone(), path, size))?;
         socket = reader.into_inner();
         net::write_message_to_socket(&mut socket, proto::BrokerToArtifactPusher(None))?;
     }

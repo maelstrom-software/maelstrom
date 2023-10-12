@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 
 mod cache;
-pub mod scheduler;
+mod scheduler;
 
 #[derive(Debug)]
 pub struct PassThroughDeps;
