@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
@@ -112,13 +112,15 @@ fn main() -> Result<()> {
             } else {
                 e
             }
-        })?;
+        })
+        .context("reading configuration")?;
     if print_config {
         println!("{config:#?}");
         return Ok(());
     }
-    let runtime = tokio::runtime::Runtime::new()?;
-    runtime.block_on(async move { meticulous_worker::main(config).await })?;
+    tokio::runtime::Runtime::new()
+        .context("starting tokio runtime")?
+        .block_on(async move { meticulous_worker::main(config).await })?;
     Ok(())
 }
 

@@ -6,6 +6,7 @@ mod dispatcher;
 mod executor;
 mod fetcher;
 
+use anyhow::Context;
 use meticulous_base::{proto, JobDetails, JobId, Sha256Digest};
 use meticulous_util::{error::Result, net};
 use std::path::PathBuf;
@@ -92,7 +93,8 @@ async fn signal_handler(kind: tokio::signal::unix::SignalKind) {
 /// when a signal is received or when one of the worker tasks completes because of an error.
 pub async fn main(config: config::Config) -> Result<()> {
     let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(config.broker.inner())
-        .await?
+        .await
+        .context("connecting to broker")?
         .into_split();
     let read_stream = tokio::io::BufReader::new(read_stream);
 
@@ -102,7 +104,8 @@ pub async fn main(config: config::Config) -> Result<()> {
             slots: (*config.slots.inner()).into(),
         },
     )
-    .await?;
+    .await
+    .context("writing initial message to broker")?;
 
     let (dispatcher_sender, dispatcher_receiver) = tokio::sync::mpsc::unbounded_channel();
     let dispatcher_sender_clone = dispatcher_sender.clone();
