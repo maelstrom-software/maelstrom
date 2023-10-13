@@ -47,10 +47,10 @@ pub async fn main(
     listener: TcpListener,
     http_listener: TcpListener,
     cache_root: config::CacheRoot,
-    cache_bytes_used_goal: config::CacheBytesUsedTarget,
+    cache_bytes_used_target: config::CacheBytesUsedTarget,
     log: slog::Logger,
 ) {
-    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_goal, log.clone());
+    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_target, log.clone());
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
     });

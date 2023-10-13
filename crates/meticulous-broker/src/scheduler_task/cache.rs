@@ -139,7 +139,7 @@ pub struct Cache<FsT> {
     heap: Heap<CacheMap>,
     next_priority: u64,
     bytes_used: u64,
-    bytes_used_goal: u64,
+    bytes_used_target: u64,
     log: slog::Logger,
 }
 
@@ -147,7 +147,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn new(
         mut fs: FsT,
         root: config::CacheRoot,
-        bytes_used_goal: config::CacheBytesUsedTarget,
+        bytes_used_target: config::CacheBytesUsedTarget,
         log: slog::Logger,
     ) -> Self {
         let root = root.into_inner();
@@ -167,7 +167,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_goal: bytes_used_goal.into_inner(),
+            bytes_used_target: bytes_used_target.into_inner(),
             log,
         };
 
@@ -202,7 +202,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         debug!(result.log, "cache starting";
             "entries" => %result.entries.len(),
             "bytes_used" => %ByteSize::b(result.bytes_used),
-            "byte_used_target" => %ByteSize::b(result.bytes_used_goal));
+            "byte_used_target" => %ByteSize::b(result.bytes_used_target));
 
         result
     }
@@ -285,7 +285,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             "artifact_bytes_used" => %ByteSize::b(bytes_used),
             "entries" => %self.entries.len(),
             "bytes_used" => %ByteSize::b(self.bytes_used),
-            "byte_used_target" => %ByteSize::b(self.bytes_used_goal)
+            "byte_used_target" => %ByteSize::b(self.bytes_used_target)
         );
         self.possibly_remove_some();
         result
@@ -353,7 +353,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     fn possibly_remove_some(&mut self) {
-        while self.bytes_used > self.bytes_used_goal {
+        while self.bytes_used > self.bytes_used_target {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
@@ -367,7 +367,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                 "artifact_bytes_used" => %ByteSize::b(bytes_used),
                 "entries" => %self.entries.len(),
                 "bytes_used" => %ByteSize::b(self.bytes_used),
-                "byte_used_target" => %ByteSize::b(self.bytes_used_goal)
+                "byte_used_target" => %ByteSize::b(self.bytes_used_target)
             );
         }
     }
@@ -448,8 +448,8 @@ mod tests {
             Fixture { fs, cache }
         }
 
-        fn new_and_clear_fs_operations(fs: TestCacheFs, bytes_used_goal: u64) -> Self {
-            let mut result = Self::new(fs, bytes_used_goal);
+        fn new_and_clear_fs_operations(fs: TestCacheFs, bytes_used_target: u64) -> Self {
+            let mut result = Self::new(fs, bytes_used_target);
             result.clear_fs_operations();
             result
         }

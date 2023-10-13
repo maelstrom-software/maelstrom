@@ -180,7 +180,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// in `{root}/removing` and `{root}/sha256` will be removed. That implies that the [Cache]
     /// doesn't currently keep data stored across invocations.
     ///
-    /// `bytes_used_goal` is the goal on-disk size for the cache. The cache will periodically grow
+    /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
     pub fn new(
@@ -464,23 +464,23 @@ mod tests {
     impl Fixture {
         fn new_with_fs_and_clear_messages(
             test_cache_fs: TestCacheFs,
-            bytes_used_goal: u64,
+            bytes_used_target: u64,
         ) -> Self {
-            let mut fixture = Fixture::new(test_cache_fs, bytes_used_goal);
+            let mut fixture = Fixture::new(test_cache_fs, bytes_used_target);
             fixture.clear_messages();
             fixture
         }
 
-        fn new_and_clear_messages(bytes_used_goal: u64) -> Self {
-            Self::new_with_fs_and_clear_messages(TestCacheFs::default(), bytes_used_goal)
+        fn new_and_clear_messages(bytes_used_target: u64) -> Self {
+            Self::new_with_fs_and_clear_messages(TestCacheFs::default(), bytes_used_target)
         }
 
-        fn new(test_cache_fs: TestCacheFs, bytes_used_goal: u64) -> Self {
+        fn new(test_cache_fs: TestCacheFs, bytes_used_target: u64) -> Self {
             let messages = test_cache_fs.messages.clone();
             let cache = Cache::new(
                 test_cache_fs,
                 PathBuf::from("/z").into(),
-                bytes_used_goal.into(),
+                bytes_used_target.into(),
                 slog::Logger::root(slog::Discard, slog::o!()),
             );
             Fixture { messages, cache }
