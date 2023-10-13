@@ -1,7 +1,15 @@
 //! Code for the broker binary.
 
+mod artifact_fetcher;
+mod artifact_pusher;
+pub mod config;
+mod connection;
+mod http;
+mod scheduler_task;
+
+use config::{CacheBytesUsedTarget, CacheRoot};
 use scheduler_task::SchedulerTask;
-use slog::error;
+use slog::{error, Logger};
 use std::sync::{
     atomic::{AtomicU32, Ordering},
     Arc,
@@ -9,14 +17,8 @@ use std::sync::{
 use tokio::{
     net::TcpListener,
     signal::unix::{self, SignalKind},
+    task::JoinSet,
 };
-
-mod artifact_fetcher;
-mod artifact_pusher;
-pub mod config;
-mod connection;
-mod http;
-mod scheduler_task;
 
 /// Simple wrapper around a [AtomicU32] used to vend [meticulous_base::ClientId]s and
 /// [meticulous_base::WorkerId]s.
@@ -32,7 +34,7 @@ impl IdVendor {
 
 /// "Main loop" for a signal handler. This function will block until it receives the indicated
 /// signal, then it will return an error.
-async fn signal_handler(kind: SignalKind, log: slog::Logger, signame: &'static str) {
+async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
     unix::signal(kind)
         .expect("failed to register signal handler")
         .recv()
@@ -46,16 +48,16 @@ async fn signal_handler(kind: SignalKind, log: slog::Logger, signame: &'static s
 pub async fn main(
     listener: TcpListener,
     http_listener: TcpListener,
-    cache_root: config::CacheRoot,
-    cache_bytes_used_target: config::CacheBytesUsedTarget,
-    log: slog::Logger,
+    cache_root: CacheRoot,
+    cache_bytes_used_target: CacheBytesUsedTarget,
+    log: Logger,
 ) {
     let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_target, log.clone());
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
     });
 
-    let mut join_set = tokio::task::JoinSet::new();
+    let mut join_set = JoinSet::new();
 
     join_set.spawn(http::listener_main(
         http_listener,

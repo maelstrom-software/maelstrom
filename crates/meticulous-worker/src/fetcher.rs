@@ -1,13 +1,22 @@
+use super::config;
 use anyhow::anyhow;
-use meticulous_base::{proto, Sha256Digest};
+use meticulous_base::{
+    proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
+    Sha256Digest,
+};
 use meticulous_util::{
     error::Result,
     net::{self, FixedSizeReader, Sha256Reader},
 };
-use slog::debug;
-use std::{net::TcpStream, path::PathBuf};
+use slog::{debug, Logger};
+use std::{
+    io::{BufReader, Read},
+    net::TcpStream,
+    path::PathBuf,
+};
+use tar::Archive;
 
-fn read_to_end(mut input: impl std::io::Read) -> std::io::Result<()> {
+fn read_to_end(mut input: impl Read) -> Result<()> {
     let mut buf = [0u8; 4096];
     while input.read(&mut buf)? > 0 {}
     Ok(())
@@ -16,23 +25,23 @@ fn read_to_end(mut input: impl std::io::Read) -> std::io::Result<()> {
 pub fn main(
     digest: &Sha256Digest,
     path: PathBuf,
-    broker_addr: super::config::Broker,
-    log: &mut slog::Logger,
+    broker_addr: config::Broker,
+    log: &mut Logger,
 ) -> Result<u64> {
     let mut writer = TcpStream::connect(broker_addr.inner())?;
-    let mut reader = std::io::BufReader::new(writer.try_clone()?);
-    net::write_message_to_socket(&mut writer, proto::Hello::ArtifactFetcher)?;
-    let msg = proto::ArtifactFetcherToBroker(digest.clone());
+    let mut reader = BufReader::new(writer.try_clone()?);
+    net::write_message_to_socket(&mut writer, Hello::ArtifactFetcher)?;
+    let msg = ArtifactFetcherToBroker(digest.clone());
     debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
     net::write_message_to_socket(&mut writer, msg)?;
-    let msg = net::read_message_from_socket::<proto::BrokerToArtifactFetcher>(&mut reader)?;
+    let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut reader)?;
     debug!(log, "artifact fetcher received message"; "msg" => ?msg);
     let size = msg
         .0
         .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
     let reader = FixedSizeReader::new(reader, size);
     let mut reader = Sha256Reader::new(reader);
-    tar::Archive::new(&mut reader).unpack(path)?;
+    Archive::new(&mut reader).unpack(path)?;
     read_to_end(&mut reader)?;
     let (_, actual_digest) = reader.finalize();
     actual_digest.verify(digest)?;

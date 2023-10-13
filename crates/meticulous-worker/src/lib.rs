@@ -6,29 +6,42 @@ mod dispatcher;
 mod executor;
 mod fetcher;
 
-use meticulous_base::{proto, JobDetails, JobId, Sha256Digest};
+use cache::{Cache, StdCacheFs};
+use config::{Broker, Config};
+use dispatcher::{Dispatcher, DispatcherDeps, Message};
+use executor::Handle;
+use meticulous_base::{
+    proto::{Hello, WorkerToBroker},
+    JobDetails, JobId, Sha256Digest,
+};
 use meticulous_util::{error::Result, net};
-use slog::{debug, error, info, o};
-use std::{path::PathBuf, process};
-use tokio::signal::unix::{self, SignalKind};
+use slog::{debug, error, info, o, Logger};
+use std::{path::PathBuf, process, thread};
+use tokio::{
+    io::BufReader,
+    net::TcpStream,
+    signal::unix::{self, SignalKind},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::JoinSet,
+};
 
-type DispatcherReceiver = tokio::sync::mpsc::UnboundedReceiver<dispatcher::Message>;
-type DispatcherSender = tokio::sync::mpsc::UnboundedSender<dispatcher::Message>;
-type BrokerSocketSender = tokio::sync::mpsc::UnboundedSender<proto::WorkerToBroker>;
+type DispatcherReceiver = UnboundedReceiver<Message>;
+type DispatcherSender = UnboundedSender<Message>;
+type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
 
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: config::Broker,
-    log: slog::Logger,
+    broker_addr: Broker,
+    log: Logger,
 }
 
 impl DispatcherAdapter {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        broker_addr: config::Broker,
-        log: slog::Logger,
+        broker_addr: Broker,
+        log: Logger,
     ) -> Self {
         DispatcherAdapter {
             dispatcher_sender,
@@ -39,8 +52,8 @@ impl DispatcherAdapter {
     }
 }
 
-impl dispatcher::DispatcherDeps for DispatcherAdapter {
-    type JobHandle = executor::Handle;
+impl DispatcherDeps for DispatcherAdapter {
+    type JobHandle = Handle;
 
     fn start_job(
         &mut self,
@@ -55,7 +68,7 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
         debug!(log, "job starting");
         executor::start(details, move |result| {
             debug!(log, "job completed"; "result" => ?result);
-            sender.send(dispatcher::Message::Executor(id, result)).ok();
+            sender.send(Message::Executor(id, result)).ok();
         })
     }
 
@@ -67,40 +80,38 @@ impl dispatcher::DispatcherDeps for DispatcherAdapter {
             "broker_addr" => broker_addr.inner().to_string()
         ));
         debug!(log, "artifact fetcher starting");
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             let result = fetcher::main(&digest, path, broker_addr, &mut log).ok();
             debug!(log, "artifact fetcher completed"; "result" => ?result);
-            sender
-                .send(dispatcher::Message::ArtifactFetcher(digest, result))
-                .ok();
+            sender.send(Message::ArtifactFetcher(digest, result)).ok();
         });
     }
 
-    fn send_message_to_broker(&mut self, message: proto::WorkerToBroker) {
+    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
 }
 
 async fn dispatcher_main(
-    config: config::Config,
+    config: Config,
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    log: slog::Logger,
+    log: Logger,
 ) {
-    let cache = cache::Cache::new(
-        cache::StdCacheFs,
+    let cache = Cache::new(
+        StdCacheFs,
         config.cache_root,
         config.cache_bytes_used_target,
         log.clone(),
     );
     let adapter =
         DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, config.broker, log);
-    let mut dispatcher = dispatcher::Dispatcher::new(adapter, cache, config.slots);
+    let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
     net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
 
-async fn signal_handler(kind: SignalKind, log: slog::Logger, signame: &'static str) {
+async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
     unix::signal(kind)
         .expect("failed to register signal handler")
         .recv()
@@ -110,21 +121,21 @@ async fn signal_handler(kind: SignalKind, log: slog::Logger, signame: &'static s
 
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
-pub async fn main(config: config::Config, log: slog::Logger) -> Result<()> {
+pub async fn main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
 
-    let (read_stream, mut write_stream) = tokio::net::TcpStream::connect(config.broker.inner())
+    let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
         .await
         .map_err(|err| {
             error!(log, "error connecting to broker"; "err" => %err);
             err
         })?
         .into_split();
-    let read_stream = tokio::io::BufReader::new(read_stream);
+    let read_stream = BufReader::new(read_stream);
 
     net::write_message_to_async_socket(
         &mut write_stream,
-        proto::Hello::Worker {
+        Hello::Worker {
             slots: (*config.slots.inner()).into(),
         },
     )
@@ -134,11 +145,11 @@ pub async fn main(config: config::Config, log: slog::Logger) -> Result<()> {
         err
     })?;
 
-    let (dispatcher_sender, dispatcher_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let dispatcher_sender_clone = dispatcher_sender.clone();
-    let (broker_socket_sender, broker_socket_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (broker_socket_sender, broker_socket_receiver) = mpsc::unbounded_channel();
 
-    let mut join_set = tokio::task::JoinSet::new();
+    let mut join_set = JoinSet::new();
 
     let log_clone = log.clone();
     join_set.spawn(net::async_socket_reader(
@@ -146,7 +157,7 @@ pub async fn main(config: config::Config, log: slog::Logger) -> Result<()> {
         dispatcher_sender_clone,
         move |msg| {
             debug!(log_clone, "received broker message"; "msg" => ?msg);
-            dispatcher::Message::Broker(msg)
+            Message::Broker(msg)
         },
     ));
     let log_clone = log.clone();

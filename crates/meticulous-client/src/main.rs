@@ -1,9 +1,12 @@
 use anyhow::Result;
 use clap::{builder::NonEmptyStringValueParser, Parser};
-use std::net::SocketAddr;
+use std::{
+    io,
+    net::{SocketAddr, ToSocketAddrs as _},
+};
+use tokio::runtime::Runtime;
 
-fn parse_socket_addr(arg: &str) -> std::io::Result<SocketAddr> {
-    use std::net::ToSocketAddrs as _;
+fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
     // It's not clear how we could end up with an empty iterator. We'll assume
     // that's impossible until proven wrong.
@@ -30,7 +33,7 @@ struct Cli {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let runtime = tokio::runtime::Runtime::new()?;
+    let runtime = Runtime::new()?;
     runtime.block_on(async { meticulous_client::main(cli.name, cli.broker).await })?;
     Ok(())
 }

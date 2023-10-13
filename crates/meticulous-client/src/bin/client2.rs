@@ -14,10 +14,12 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
-    io::Read,
+    fs::File,
+    io::{self, Read},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     sync::{Arc, Condvar, Mutex},
+    thread,
 };
 
 #[derive(Deserialize, Debug)]
@@ -89,7 +91,7 @@ impl Client {
 
         let stream = client.stream.try_clone().unwrap();
         let shared = client.shared.clone();
-        std::thread::spawn(|| Self::receiver_main(shared, stream));
+        thread::spawn(|| Self::receiver_main(shared, stream));
 
         Ok(client)
     }
@@ -115,9 +117,7 @@ impl Client {
                         .get(&digest)
                         .unwrap()
                         .clone();
-                    std::thread::spawn(move || {
-                        Self::transfer_artifact_main(broker_addr, digest, path)
-                    });
+                    thread::spawn(move || Self::transfer_artifact_main(broker_addr, digest, path));
                 }
                 BrokerToClient::StatisticsResponse(_) => {
                     unimplemented!("this client doesn't send statistics requests")
@@ -131,13 +131,13 @@ impl Client {
         digest: Sha256Digest,
         path: PathBuf,
     ) -> Result<()> {
-        let file = std::fs::File::open(path)?;
+        let file = File::open(path)?;
         let mut stream = TcpStream::connect(broker_addr)?;
         let size = file.metadata()?.len();
         let mut file = FixedSizeReader::new(file, size);
         net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
         net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
-        let copied = std::io::copy(&mut file, &mut stream)?;
+        let copied = io::copy(&mut file, &mut stream)?;
         assert_eq!(copied, size);
         let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
         resp.map_err(|e| anyhow!("Error from broker: {e}"))
@@ -154,7 +154,7 @@ impl Client {
                 ));
             }
         }
-        let mut f = std::fs::File::open(&path)?;
+        let mut f = File::open(&path)?;
         let mut buf = [0u8; 8192];
         loop {
             let n = f.read(&mut buf)?;

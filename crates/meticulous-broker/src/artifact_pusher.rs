@@ -4,26 +4,28 @@ use meticulous_util::{
     error::Result,
     net::{self, FixedSizeReader, Sha256Reader},
 };
+use proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use slog::{debug, Logger};
 use std::{
+    io,
     net::TcpStream,
     path::{Path, PathBuf},
 };
 
 fn handle_one_message(
-    msg: proto::ArtifactPusherToBroker,
+    msg: ArtifactPusherToBroker,
     socket: &mut TcpStream,
     scheduler_sender: &SchedulerSender,
     cache_tmp_path: &Path,
 ) -> Result<()> {
-    let proto::ArtifactPusherToBroker(digest, size) = msg;
+    let ArtifactPusherToBroker(digest, size) = msg;
     let mut tmp = tempfile::Builder::new()
         .prefix(&digest.to_string())
         .suffix(".tar")
         .tempfile_in(cache_tmp_path)?;
     let fixed_size_reader = FixedSizeReader::new(socket, size);
     let mut sha_reader = Sha256Reader::new(fixed_size_reader);
-    let copied = std::io::copy(&mut sha_reader, &mut tmp)?;
+    let copied = io::copy(&mut sha_reader, &mut tmp)?;
     assert_eq!(copied, size);
     let (_, actual_digest) = sha_reader.finalize();
     actual_digest.verify(&digest)?;
@@ -42,8 +44,7 @@ fn connection_loop(
         let msg = net::read_message_from_socket(&mut socket)?;
         debug!(log, "received artifact pusher message"; "msg" => ?msg);
         let result = handle_one_message(msg, &mut socket, scheduler_sender, cache_tmp_path);
-        let msg =
-            proto::BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+        let msg = BrokerToArtifactPusher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
         debug!(log, "sending artifact pusher message"; "msg" => ?msg);
         net::write_message_to_socket(&mut socket, msg)?;
         result?;

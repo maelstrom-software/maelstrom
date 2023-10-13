@@ -1,7 +1,16 @@
 //! Easily start and stop processes.
 
 use meticulous_base::{JobDetails, JobResult};
-use nix::{sys::signal::Signal, unistd::Pid};
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
+use std::{os::unix::process::ExitStatusExt, process::Stdio};
+use tokio::{
+    process::{Child, Command},
+    sync::oneshot::{self, Receiver, Sender},
+    task,
+};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -38,13 +47,13 @@ trait Killer: Send + 'static {
 
 impl Killer for () {
     fn kill(&mut self, pid: Pid, signal: Signal) {
-        nix::sys::signal::kill(pid, signal).ok();
+        signal::kill(pid, signal).ok();
     }
 }
 
 struct GenericHandle<K: Killer> {
     pid: Pid,
-    done_receiver: tokio::sync::oneshot::Receiver<()>,
+    done_receiver: Receiver<()>,
     killer: K,
 }
 
@@ -60,11 +69,10 @@ impl<K: Killer> Drop for GenericHandle<K> {
 }
 
 async fn waiter(
-    mut child: tokio::process::Child,
-    done_sender: tokio::sync::oneshot::Sender<()>,
+    mut child: Child,
+    done_sender: Sender<()>,
     done: impl FnOnce(JobResult) + Send + 'static,
 ) {
-    use std::os::unix::process::ExitStatusExt;
     done(match child.wait().await {
         Err(error) => JobResult::Error(error.to_string()),
         Ok(status) => match status.code() {
@@ -80,15 +88,15 @@ fn start_with_killer<K: Killer>(
     done: impl FnOnce(JobResult) + Send + 'static,
     killer: K,
 ) -> GenericHandle<K> {
-    let (done_sender, done_receiver) = tokio::sync::oneshot::channel();
-    let result = tokio::process::Command::new(&details.program)
+    let (done_sender, done_receiver) = oneshot::channel();
+    let result = Command::new(&details.program)
         .args(details.arguments.iter())
-        .stdin(std::process::Stdio::null())
+        .stdin(Stdio::null())
         .spawn();
     match result {
         Err(error) => {
             done_sender.send(()).ok();
-            tokio::task::spawn(async move { done(JobResult::Error(error.to_string())) });
+            task::spawn(async move { done(JobResult::Error(error.to_string())) });
             GenericHandle {
                 pid: Pid::from_raw(0),
                 done_receiver,
@@ -97,7 +105,7 @@ fn start_with_killer<K: Killer>(
         }
         Ok(child) => {
             let pid = Pid::from_raw(child.id().unwrap() as i32);
-            tokio::task::spawn(async move { waiter(child, done_sender, done).await });
+            task::spawn(async move { waiter(child, done_sender, done).await });
             GenericHandle {
                 pid,
                 done_receiver,
@@ -143,7 +151,7 @@ mod tests {
     }
 
     async fn start_and_await(details: JobDetails) -> JobResult {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _handle = start(&details, move |result| tx.send(result).unwrap());
         rx.await.unwrap()
     }
@@ -151,7 +159,7 @@ mod tests {
     impl Killer for Arc<Mutex<Option<Signal>>> {
         fn kill(&mut self, pid: Pid, signal: Signal) {
             assert!(self.lock().unwrap().replace(signal).is_none());
-            nix::sys::signal::kill(pid, signal).ok();
+            signal::kill(pid, signal).ok();
         }
     }
 
@@ -159,7 +167,7 @@ mod tests {
         details: JobDetails,
     ) -> (JobResult, Option<Signal>) {
         let killer = Arc::new(Mutex::new(None));
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _handle = start_with_killer(
             &details,
             move |result| tx.send(result).unwrap(),
@@ -184,7 +192,7 @@ mod tests {
         let mut tempfile = tempdir.path().to_path_buf();
         tempfile.push("foo");
 
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _ = start(
             &bash!("sleep infinity && touch {}", tempfile.display()),
             move |result| tx.send(result).unwrap(),
@@ -225,7 +233,7 @@ mod tests {
         let mutex: Arc<Mutex<()>> = Arc::new(Mutex::new(()));
         let guard = mutex.lock().unwrap();
         let mutex_clone = mutex.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let _handle = start(&bad_program(), move |result| {
             let _guard = mutex_clone.try_lock().unwrap();
             tx.send(result).unwrap()
@@ -263,7 +271,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_sends_signal_on_drop_if_process_still_running() {
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let (tx, rx) = oneshot::channel();
         let killer = Arc::new(Mutex::new(None));
         let handle = start_with_killer(
             &bash!("sleep infinity"),

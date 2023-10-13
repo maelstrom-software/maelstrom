@@ -50,7 +50,7 @@ impl TryFrom<String> for Name {
 }
 
 impl Debug for Name {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
@@ -106,7 +106,7 @@ impl From<PathBuf> for CacheRoot {
 }
 
 impl Debug for CacheRoot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }

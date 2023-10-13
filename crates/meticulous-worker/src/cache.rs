@@ -4,11 +4,15 @@ use crate::config::{CacheBytesUsedTarget, CacheRoot};
 use bytesize::ByteSize;
 use meticulous_base::{JobId, Sha256Digest};
 use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
-use slog::debug;
+use slog::{debug, Logger};
 use std::{
-    collections::{hash_map, HashMap},
+    cmp::Ordering,
+    collections::{hash_map::Entry, HashMap},
+    fs, mem,
     num::NonZeroU32,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
+    thread,
 };
 
 /// Dependencies that [Cache] has on the file system.
@@ -53,23 +57,19 @@ impl CacheFs for StdCacheFs {
     }
 
     fn rename(&mut self, source: &Path, destination: &Path) {
-        std::fs::rename(source, destination).unwrap()
+        fs::rename(source, destination).unwrap()
     }
 
     fn remove_recursively_on_thread(&mut self, path: PathBuf) {
-        std::thread::spawn(move || std::fs::remove_dir_all(path).unwrap());
+        thread::spawn(move || fs::remove_dir_all(path).unwrap());
     }
 
     fn mkdir_recursively(&mut self, path: &Path) {
-        std::fs::create_dir_all(path).unwrap();
+        fs::create_dir_all(path).unwrap();
     }
 
     fn read_dir(&self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
-        Box::new(
-            std::fs::read_dir(path)
-                .unwrap()
-                .map(|de| de.unwrap().path()),
-        )
+        Box::new(fs::read_dir(path).unwrap().map(|de| de.unwrap().path()))
     }
 }
 
@@ -123,7 +123,7 @@ enum CacheEntry {
 #[derive(Default)]
 struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
 
-impl std::ops::Deref for CacheMap {
+impl Deref for CacheMap {
     type Target = HashMap<Sha256Digest, CacheEntry>;
 
     fn deref(&self) -> &Self::Target {
@@ -131,7 +131,7 @@ impl std::ops::Deref for CacheMap {
     }
 }
 
-impl std::ops::DerefMut for CacheMap {
+impl DerefMut for CacheMap {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -149,7 +149,7 @@ impl HeapDeps for CacheMap {
             Some(CacheEntry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
-        lhs_priority.cmp(&rhs_priority) == std::cmp::Ordering::Less
+        lhs_priority.cmp(&rhs_priority) == Ordering::Less
     }
 
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
@@ -171,7 +171,7 @@ pub struct Cache<FsT> {
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
-    log: slog::Logger,
+    log: Logger,
 }
 
 impl<FsT: CacheFs> Cache<FsT> {
@@ -187,7 +187,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         mut fs: FsT,
         root: CacheRoot,
         bytes_used_target: CacheBytesUsedTarget,
-        log: slog::Logger,
+        log: Logger,
     ) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
@@ -223,11 +223,11 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
         let cache_path = Self::cache_path(&self.root, &digest);
         match self.entries.entry(digest) {
-            hash_map::Entry::Vacant(entry) => {
+            Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::DownloadingAndExtracting(vec![jid]));
                 GetArtifact::Get(cache_path)
             }
-            hash_map::Entry::Occupied(entry) => {
+            Entry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 match entry {
                     CacheEntry::DownloadingAndExtracting(jobs) => {
@@ -284,7 +284,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
         let ref_count = jobs.len().try_into().unwrap();
-        let jobs = std::mem::take(jobs);
+        let jobs = mem::take(jobs);
         // Reference count must be > 0 since we don't allow cancellation of gets.
         *entry = CacheEntry::InUse {
             bytes_used,
@@ -395,6 +395,7 @@ mod tests {
     use super::*;
     use itertools::Itertools;
     use meticulous_test::*;
+    use slog::{o, Discard};
     use std::{cell::RefCell, collections::HashSet, rc::Rc};
     use TestMessage::*;
 
@@ -481,7 +482,7 @@ mod tests {
                 test_cache_fs,
                 PathBuf::from("/z").into(),
                 bytes_used_target.into(),
-                slog::Logger::root(slog::Discard, slog::o!()),
+                Logger::root(Discard, o!()),
             );
             Fixture { messages, cache }
         }

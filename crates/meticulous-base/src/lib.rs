@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::{
+    error::Error,
     fmt::{self, Debug, Display, Formatter},
     hash::Hash,
+    result::Result,
+    str::FromStr,
 };
 
 pub mod proto;
@@ -75,10 +78,7 @@ pub struct BrokerStatistics {
 pub struct Sha256Digest(pub [u8; 32]);
 
 impl Sha256Digest {
-    pub fn verify(
-        &self,
-        expected: &Self,
-    ) -> std::result::Result<(), Sha256DigestVerificationError> {
+    pub fn verify(&self, expected: &Self) -> Result<(), Sha256DigestVerificationError> {
         if *self != *expected {
             Err(Sha256DigestVerificationError::new(
                 self.clone(),
@@ -106,10 +106,10 @@ impl From<u64> for Sha256Digest {
     }
 }
 
-impl std::str::FromStr for Sha256Digest {
+impl FromStr for Sha256Digest {
     type Err = &'static str;
 
-    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         let digits: Option<Vec<_>> = value
             .chars()
             .map(|c| c.to_digit(16).and_then(|x| x.try_into().ok()))
@@ -181,7 +181,7 @@ impl Display for Sha256DigestVerificationError {
     }
 }
 
-impl std::error::Error for Sha256DigestVerificationError {}
+impl Error for Sha256DigestVerificationError {}
 
 #[cfg(test)]
 mod tests {

@@ -5,12 +5,16 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use meticulous_worker::config::Config;
 use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
-use slog::{o, Drain};
+use slog::{o, Drain, Logger};
+use slog_async::Async;
+use slog_term::{CompactFormat, TermDecorator};
 use std::path::PathBuf;
+use tokio::runtime::Runtime;
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
 #[derive(Parser)]
@@ -100,7 +104,7 @@ impl Serialize for CliOptions {
 fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
-    let config: meticulous_worker::config::Config = Figment::new()
+    let config: Config = Figment::new()
         .merge(Serialized::defaults(CliOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_WORKER_"))
@@ -119,11 +123,11 @@ fn main() -> Result<()> {
         println!("{config:#?}");
         return Ok(());
     }
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::CompactFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let log = slog::Logger::root(drain, o!());
-    tokio::runtime::Runtime::new()
+    let decorator = TermDecorator::new().build();
+    let drain = CompactFormat::new(decorator).build().fuse();
+    let drain = Async::new(drain).build().fuse();
+    let log = Logger::root(drain, o!());
+    Runtime::new()
         .context("starting tokio runtime")?
         .block_on(async move { meticulous_worker::main(config, log).await })?;
     Ok(())

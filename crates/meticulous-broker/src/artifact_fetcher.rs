@@ -1,15 +1,15 @@
 use super::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::anyhow;
-use meticulous_base::{proto, Sha256Digest};
+use meticulous_base::{
+    proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
+    Sha256Digest,
+};
 use meticulous_util::{error::Result, net};
 use slog::{debug, Logger};
-use std::net::TcpStream;
+use std::{fs::File, io, net::TcpStream, sync::mpsc};
 
-fn get_file(
-    digest: &Sha256Digest,
-    scheduler_sender: &SchedulerSender,
-) -> Result<(std::fs::File, u64)> {
-    let (channel_sender, channel_receiver) = std::sync::mpsc::channel();
+fn get_file(digest: &Sha256Digest, scheduler_sender: &SchedulerSender) -> Result<(File, u64)> {
+    let (channel_sender, channel_receiver) = mpsc::channel();
     scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
         digest.clone(),
         channel_sender,
@@ -17,7 +17,7 @@ fn get_file(
 
     match channel_receiver.recv()? {
         Some((path, size)) => {
-            let f = std::fs::File::open(path)?;
+            let f = File::open(path)?;
             Ok((f, size))
         }
         None => Err(anyhow!("Cache doesn't contain artifact {digest}")),
@@ -25,15 +25,15 @@ fn get_file(
 }
 
 fn handle_one_message(
-    msg: proto::ArtifactFetcherToBroker,
+    msg: ArtifactFetcherToBroker,
     mut socket: &mut TcpStream,
     scheduler_sender: &SchedulerSender,
     log: &mut Logger,
 ) -> Result<()> {
     debug!(log, "received artifact fetcher message"; "msg" => ?msg);
-    let proto::ArtifactFetcherToBroker(digest) = msg;
+    let ArtifactFetcherToBroker(digest) = msg;
     let result = get_file(&digest, scheduler_sender);
-    let msg = proto::BrokerToArtifactFetcher(
+    let msg = BrokerToArtifactFetcher(
         result
             .as_ref()
             .map(|(_, size)| *size)
@@ -42,7 +42,7 @@ fn handle_one_message(
     debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
     net::write_message_to_socket(&mut socket, msg)?;
     let (mut f, size) = result?;
-    let copied = std::io::copy(&mut f, &mut socket)?;
+    let copied = io::copy(&mut f, &mut socket)?;
     assert_eq!(copied, size);
     scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
     Ok(())

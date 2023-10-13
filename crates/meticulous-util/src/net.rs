@@ -4,12 +4,19 @@ use crate::error::Result;
 use meticulous_base::Sha256Digest;
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::Digest;
-use std::io::{self, Chain, Read, Repeat, Take, Write};
+use std::{
+    io::{self, Chain, Read, Repeat, Take, Write},
+    sync::mpsc as std_mpsc,
+};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
+    sync::mpsc as tokio_mpsc,
+};
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are
 /// no more channel senders.
 pub async fn channel_reader<MessageT>(
-    mut channel: tokio::sync::mpsc::UnboundedReceiver<MessageT>,
+    mut channel: tokio_mpsc::UnboundedReceiver<MessageT>,
     mut processor: impl FnMut(MessageT),
 ) {
     while let Some(x) = channel.recv().await {
@@ -20,7 +27,7 @@ pub async fn channel_reader<MessageT>(
 /// Write a message to a Tokio output stream. Each message is framed by sending a leading 4-byte,
 /// little-endian message size.
 pub async fn write_message_to_async_socket(
-    stream: &mut (impl tokio::io::AsyncWrite + Unpin),
+    stream: &mut (impl AsyncWrite + Unpin),
     msg: impl Serialize,
 ) -> Result<()> {
     let msg_len = bincode::serialized_size(&msg)? as u32;
@@ -29,30 +36,30 @@ pub async fn write_message_to_async_socket(
     Write::write(&mut buf, &msg_len.to_le_bytes())?;
     bincode::serialize_into(&mut buf, &msg)?;
 
-    Ok(tokio::io::AsyncWriteExt::write_all(stream, &buf).await?)
+    Ok(stream.write_all(&buf).await?)
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of
 /// [write_message_to_async_socket].
 pub async fn read_message_from_async_socket<MessageT>(
-    stream: &mut (impl tokio::io::AsyncRead + Unpin),
+    stream: &mut (impl AsyncRead + Unpin),
 ) -> Result<MessageT>
 where
     MessageT: DeserializeOwned,
 {
     let mut msg_len: [u8; 4] = [0; 4];
-    tokio::io::AsyncReadExt::read_exact(stream, &mut msg_len).await?;
+    stream.read_exact(&mut msg_len).await?;
     let msg_len = u32::from_le_bytes(msg_len) as usize;
 
     let mut buf = vec![0; msg_len];
-    tokio::io::AsyncReadExt::read_exact(stream, &mut buf).await?;
+    stream.read_exact(&mut buf).await?;
     Ok(bincode::deserialize_from(&mut &buf[..])?)
 }
 
 /// Loop reading messages from a socket and writing them to an mpsc channel.
 pub async fn async_socket_reader<MessageT, TransformedT>(
-    mut socket: (impl tokio::io::AsyncRead + Unpin),
-    channel: tokio::sync::mpsc::UnboundedSender<TransformedT>,
+    mut socket: (impl AsyncRead + Unpin),
+    channel: tokio_mpsc::UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
 ) where
     MessageT: DeserializeOwned,
@@ -66,8 +73,8 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
 
 /// Loop reading messages from an mpsc channel and writing them to a socket.
 pub async fn async_socket_writer<MessageT>(
-    mut channel: tokio::sync::mpsc::UnboundedReceiver<MessageT>,
-    mut socket: (impl tokio::io::AsyncWrite + Unpin),
+    mut channel: tokio_mpsc::UnboundedReceiver<MessageT>,
+    mut socket: (impl AsyncWrite + Unpin),
     mut inspect: impl FnMut(&MessageT),
 ) where
     MessageT: Serialize,
@@ -113,7 +120,7 @@ where
 /// Loop reading messages from a socket and writing them to an mpsc channel.
 pub fn socket_reader<MessageT, TransformedT>(
     mut socket: impl Read,
-    channel: std::sync::mpsc::Sender<TransformedT>,
+    channel: std_mpsc::Sender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
 ) where
     MessageT: DeserializeOwned,
@@ -126,7 +133,7 @@ pub fn socket_reader<MessageT, TransformedT>(
 }
 
 /// Loop reading messages from an mpsc channel and writing them to a socket.
-pub fn socket_writer(channel: std::sync::mpsc::Receiver<impl Serialize>, mut socket: impl Write) {
+pub fn socket_writer(channel: std_mpsc::Receiver<impl Serialize>, mut socket: impl Write) {
     while let Ok(msg) = channel.recv() {
         if write_message_to_socket(&mut socket, msg).is_err() {
             break;
@@ -185,10 +192,11 @@ impl<InnerT: Read> Read for Sha256Reader<InnerT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::task;
 
     #[tokio::test]
     async fn no_messages() {
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel::<u8>();
+        let (_, rx) = tokio_mpsc::unbounded_channel::<u8>();
         let mut vec = vec![];
         channel_reader(rx, |s| vec.push(s)).await;
         assert_eq!(vec, vec![]);
@@ -196,8 +204,8 @@ mod tests {
 
     #[tokio::test]
     async fn one_messages() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::task::spawn(async move { tx.send(1).unwrap() });
+        let (tx, rx) = tokio_mpsc::unbounded_channel();
+        task::spawn(async move { tx.send(1).unwrap() });
         let mut vec = vec![];
         channel_reader(rx, |s| vec.push(s)).await;
 
@@ -206,8 +214,8 @@ mod tests {
 
     #[tokio::test]
     async fn three_messages() {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::task::spawn(async move {
+        let (tx, rx) = tokio_mpsc::unbounded_channel();
+        task::spawn(async move {
             tx.send(1).unwrap();
             tx.send(2).unwrap();
             tx.send(3).unwrap();

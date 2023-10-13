@@ -1,16 +1,19 @@
+mod cache;
+mod scheduler;
+
 use crate::config;
 use cache::{Cache, StdCacheFs};
+use config::{CacheBytesUsedTarget, CacheRoot};
 use meticulous_base::proto;
 use meticulous_util::net;
+use proto::{BrokerToClient, BrokerToWorker};
 use scheduler::{Message, Scheduler, SchedulerDeps};
+use slog::Logger;
 use std::{
     path::{Path, PathBuf},
     sync::mpsc as std_mpsc,
 };
 use tokio::sync::mpsc as tokio_mpsc;
-
-mod cache;
-mod scheduler;
 
 #[derive(Debug)]
 pub struct PassThroughDeps;
@@ -18,23 +21,15 @@ pub struct PassThroughDeps;
 /// The production implementation of [SchedulerDeps]. This implementation just hands the
 /// message to the provided sender.
 impl SchedulerDeps for PassThroughDeps {
-    type ClientSender = tokio_mpsc::UnboundedSender<proto::BrokerToClient>;
-    type WorkerSender = tokio_mpsc::UnboundedSender<proto::BrokerToWorker>;
+    type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
+    type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
     type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
 
-    fn send_message_to_client(
-        &mut self,
-        sender: &mut Self::ClientSender,
-        message: proto::BrokerToClient,
-    ) {
+    fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         sender.send(message).ok();
     }
 
-    fn send_message_to_worker(
-        &mut self,
-        sender: &mut Self::WorkerSender,
-        message: proto::BrokerToWorker,
-    ) {
+    fn send_message_to_worker(&mut self, sender: &mut Self::WorkerSender, message: BrokerToWorker) {
         sender.send(message).ok();
     }
 
@@ -64,9 +59,9 @@ pub struct SchedulerTask {
 
 impl SchedulerTask {
     pub fn new(
-        cache_root: config::CacheRoot,
-        cache_bytes_used_target: config::CacheBytesUsedTarget,
-        log: slog::Logger,
+        cache_root: CacheRoot,
+        cache_bytes_used_target: CacheBytesUsedTarget,
+        log: Logger,
     ) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
         let cache = Cache::new(StdCacheFs, cache_root, cache_bytes_used_target, log);

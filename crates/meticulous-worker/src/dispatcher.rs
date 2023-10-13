@@ -11,7 +11,8 @@ use meticulous_base::{
 };
 use meticulous_util::OptionExt;
 use std::{
-    collections::{hash_map, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, VecDeque},
+    mem,
     path::PathBuf,
 };
 
@@ -229,7 +230,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     true
                 } else {
                     assert!(layers.is_empty());
-                    std::mem::swap(&mut x.1.layers, &mut layers);
+                    mem::swap(&mut x.1.layers, &mut layers);
                     false
                 }
             });
@@ -291,10 +292,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // we've gotten all layers. If we have, then we can go ahead and schedule
             // the job.
             match self.awaiting_layers.entry(jid) {
-                hash_map::Entry::Vacant(_) => {
+                Entry::Vacant(_) => {
                     self.cache.decrement_ref_count(&digest);
                 }
-                hash_map::Entry::Occupied(mut entry) => {
+                Entry::Occupied(mut entry) => {
                     entry
                         .get_mut()
                         .layers

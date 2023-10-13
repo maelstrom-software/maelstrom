@@ -5,11 +5,15 @@ use super::{
 };
 use meticulous_base::{proto, ClientId, WorkerId};
 use meticulous_util::{error::Result, net};
+use proto::Hello;
+use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{path::PathBuf, sync::Arc};
+use std::{future::Future, path::PathBuf, sync::Arc, thread};
 use tokio::{
-    net::TcpStream,
+    io::BufReader,
+    net::{TcpListener, TcpStream},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::{self, JoinSet},
 };
 
 /// Main loop for a client or worker socket-like object (socket or websocket). There should be one
@@ -61,9 +65,9 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     socket_writer_main: impl FnOnce(UnboundedReceiver<FromSchedulerMessageT>) -> WriterFutureT,
 ) where
     IdT: Copy + Send + 'static,
-    FromSchedulerMessageT: serde::Serialize + Send + 'static,
-    ReaderFutureT: std::future::Future<Output = ()> + Send + 'static,
-    WriterFutureT: std::future::Future<Output = ()> + Send + 'static,
+    FromSchedulerMessageT: Serialize + Send + 'static,
+    ReaderFutureT: Future<Output = ()> + Send + 'static,
+    WriterFutureT: Future<Output = ()> + Send + 'static,
 {
     let (socket_sender, socket_receiver) = mpsc::unbounded_channel();
 
@@ -79,7 +83,7 @@ pub async fn connection_main<IdT, FromSchedulerMessageT, ReaderFutureT, WriterFu
     }
 
     // Spawn two tasks to read and write from the socket. Plumb the message queues appropriately.
-    let mut join_set = tokio::task::JoinSet::new();
+    let mut join_set = JoinSet::new();
     join_set.spawn(socket_reader_main(scheduler_sender.clone()));
     join_set.spawn(socket_writer_main(socket_receiver));
 
@@ -100,9 +104,9 @@ async fn unassigned_connection_main(
     log: Logger,
 ) {
     match net::read_message_from_async_socket(&mut socket).await {
-        Ok(proto::Hello::Client) => {
+        Ok(Hello::Client) => {
             let (read_stream, write_stream) = socket.into_split();
-            let read_stream = tokio::io::BufReader::new(read_stream);
+            let read_stream = BufReader::new(read_stream);
             let id: ClientId = id_vendor.vend();
             let log = log.new(o!("cid" => id.to_string()));
             debug!(log, "connection upgraded to client connection");
@@ -128,9 +132,9 @@ async fn unassigned_connection_main(
             .await;
             debug!(log, "received client disconnect");
         }
-        Ok(proto::Hello::Worker { slots }) => {
+        Ok(Hello::Worker { slots }) => {
             let (read_stream, write_stream) = socket.into_split();
-            let read_stream = tokio::io::BufReader::new(read_stream);
+            let read_stream = BufReader::new(read_stream);
             let id: WorkerId = id_vendor.vend();
             let log = log.new(o!("wid" => id.to_string()));
             info!(log, "connection upgraded to worker connection"; "slots" => slots);
@@ -156,19 +160,19 @@ async fn unassigned_connection_main(
             .await;
             info!(log, "received worker disconnect");
         }
-        Ok(proto::Hello::ArtifactFetcher) => {
+        Ok(Hello::ArtifactFetcher) => {
             let log = log.clone();
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
-            std::thread::spawn(move || -> Result<()> {
+            thread::spawn(move || -> Result<()> {
                 artifact_fetcher::connection_main(socket, scheduler_sender, log)
             });
         }
-        Ok(proto::Hello::ArtifactPusher) => {
+        Ok(Hello::ArtifactPusher) => {
             let log = log.clone();
             let socket = socket.into_std().unwrap();
             socket.set_nonblocking(false).unwrap();
-            std::thread::spawn(move || -> Result<()> {
+            thread::spawn(move || -> Result<()> {
                 artifact_pusher::connection_main(socket, scheduler_sender, cache_tmp_path, log)
             });
         }
@@ -182,7 +186,7 @@ async fn unassigned_connection_main(
 /// one of these in a broker process. It will only return when it encounters an error. Until then,
 /// it listens on a socket and spawns new tasks for each client or worker that connects.
 pub async fn listener_main(
-    listener: tokio::net::TcpListener,
+    listener: TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
     cache_tmp_path: PathBuf,
@@ -193,7 +197,7 @@ pub async fn listener_main(
             Ok((socket, peer_addr)) => {
                 let log = log.new(o!("peer_addr" => peer_addr));
                 debug!(log, "received connection");
-                tokio::task::spawn(unassigned_connection_main(
+                task::spawn(unassigned_connection_main(
                     socket,
                     scheduler_sender.clone(),
                     id_vendor.clone(),

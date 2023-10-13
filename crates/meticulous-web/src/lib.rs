@@ -3,7 +3,10 @@ use wasm_bindgen::prelude::*;
 
 #[cfg(target_arch = "wasm32")]
 mod wasm {
-    use anyhow::Result;
+    use anyhow::{anyhow, Error, Result};
+    use eframe::{App, CreationContext, Frame, WebOptions, WebRunner};
+    use egui::{CentralPanel, Context};
+    use futures::channel::mpsc::{self, Receiver, Sender};
     use futures::{SinkExt as _, StreamExt as _};
     use gloo_net::websocket::{futures::WebSocket, Message};
     use gloo_utils::errors::JsError;
@@ -12,7 +15,10 @@ mod wasm {
         BrokerStatistics,
     };
     use std::{cell::RefCell, time::Duration};
+    use wasm_bindgen::JsValue;
     use wasm_bindgen_futures::spawn_local;
+    use wasm_logger::Config;
+    use web_sys::Window;
 
     pub trait ClientConnection {
         fn send(&self, message: ClientToBroker) -> Result<()>;
@@ -25,14 +31,14 @@ mod wasm {
     }
 
     impl<RpcConnectionT> UiHandler<RpcConnectionT> {
-        pub fn new(rpc: RpcConnectionT, _cc: &eframe::CreationContext<'_>) -> Self {
+        pub fn new(rpc: RpcConnectionT, _cc: &CreationContext<'_>) -> Self {
             Self { rpc, stats: None }
         }
     }
 
-    impl<RpcConnectionT: ClientConnection> eframe::App for UiHandler<RpcConnectionT> {
-        fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-            egui::CentralPanel::default().show(ctx, |ui| {
+    impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
+        fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
+            CentralPanel::default().show(ctx, |ui| {
                 ui.heading("Meticulous UI");
                 if let Some(stats) = &self.stats {
                     ui.label(&format!("number of clients: {}", stats.num_clients));
@@ -56,7 +62,7 @@ mod wasm {
         }
     }
 
-    fn window() -> web_sys::Window {
+    fn window() -> Window {
         web_sys::window().expect("no global `window` exists")
     }
 
@@ -65,8 +71,8 @@ mod wasm {
     }
 
     struct RpcConnection {
-        send: RefCell<futures::channel::mpsc::Sender<Message>>,
-        recv: RefCell<futures::channel::mpsc::Receiver<Message>>,
+        send: RefCell<Sender<Message>>,
+        recv: RefCell<Receiver<Message>>,
     }
 
     impl RpcConnection {
@@ -75,7 +81,7 @@ mod wasm {
 
             let (mut write, mut read) = socket.split();
 
-            let (mut task_send, recv) = futures::channel::mpsc::channel(1000);
+            let (mut task_send, recv) = mpsc::channel(1000);
             spawn_local(async move {
                 while let Some(Ok(msg)) = read.next().await {
                     if task_send.send(msg).await.is_err() {
@@ -84,7 +90,7 @@ mod wasm {
                 }
             });
 
-            let (send, mut task_recv) = futures::channel::mpsc::channel(1000);
+            let (send, mut task_recv) = mpsc::channel(1000);
             spawn_local(async move {
                 while let Some(message) = task_recv.next().await {
                     if write.send(message).await.is_err() {
@@ -101,18 +107,18 @@ mod wasm {
     }
 
     impl ClientConnection for RpcConnection {
-        fn send(&self, message: ClientToBroker) -> anyhow::Result<()> {
+        fn send(&self, message: ClientToBroker) -> Result<()> {
             self.send
                 .borrow_mut()
                 .try_send(Message::Bytes(bincode::serialize(&message).unwrap()))?;
             Ok(())
         }
 
-        fn try_recv(&self) -> anyhow::Result<Option<BrokerToClient>> {
+        fn try_recv(&self) -> Result<Option<BrokerToClient>> {
             match self.recv.borrow_mut().try_next() {
                 Ok(Some(Message::Bytes(b))) => Ok(Some(bincode::deserialize(&b)?)),
-                Ok(Some(Message::Text(_))) => Err(anyhow::Error::msg("Unexpected Message::Text")),
-                Ok(None) => Err(anyhow::Error::msg("websocket closed")),
+                Ok(Some(Message::Text(_))) => Err(anyhow!("Unexpected Message::Text")),
+                Ok(None) => Err(anyhow!("websocket closed")),
                 Err(_) => Ok(None),
             }
         }
@@ -120,13 +126,13 @@ mod wasm {
 
     pub async fn start() -> Result<(), JsError> {
         console_error_panic_hook::set_once();
-        wasm_logger::init(wasm_logger::Config::default());
+        wasm_logger::init(Config::default());
 
         let uri = format!("ws://{}", host());
         let rpc = RpcConnection::new(&uri)?;
 
-        let runner = eframe::WebRunner::new();
-        let web_options = eframe::WebOptions::default();
+        let runner = WebRunner::new();
+        let web_options = WebOptions::default();
         runner
             .start(
                 "canvas",
@@ -142,7 +148,7 @@ mod wasm {
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(start)]
-pub async fn start() -> Result<(), wasm_bindgen::JsValue> {
+pub async fn start() -> Result<(), JsValue> {
     match wasm::start().await {
         Ok(()) => Ok(()),
         Err(e) => panic!("error: {e:?}"),

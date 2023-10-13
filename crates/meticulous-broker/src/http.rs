@@ -29,7 +29,7 @@ use std::{
     task::{Context, Poll},
 };
 use tar::Archive;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::{net::TcpListener, sync::mpsc::UnboundedReceiver};
 use tungstenite::Message;
 
 /// The embedded website. This is built from [`meticulous-web`].
@@ -203,7 +203,7 @@ impl Service<Request<Body>> for Handler {
 }
 
 pub async fn listener_main(
-    listener: tokio::net::TcpListener,
+    listener: TcpListener,
     scheduler_sender: SchedulerSender,
     id_vendor: Arc<IdVendor>,
     log: Logger,
