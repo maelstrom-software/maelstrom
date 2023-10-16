@@ -1,4 +1,5 @@
-//! Core structs used by the broker, worker, and clients.
+//! Core structs used by the broker, worker, and clients. Everything in this crate must be usable
+//! from wasm.
 
 pub mod proto;
 

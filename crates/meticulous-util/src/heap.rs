@@ -1,5 +1,5 @@
 //! A binary min-heap implementation that provides some features necessary for us that are missing
-//! from [std::collections::BinaryHeap].
+//! from [`std::collections::BinaryHeap`].
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -11,48 +11,48 @@
  */
 
 /// A min-heap implementation that provides some features necessary for us that are missing from
-/// [std::collections::BinaryHeap]:
+/// [`std::collections::BinaryHeap`]:
 ///
 ///   - The values (priorities) of elements can be stored outside of the heap itself. This supports
 ///     a common use case where the heap just contains IDs for a specific data structure, and the
 ///     actual data structures are stored elsewhere, usually in a map of some sort.
-///   - The heap can be notified when Individual elements' values change, via [Heap::sift_up] and
-///     [Heap::sift_down], both of which are O(log(n)).
+///   - The heap can be notified when Individual elements' values change, via [`Heap::sift_up`] and
+///     [`Heap::sift_down`], both of which are O(log(n)).
 ///   - If all or most of the elements' values change, the heap can be fixed up using
-///     [Heap::rebuild]. This is O(n).
+///     [`Heap::rebuild`]. This is O(n).
 ///   - Arbitrary elements can be removed from the heap in O(log(n)) time.
 ///
 /// This heap accomplishes this by telling the elements what their heap indices are. Those heap
 /// indices are then used in the per-element methods.
 ///
-/// Since the values of elements are stored externally from the heap, the heap relies on the
-/// client notifying it whenever a value changes. If the client doesn't do this, the heap condition
-/// will be violated and [Heap::peek] will no longer necessarily provide the smallest element.
+/// Since the values of elements are stored externally from the heap, the heap relies on the client
+/// notifying it whenever a value changes. If the client doesn't do this, the heap condition will
+/// be violated and [`Heap::peek`] will no longer necessarily provide the smallest element.
 ///
-/// The modifying methods of this struct take a [&mut HeapDeps], instead of a [Heap] constructor
+/// The modifying methods of this struct take a `&mut HeapDeps`, instead of a [`Heap`] constructor
 /// taking the dependencies and storing them in the heap. This is done to satisfy the borrow
-/// checker so that clients of the heap don't need to use a bunch of Rc<Refcell<_>>s.
+/// checker so that clients of the heap don't need to use a bunch of [`std::rc::Rc<Refcell<_>>`]s.
 pub struct Heap<DepsT: HeapDeps>(Vec<DepsT::Element>);
 
-/// An index value in [Heap]. These are provided to the client via [HeapDeps::update_index]. The
-/// client then provides them back to the heap when calling [Heap::sift_up], [Heap::sift_down], and
-/// [Heap::remove].
+/// An index value in [`Heap`]. These are provided to the client via [`HeapDeps::update_index`].
+/// The client then provides them back to the heap when calling [`Heap::sift_up`],
+/// [`Heap::sift_down`], and [`Heap::remove`].
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub struct HeapIndex(usize);
 
-/// A client of the [Heap] must implement this trait.
+/// A client of the [`Heap`] must implement this trait.
 pub trait HeapDeps {
     /// The type of elements to be stored in the heap.
     type Element;
 
-    /// Compare two elements. This is defined on [HeapDeps], instead of just using [Ord] on the
+    /// Compare two elements. This is defined on [`HeapDeps`], instead of just using [`Ord`] on the
     /// element type, because the client will usually want to consult external data to determine
     /// the ordering of two elements.
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool;
 
-    /// Update the stored index of a given element. This index can be used for [Heap::remove],
-    /// [Heap::sift_up], and [Heap::sift_down]. The methods of [Heap] will call this at most once
-    /// for a given element in a given method call.
+    /// Update the stored index of a given element. This index can be used for [`Heap::remove`],
+    /// [`Heap::sift_up`], and [`Heap::sift_down`]. The methods of [`Heap`] will call this at most
+    /// once for a given element in a given method call.
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex);
 }
 
@@ -63,14 +63,14 @@ impl<DepsT: HeapDeps> Default for Heap<DepsT> {
 }
 
 impl<DepsT: HeapDeps> Heap<DepsT> {
-    /// Return an [Option] containing an element with the smallest value in the heap, or [None] if
-    /// the heap is empty. Note that multiple elements in the heap may have the smallest value. In
-    /// this case, an arbitrary element will be returned. O(1).
+    /// Return an [`Option`] containing an element with the smallest value in the heap, or [`None`]
+    /// if the heap is empty. Note that multiple elements in the heap may have the smallest value.
+    /// In this case, an arbitrary element will be returned. O(1).
     pub fn peek(&self) -> Option<&DepsT::Element> {
         self.0.get(0)
     }
 
-    /// Remove the element with the smallest value in the heap, or [None] if the heap is empty.
+    /// Remove the element with the smallest value in the heap, or [`None`] if the heap is empty.
     /// Note that multiple elements in the heap may have the smallest value. In this case, an
     /// arbitrary element will be returned. O(log(n)).
     pub fn pop(&mut self, deps: &mut DepsT) -> Option<DepsT::Element> {
@@ -127,7 +127,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
 
     /// Assume all elements' values have changed and rebuild the heap accordingly. If one is
     /// changing the values of most of the elements in the heap, this method is faster than calling
-    /// [Heap::sift_up] or [Heap::sift_down] on each element. O(n).
+    /// [`Heap::sift_up`] or [`Heap::sift_down`] on each element. O(n).
     pub fn rebuild(&mut self, deps: &mut DepsT) {
         // The last ceil(n/2) elements form single-element sub heaps. We walk backwards from there
         // sifting down the remaining floor(n/2) elements.
