@@ -5,12 +5,9 @@ use meticulous_base::{
     },
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
-use meticulous_util::{
-    ext::OptionExt as _,
-    net::{self, FixedSizeReader},
-};
+use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use serde::Deserialize;
-use sha2::{Digest, Sha256};
+use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
     fs::File,

@@ -1,7 +1,10 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
 use meticulous_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
-use meticulous_util::net::{self, FixedSizeReader, Sha256Reader};
+use meticulous_util::{
+    io::{FixedSizeReader, Sha256Reader},
+    net,
+};
 use slog::{debug, Logger};
 use std::{
     io,

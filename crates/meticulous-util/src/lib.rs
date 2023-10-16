@@ -4,4 +4,5 @@
 
 pub mod ext;
 pub mod heap;
+pub mod io;
 pub mod net;

@@ -4,7 +4,10 @@ use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use meticulous_util::net::{self, FixedSizeReader, Sha256Reader};
+use meticulous_util::{
+    io::{FixedSizeReader, Sha256Reader},
+    net,
+};
 use slog::{debug, Logger};
 use std::{
     io::{BufReader, Read},
