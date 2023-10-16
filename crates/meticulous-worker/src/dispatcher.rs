@@ -5,6 +5,7 @@ use crate::{
     cache::{Cache, CacheFs, GetArtifact},
     config::Slots,
 };
+use anyhow::{Error, Result};
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     JobDetails, JobId, JobResult, Sha256Digest,
@@ -94,7 +95,7 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 pub enum Message {
     Broker(BrokerToWorker),
     Executor(JobId, JobResult),
-    ArtifactFetcher(Sha256Digest, Option<u64>),
+    ArtifactFetcher(Sha256Digest, Result<u64>),
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -121,8 +122,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
             Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
             Message::Executor(jid, result) => self.receive_job_result(jid, result),
-            Message::ArtifactFetcher(digest, None) => self.receive_artifact_failure(digest),
-            Message::ArtifactFetcher(digest, Some(bytes_used)) => {
+            Message::ArtifactFetcher(digest, Err(err)) => {
+                self.receive_artifact_failure(digest, err)
+            }
+            Message::ArtifactFetcher(digest, Ok(bytes_used)) => {
                 self.receive_artifact_success(digest, bytes_used)
             }
         }
@@ -260,7 +263,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
-    fn receive_artifact_failure(&mut self, digest: Sha256Digest) {
+    fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
         for jid in self.cache.got_artifact_failure(&digest) {
             // If this was the first layer error for this request, then we'll find something in the
             // hash table, and we'll need to clean up.
@@ -271,8 +274,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 self.deps.send_message_to_broker(WorkerToBroker(
                     jid,
                     JobResult::SystemError(format!(
-                        "Failed to download and extract layer artifact {}",
-                        digest
+                        "Failed to download and extract layer artifact {digest}: {err}"
                     )),
                 ));
                 for digest in entry.layers.into_keys() {
@@ -323,6 +325,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 mod tests {
     use super::Message::*;
     use super::*;
+    use anyhow::anyhow;
     use itertools::Itertools;
     use meticulous_test::*;
     use std::cell::RefCell;
@@ -548,10 +551,10 @@ mod tests {
             StartArtifactFetch(digest!(43), path_buf!("/c")),
         };
 
-        ArtifactFetcher(digest!(42), Some(100)) => {
+        ArtifactFetcher(digest!(42), Ok(100)) => {
             CacheGotArtifactSuccess(digest!(42), 100),
         };
-        ArtifactFetcher(digest!(43), Some(100)) => {
+        ArtifactFetcher(digest!(43), Ok(100)) => {
             CacheGotArtifactSuccess(digest!(43), 100),
             StartJob(jid!(1), details!(1, [41, 42, 43]), path_buf_vec!["/a", "/b", "/c"])
         }
@@ -712,20 +715,20 @@ mod tests {
             CacheGetArtifact(digest!(43), jid!(1)),
             CacheGetArtifact(digest!(44), jid!(1)),
         };
-        ArtifactFetcher(digest!(41), Some(101)) => {
+        ArtifactFetcher(digest!(41), Ok(101)) => {
             CacheGotArtifactSuccess(digest!(41), 101),
         };
-        ArtifactFetcher(digest!(42), None) => {
+        ArtifactFetcher(digest!(42), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(digest!(42)),
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::SystemError(
-                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
+                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo".to_string()))),
             CacheDecrementRefCount(digest!(41))
         };
-        ArtifactFetcher(digest!(43), Some(103)) => {
+        ArtifactFetcher(digest!(43), Ok(103)) => {
             CacheGotArtifactSuccess(digest!(43), 103),
             CacheDecrementRefCount(digest!(43))
         };
-        ArtifactFetcher(digest!(44), None) => {
+        ArtifactFetcher(digest!(44), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(digest!(44)),
         };
     }

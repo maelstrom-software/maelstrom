@@ -5,6 +5,8 @@ use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
 use slog::debug;
 use std::{
     collections::{hash_map, HashMap, HashSet},
+    error::Error,
+    fmt::{self, Debug, Display, Formatter},
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
@@ -64,6 +66,28 @@ pub enum GetArtifact {
     Wait,
     Get,
 }
+
+/// An error indicating that [`Cache::get_artifact_for_worker`] was called illegally. That function
+/// should only be called when the artifact in question is in the cache and has a non-zero
+/// reference count. This is because the broker gets a reference count and holds it for all
+/// artifacts that are currently in the queue or being processed by workers. So, the worker should
+/// only request an artifact when it's been assigned a job, which means the broker should have a
+/// reference on the artifact.
+///
+/// However, this can go wrong for a few reasons. Most obviously, the worker could be malicious. We
+/// don't want to provide a way for malicious workers to crash the brokers. Less obvious are
+/// various race conditions that can occur in error conditions. The job could be canceled, for
+/// example. So, we return this error instead of panicking.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GetArtifactForWorkerError;
+
+impl Display for GetArtifactForWorkerError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "artifact not in cache")
+    }
+}
+
+impl Error for GetArtifactForWorkerError {}
 
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
 /// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
@@ -326,17 +350,21 @@ impl<FsT: CacheFs> Cache<FsT> {
         })
     }
 
-    pub fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+    /// See the comment for [`GetArtifactForWorkerError`].
+    pub fn get_artifact_for_worker(
+        &mut self,
+        digest: &Sha256Digest,
+    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
         let Some(CacheEntry::InUse {
             refcount,
             bytes_used,
         }) = self.entries.get_mut(digest)
         else {
-            return None;
+            return Err(GetArtifactForWorkerError);
         };
         *refcount = refcount.checked_add(1).unwrap();
         let bytes_used = *bytes_used;
-        Some((self.cache_path(digest), bytes_used))
+        Ok((self.cache_path(digest), bytes_used))
     }
 
     pub fn tmp_path(&self) -> PathBuf {
@@ -521,7 +549,7 @@ mod tests {
         fn get_artifact_for_worker(
             &mut self,
             digest: Sha256Digest,
-            expected: Option<(PathBuf, u64)>,
+            expected: Result<(PathBuf, u64), GetArtifactForWorkerError>,
         ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
         }
@@ -1010,21 +1038,21 @@ mod tests {
     #[test]
     fn test_get_artifact_for_worker_no_entry() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
-        fixture.get_artifact_for_worker(digest!(1), None);
+        fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
     fn test_get_artifact_for_worker_waiting() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.get_artifact_for_worker(digest!(1), None);
+        fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
     fn test_get_artifact_for_worker_in_cache() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 1);
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
-        fixture.get_artifact_for_worker(digest!(1), None);
+        fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
@@ -1032,7 +1060,7 @@ mod tests {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 42);
-        fixture.get_artifact_for_worker(digest!(1), Some((long_path!("/z/sha256", 1, "tar"), 42)));
+        fixture.get_artifact_for_worker(digest!(1), Ok((long_path!("/z/sha256", 1, "tar"), 42)));
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);

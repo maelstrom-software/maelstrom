@@ -1,7 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact};
+use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
@@ -36,7 +36,7 @@ pub trait SchedulerDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Option<(PathBuf, u64)>,
+        message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
     );
 }
 
@@ -52,7 +52,10 @@ pub trait SchedulerCache {
     fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId>;
     fn decrement_refcount(&mut self, digest: Sha256Digest);
     fn client_disconnected(&mut self, cid: ClientId);
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)>;
+    fn get_artifact_for_worker(
+        &mut self,
+        digest: &Sha256Digest,
+    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError>;
 }
 
 impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
@@ -72,7 +75,10 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
         self.client_disconnected(cid)
     }
 
-    fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+    fn get_artifact_for_worker(
+        &mut self,
+        digest: &Sha256Digest,
+    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
         self.get_artifact_for_worker(digest)
     }
 }
@@ -502,7 +508,7 @@ mod tests {
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
-        ToWorkerArtifactFetcher(u32, Option<(PathBuf, u64)>),
+        ToWorkerArtifactFetcher(u32, Result<(PathBuf, u64), GetArtifactForWorkerError>),
         CacheGetArtifact(JobId, Sha256Digest),
         CacheGotArtifact(Sha256Digest, PathBuf, u64),
         CacheDecrementRefcount(Sha256Digest),
@@ -521,7 +527,8 @@ mod tests {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
-        get_artifact_for_worker_returns: HashMap<Sha256Digest, Vec<Option<(PathBuf, u64)>>>,
+        get_artifact_for_worker_returns:
+            HashMap<Sha256Digest, Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>>,
     }
 
     impl SchedulerCache for Arc<RefCell<TestState>> {
@@ -562,7 +569,10 @@ mod tests {
                 .messages
                 .push(CacheClientDisconnected(cid));
         }
-        fn get_artifact_for_worker(&mut self, digest: &Sha256Digest) -> Option<(PathBuf, u64)> {
+        fn get_artifact_for_worker(
+            &mut self,
+            digest: &Sha256Digest,
+        ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifactForWorker(digest.clone()));
@@ -598,7 +608,7 @@ mod tests {
         fn send_message_to_worker_artifact_fetcher(
             &mut self,
             sender: &mut TestWorkerArtifactFetcherSender,
-            message: Option<(PathBuf, u64)>,
+            message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
         ) {
             self.borrow_mut()
                 .messages
@@ -625,7 +635,10 @@ mod tests {
         fn new<const L: usize, const M: usize, const N: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
-            get_artifact_for_worker_returns: [(Sha256Digest, Vec<Option<(PathBuf, u64)>>); N],
+            get_artifact_for_worker_returns: [(
+                Sha256Digest,
+                Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>,
+            ); N],
         ) -> Self {
             let result = Self::default();
             result.test_state.borrow_mut().get_artifact_returns =
@@ -1235,11 +1248,11 @@ mod tests {
     script_test! {
         get_artifact_for_worker,
         {
-            Fixture::new([], [], [(digest![42], vec![Some(("/a/good/path".into(), 42))])])
+            Fixture::new([], [], [(digest![42], vec![Ok(("/a/good/path".into(), 42))])])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Some(("/a/good/path".into(), 42))),
+            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), 42))),
         }
     }
 

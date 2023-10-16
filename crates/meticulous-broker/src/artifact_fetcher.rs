@@ -1,5 +1,5 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
@@ -15,13 +15,9 @@ fn get_file(digest: &Sha256Digest, scheduler_sender: &SchedulerSender) -> Result
         channel_sender,
     ))?;
 
-    match channel_receiver.recv()? {
-        Some((path, size)) => {
-            let f = File::open(path)?;
-            Ok((f, size))
-        }
-        None => Err(anyhow!("Cache doesn't contain artifact {digest}")),
-    }
+    let (path, size) = channel_receiver.recv()??;
+    let f = File::open(path)?;
+    Ok((f, size))
 }
 
 fn handle_one_message(

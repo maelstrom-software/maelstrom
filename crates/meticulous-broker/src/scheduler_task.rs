@@ -2,7 +2,7 @@ mod cache;
 mod scheduler;
 
 use crate::config::{CacheBytesUsedTarget, CacheRoot};
-use cache::{Cache, StdCacheFs};
+use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use meticulous_base::proto::{BrokerToClient, BrokerToWorker};
 use meticulous_util::sync;
 use scheduler::{Message, Scheduler, SchedulerDeps};
@@ -21,7 +21,8 @@ pub struct PassThroughDeps;
 impl SchedulerDeps for PassThroughDeps {
     type ClientSender = tokio_mpsc::UnboundedSender<BrokerToClient>;
     type WorkerSender = tokio_mpsc::UnboundedSender<BrokerToWorker>;
-    type WorkerArtifactFetcherSender = std_mpsc::Sender<Option<(PathBuf, u64)>>;
+    type WorkerArtifactFetcherSender =
+        std_mpsc::Sender<Result<(PathBuf, u64), GetArtifactForWorkerError>>;
 
     fn send_message_to_client(&mut self, sender: &mut Self::ClientSender, message: BrokerToClient) {
         sender.send(message).ok();
@@ -34,7 +35,7 @@ impl SchedulerDeps for PassThroughDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Option<(PathBuf, u64)>,
+        message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
     ) {
         sender.send(message).ok();
     }
