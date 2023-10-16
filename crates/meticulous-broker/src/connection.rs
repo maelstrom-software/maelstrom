@@ -3,8 +3,9 @@ use super::{
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
+use anyhow::Result;
 use meticulous_base::{proto, ClientId, WorkerId};
-use meticulous_util::{error::Result, net};
+use meticulous_util::net;
 use proto::Hello;
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};

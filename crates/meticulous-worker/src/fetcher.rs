@@ -1,13 +1,10 @@
 use super::config;
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use meticulous_util::{
-    error::Result,
-    net::{self, FixedSizeReader, Sha256Reader},
-};
+use meticulous_util::net::{self, FixedSizeReader, Sha256Reader};
 use slog::{debug, Logger};
 use std::{
     io::{BufReader, Read},

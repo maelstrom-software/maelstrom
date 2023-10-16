@@ -1,10 +1,10 @@
 use super::scheduler_task::{SchedulerMessage, SchedulerSender};
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
 };
-use meticulous_util::{error::Result, net};
+use meticulous_util::net;
 use slog::{debug, Logger};
 use std::{fs::File, io, net::TcpStream, sync::mpsc};
 

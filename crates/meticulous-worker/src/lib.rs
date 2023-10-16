@@ -6,6 +6,7 @@ mod dispatcher;
 mod executor;
 mod fetcher;
 
+use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{Broker, Config};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
@@ -14,7 +15,7 @@ use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobId, Sha256Digest,
 };
-use meticulous_util::{error::Result, net};
+use meticulous_util::net;
 use slog::{debug, error, info, o, Logger};
 use std::{path::PathBuf, process, thread};
 use tokio::{

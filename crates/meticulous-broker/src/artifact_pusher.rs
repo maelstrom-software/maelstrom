@@ -1,9 +1,7 @@
 use super::scheduler_task::{SchedulerMessage, SchedulerSender};
+use anyhow::Result;
 use meticulous_base::proto;
-use meticulous_util::{
-    error::Result,
-    net::{self, FixedSizeReader, Sha256Reader},
-};
+use meticulous_util::net::{self, FixedSizeReader, Sha256Reader};
 use proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use slog::{debug, Logger};
 use std::{

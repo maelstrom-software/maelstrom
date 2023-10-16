@@ -1,6 +1,6 @@
 //! Functions that are useful for reading and writing messages, to and from sockets and channels.
 
-use crate::error::Result;
+use anyhow::Result;
 use meticulous_base::Sha256Digest;
 use serde::{de::DeserializeOwned, Serialize};
 use sha2::Digest;

@@ -11,6 +11,7 @@ use super::{
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
+use anyhow::{Error, Result};
 use futures::{
     sink::SinkExt,
     stream::{SplitSink, SplitStream, StreamExt},
@@ -18,7 +19,6 @@ use futures::{
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use meticulous_base::{proto::BrokerToClient, ClientId};
-use meticulous_util::error::{Error, Result};
 use slog::{debug, error, o, Logger};
 use std::{
     collections::HashMap,

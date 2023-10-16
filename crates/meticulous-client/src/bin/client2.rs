@@ -1,4 +1,4 @@
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
@@ -6,7 +6,6 @@ use meticulous_base::{
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
 use meticulous_util::{
-    error::Result,
     net::{self, FixedSizeReader},
     OptionExt,
 };
