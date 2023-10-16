@@ -263,10 +263,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             let jid = self.queued_requests.pop_front().unwrap();
             let details = &self
                 .clients
-                .get(&jid.0)
+                .get(&jid.cid)
                 .unwrap()
                 .jobs
-                .get(&jid.1)
+                .get(&jid.cjid)
                 .unwrap()
                 .details;
             deps.send_message_to_worker(
@@ -296,10 +296,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             }
         }
 
-        self.queued_requests.retain(|JobId(cid, _)| *cid != id);
+        self.queued_requests.retain(|JobId { cid, .. }| *cid != id);
         for worker in self.workers.0.values_mut() {
             worker.pending.retain(|jid| {
-                jid.0 != id || {
+                jid.cid != id || {
                     deps.send_message_to_worker(
                         &mut worker.sender,
                         BrokerToWorker::CancelJob(*jid),
@@ -321,7 +321,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     ) {
         let client = self.clients.get_mut(&cid).unwrap();
         let mut job = Job::new(details);
-        let jid = JobId(cid, cjid);
+        let jid = JobId { cid, cjid };
         for layer in &job.details.layers {
             match self.cache.get_artifact(jid, layer.clone()) {
                 GetArtifact::Success => {
@@ -404,12 +404,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             return;
         }
 
-        let client = self.clients.get_mut(&jid.0).unwrap();
+        let client = self.clients.get_mut(&jid.cid).unwrap();
         deps.send_message_to_client(
             &mut client.sender,
-            BrokerToClient::JobResponse(jid.1, result),
+            BrokerToClient::JobResponse(jid.cjid, result),
         );
-        let job = client.jobs.remove(&jid.1).unwrap();
+        let job = client.jobs.remove(&jid.cjid).unwrap();
         for artifact in job.acquired_artifacts {
             self.cache.decrement_refcount(artifact);
         }
@@ -417,10 +417,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         if let Some(jid) = self.queued_requests.pop_front() {
             let details = &self
                 .clients
-                .get(&jid.0)
+                .get(&jid.cid)
                 .unwrap()
                 .jobs
-                .get(&jid.1)
+                .get(&jid.cjid)
                 .unwrap()
                 .details;
             // If there are any queued_requests, we can just pop one off of the front of
@@ -449,10 +449,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for jid in self.cache.got_artifact(digest.clone(), &path, bytes_used) {
             let job = self
                 .clients
-                .get_mut(&jid.0)
+                .get_mut(&jid.cid)
                 .unwrap()
                 .jobs
-                .get_mut(&jid.1)
+                .get_mut(&jid.cjid)
                 .unwrap();
             job.acquired_artifacts
                 .insert(digest.clone())

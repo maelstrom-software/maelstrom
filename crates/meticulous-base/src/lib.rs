@@ -13,7 +13,7 @@ use std::{
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ClientId(pub u32);
+pub struct ClientId(u32);
 
 impl From<u32> for ClientId {
     fn from(input: u32) -> Self {
@@ -29,7 +29,7 @@ impl Display for ClientId {
 
 /// A client-relative job ID. Clients can assign these however they like.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ClientJobId(pub u32);
+pub struct ClientJobId(u32);
 
 impl From<u32> for ClientJobId {
     fn from(input: u32) -> Self {
@@ -39,7 +39,10 @@ impl From<u32> for ClientJobId {
 
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct JobId(pub ClientId, pub ClientJobId);
+pub struct JobId {
+    pub cid: ClientId,
+    pub cjid: ClientJobId,
+}
 
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -61,7 +64,7 @@ pub enum JobResult {
 #[derive(
     Copy, Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
-pub struct WorkerId(pub u32);
+pub struct WorkerId(u32);
 
 impl From<u32> for WorkerId {
     fn from(input: u32) -> Self {
@@ -85,9 +88,13 @@ pub struct BrokerStatistics {
 
 /// A SHA-256 digest.
 #[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct Sha256Digest(pub [u8; 32]);
+pub struct Sha256Digest([u8; 32]);
 
 impl Sha256Digest {
+    pub fn new(input: [u8; 32]) -> Self {
+        Sha256Digest(input)
+    }
+
     /// Verify that two digests match. If not, return a [`Sha256DigestVerificationError`].
     pub fn verify(&self, expected: &Self) -> Result<(), Sha256DigestVerificationError> {
         if *self != *expected {

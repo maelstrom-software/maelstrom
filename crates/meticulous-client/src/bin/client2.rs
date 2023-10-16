@@ -162,7 +162,7 @@ impl Client {
             }
             hasher.update(&buf[..n]);
         }
-        let digest = Sha256Digest(hasher.finalize().into());
+        let digest = Sha256Digest::new(hasher.finalize().into());
         self.shared
             .lock
             .lock()

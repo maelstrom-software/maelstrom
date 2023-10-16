@@ -3,7 +3,7 @@
 use anyhow::Result;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
-    ClientJobId, JobDetails,
+    JobDetails,
 };
 use meticulous_util::net;
 use regex::Regex;
@@ -51,7 +51,7 @@ pub async fn main(_name: String, broker_addr: SocketAddr) -> Result<()> {
     net::write_message_to_async_socket(&mut write_stream, Hello::Client).await?;
     let mut map = HashMap::new();
     for (id, (binary, case)) in pairs.into_iter().enumerate() {
-        let id = ClientJobId(id as u32);
+        let id = (id as u32).into();
         map.insert(id, case.clone());
         net::write_message_to_async_socket(
             &mut write_stream,

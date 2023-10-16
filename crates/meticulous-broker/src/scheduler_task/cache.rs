@@ -216,7 +216,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         match entry {
             CacheEntry::Waiting(requests, clients) => {
                 requests.push(jid);
-                if clients.insert(jid.0) {
+                if clients.insert(jid.cid) {
                     GetArtifact::Get
                 } else {
                     GetArtifact::Wait
@@ -320,7 +320,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             let CacheEntry::Waiting(jids, clients) = e else {
                 return true;
             };
-            jids.retain(|jid| jid.0 != cid);
+            jids.retain(|jid| jid.cid != cid);
             clients.retain(|c| *c != cid);
             !jids.is_empty()
         })

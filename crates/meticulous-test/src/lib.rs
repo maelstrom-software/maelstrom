@@ -1,18 +1,18 @@
 #[macro_export]
 macro_rules! cjid {
     [$n:expr] => {
-        meticulous_base::ClientJobId($n)
+        meticulous_base::ClientJobId::from($n)
     };
 }
 
 #[macro_export]
 macro_rules! cid {
-    [$n:expr] => { meticulous_base::ClientId($n) };
+    [$n:expr] => { meticulous_base::ClientId::from($n) };
 }
 
 #[macro_export]
 macro_rules! wid {
-    [$n:expr] => { meticulous_base::WorkerId($n) };
+    [$n:expr] => { meticulous_base::WorkerId::from($n) };
 }
 
 #[macro_export]
@@ -21,7 +21,7 @@ macro_rules! jid {
         jid!($n, $n)
     };
     [$cid:expr, $cjid:expr] => {
-        meticulous_base::JobId(cid![$cid], cjid![$cjid])
+        meticulous_base::JobId{cid: cid![$cid], cjid: cjid![$cjid]}
     };
 }
 

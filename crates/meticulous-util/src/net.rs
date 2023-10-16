@@ -177,7 +177,7 @@ impl<InnerT> Sha256Reader<InnerT> {
     }
 
     pub fn finalize(self) -> (InnerT, Sha256Digest) {
-        (self.inner, Sha256Digest(self.hasher.finalize().into()))
+        (self.inner, Sha256Digest::new(self.hasher.finalize().into()))
     }
 }
 
