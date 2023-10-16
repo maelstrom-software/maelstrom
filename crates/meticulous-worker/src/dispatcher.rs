@@ -9,7 +9,7 @@ use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     JobDetails, JobId, JobResult, Sha256Digest,
 };
-use meticulous_util::OptionExt;
+use meticulous_util::ext::OptionExt as _;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     mem,

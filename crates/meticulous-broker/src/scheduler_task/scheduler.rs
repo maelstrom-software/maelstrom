@@ -7,8 +7,8 @@ use meticulous_base::{
     BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
 };
 use meticulous_util::{
+    ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
-    BoolExt, OptionExt,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},

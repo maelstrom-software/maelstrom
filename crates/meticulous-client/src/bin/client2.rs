@@ -6,8 +6,8 @@ use meticulous_base::{
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
 use meticulous_util::{
+    ext::OptionExt as _,
     net::{self, FixedSizeReader},
-    OptionExt,
 };
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
