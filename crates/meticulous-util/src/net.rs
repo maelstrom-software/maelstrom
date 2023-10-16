@@ -1,4 +1,4 @@
-//! Functions that are useful for reading and writing messages, to and from sockets and channels.
+//! Functions that are useful for reading/writing messages from/to sockets.
 
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};

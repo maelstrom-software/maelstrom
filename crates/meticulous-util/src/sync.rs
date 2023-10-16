@@ -1,3 +1,4 @@
+//! Functions that are useful for communicating between tasks and threads within a program.
 use tokio::sync::mpsc::UnboundedReceiver;
 
 /// Read messages from a channel, calling an individual function on each one. Return when there are

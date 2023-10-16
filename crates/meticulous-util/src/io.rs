@@ -1,8 +1,10 @@
+//! Useful [`Read`]ers.
+
 use meticulous_base::Sha256Digest;
 use sha2::{Digest as _, Sha256};
 use std::io::{self, Chain, Read, Repeat, Take};
 
-/// A reader wrapper that will always return a specific number of bytes, except on error. If the
+/// A [`Read`]er wrapper that will always reads a specific number of bytes, except on error. If the
 /// inner, wrapped, reader returns EOF before the specified number of bytes have been returned,
 /// this reader will pad the remaining bytes with zeros. If the inner reader returns more bytes
 /// than the specified number, this reader will return EOF early, like [Read::take].
@@ -24,6 +26,8 @@ impl<InnerT: Read> Read for FixedSizeReader<InnerT> {
     }
 }
 
+/// A [`Read`]er wrapper that computes the SHA-256 digest of the bytes that are read from its inner
+/// reader.
 pub struct Sha256Reader<InnerT> {
     inner: InnerT,
     hasher: Sha256,
@@ -37,6 +41,7 @@ impl<InnerT> Sha256Reader<InnerT> {
         }
     }
 
+    /// Deconstruct the reader and return the inner reader and computed digest.
     pub fn finalize(self) -> (InnerT, Sha256Digest) {
         (self.inner, Sha256Digest::new(self.hasher.finalize().into()))
     }
