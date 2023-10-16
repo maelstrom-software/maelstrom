@@ -1,3 +1,7 @@
+//! Core structs used by the broker, worker, and clients.
+
+pub mod proto;
+
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -7,8 +11,7 @@ use std::{
     str::FromStr,
 };
 
-pub mod proto;
-
+/// ID of a client connection. These share the same ID space as [`WorkerId`].
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientId(pub u32);
 
@@ -24,6 +27,7 @@ impl Display for ClientId {
     }
 }
 
+/// A client-relative job ID. Clients can assign these however they like.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ClientJobId(pub u32);
 
@@ -33,9 +37,11 @@ impl From<u32> for ClientJobId {
     }
 }
 
+/// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct JobId(pub ClientId, pub ClientJobId);
 
+/// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobDetails {
     pub program: String,
@@ -43,6 +49,7 @@ pub struct JobDetails {
     pub layers: Vec<Sha256Digest>,
 }
 
+/// All relevant information about the outcome of a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum JobResult {
     Exited(u8),
@@ -50,6 +57,7 @@ pub enum JobResult {
     Error(String),
 }
 
+/// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(
     Copy, Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
@@ -67,6 +75,7 @@ impl Display for WorkerId {
     }
 }
 
+/// Useful information for a client to display about the broker's state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BrokerStatistics {
     pub num_clients: u64,
@@ -74,10 +83,12 @@ pub struct BrokerStatistics {
     pub num_requests: u64,
 }
 
+/// A SHA-256 digest.
 #[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sha256Digest(pub [u8; 32]);
 
 impl Sha256Digest {
+    /// Verify that two digests match. If not, return a [`Sha256DigestVerificationError`].
     pub fn verify(&self, expected: &Self) -> Result<(), Sha256DigestVerificationError> {
         if *self != *expected {
             Err(Sha256DigestVerificationError::new(
@@ -159,6 +170,7 @@ impl Debug for Sha256Digest {
     }
 }
 
+/// Error indicating that two digests that should have matched didn't.
 #[derive(Debug)]
 pub struct Sha256DigestVerificationError {
     pub actual: Sha256Digest,
