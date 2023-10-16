@@ -1,9 +1,11 @@
 //! Code for the client binary.
 
 use anyhow::Result;
-use meticulous_base::{proto, ClientJobId, JobDetails};
+use meticulous_base::{
+    proto::{BrokerToClient, ClientToBroker, Hello},
+    ClientJobId, JobDetails,
+};
 use meticulous_util::net;
-use proto::{BrokerToClient, ClientToBroker, Hello};
 use regex::Regex;
 use std::collections::HashMap;
 use std::{net::SocketAddr, str};

@@ -6,7 +6,7 @@
 //! a tar file. The tar file is then embedded in this module as compile time.
 //!
 //! Second, it handles WebSockets. These are treated just like client connections.
-use super::{
+use crate::{
     connection,
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,

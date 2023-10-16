@@ -1,12 +1,11 @@
-use super::{
+use crate::{
     artifact_fetcher, artifact_pusher,
     scheduler_task::{SchedulerMessage, SchedulerSender},
     IdVendor,
 };
 use anyhow::Result;
-use meticulous_base::{proto, ClientId, WorkerId};
+use meticulous_base::{proto::Hello, ClientId, WorkerId};
 use meticulous_util::net;
-use proto::Hello;
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
 use std::{future::Future, path::PathBuf, sync::Arc, thread};

@@ -1,7 +1,7 @@
 //! Central processing module for the broker. Receives and sends messages to and from clients and
 //! workers.
 
-use super::cache::{Cache, CacheFs, GetArtifact};
+use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,

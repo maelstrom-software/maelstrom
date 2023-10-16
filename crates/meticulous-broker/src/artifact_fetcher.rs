@@ -1,4 +1,4 @@
-use super::scheduler_task::{SchedulerMessage, SchedulerSender};
+use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},

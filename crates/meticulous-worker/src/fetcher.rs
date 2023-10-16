@@ -1,4 +1,4 @@
-use super::config;
+use crate::config;
 use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
