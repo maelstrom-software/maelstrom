@@ -15,7 +15,7 @@ use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobId, Sha256Digest,
 };
-use meticulous_util::net;
+use meticulous_util::{net, sync};
 use slog::{debug, error, info, o, Logger};
 use std::{path::PathBuf, process, thread};
 use tokio::{
@@ -109,7 +109,7 @@ async fn dispatcher_main(
     let adapter =
         DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, config.broker, log);
     let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
-    net::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
+    sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }
 
 async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {

@@ -4,7 +4,7 @@ mod scheduler;
 use crate::config::{CacheBytesUsedTarget, CacheRoot};
 use cache::{Cache, StdCacheFs};
 use meticulous_base::proto::{BrokerToClient, BrokerToWorker};
-use meticulous_util::net;
+use meticulous_util::sync;
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{
@@ -92,7 +92,7 @@ impl SchedulerTask {
     /// ignore the error in that case. Besides, the [scheduler::SchedulerDeps] interface doesn't
     /// give us a way to return an error, for precisely this reason.
     pub async fn run(mut self) {
-        net::channel_reader(self.receiver, |msg| {
+        sync::channel_reader(self.receiver, |msg| {
             self.scheduler.receive_message(&mut PassThroughDeps, msg)
         })
         .await;
