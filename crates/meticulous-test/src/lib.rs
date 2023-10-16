@@ -77,16 +77,16 @@ macro_rules! details {
 #[macro_export]
 macro_rules! result {
     [1] => {
-        meticulous_base::JobResult::Exited(0)
+        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited(0)}
     };
     [2] => {
-        meticulous_base::JobResult::Exited(1)
+        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited(1)}
     };
     [3] => {
-        meticulous_base::JobResult::Signalled(15)
+        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Signalled(15)}
     };
     [$n:expr] => {
-        meticulous_base::JobResult::Exited($n)
+        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited($n)}
     };
 }
 

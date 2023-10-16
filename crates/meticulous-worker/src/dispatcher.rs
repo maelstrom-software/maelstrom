@@ -270,7 +270,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             if let Some(entry) = self.awaiting_layers.remove(&jid) {
                 self.deps.send_message_to_broker(WorkerToBroker(
                     jid,
-                    JobResult::Error(format!(
+                    JobResult::SystemError(format!(
                         "Failed to download and extract layer artifact {}",
                         digest
                     )),
@@ -717,7 +717,7 @@ mod tests {
         };
         ArtifactFetcher(digest!(42), None) => {
             CacheGotArtifactFailure(digest!(42)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Error(
+            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::SystemError(
                 "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a".to_string()))),
             CacheDecrementRefCount(digest!(41))
         };

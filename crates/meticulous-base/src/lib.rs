@@ -53,12 +53,30 @@ pub struct JobDetails {
     pub layers: Vec<Sha256Digest>,
 }
 
+/// How a job's process terminated. A process can either exit of its own accord or be killed by a
+/// signal.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum JobStatus {
+    Exited(u8),
+    Signalled(u8),
+}
+
 /// All relevant information about the outcome of a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum JobResult {
-    Exited(u8),
-    Signalled(u8),
-    Error(String),
+    /// The job was successfully executed.
+    Ran { status: JobStatus },
+
+    /// There was something wrong with the job that made it unable to be executed. This error
+    /// indicates that there was something wrong with the job itself, and thus is obstensibly the
+    /// fault of the client. An error of this type might happen if the execution path was't found, or
+    /// if the binary couldn't be executed because it was for the wrong architecture.
+    ExecutionError(String),
+
+    /// There was something wrong with the system that made it impossible to execute the job. There
+    /// isn't anything different the client could do to mitigate this error. An error of this type
+    /// might happen if the broker ran out of disk space, or there was a software error.
+    SystemError(String),
 }
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
