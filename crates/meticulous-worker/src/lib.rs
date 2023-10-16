@@ -8,7 +8,7 @@ mod fetcher;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
-use config::{Broker, Config};
+use config::{BrokerAddr, Config};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Handle;
 use meticulous_base::{
@@ -33,7 +33,7 @@ type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: Broker,
+    broker_addr: BrokerAddr,
     log: Logger,
 }
 
@@ -41,7 +41,7 @@ impl DispatcherAdapter {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        broker_addr: Broker,
+        broker_addr: BrokerAddr,
         log: Logger,
     ) -> Self {
         DispatcherAdapter {

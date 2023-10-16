@@ -8,26 +8,26 @@ use std::{
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(try_from = "String")]
-pub struct Broker(SocketAddr);
+pub struct BrokerAddr(SocketAddr);
 
-impl Broker {
+impl BrokerAddr {
     pub fn inner(&self) -> &SocketAddr {
         &self.0
     }
 }
 
-impl TryFrom<String> for Broker {
+impl TryFrom<String> for BrokerAddr {
     type Error = io::Error;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         let addrs: Vec<SocketAddr> = value.to_socket_addrs()?.collect();
         // It's not clear how we could end up with an empty iterator. We'll assume that's
         // impossible until proven wrong.
-        Ok(Broker(*addrs.get(0).unwrap()))
+        Ok(BrokerAddr(*addrs.get(0).unwrap()))
     }
 }
 
-impl Debug for Broker {
+impl Debug for BrokerAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         self.0.fmt(f)
     }
@@ -137,7 +137,7 @@ impl Debug for CacheBytesUsedTarget {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Socket address of broker.
-    pub broker: Broker,
+    pub broker: BrokerAddr,
 
     /// Name of the worker provided to the broker.
     pub name: Name,

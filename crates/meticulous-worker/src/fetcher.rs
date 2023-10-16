@@ -22,7 +22,7 @@ fn read_to_end(mut input: impl Read) -> Result<()> {
 pub fn main(
     digest: &Sha256Digest,
     path: PathBuf,
-    broker_addr: config::Broker,
+    broker_addr: config::BrokerAddr,
     log: &mut Logger,
 ) -> Result<u64> {
     let mut writer = TcpStream::connect(broker_addr.inner())?;

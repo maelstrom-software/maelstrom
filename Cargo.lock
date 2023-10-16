@@ -1806,18 +1806,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meticulous-prototypes"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "flate2",
- "meticulous-base",
- "sha2",
- "tar",
-]
-
-[[package]]
 name = "meticulous-test"
 version = "0.1.0"
 
