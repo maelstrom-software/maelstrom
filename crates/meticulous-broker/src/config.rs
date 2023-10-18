@@ -1,4 +1,5 @@
 use anyhow::Result;
+use bytesize::ByteSize;
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -97,7 +98,7 @@ impl From<u64> for CacheBytesUsedTarget {
 
 impl Debug for CacheBytesUsedTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0.fmt(f)
+        ByteSize::b(self.0).fmt(f)
     }
 }
 

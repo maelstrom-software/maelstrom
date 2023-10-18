@@ -77,16 +77,32 @@ macro_rules! details {
 #[macro_export]
 macro_rules! result {
     [1] => {
-        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited(0)}
+        meticulous_base::JobResult::Ran{
+            status: meticulous_base::JobStatus::Exited(0),
+            stdout: meticulous_base::JobOutputResult::None,
+            stderr: meticulous_base::JobOutputResult::None,
+        }
     };
     [2] => {
-        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited(1)}
+        meticulous_base::JobResult::Ran{
+            status: meticulous_base::JobStatus::Exited(1),
+            stdout: meticulous_base::JobOutputResult::None,
+            stderr: meticulous_base::JobOutputResult::None,
+        }
     };
     [3] => {
-        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Signalled(15)}
+        meticulous_base::JobResult::Ran{
+            status: meticulous_base::JobStatus::Signalled(15),
+            stdout: meticulous_base::JobOutputResult::None,
+            stderr: meticulous_base::JobOutputResult::None,
+        }
     };
     [$n:expr] => {
-        meticulous_base::JobResult::Ran{status: meticulous_base::JobStatus::Exited($n)}
+        meticulous_base::JobResult::Ran{
+            status: meticulous_base::JobStatus::Exited($n),
+            stdout: meticulous_base::JobOutputResult::None,
+            stderr: meticulous_base::JobOutputResult::None,
+        }
     };
 }
 

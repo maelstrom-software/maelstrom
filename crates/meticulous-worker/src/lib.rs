@@ -8,7 +8,7 @@ mod fetcher;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
-use config::{BrokerAddr, Config};
+use config::{BrokerAddr, Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Handle;
 use meticulous_base::{
@@ -34,6 +34,7 @@ struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
     broker_addr: BrokerAddr,
+    inline_limit: InlineLimit,
     log: Logger,
 }
 
@@ -42,12 +43,14 @@ impl DispatcherAdapter {
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
         broker_addr: BrokerAddr,
+        inline_limit: InlineLimit,
         log: Logger,
     ) -> Self {
         DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
             broker_addr,
+            inline_limit,
             log,
         }
     }
@@ -67,7 +70,7 @@ impl DispatcherDeps for DispatcherAdapter {
             .log
             .new(o!("id" => format!("{id:?}"), "details" => format!("{details:?}")));
         debug!(log, "job starting");
-        executor::start(details, move |result| {
+        executor::start(details, self.inline_limit, move |result| {
             debug!(log, "job completed"; "result" => ?result);
             sender.send(Message::Executor(id, result)).ok();
         })
@@ -106,8 +109,13 @@ async fn dispatcher_main(
         config.cache_bytes_used_target,
         log.clone(),
     );
-    let adapter =
-        DispatcherAdapter::new(dispatcher_sender, broker_socket_sender, config.broker, log);
+    let adapter = DispatcherAdapter::new(
+        dispatcher_sender,
+        broker_socket_sender,
+        config.broker,
+        config.inline_limit,
+        log,
+    );
     let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
     sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
 }

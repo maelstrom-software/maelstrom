@@ -61,11 +61,54 @@ pub enum JobStatus {
     Signalled(u8),
 }
 
+/// The result for stdout or stderr for a job.
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
+pub enum JobOutputResult {
+    /// There was no output.
+    None,
+
+    /// The output is contained in the provided slice.
+    Inline(Box<[u8]>),
+
+    /// The output was truncated to the provided slice, the size of which is based on the job
+    /// request. The actual size of the output is also provided, though the remaining bytes will
+    /// have been thrown away.
+    Truncated(Box<[u8]>, u64),
+    /*
+     * To come:
+    /// The output was stored in a digest, and is of the provided size.
+    External(Sha256Digest, u64),
+    */
+}
+
+impl Debug for JobOutputResult {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            JobOutputResult::None => write!(f, "None"),
+            JobOutputResult::Inline(bytes) => {
+                let pretty_bytes = String::from_utf8_lossy(bytes);
+                f.debug_tuple("Inline").field(&pretty_bytes).finish()
+            }
+            JobOutputResult::Truncated(bytes, len) => {
+                let pretty_bytes = String::from_utf8_lossy(bytes);
+                f.debug_tuple("Truncated")
+                    .field(&pretty_bytes)
+                    .field(len)
+                    .finish()
+            }
+        }
+    }
+}
+
 /// All relevant information about the outcome of a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum JobResult {
     /// The job was successfully executed.
-    Ran { status: JobStatus },
+    Ran {
+        status: JobStatus,
+        stdout: JobOutputResult,
+        stderr: JobOutputResult,
+    },
 
     /// There was something wrong with the job that made it unable to be executed. This error
     /// indicates that there was something wrong with the job itself, and thus is obstensibly the

@@ -58,6 +58,10 @@ struct CliOptions {
     /// strictly, so it's best to be conservative
     #[arg(short = 'B', long)]
     cache_bytes_used_target: Option<u64>,
+
+    /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    #[arg(short = 'i', long)]
+    inline_limit: Option<u64>,
 }
 
 impl Default for CliOptions {
@@ -69,7 +73,8 @@ impl Default for CliOptions {
             name: Some(gethostname::gethostname().into_string().unwrap()),
             slots: Some(num_cpus::get().try_into().unwrap()),
             cache_root: Some("var/cache/meticulous-worker".into()),
-            cache_bytes_used_target: Some(100000000),
+            cache_bytes_used_target: Some(1_000_000_000),
+            inline_limit: Some(1_000_000),
         }
     }
 }
@@ -96,6 +101,9 @@ impl Serialize for CliOptions {
         }
         if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
             map.serialize_entry("cache_bytes_used_target", cache_bytes_used_target)?;
+        }
+        if let Some(inline_limit) = &self.inline_limit {
+            map.serialize_entry("inline_limit", inline_limit)?;
         }
         map.end()
     }

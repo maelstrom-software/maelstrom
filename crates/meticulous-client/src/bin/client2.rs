@@ -38,13 +38,16 @@ broker = "127.0.0.1:1234"
 tmpdir = "run/client/tmp"
 
 [[jobs]]
-program = "foo"
-arguments = ["arg1", "arg2"]
-layers = ["web"]
+program = "echo"
+arguments = ["a"]
 
 [[jobs]]
-program = "bar"
-arguments = ["barg1", "barg2"]
+program = "echo"
+arguments = ["a", "b"]
+
+[[jobs]]
+program = "echo"
+arguments = ["a", "b", "c"]
 
 [layers]
 web = "target/web.tar"

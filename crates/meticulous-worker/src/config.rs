@@ -1,3 +1,4 @@
+use bytesize::ByteSize;
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -129,7 +130,29 @@ impl From<u64> for CacheBytesUsedTarget {
 
 impl Debug for CacheBytesUsedTarget {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0.fmt(f)
+        ByteSize::b(self.0).fmt(f)
+    }
+}
+
+#[derive(Clone, Copy, Deserialize)]
+#[serde(from = "u64")]
+pub struct InlineLimit(u64);
+
+impl InlineLimit {
+    pub fn into_inner(self) -> u64 {
+        self.0
+    }
+}
+
+impl From<u64> for InlineLimit {
+    fn from(value: u64) -> Self {
+        InlineLimit(value)
+    }
+}
+
+impl Debug for InlineLimit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+        ByteSize::b(self.0).fmt(f)
     }
 }
 
@@ -151,4 +174,7 @@ pub struct Config {
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
     pub cache_bytes_used_target: CacheBytesUsedTarget,
+
+    /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    pub inline_limit: InlineLimit,
 }
