@@ -1790,6 +1790,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "meticulous-cargo-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "gethostname 0.4.3",
+ "meticulous-base",
+ "meticulous-util",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "meticulous-client"
 version = "0.1.0"
 dependencies = [
