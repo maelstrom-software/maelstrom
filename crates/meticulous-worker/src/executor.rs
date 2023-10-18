@@ -88,16 +88,18 @@ async fn output_reader(
     let mut take = stream.take(inline_limit);
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
-    let extra = io::copy(&mut take.into_inner(), &mut io::sink()).await?;
-    if extra == 0 {
+    let truncated = io::copy(&mut take.into_inner(), &mut io::sink()).await?;
+    if truncated == 0 {
         if buf.is_empty() {
             Ok(JobOutputResult::None)
         } else {
             Ok(JobOutputResult::Inline(buf))
         }
     } else {
-        let total = (buf.len() as u64) + extra;
-        Ok(JobOutputResult::Truncated(buf, total))
+        Ok(JobOutputResult::Truncated {
+            first: buf,
+            truncated,
+        })
     }
 }
 
@@ -308,7 +310,10 @@ mod tests {
             start_and_await(bash!("echo a"), 0).await,
             JobResult::Ran {
                 status: JobStatus::Exited(0),
-                stdout: JobOutputResult::Truncated(b"".to_vec().into_boxed_slice(), 2),
+                stdout: JobOutputResult::Truncated {
+                    first: b"".to_vec().into_boxed_slice(),
+                    truncated: 2
+                },
                 stderr: JobOutputResult::None,
             }
         );
@@ -316,7 +321,10 @@ mod tests {
             start_and_await(bash!("echo a"), 1).await,
             JobResult::Ran {
                 status: JobStatus::Exited(0),
-                stdout: JobOutputResult::Truncated(b"a".to_vec().into_boxed_slice(), 2),
+                stdout: JobOutputResult::Truncated {
+                    first: b"a".to_vec().into_boxed_slice(),
+                    truncated: 1
+                },
                 stderr: JobOutputResult::None,
             }
         );
@@ -345,7 +353,10 @@ mod tests {
             JobResult::Ran {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
-                stderr: JobOutputResult::Truncated(b"".to_vec().into_boxed_slice(), 2),
+                stderr: JobOutputResult::Truncated {
+                    first: b"".to_vec().into_boxed_slice(),
+                    truncated: 2
+                },
             }
         );
         assert_eq!(
@@ -353,7 +364,10 @@ mod tests {
             JobResult::Ran {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
-                stderr: JobOutputResult::Truncated(b"a".to_vec().into_boxed_slice(), 2),
+                stderr: JobOutputResult::Truncated {
+                    first: b"a".to_vec().into_boxed_slice(),
+                    truncated: 1
+                },
             }
         );
         assert_eq!(

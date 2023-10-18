@@ -79,7 +79,7 @@ pub enum JobOutputResult {
     /// The output was truncated to the provided slice, the size of which is based on the job
     /// request. The actual size of the output is also provided, though the remaining bytes will
     /// have been thrown away.
-    Truncated(Box<[u8]>, u64),
+    Truncated { first: Box<[u8]>, truncated: u64 },
     /*
      * To come:
     /// The output was stored in a digest, and is of the provided size.
@@ -95,11 +95,11 @@ impl Debug for JobOutputResult {
                 let pretty_bytes = String::from_utf8_lossy(bytes);
                 f.debug_tuple("Inline").field(&pretty_bytes).finish()
             }
-            JobOutputResult::Truncated(bytes, len) => {
-                let pretty_bytes = String::from_utf8_lossy(bytes);
-                f.debug_tuple("Truncated")
-                    .field(&pretty_bytes)
-                    .field(len)
+            JobOutputResult::Truncated { first, truncated } => {
+                let pretty_first = String::from_utf8_lossy(first);
+                f.debug_struct("Truncated")
+                    .field("first", &pretty_first)
+                    .field("truncated", truncated)
                     .finish()
             }
         }

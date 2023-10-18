@@ -241,13 +241,10 @@ fn main() -> Result<ExitCode> {
                     JobOutputResult::Inline(bytes) => {
                         io::stdout().write_all(&bytes)?;
                     }
-                    JobOutputResult::Truncated(bytes, total) => {
-                        io::stdout().write_all(&bytes)?;
+                    JobOutputResult::Truncated { first, truncated } => {
+                        io::stdout().write_all(&first)?;
                         io::stdout().flush()?;
-                        eprintln!(
-                            "job {cjid}: stdout truncated, {} bytes lost",
-                            total - (bytes.len() as u64)
-                        );
+                        eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
                     }
                 }
                 match stderr {
@@ -255,12 +252,9 @@ fn main() -> Result<ExitCode> {
                     JobOutputResult::Inline(bytes) => {
                         io::stderr().write_all(&bytes)?;
                     }
-                    JobOutputResult::Truncated(bytes, total) => {
-                        io::stderr().write_all(&bytes)?;
-                        eprintln!(
-                            "job {cjid}: stderr truncated, {} bytes lost",
-                            total - (bytes.len() as u64)
-                        );
+                    JobOutputResult::Truncated { first, truncated } => {
+                        io::stderr().write_all(&first)?;
+                        eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
                     }
                 }
                 match status {
