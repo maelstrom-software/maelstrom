@@ -38,6 +38,12 @@ impl From<u32> for ClientJobId {
     }
 }
 
+impl Display for ClientJobId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct JobId {

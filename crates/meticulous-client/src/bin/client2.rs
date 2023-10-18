@@ -3,7 +3,7 @@ use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
-    ClientJobId, JobDetails, JobResult, Sha256Digest,
+    ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus, Sha256Digest,
 };
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use serde::Deserialize;
@@ -11,9 +11,10 @@ use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Write as _},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
+    process::ExitCode,
     sync::{Arc, Condvar, Mutex},
     thread,
 };
@@ -34,23 +35,27 @@ struct Config {
 }
 
 const FILE: &str = r#"
-broker = "127.0.0.1:1234"
-tmpdir = "run/client/tmp"
+{
+    "broker": "127.0.0.1:1234",
+    "tmpdir": "run/client/tmp",
 
-[[jobs]]
-program = "echo"
-arguments = ["a"]
+    "jobs": [
+        {
+            "program": "bash",
+            "arguments": ["-c", "echo foo >&2"]
+        },
+        {
+            "program": "bash",
+            "arguments": ["-c", "echo foobar && kill $$"]
+        },
+        {
+            "program": "bash",
+            "arguments": ["-c", "echo blah && exit 2"]
+        }
+    ],
 
-[[jobs]]
-program = "echo"
-arguments = ["a", "b"]
-
-[[jobs]]
-program = "echo"
-arguments = ["a", "b", "c"]
-
-[layers]
-web = "target/web.tar"
+    "layers": {}
+}
 "#;
 
 struct Client {
@@ -194,10 +199,8 @@ impl Client {
     }
 }
 
-fn main() -> Result<()> {
-    let config: Config = toml::from_str(FILE).unwrap();
-
-    println!("{:?}", config);
+fn main() -> Result<ExitCode> {
+    let config: Config = serde_json::from_str(FILE).unwrap();
 
     let mut client = Client::new(config.broker.parse()?, config.tmpdir.into())?;
     let mut layer_map: HashMap<String, Sha256Digest> = HashMap::default();
@@ -224,5 +227,59 @@ fn main() -> Result<()> {
         })?;
     }
     client.wait_for_oustanding_jobs();
-    Ok(())
+    let jobs = std::mem::take(&mut client.shared.lock.lock().unwrap().jobs);
+    let mut exit_code = ExitCode::from(0);
+    for (cjid, result) in jobs {
+        match result {
+            JobResult::Ran {
+                status,
+                stdout,
+                stderr,
+            } => {
+                match stdout {
+                    JobOutputResult::None => {}
+                    JobOutputResult::Inline(bytes) => {
+                        io::stdout().write_all(&bytes)?;
+                    }
+                    JobOutputResult::Truncated(bytes, total) => {
+                        io::stdout().write_all(&bytes)?;
+                        io::stdout().flush()?;
+                        eprintln!(
+                            "job {cjid}: stdout truncated, {} bytes lost",
+                            total - (bytes.len() as u64)
+                        );
+                    }
+                }
+                match stderr {
+                    JobOutputResult::None => {}
+                    JobOutputResult::Inline(bytes) => {
+                        io::stderr().write_all(&bytes)?;
+                    }
+                    JobOutputResult::Truncated(bytes, total) => {
+                        io::stderr().write_all(&bytes)?;
+                        eprintln!(
+                            "job {cjid}: stderr truncated, {} bytes lost",
+                            total - (bytes.len() as u64)
+                        );
+                    }
+                }
+                match status {
+                    JobStatus::Exited(0) => {}
+                    JobStatus::Exited(code) => {
+                        io::stdout().flush()?;
+                        eprintln!("job {cjid}: exited with code {code}");
+                        exit_code = ExitCode::from(code)
+                    }
+                    JobStatus::Signalled(signum) => {
+                        io::stdout().flush()?;
+                        eprintln!("job {cjid}: killed by signal {signum}");
+                        exit_code = ExitCode::from(1)
+                    }
+                }
+            }
+            JobResult::ExecutionError(err) => eprintln!("job {cjid}: execution error: {err}"),
+            JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
+        }
+    }
+    Ok(exit_code)
 }
