@@ -130,33 +130,18 @@ impl ClientReceiver {
     }
 }
 
-#[derive(Default)]
-struct ClientLocked {
-    artifacts: HashMap<Sha256Digest, PathBuf>,
-}
-
-struct ClientShared {
-    lock: Mutex<ClientLocked>,
-    broker_addr: SocketAddr,
-}
-
 struct Client {
     sender_sender: SyncSender<JobDetails>,
     sender_handle: JoinHandle<Result<u32>>,
     receiver_sender: SyncSender<ClientReceiverMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
-    shared: Arc<ClientShared>,
+    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
 }
 
 impl Client {
     fn new(broker_addr: SocketAddr) -> Result<Self> {
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
-
-        let shared = ClientShared {
-            lock: Mutex::default(),
-            broker_addr,
-        };
 
         let sender_stream = stream.try_clone()?;
         let receiver_stream = stream;
@@ -178,22 +163,32 @@ impl Client {
         };
         let receiver_handle = thread::spawn(|| receiver.main());
 
+        let artifacts = Arc::new(Mutex::new(HashMap::default()));
+        let artifacts_clone = artifacts.clone();
+
         let client = Client {
             sender_sender,
             sender_handle,
             receiver_sender,
             receiver_handle,
-            shared: Arc::new(shared),
+            artifacts,
         };
 
-        let shared = client.shared.clone();
-        thread::spawn(|| Self::receiver_main(shared, receiver_sender_clone, receiver_stream));
+        thread::spawn(move || {
+            Self::receiver_main(
+                artifacts_clone,
+                broker_addr,
+                receiver_sender_clone,
+                receiver_stream,
+            )
+        });
 
         Ok(client)
     }
 
     fn receiver_main(
-        shared: Arc<ClientShared>,
+        artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
+        broker_addr: SocketAddr,
         receiver_sender: SyncSender<ClientReceiverMessage>,
         mut stream: TcpStream,
     ) -> Result<()> {
@@ -205,15 +200,7 @@ impl Client {
                         .unwrap();
                 }
                 BrokerToClient::TransferArtifact(digest) => {
-                    let broker_addr = shared.broker_addr;
-                    let path = shared
-                        .lock
-                        .lock()
-                        .unwrap()
-                        .artifacts
-                        .get(&digest)
-                        .unwrap()
-                        .clone();
+                    let path = artifacts.lock().unwrap().get(&digest).unwrap().clone();
                     thread::spawn(move || Self::transfer_artifact_main(broker_addr, digest, path));
                 }
                 BrokerToClient::StatisticsResponse(_) => {
@@ -262,11 +249,9 @@ impl Client {
             hasher.update(&buf[..n]);
         }
         let digest = Sha256Digest::new(hasher.finalize().into());
-        self.shared
-            .lock
+        self.artifacts
             .lock()
             .unwrap()
-            .artifacts
             .insert(digest.clone(), path)
             .assert_is_none();
         Ok(digest)
