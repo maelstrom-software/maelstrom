@@ -186,13 +186,14 @@ impl Client {
         Ok(())
     }
 
-    fn wait_for_oustanding_jobs(&mut self) {
+    fn wait_for_oustanding_jobs(self) -> HashMap<ClientJobId, JobResult> {
         let _ = self
             .shared
             .no_outstanding_jobs
             .wait_while(self.shared.lock.lock().unwrap(), |locked| {
                 locked.outstanding_jobs != 0
             });
+        std::mem::take(&mut self.shared.lock.lock().unwrap().jobs)
     }
 }
 
@@ -264,8 +265,7 @@ fn main() -> Result<ExitCode> {
             },
         })?;
     }
-    client.wait_for_oustanding_jobs();
-    let jobs = std::mem::take(&mut client.shared.lock.lock().unwrap().jobs);
+    let jobs = client.wait_for_oustanding_jobs();
     let mut exit_code = ExitCode::from(0);
     for (cjid, result) in jobs {
         match result {
