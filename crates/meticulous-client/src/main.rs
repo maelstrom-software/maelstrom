@@ -130,6 +130,60 @@ impl ClientReceiver {
     }
 }
 
+struct ClientSocketReceiver {
+    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
+    broker_addr: SocketAddr,
+    receiver_sender: SyncSender<ClientReceiverMessage>,
+    stream: TcpStream,
+}
+
+impl ClientSocketReceiver {
+    fn main(mut self) -> Result<()> {
+        loop {
+            match net::read_message_from_socket::<BrokerToClient>(&mut self.stream)? {
+                BrokerToClient::JobResponse(cjid, result) => {
+                    self.receiver_sender
+                        .send(ClientReceiverMessage::Result(cjid, result))
+                        .unwrap();
+                }
+                BrokerToClient::TransferArtifact(digest) => {
+                    let path = self.artifacts.lock().unwrap().get(&digest).unwrap().clone();
+                    let artifact_pusher = ClientArtifactPusher {
+                        broker_addr: self.broker_addr,
+                        path,
+                        digest,
+                    };
+                    thread::spawn(move || artifact_pusher.main());
+                }
+                BrokerToClient::StatisticsResponse(_) => {
+                    unimplemented!("this client doesn't send statistics requests")
+                }
+            }
+        }
+    }
+}
+
+struct ClientArtifactPusher {
+    broker_addr: SocketAddr,
+    path: PathBuf,
+    digest: Sha256Digest,
+}
+
+impl ClientArtifactPusher {
+    fn main(self) -> Result<()> {
+        let file = File::open(self.path)?;
+        let mut stream = TcpStream::connect(self.broker_addr)?;
+        let size = file.metadata()?.len();
+        let mut file = FixedSizeReader::new(file, size);
+        net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
+        net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(self.digest, size))?;
+        let copied = io::copy(&mut file, &mut stream)?;
+        assert_eq!(copied, size);
+        let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
+        resp.map_err(|e| anyhow!("Error from broker: {e}"))
+    }
+}
+
 struct Client {
     sender_sender: SyncSender<JobDetails>,
     sender_handle: JoinHandle<Result<u32>>,
@@ -144,7 +198,6 @@ impl Client {
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
         let sender_stream = stream.try_clone()?;
-        let receiver_stream = stream;
 
         let (sender_sender, sender_receiver) = mpsc::sync_channel(1000);
 
@@ -156,7 +209,6 @@ impl Client {
         let sender_handle = thread::spawn(|| sender.main());
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
-        let receiver_sender_clone = receiver_sender.clone();
 
         let receiver = ClientReceiver {
             receiver: receiver_receiver,
@@ -164,67 +216,23 @@ impl Client {
         let receiver_handle = thread::spawn(|| receiver.main());
 
         let artifacts = Arc::new(Mutex::new(HashMap::default()));
-        let artifacts_clone = artifacts.clone();
 
-        let client = Client {
+        let socket_receiver = ClientSocketReceiver {
+            artifacts: artifacts.clone(),
+            broker_addr,
+            receiver_sender: receiver_sender.clone(),
+            stream,
+        };
+
+        thread::spawn(move || socket_receiver.main());
+
+        Ok(Client {
             sender_sender,
             sender_handle,
             receiver_sender,
             receiver_handle,
             artifacts,
-        };
-
-        thread::spawn(move || {
-            Self::receiver_main(
-                artifacts_clone,
-                broker_addr,
-                receiver_sender_clone,
-                receiver_stream,
-            )
-        });
-
-        Ok(client)
-    }
-
-    fn receiver_main(
-        artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
-        broker_addr: SocketAddr,
-        receiver_sender: SyncSender<ClientReceiverMessage>,
-        mut stream: TcpStream,
-    ) -> Result<()> {
-        loop {
-            match net::read_message_from_socket::<BrokerToClient>(&mut stream)? {
-                BrokerToClient::JobResponse(cjid, result) => {
-                    receiver_sender
-                        .send(ClientReceiverMessage::Result(cjid, result))
-                        .unwrap();
-                }
-                BrokerToClient::TransferArtifact(digest) => {
-                    let path = artifacts.lock().unwrap().get(&digest).unwrap().clone();
-                    thread::spawn(move || Self::transfer_artifact_main(broker_addr, digest, path));
-                }
-                BrokerToClient::StatisticsResponse(_) => {
-                    unimplemented!("this client doesn't send statistics requests")
-                }
-            }
-        }
-    }
-
-    fn transfer_artifact_main(
-        broker_addr: SocketAddr,
-        digest: Sha256Digest,
-        path: PathBuf,
-    ) -> Result<()> {
-        let file = File::open(path)?;
-        let mut stream = TcpStream::connect(broker_addr)?;
-        let size = file.metadata()?.len();
-        let mut file = FixedSizeReader::new(file, size);
-        net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
-        net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
-        let copied = io::copy(&mut file, &mut stream)?;
-        assert_eq!(copied, size);
-        let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
-        resp.map_err(|e| anyhow!("Error from broker: {e}"))
+        })
     }
 
     #[allow(dead_code)]
@@ -258,8 +266,7 @@ impl Client {
     }
 
     fn add_job(&mut self, details: JobDetails) -> Result<()> {
-        self.sender_sender.send(details)?;
-        Ok(())
+        self.sender_sender.send(details).map_err(|e| e.into())
     }
 
     fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
