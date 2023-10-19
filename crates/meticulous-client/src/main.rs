@@ -13,7 +13,7 @@ use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{self, BufRead, Read, Write as _},
+    io::{self, Read, Write as _},
     net::{SocketAddr, TcpStream, ToSocketAddrs as _},
     path::PathBuf,
     process::ExitCode,
@@ -54,26 +54,75 @@ struct ClientReceiver {
 }
 
 impl ClientReceiver {
-    fn main(self) -> Result<HashMap<ClientJobId, JobResult>> {
-        let mut jobs = HashMap::default();
-        let mut stop_at_num_jobs: Option<usize> = None;
+    fn main(self) -> Result<ExitCode> {
+        let mut jobs_completed = 0u32;
+        let mut stop_at_num_jobs: Option<u32> = None;
+        let mut exit_code = ExitCode::from(0);
+        let mut stdout_locked = io::stdout().lock();
+        let mut stderr_locked = io::stderr().lock();
         loop {
             let msg = self.receiver.recv()?;
             match msg {
                 ClientReceiverMessage::Result(cjid, result) => {
-                    jobs.insert(cjid, result).assert_is_none();
-                    if let Some(stop_at_num_jobs) = stop_at_num_jobs {
-                        if jobs.len() == stop_at_num_jobs {
-                            return Ok(jobs);
+                    match result {
+                        JobResult::Ran {
+                            status,
+                            stdout,
+                            stderr,
+                        } => {
+                            match stdout {
+                                JobOutputResult::None => {}
+                                JobOutputResult::Inline(bytes) => {
+                                    stdout_locked.write_all(&bytes)?;
+                                }
+                                JobOutputResult::Truncated { first, truncated } => {
+                                    stdout_locked.write_all(&first)?;
+                                    stdout_locked.flush()?;
+                                    eprintln!(
+                                        "job {cjid}: stdout truncated, {truncated} bytes lost"
+                                    );
+                                }
+                            }
+                            match stderr {
+                                JobOutputResult::None => {}
+                                JobOutputResult::Inline(bytes) => {
+                                    stderr_locked.write_all(&bytes)?;
+                                }
+                                JobOutputResult::Truncated { first, truncated } => {
+                                    stderr_locked.write_all(&first)?;
+                                    eprintln!(
+                                        "job {cjid}: stderr truncated, {truncated} bytes lost"
+                                    );
+                                }
+                            }
+                            match status {
+                                JobStatus::Exited(0) => {}
+                                JobStatus::Exited(code) => {
+                                    stdout_locked.flush()?;
+                                    eprintln!("job {cjid}: exited with code {code}");
+                                    exit_code = ExitCode::from(code)
+                                }
+                                JobStatus::Signalled(signum) => {
+                                    stdout_locked.flush()?;
+                                    eprintln!("job {cjid}: killed by signal {signum}");
+                                    exit_code = ExitCode::from(1)
+                                }
+                            }
                         }
+                        JobResult::ExecutionError(err) => {
+                            eprintln!("job {cjid}: execution error: {err}")
+                        }
+                        JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
+                    }
+                    jobs_completed = jobs_completed.checked_add(1).unwrap();
+                    if stop_at_num_jobs == Some(jobs_completed) {
+                        return Ok(exit_code);
                     }
                 }
                 ClientReceiverMessage::SenderCompleted(num_jobs) => {
-                    let num_jobs = num_jobs as usize;
-                    if jobs.len() == num_jobs {
-                        return Ok(jobs);
-                    } else {
-                        stop_at_num_jobs = Some(num_jobs);
+                    stop_at_num_jobs = Some(num_jobs);
+                    if stop_at_num_jobs == Some(jobs_completed) {
+                        return Ok(exit_code);
                     }
                 }
             }
@@ -95,7 +144,7 @@ struct Client {
     sender_sender: SyncSender<JobDetails>,
     sender_handle: JoinHandle<Result<u32>>,
     receiver_sender: SyncSender<ClientReceiverMessage>,
-    receiver_handle: JoinHandle<Result<HashMap<ClientJobId, JobResult>>>,
+    receiver_handle: JoinHandle<Result<ExitCode>>,
     shared: Arc<ClientShared>,
 }
 
@@ -228,7 +277,7 @@ impl Client {
         Ok(())
     }
 
-    fn wait_for_oustanding_jobs(self) -> Result<HashMap<ClientJobId, JobResult>> {
+    fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
         drop(self.sender_sender);
         let num_jobs = self.sender_handle.join().unwrap()?;
         self.receiver_sender
@@ -265,14 +314,6 @@ struct JobDescription {
     layers: Option<Vec<String>>,
 }
 
-trait BufReadExt: BufRead {
-    fn has_data_left_2(&mut self) -> io::Result<bool> {
-        self.fill_buf().map(|b| !b.is_empty())
-    }
-}
-
-impl<T: BufRead> BufReadExt for T {}
-
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let mut client = Client::new(parse_socket_addr(cli_options.broker)?)?;
@@ -306,55 +347,7 @@ fn main() -> Result<ExitCode> {
             },
         })?;
     }
-    let jobs = client.wait_for_oustanding_jobs()?;
-    let mut exit_code = ExitCode::from(0);
-    for (cjid, result) in jobs {
-        match result {
-            JobResult::Ran {
-                status,
-                stdout,
-                stderr,
-            } => {
-                match stdout {
-                    JobOutputResult::None => {}
-                    JobOutputResult::Inline(bytes) => {
-                        io::stdout().write_all(&bytes)?;
-                    }
-                    JobOutputResult::Truncated { first, truncated } => {
-                        io::stdout().write_all(&first)?;
-                        io::stdout().flush()?;
-                        eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
-                    }
-                }
-                match stderr {
-                    JobOutputResult::None => {}
-                    JobOutputResult::Inline(bytes) => {
-                        io::stderr().write_all(&bytes)?;
-                    }
-                    JobOutputResult::Truncated { first, truncated } => {
-                        io::stderr().write_all(&first)?;
-                        eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
-                    }
-                }
-                match status {
-                    JobStatus::Exited(0) => {}
-                    JobStatus::Exited(code) => {
-                        io::stdout().flush()?;
-                        eprintln!("job {cjid}: exited with code {code}");
-                        exit_code = ExitCode::from(code)
-                    }
-                    JobStatus::Signalled(signum) => {
-                        io::stdout().flush()?;
-                        eprintln!("job {cjid}: killed by signal {signum}");
-                        exit_code = ExitCode::from(1)
-                    }
-                }
-            }
-            JobResult::ExecutionError(err) => eprintln!("job {cjid}: execution error: {err}"),
-            JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
-        }
-    }
-    Ok(exit_code)
+    client.wait_for_oustanding_jobs()
 }
 
 #[test]
