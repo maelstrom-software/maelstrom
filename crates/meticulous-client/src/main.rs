@@ -17,14 +17,37 @@ use std::{
     net::{SocketAddr, TcpStream, ToSocketAddrs as _},
     path::PathBuf,
     process::ExitCode,
-    sync::{Arc, Condvar, Mutex},
-    thread,
+    sync::{
+        mpsc::{self, Receiver, SyncSender},
+        Arc, Condvar, Mutex,
+    },
+    thread::{self, JoinHandle},
 };
 
 struct Client {
+    sender_sender: SyncSender<JobDetails>,
+    sender_handle: JoinHandle<Result<u32>>,
+    shared: Arc<ClientShared>,
+}
+
+struct ClientSender {
+    receiver: Receiver<JobDetails>,
     stream: TcpStream,
     next_client_job_id: u32,
-    shared: Arc<ClientShared>,
+}
+
+impl ClientSender {
+    fn main(mut self) -> Result<u32> {
+        while let Ok(details) = self.receiver.recv() {
+            let cjid = self.next_client_job_id.into();
+            self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
+            net::write_message_to_socket(
+                &mut self.stream,
+                ClientToBroker::JobRequest(cjid, details),
+            )?;
+        }
+        Ok(self.next_client_job_id)
+    }
 }
 
 struct ClientShared {
@@ -50,15 +73,27 @@ impl Client {
             no_outstanding_jobs: Condvar::default(),
             broker_addr,
         };
-        let client = Client {
-            stream,
+
+        let sender_stream = stream.try_clone()?;
+        let receiver_stream = stream;
+
+        let (sender_sender, sender_receiver) = mpsc::sync_channel(1000);
+
+        let sender = ClientSender {
+            receiver: sender_receiver,
+            stream: sender_stream,
             next_client_job_id: 0,
+        };
+        let sender_handle = thread::spawn(|| sender.main());
+
+        let client = Client {
+            sender_sender,
+            sender_handle,
             shared: Arc::new(shared),
         };
 
-        let stream = client.stream.try_clone().unwrap();
         let shared = client.shared.clone();
-        thread::spawn(|| Self::receiver_main(shared, stream));
+        thread::spawn(|| Self::receiver_main(shared, receiver_stream));
 
         Ok(client)
     }
@@ -143,13 +178,11 @@ impl Client {
     }
 
     fn add_job(&mut self, details: JobDetails) -> Result<()> {
-        let cjid = self.next_client_job_id.into();
-        self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
         {
             let mut locked = self.shared.lock.lock().unwrap();
             locked.outstanding_jobs = locked.outstanding_jobs.checked_add(1).unwrap();
         }
-        net::write_message_to_socket(&mut self.stream, ClientToBroker::JobRequest(cjid, details))?;
+        self.sender_sender.send(details)?;
         Ok(())
     }
 
