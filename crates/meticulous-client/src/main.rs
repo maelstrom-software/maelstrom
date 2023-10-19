@@ -60,7 +60,6 @@ struct ClientShared {
 struct ClientLocked {
     jobs: HashMap<ClientJobId, JobResult>,
     artifacts: HashMap<Sha256Digest, PathBuf>,
-    outstanding_jobs: u32,
 }
 
 impl Client {
@@ -104,10 +103,7 @@ impl Client {
                 BrokerToClient::JobResponse(cjid, result) => {
                     let mut locked = shared.lock.lock().unwrap();
                     locked.jobs.insert(cjid, result).assert_is_none();
-                    locked.outstanding_jobs = locked.outstanding_jobs.checked_sub(1).unwrap();
-                    if locked.outstanding_jobs == 0 {
-                        shared.no_outstanding_jobs.notify_all();
-                    }
+                    shared.no_outstanding_jobs.notify_all();
                 }
                 BrokerToClient::TransferArtifact(digest) => {
                     let broker_addr = shared.broker_addr;
@@ -178,22 +174,20 @@ impl Client {
     }
 
     fn add_job(&mut self, details: JobDetails) -> Result<()> {
-        {
-            let mut locked = self.shared.lock.lock().unwrap();
-            locked.outstanding_jobs = locked.outstanding_jobs.checked_add(1).unwrap();
-        }
         self.sender_sender.send(details)?;
         Ok(())
     }
 
-    fn wait_for_oustanding_jobs(self) -> HashMap<ClientJobId, JobResult> {
-        let _ = self
+    fn wait_for_oustanding_jobs(self) -> Result<HashMap<ClientJobId, JobResult>> {
+        drop(self.sender_sender);
+        let num_jobs = self.sender_handle.join().unwrap()?;
+        let guard = self.shared.lock.lock().unwrap();
+        let mut guard = self
             .shared
             .no_outstanding_jobs
-            .wait_while(self.shared.lock.lock().unwrap(), |locked| {
-                locked.outstanding_jobs != 0
-            });
-        std::mem::take(&mut self.shared.lock.lock().unwrap().jobs)
+            .wait_while(guard, |locked| locked.jobs.len() != num_jobs as usize)
+            .unwrap();
+        Ok(std::mem::take(&mut guard.jobs))
     }
 }
 
@@ -265,7 +259,7 @@ fn main() -> Result<ExitCode> {
             },
         })?;
     }
-    let jobs = client.wait_for_oustanding_jobs();
+    let jobs = client.wait_for_oustanding_jobs()?;
     let mut exit_code = ExitCode::from(0);
     for (cjid, result) in jobs {
         match result {
