@@ -19,16 +19,10 @@ use std::{
     process::ExitCode,
     sync::{
         mpsc::{self, Receiver, SyncSender},
-        Arc, Condvar, Mutex,
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
 };
-
-struct Client {
-    sender_sender: SyncSender<JobDetails>,
-    sender_handle: JoinHandle<Result<u32>>,
-    shared: Arc<ClientShared>,
-}
 
 struct ClientSender {
     receiver: Receiver<JobDetails>,
@@ -50,16 +44,59 @@ impl ClientSender {
     }
 }
 
-struct ClientShared {
-    lock: Mutex<ClientLocked>,
-    no_outstanding_jobs: Condvar,
-    broker_addr: SocketAddr,
+enum ClientReceiverMessage {
+    Result(ClientJobId, JobResult),
+    SenderCompleted(u32),
+}
+
+struct ClientReceiver {
+    receiver: Receiver<ClientReceiverMessage>,
+}
+
+impl ClientReceiver {
+    fn main(self) -> Result<HashMap<ClientJobId, JobResult>> {
+        let mut jobs = HashMap::default();
+        let mut stop_at_num_jobs: Option<usize> = None;
+        loop {
+            let msg = self.receiver.recv()?;
+            match msg {
+                ClientReceiverMessage::Result(cjid, result) => {
+                    jobs.insert(cjid, result).assert_is_none();
+                    if let Some(stop_at_num_jobs) = stop_at_num_jobs {
+                        if jobs.len() == stop_at_num_jobs {
+                            return Ok(jobs);
+                        }
+                    }
+                }
+                ClientReceiverMessage::SenderCompleted(num_jobs) => {
+                    let num_jobs = num_jobs as usize;
+                    if jobs.len() == num_jobs {
+                        return Ok(jobs);
+                    } else {
+                        stop_at_num_jobs = Some(num_jobs);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
 struct ClientLocked {
-    jobs: HashMap<ClientJobId, JobResult>,
     artifacts: HashMap<Sha256Digest, PathBuf>,
+}
+
+struct ClientShared {
+    lock: Mutex<ClientLocked>,
+    broker_addr: SocketAddr,
+}
+
+struct Client {
+    sender_sender: SyncSender<JobDetails>,
+    sender_handle: JoinHandle<Result<u32>>,
+    receiver_sender: SyncSender<ClientReceiverMessage>,
+    receiver_handle: JoinHandle<Result<HashMap<ClientJobId, JobResult>>>,
+    shared: Arc<ClientShared>,
 }
 
 impl Client {
@@ -69,7 +106,6 @@ impl Client {
 
         let shared = ClientShared {
             lock: Mutex::default(),
-            no_outstanding_jobs: Condvar::default(),
             broker_addr,
         };
 
@@ -85,25 +121,39 @@ impl Client {
         };
         let sender_handle = thread::spawn(|| sender.main());
 
+        let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
+        let receiver_sender_clone = receiver_sender.clone();
+
+        let receiver = ClientReceiver {
+            receiver: receiver_receiver,
+        };
+        let receiver_handle = thread::spawn(|| receiver.main());
+
         let client = Client {
             sender_sender,
             sender_handle,
+            receiver_sender,
+            receiver_handle,
             shared: Arc::new(shared),
         };
 
         let shared = client.shared.clone();
-        thread::spawn(|| Self::receiver_main(shared, receiver_stream));
+        thread::spawn(|| Self::receiver_main(shared, receiver_sender_clone, receiver_stream));
 
         Ok(client)
     }
 
-    fn receiver_main(shared: Arc<ClientShared>, mut stream: TcpStream) -> Result<()> {
+    fn receiver_main(
+        shared: Arc<ClientShared>,
+        receiver_sender: SyncSender<ClientReceiverMessage>,
+        mut stream: TcpStream,
+    ) -> Result<()> {
         loop {
             match net::read_message_from_socket::<BrokerToClient>(&mut stream)? {
                 BrokerToClient::JobResponse(cjid, result) => {
-                    let mut locked = shared.lock.lock().unwrap();
-                    locked.jobs.insert(cjid, result).assert_is_none();
-                    shared.no_outstanding_jobs.notify_all();
+                    receiver_sender
+                        .send(ClientReceiverMessage::Result(cjid, result))
+                        .unwrap();
                 }
                 BrokerToClient::TransferArtifact(digest) => {
                     let broker_addr = shared.broker_addr;
@@ -181,13 +231,10 @@ impl Client {
     fn wait_for_oustanding_jobs(self) -> Result<HashMap<ClientJobId, JobResult>> {
         drop(self.sender_sender);
         let num_jobs = self.sender_handle.join().unwrap()?;
-        let guard = self.shared.lock.lock().unwrap();
-        let mut guard = self
-            .shared
-            .no_outstanding_jobs
-            .wait_while(guard, |locked| locked.jobs.len() != num_jobs as usize)
+        self.receiver_sender
+            .send(ClientReceiverMessage::SenderCompleted(num_jobs))
             .unwrap();
-        Ok(std::mem::take(&mut guard.jobs))
+        self.receiver_handle.join().unwrap()
     }
 }
 
