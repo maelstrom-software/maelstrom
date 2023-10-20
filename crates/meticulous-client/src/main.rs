@@ -12,10 +12,10 @@ use serde_json::{self, Deserializer};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{self, File},
     io::{self, Read, Write as _},
     net::{SocketAddr, TcpStream, ToSocketAddrs as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::ExitCode,
     sync::{
         mpsc::{self, Receiver, SyncSender},
@@ -57,9 +57,7 @@ impl ClientReceiver {
     fn main(self) -> Result<ExitCode> {
         let mut jobs_completed = 0u32;
         let mut stop_at_num_jobs: Option<u32> = None;
-        let mut exit_code = ExitCode::from(0);
-        let mut stdout_locked = io::stdout().lock();
-        let mut stderr_locked = io::stderr().lock();
+        let mut exit_code = ExitCode::SUCCESS;
         loop {
             let msg = self.receiver.recv()?;
             match msg {
@@ -73,11 +71,11 @@ impl ClientReceiver {
                             match stdout {
                                 JobOutputResult::None => {}
                                 JobOutputResult::Inline(bytes) => {
-                                    stdout_locked.write_all(&bytes)?;
+                                    io::stdout().lock().write_all(&bytes)?;
                                 }
                                 JobOutputResult::Truncated { first, truncated } => {
-                                    stdout_locked.write_all(&first)?;
-                                    stdout_locked.flush()?;
+                                    io::stdout().lock().write_all(&first)?;
+                                    io::stdout().lock().flush()?;
                                     eprintln!(
                                         "job {cjid}: stdout truncated, {truncated} bytes lost"
                                     );
@@ -86,10 +84,10 @@ impl ClientReceiver {
                             match stderr {
                                 JobOutputResult::None => {}
                                 JobOutputResult::Inline(bytes) => {
-                                    stderr_locked.write_all(&bytes)?;
+                                    io::stderr().lock().write_all(&bytes)?;
                                 }
                                 JobOutputResult::Truncated { first, truncated } => {
-                                    stderr_locked.write_all(&first)?;
+                                    io::stderr().lock().write_all(&first)?;
                                     eprintln!(
                                         "job {cjid}: stderr truncated, {truncated} bytes lost"
                                     );
@@ -98,14 +96,14 @@ impl ClientReceiver {
                             match status {
                                 JobStatus::Exited(0) => {}
                                 JobStatus::Exited(code) => {
-                                    stdout_locked.flush()?;
+                                    io::stdout().lock().flush()?;
                                     eprintln!("job {cjid}: exited with code {code}");
                                     exit_code = ExitCode::from(code)
                                 }
                                 JobStatus::Signalled(signum) => {
-                                    stdout_locked.flush()?;
+                                    io::stdout().lock().flush()?;
                                     eprintln!("job {cjid}: killed by signal {signum}");
-                                    exit_code = ExitCode::from(1)
+                                    exit_code = ExitCode::FAILURE
                                 }
                             }
                         }
@@ -190,6 +188,7 @@ struct Client {
     receiver_sender: SyncSender<ClientReceiverMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
+    paths: HashMap<PathBuf, Sha256Digest>,
 }
 
 impl Client {
@@ -232,11 +231,15 @@ impl Client {
             receiver_sender,
             receiver_handle,
             artifacts,
+            paths: HashMap::default(),
         })
     }
 
-    #[allow(dead_code)]
-    fn add_artifact(&mut self, path: PathBuf) -> Result<Sha256Digest> {
+    fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+        let path = fs::canonicalize(path)?;
+        if let Some(digest) = self.paths.get(&path) {
+            return Ok(digest.clone());
+        }
         let mut hasher = Sha256::new();
         match path.extension() {
             Some(ext) if ext == "tar" => {}
@@ -257,11 +260,10 @@ impl Client {
             hasher.update(&buf[..n]);
         }
         let digest = Sha256Digest::new(hasher.finalize().into());
-        self.artifacts
-            .lock()
-            .unwrap()
-            .insert(digest.clone(), path)
+        self.paths
+            .insert(path.clone(), digest.clone())
             .assert_is_none();
+        self.artifacts.lock().unwrap().insert(digest.clone(), path);
         Ok(digest)
     }
 
@@ -309,10 +311,6 @@ struct JobDescription {
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let mut client = Client::new(parse_socket_addr(cli_options.broker)?)?;
-    let layer_map: HashMap<String, Sha256Digest> = HashMap::default();
-    //    for (name, path) in config.layers {
-    //        layer_map.insert(name, client.add_artifact(path.into())?);
-    //    }
     let reader: Box<dyn Read> = if let Some(file) = cli_options.file {
         Box::new(File::open(file)?)
     } else {
@@ -321,22 +319,16 @@ fn main() -> Result<ExitCode> {
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {
         let job = job?;
+        let layers = job
+            .layers
+            .unwrap_or(vec![])
+            .iter()
+            .map(|layer| client.add_artifact(Path::new(layer)))
+            .collect::<Result<Vec<_>>>()?;
         client.add_job(JobDetails {
             program: job.program,
-            arguments: if let Some(args) = job.arguments {
-                args
-            } else {
-                vec![]
-            },
-            layers: if let Some(job_layers) = job.layers {
-                let mut layers = vec![];
-                for layer in job_layers {
-                    layers.push(layer_map.get(&layer).unwrap().clone());
-                }
-                layers
-            } else {
-                vec![]
-            },
+            arguments: job.arguments.unwrap_or(vec![]),
+            layers,
         })?;
     }
     client.wait_for_oustanding_jobs()
