@@ -1,9 +1,6 @@
 //! Core structs used by the broker, worker, and clients. Everything in this crate must be usable
 //! from wasm.
 
-pub mod proto;
-pub mod ring_buffer;
-
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -12,6 +9,10 @@ use std::{
     result::Result,
     str::FromStr,
 };
+
+pub mod proto;
+pub mod ring_buffer;
+pub mod stats;
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -145,14 +146,6 @@ impl Display for WorkerId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("{}", self.0))
     }
-}
-
-/// Useful information for a client to display about the broker's state.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct BrokerStatistics {
-    pub num_clients: u64,
-    pub num_workers: u64,
-    pub num_requests: u64,
 }
 
 /// A SHA-256 digest.

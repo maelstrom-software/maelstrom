@@ -10,6 +10,7 @@ clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 console_error_panic_hook = "0.1.7"
 eframe = "0.22"
 egui = "0.22"
+enum-map = { version = "2.7.0", features = ["serde"] }
 figment = { version = "0.10.10", features = ["env", "toml"] }
 futures = "0.3"
 gethostname = "0.4.2"
@@ -18,6 +19,7 @@ gloo-utils = "0.2"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 itertools = "0.10.5"
+maplit = "1"
 meticulous-base = { path = "crates/meticulous-base" }
 meticulous-test = { path = "crates/meticulous-test" }
 meticulous-util = { path = "crates/meticulous-util" }

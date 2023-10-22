@@ -977,6 +977,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "enum-map"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53337c2dbf26a3c31eccc73a37b10c1614e8d4ae99b6a50d553e8936423c1f16"
+dependencies = [
+ "enum-map-derive",
+ "serde",
+]
+
+[[package]]
+name = "enum-map-derive"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "04d0b288e3bb1d861c4403c1774a6f7a798781dfc519b3647df2a3dd4ae95f25"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.37",
+]
+
+[[package]]
 name = "enumflags2"
 version = "0.7.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1725,6 +1746,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
+
+[[package]]
 name = "memchr"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1761,6 +1788,7 @@ dependencies = [
 name = "meticulous-base"
 version = "0.1.0"
 dependencies = [
+ "enum-map",
  "serde",
  "serde_test",
 ]
@@ -1773,11 +1801,13 @@ dependencies = [
  "bincode",
  "bytesize",
  "clap",
+ "enum-map",
  "figment",
  "futures",
  "hyper",
  "hyper-tungstenite",
  "itertools",
+ "maplit",
  "meticulous-base",
  "meticulous-test",
  "meticulous-util",

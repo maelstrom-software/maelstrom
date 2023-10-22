@@ -23,5 +23,7 @@ slog-async = { workspace = true }
 bytesize = { workspace = true }
 
 [dev-dependencies]
+enum-map = { workspace = true }
 itertools = { workspace = true }
+maplit = { workspace = true }
 meticulous-test = { workspace = true }

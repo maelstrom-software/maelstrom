@@ -3,7 +3,7 @@ use eframe::{App, CreationContext, Frame};
 use egui::{CentralPanel, Context};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
-    BrokerStatistics,
+    stats::BrokerStatistics,
 };
 use std::time::Duration;
 
@@ -25,7 +25,6 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
             if let Some(stats) = &self.stats {
                 ui.label(&format!("number of clients: {}", stats.num_clients));
                 ui.label(&format!("number of workers: {}", stats.num_workers));
-                ui.label(&format!("number of requests: {}", stats.num_requests));
             } else {
                 ui.label("loading..");
             }

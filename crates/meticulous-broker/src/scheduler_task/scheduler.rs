@@ -4,7 +4,10 @@
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
-    BrokerStatistics, ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
+    stats::{
+        BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
+    },
+    ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
 };
 use meticulous_util::{
     ext::{BoolExt as _, OptionExt as _},
@@ -142,6 +145,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             workers: WorkerMap(HashMap::default()),
             queued_requests: VecDeque::default(),
             worker_heap: Heap::default(),
+            job_statistics: JobStatisticsTimeSeries::default(),
         }
     }
 
@@ -201,6 +205,7 @@ impl Job {
 struct Client<DepsT: SchedulerDeps> {
     sender: DepsT::ClientSender,
     jobs: HashMap<ClientJobId, Job>,
+    num_completed_jobs: u64,
 }
 
 impl<DepsT: SchedulerDeps> Client<DepsT> {
@@ -208,6 +213,7 @@ impl<DepsT: SchedulerDeps> Client<DepsT> {
         Client {
             sender,
             jobs: HashMap::default(),
+            num_completed_jobs: 0,
         }
     }
 }
@@ -254,6 +260,7 @@ pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
     workers: WorkerMap<DepsT>,
     queued_requests: VecDeque<JobId>,
     worker_heap: Heap<WorkerMap<DepsT>>,
+    job_statistics: JobStatisticsTimeSeries,
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
@@ -356,10 +363,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     }
 
     fn receive_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
+        self.sample_job_statistics();
+
         let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
             num_clients: self.clients.len() as u64,
             num_workers: self.workers.0.len() as u64,
-            num_requests: self.queued_requests.len() as u64,
+            job_statistics: self.job_statistics.clone(),
         });
         deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
     }
@@ -419,6 +428,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for artifact in job.acquired_artifacts {
             self.cache.decrement_refcount(artifact);
         }
+        client.num_completed_jobs += 1;
 
         if let Some(jid) = self.queued_requests.pop_front() {
             let details = &self
@@ -486,6 +496,47 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn receive_decrement_refcount(&mut self, digest: Sha256Digest) {
         self.cache.decrement_refcount(digest);
     }
+
+    fn sample_job_statistics_for_client(&self, cid: ClientId) -> JobStateCounts {
+        let client = self.clients.get(&cid).unwrap();
+        let jobs = &client.jobs;
+
+        let mut counts = JobStateCounts::default();
+        counts[JobState::WaitingForArtifacts] = jobs
+            .values()
+            .filter(|job| !job.missing_artifacts.is_empty())
+            .count() as u64;
+
+        counts[JobState::Pending] = self
+            .queued_requests
+            .iter()
+            .filter(|jid| jid.cid == cid)
+            .count() as u64;
+
+        counts[JobState::Running] = self
+            .workers
+            .0
+            .values()
+            .map(|w| w.pending.iter())
+            .flatten()
+            .filter(|jid| jid.cid == cid)
+            .count() as u64;
+
+        counts[JobState::Complete] = client.num_completed_jobs;
+
+        counts
+    }
+
+    fn sample_job_statistics(&mut self) {
+        let sample = JobStatisticsSample {
+            client_to_stats: self
+                .clients
+                .keys()
+                .map(|&cid| (cid, self.sample_job_statistics_for_client(cid)))
+                .collect(),
+        };
+        self.job_statistics.insert(sample);
+    }
 }
 
 /*  _            _
@@ -499,7 +550,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
+    use enum_map::enum_map;
     use itertools::Itertools;
+    use maplit::hashmap;
     use meticulous_base::proto::BrokerToWorker::{self, *};
     use meticulous_test::*;
     use std::{cell::RefCell, sync::Arc};
@@ -1260,6 +1313,113 @@ mod tests {
         decrement_refcount,
         DecrementRefcount(digest![42]) => {
             CacheDecrementRefcount(digest![42]),
+        }
+    }
+
+    script_test! {
+        job_statistics_waiting_for_artifacts,
+        {
+            Fixture::new([
+                ((jid![1, 1], digest![42]), vec![GetArtifact::Wait]),
+            ],
+            [],
+            [])
+        },
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1, [42]])) => {
+            CacheGetArtifact(jid![1, 1], digest![42]),
+        };
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 1,
+                num_workers: 1,
+                job_statistics: [JobStatisticsSample {
+                    client_to_stats: hashmap! {
+                        cid![1] => enum_map! {
+                            JobState::WaitingForArtifacts => 1,
+                            JobState::Pending => 0,
+                            JobState::Running => 0,
+                            JobState::Complete => 0,
+                        }
+                    }
+                }].into_iter().collect()
+            }))
+        }
+    }
+
+    script_test! {
+        job_statistics_pending,
+        ClientConnected(cid![1], client_sender![1]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 1,
+                num_workers: 0,
+                job_statistics: [JobStatisticsSample {
+                    client_to_stats: hashmap! {
+                        cid![1] => enum_map! {
+                            JobState::WaitingForArtifacts => 0,
+                            JobState::Pending => 1,
+                            JobState::Running => 0,
+                            JobState::Complete => 0,
+                        }
+                    }
+                }].into_iter().collect()
+            }))
+        }
+    }
+
+    script_test! {
+        job_statistics_running,
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
+        };
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 1,
+                num_workers: 1,
+                job_statistics: [JobStatisticsSample {
+                    client_to_stats: hashmap! {
+                        cid![1] => enum_map! {
+                            JobState::WaitingForArtifacts => 0,
+                            JobState::Pending => 0,
+                            JobState::Running => 1,
+                            JobState::Complete => 0,
+                        }
+                    }
+                }].into_iter().collect()
+            }))
+        }
+    }
+
+    script_test! {
+        job_statistics_completed,
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
+        };
+        FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
+            ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
+        };
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 1,
+                num_workers: 1,
+                job_statistics: [JobStatisticsSample {
+                    client_to_stats: hashmap! {
+                        cid![1] => enum_map! {
+                            JobState::WaitingForArtifacts => 0,
+                            JobState::Pending => 0,
+                            JobState::Running => 0,
+                            JobState::Complete => 1,
+                        }
+                    }
+                }].into_iter().collect()
+            }))
         }
     }
 }
