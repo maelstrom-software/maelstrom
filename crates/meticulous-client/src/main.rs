@@ -267,8 +267,11 @@ impl Client {
         Ok(digest)
     }
 
-    fn add_job(&mut self, details: JobDetails) -> Result<()> {
-        self.sender_sender.send(details).map_err(|e| e.into())
+    fn add_job(&mut self, details: JobDetails) {
+        // We will only get an error if the sender has closed its receiver, which will only happen
+        // if it had an error writing to the socket. We'll get that error when we wait in
+        // `wait_for_oustanding_job`.
+        let _ = self.sender_sender.send(details);
     }
 
     fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
@@ -329,7 +332,7 @@ fn main() -> Result<ExitCode> {
             program: job.program,
             arguments: job.arguments.unwrap_or(vec![]),
             layers,
-        })?;
+        });
     }
     client.wait_for_oustanding_jobs()
 }
