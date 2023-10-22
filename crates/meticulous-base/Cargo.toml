@@ -5,3 +5,6 @@ edition = "2021"
 
 [dependencies]
 serde = { workspace = true }
+
+[dev-dependencies]
+serde_test = { workspace = true }

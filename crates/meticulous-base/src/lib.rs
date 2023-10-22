@@ -2,6 +2,7 @@
 //! from wasm.
 
 pub mod proto;
+pub mod ring_buffer;
 
 use serde::{Deserialize, Serialize};
 use std::{
