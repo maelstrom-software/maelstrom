@@ -41,16 +41,16 @@ impl SenderThread {
     }
 }
 
-enum ReceiverThreadMessage {
+enum DispatcherThreadMessage {
     Result(ClientJobId, JobResult),
     SenderCompleted(u32),
 }
 
-struct ReceiverThread {
-    receiver: Receiver<ReceiverThreadMessage>,
+struct DispatcherThread {
+    receiver: Receiver<DispatcherThreadMessage>,
 }
 
-impl ReceiverThread {
+impl DispatcherThread {
     fn main(self) -> Result<ExitCode> {
         let mut jobs_completed = 0u32;
         let mut stop_at_num_jobs: Option<u32> = None;
@@ -58,7 +58,7 @@ impl ReceiverThread {
         loop {
             let msg = self.receiver.recv()?;
             match msg {
-                ReceiverThreadMessage::Result(cjid, result) => {
+                DispatcherThreadMessage::Result(cjid, result) => {
                     match result {
                         JobResult::Ran {
                             status,
@@ -114,7 +114,7 @@ impl ReceiverThread {
                         return Ok(exit_code);
                     }
                 }
-                ReceiverThreadMessage::SenderCompleted(num_jobs) => {
+                DispatcherThreadMessage::SenderCompleted(num_jobs) => {
                     stop_at_num_jobs = Some(num_jobs);
                     if stop_at_num_jobs == Some(jobs_completed) {
                         return Ok(exit_code);
@@ -128,7 +128,7 @@ impl ReceiverThread {
 struct SocketReaderThread {
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     broker_addr: SocketAddr,
-    receiver_sender: SyncSender<ReceiverThreadMessage>,
+    receiver_sender: SyncSender<DispatcherThreadMessage>,
     stream: TcpStream,
 }
 
@@ -138,7 +138,7 @@ impl SocketReaderThread {
             match net::read_message_from_socket::<BrokerToClient>(&mut self.stream)? {
                 BrokerToClient::JobResponse(cjid, result) => {
                     self.receiver_sender
-                        .send(ReceiverThreadMessage::Result(cjid, result))
+                        .send(DispatcherThreadMessage::Result(cjid, result))
                         .unwrap();
                 }
                 BrokerToClient::TransferArtifact(digest) => {
@@ -182,7 +182,7 @@ impl ArtifactPusherThread {
 pub struct Client {
     sender_sender: SyncSender<JobDetails>,
     sender_handle: JoinHandle<Result<u32>>,
-    receiver_sender: SyncSender<ReceiverThreadMessage>,
+    receiver_sender: SyncSender<DispatcherThreadMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     paths: HashMap<PathBuf, Sha256Digest>,
@@ -206,7 +206,7 @@ impl Client {
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
-        let receiver = ReceiverThread {
+        let receiver = DispatcherThread {
             receiver: receiver_receiver,
         };
         let receiver_handle = thread::spawn(|| receiver.main());
@@ -275,7 +275,7 @@ impl Client {
         drop(self.sender_sender);
         let num_jobs = self.sender_handle.join().unwrap()?;
         self.receiver_sender
-            .send(ReceiverThreadMessage::SenderCompleted(num_jobs))
+            .send(DispatcherThreadMessage::SenderCompleted(num_jobs))
             .unwrap();
         self.receiver_handle.join().unwrap()
     }
