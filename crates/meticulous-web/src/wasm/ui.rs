@@ -1,6 +1,6 @@
 use crate::wasm::rpc::ClientConnection;
 use eframe::{App, CreationContext, Frame};
-use egui::plot::{Line, Plot, PlotPoints};
+use egui::plot::{Line, Plot, PlotBounds, PlotPoints};
 use egui::{CentralPanel, Context};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
@@ -80,12 +80,11 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
                                     .collect();
 
                                 let capacity = stats.job_statistics.capacity();
-                                if points.len() < capacity {
-                                    points.push([stats.job_statistics.len() as f64, 0.0]);
-                                    points.push([capacity as f64, 0.0]);
-                                }
-
                                 plot_ui.line(Line::new(PlotPoints::new(points)));
+                                plot_ui.set_plot_bounds(PlotBounds::from_min_max(
+                                    [0.0, 0.0],
+                                    [capacity as f64, 100.0],
+                                ))
                             }
                         });
                 }
