@@ -16,7 +16,7 @@ use std::{
     process::ExitCode,
     sync::{
         mpsc::{self, Receiver, SyncSender},
-        Mutex,
+        Arc, Mutex,
     },
     thread::{self, JoinHandle},
 };
@@ -82,16 +82,16 @@ impl Default for ExitCodeAccumulator {
 }
 
 impl ExitCodeAccumulator {
-    fn add(&mut self, code: ExitCode) {
+    fn add(&self, code: ExitCode) {
         self.0.lock().unwrap().get_or_insert(code);
     }
 
-    fn get(self) -> ExitCode {
+    fn get(&self) -> ExitCode {
         self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
     }
 }
 
-fn visitor(cjid: ClientJobId, result: JobResult, accum: &mut ExitCodeAccumulator) -> Result<()> {
+fn visitor(cjid: ClientJobId, result: JobResult, accum: &ExitCodeAccumulator) -> Result<()> {
     match result {
         JobResult::Ran {
             status,
@@ -149,20 +149,20 @@ fn dispatcher_main(
     receiver: Receiver<DispatcherMessage>,
     mut stream: TcpStream,
     broker_addr: SocketAddr,
-) -> Result<ExitCode> {
+    accum: Arc<ExitCodeAccumulator>,
+) -> Result<()> {
     let mut jobs_completed = 0u32;
     let mut stop_when_all_completed = false;
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
-    let mut accum = ExitCodeAccumulator::default();
     loop {
         let msg = receiver.recv()?;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                visitor(cjid, result, &mut accum)?;
+                visitor(cjid, result, &accum)?;
                 jobs_completed = jobs_completed.checked_add(1).unwrap();
                 if stop_when_all_completed && jobs_completed == next_client_job_id {
-                    return Ok(accum.get());
+                    return Ok(());
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -185,7 +185,7 @@ fn dispatcher_main(
             }
             DispatcherMessage::Stop => {
                 if jobs_completed == next_client_job_id {
-                    return Ok(accum.get());
+                    return Ok(());
                 }
                 stop_when_all_completed = true;
             }
@@ -195,20 +195,24 @@ fn dispatcher_main(
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
-    dispatcher_handle: JoinHandle<Result<ExitCode>>,
+    dispatcher_handle: JoinHandle<Result<()>>,
     paths: HashMap<PathBuf, Sha256Digest>,
+    accum: Arc<ExitCodeAccumulator>,
 }
 
 impl Client {
     pub fn new(broker_addr: SocketAddr) -> Result<Self> {
+        let accum = Arc::new(ExitCodeAccumulator::default());
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
 
         let stream_clone = stream.try_clone()?;
-        let dispatcher_handle =
-            thread::spawn(move || dispatcher_main(dispatcher_receiver, stream_clone, broker_addr));
+        let accum_clone = accum.clone();
+        let dispatcher_handle = thread::spawn(move || {
+            dispatcher_main(dispatcher_receiver, stream_clone, broker_addr, accum_clone)
+        });
 
         let dispatcher_sender_clone = dispatcher_sender.clone();
         thread::spawn(move || {
@@ -223,6 +227,7 @@ impl Client {
             dispatcher_sender,
             dispatcher_handle,
             paths: HashMap::default(),
+            accum,
         })
     }
 
@@ -250,6 +255,7 @@ impl Client {
 
     pub fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
-        self.dispatcher_handle.join().unwrap()
+        self.dispatcher_handle.join().unwrap()?;
+        Ok(self.accum.get())
     }
 }
