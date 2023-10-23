@@ -21,13 +21,13 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-struct ClientSender {
+struct SenderThread {
     receiver: Receiver<JobDetails>,
     stream: TcpStream,
     next_client_job_id: u32,
 }
 
-impl ClientSender {
+impl SenderThread {
     fn main(mut self) -> Result<u32> {
         while let Ok(details) = self.receiver.recv() {
             let cjid = self.next_client_job_id.into();
@@ -41,16 +41,16 @@ impl ClientSender {
     }
 }
 
-enum ClientReceiverMessage {
+enum ReceiverThreadMessage {
     Result(ClientJobId, JobResult),
     SenderCompleted(u32),
 }
 
-struct ClientReceiver {
-    receiver: Receiver<ClientReceiverMessage>,
+struct ReceiverThread {
+    receiver: Receiver<ReceiverThreadMessage>,
 }
 
-impl ClientReceiver {
+impl ReceiverThread {
     fn main(self) -> Result<ExitCode> {
         let mut jobs_completed = 0u32;
         let mut stop_at_num_jobs: Option<u32> = None;
@@ -58,7 +58,7 @@ impl ClientReceiver {
         loop {
             let msg = self.receiver.recv()?;
             match msg {
-                ClientReceiverMessage::Result(cjid, result) => {
+                ReceiverThreadMessage::Result(cjid, result) => {
                     match result {
                         JobResult::Ran {
                             status,
@@ -114,7 +114,7 @@ impl ClientReceiver {
                         return Ok(exit_code);
                     }
                 }
-                ClientReceiverMessage::SenderCompleted(num_jobs) => {
+                ReceiverThreadMessage::SenderCompleted(num_jobs) => {
                     stop_at_num_jobs = Some(num_jobs);
                     if stop_at_num_jobs == Some(jobs_completed) {
                         return Ok(exit_code);
@@ -125,25 +125,25 @@ impl ClientReceiver {
     }
 }
 
-struct ClientSocketReceiver {
+struct SocketReaderThread {
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     broker_addr: SocketAddr,
-    receiver_sender: SyncSender<ClientReceiverMessage>,
+    receiver_sender: SyncSender<ReceiverThreadMessage>,
     stream: TcpStream,
 }
 
-impl ClientSocketReceiver {
+impl SocketReaderThread {
     fn main(mut self) -> Result<()> {
         loop {
             match net::read_message_from_socket::<BrokerToClient>(&mut self.stream)? {
                 BrokerToClient::JobResponse(cjid, result) => {
                     self.receiver_sender
-                        .send(ClientReceiverMessage::Result(cjid, result))
+                        .send(ReceiverThreadMessage::Result(cjid, result))
                         .unwrap();
                 }
                 BrokerToClient::TransferArtifact(digest) => {
                     let path = self.artifacts.lock().unwrap().get(&digest).unwrap().clone();
-                    let artifact_pusher = ClientArtifactPusher {
+                    let artifact_pusher = ArtifactPusherThread {
                         broker_addr: self.broker_addr,
                         path,
                         digest,
@@ -158,13 +158,13 @@ impl ClientSocketReceiver {
     }
 }
 
-struct ClientArtifactPusher {
+struct ArtifactPusherThread {
     broker_addr: SocketAddr,
     path: PathBuf,
     digest: Sha256Digest,
 }
 
-impl ClientArtifactPusher {
+impl ArtifactPusherThread {
     fn main(self) -> Result<()> {
         let file = File::open(self.path)?;
         let mut stream = TcpStream::connect(self.broker_addr)?;
@@ -182,7 +182,7 @@ impl ClientArtifactPusher {
 pub struct Client {
     sender_sender: SyncSender<JobDetails>,
     sender_handle: JoinHandle<Result<u32>>,
-    receiver_sender: SyncSender<ClientReceiverMessage>,
+    receiver_sender: SyncSender<ReceiverThreadMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     paths: HashMap<PathBuf, Sha256Digest>,
@@ -197,7 +197,7 @@ impl Client {
 
         let (sender_sender, sender_receiver) = mpsc::sync_channel(1000);
 
-        let sender = ClientSender {
+        let sender = SenderThread {
             receiver: sender_receiver,
             stream: sender_stream,
             next_client_job_id: 0,
@@ -206,21 +206,21 @@ impl Client {
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
-        let receiver = ClientReceiver {
+        let receiver = ReceiverThread {
             receiver: receiver_receiver,
         };
         let receiver_handle = thread::spawn(|| receiver.main());
 
         let artifacts = Arc::new(Mutex::new(HashMap::default()));
 
-        let socket_receiver = ClientSocketReceiver {
+        let socket_reader = SocketReaderThread {
             artifacts: artifacts.clone(),
             broker_addr,
             receiver_sender: receiver_sender.clone(),
             stream,
         };
 
-        thread::spawn(move || socket_receiver.main());
+        thread::spawn(move || socket_reader.main());
 
         Ok(Client {
             sender_sender,
@@ -275,7 +275,7 @@ impl Client {
         drop(self.sender_sender);
         let num_jobs = self.sender_handle.join().unwrap()?;
         self.receiver_sender
-            .send(ClientReceiverMessage::SenderCompleted(num_jobs))
+            .send(ReceiverThreadMessage::SenderCompleted(num_jobs))
             .unwrap();
         self.receiver_handle.join().unwrap()
     }
