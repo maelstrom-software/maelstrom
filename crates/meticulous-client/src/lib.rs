@@ -172,8 +172,8 @@ impl ArtifactPusherThread {
 }
 
 pub struct Client {
-    receiver_sender: SyncSender<DispatcherMessage>,
-    receiver_handle: JoinHandle<Result<ExitCode>>,
+    dispatcher_sender: SyncSender<DispatcherMessage>,
+    dispatcher_handle: JoinHandle<Result<ExitCode>>,
     paths: HashMap<PathBuf, Sha256Digest>,
 }
 
@@ -182,24 +182,24 @@ impl Client {
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
-        let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
+        let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
 
         let stream_clone = stream.try_clone()?;
-        let receiver_handle =
-            thread::spawn(move || dispatcher_main(receiver_receiver, stream_clone, broker_addr));
+        let dispatcher_handle =
+            thread::spawn(move || dispatcher_main(dispatcher_receiver, stream_clone, broker_addr));
 
-        let receiver_sender_clone = receiver_sender.clone();
+        let dispatcher_sender_clone = dispatcher_sender.clone();
         thread::spawn(move || {
             net::socket_reader(
                 stream,
-                receiver_sender_clone,
+                dispatcher_sender_clone,
                 DispatcherMessage::BrokerToClient,
             )
         });
 
         Ok(Client {
-            receiver_sender,
-            receiver_handle,
+            dispatcher_sender,
+            dispatcher_handle,
             paths: HashMap::default(),
         })
     }
@@ -210,7 +210,7 @@ impl Client {
             return Ok(digest.clone());
         }
         let (sender, receiver) = mpsc::sync_channel(1);
-        self.receiver_sender
+        self.dispatcher_sender
             .send(DispatcherMessage::AddArtifact(path.clone(), sender))?;
         let digest = receiver.recv()??;
         self.paths.insert(path, digest.clone()).assert_is_none();
@@ -222,13 +222,13 @@ impl Client {
         // if it had an error writing to the socket. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
         let _ = self
-            .receiver_sender
+            .dispatcher_sender
             .send(DispatcherMessage::AddJob(details));
     }
 
     pub fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
-        self.receiver_sender
+        self.dispatcher_sender
             .send(DispatcherMessage::SenderCompleted)?;
-        self.receiver_handle.join().unwrap()
+        self.dispatcher_handle.join().unwrap()
     }
 }
