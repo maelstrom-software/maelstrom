@@ -110,8 +110,6 @@ async fn unassigned_connection_main(
             let id: ClientId = id_vendor.vend();
             let log = log.new(o!("cid" => id.to_string()));
             debug!(log, "connection upgraded to client connection");
-            let log_clone = log.clone();
-            let log_clone2 = log.clone();
             connection_main(
                 scheduler_sender,
                 id,
@@ -119,14 +117,11 @@ async fn unassigned_connection_main(
                 SchedulerMessage::ClientDisconnected,
                 |scheduler_sender| {
                     net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
-                        debug!(log_clone, "received client message"; "msg" => ?msg);
                         SchedulerMessage::FromClient(id, msg)
                     })
                 },
                 |scheduler_receiver| {
-                    net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
-                        debug!(log_clone2, "sending client message"; "msg" => ?msg);
-                    })
+                    net::async_socket_writer(scheduler_receiver, write_stream, |_| {})
                 },
             )
             .await;

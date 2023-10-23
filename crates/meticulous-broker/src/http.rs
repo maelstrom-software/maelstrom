@@ -99,10 +99,8 @@ impl TarHandler {
 async fn websocket_writer(
     mut scheduler_receiver: UnboundedReceiver<BrokerToClient>,
     mut socket: SplitSink<WebSocketStream<Upgraded>, Message>,
-    log: Logger,
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
-        debug!(log, "sending client message"; "msg" => ?msg);
         if socket
             .send(Message::binary(bincode::serialize(&msg).unwrap()))
             .await
@@ -119,13 +117,11 @@ async fn websocket_reader(
     mut socket: SplitStream<WebSocketStream<Upgraded>>,
     scheduler_sender: SchedulerSender,
     id: ClientId,
-    log: Logger,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
         let Ok(msg) = bincode::deserialize(&msg) else {
             break;
         };
-        debug!(log, "received client message"; "msg" => ?msg);
         if scheduler_sender
             .send(SchedulerMessage::FromClient(id, msg))
             .is_err()
@@ -157,8 +153,8 @@ async fn websocket_main(
         id,
         SchedulerMessage::ClientConnected,
         SchedulerMessage::ClientDisconnected,
-        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id, log.clone()),
-        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream, log.clone()),
+        |scheduler_sender| websocket_reader(read_stream, scheduler_sender, id),
+        |scheduler_receiver| websocket_writer(scheduler_receiver, write_stream),
     )
     .await;
     debug!(log, "received websocket client disconnect")
