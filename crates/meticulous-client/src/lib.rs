@@ -18,15 +18,8 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-enum DispatcherThreadMessage {
-    BrokerToClient(BrokerToClient),
-    SenderCompleted,
-    AddJob(JobDetails),
-    AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
-}
-
 struct DispatcherThread {
-    receiver: Receiver<DispatcherThreadMessage>,
+    receiver: Receiver<DispatcherMessage>,
     stream: TcpStream,
     broker_addr: SocketAddr,
 }
@@ -59,6 +52,13 @@ fn add_artifact(
     Ok(digest)
 }
 
+enum DispatcherMessage {
+    BrokerToClient(BrokerToClient),
+    SenderCompleted,
+    AddJob(JobDetails),
+    AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
+}
+
 impl DispatcherThread {
     fn main(mut self) -> Result<ExitCode> {
         let mut jobs_completed = 0u32;
@@ -69,10 +69,7 @@ impl DispatcherThread {
         loop {
             let msg = self.receiver.recv()?;
             match msg {
-                DispatcherThreadMessage::BrokerToClient(BrokerToClient::JobResponse(
-                    cjid,
-                    result,
-                )) => {
+                DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                     match result {
                         JobResult::Ran {
                             status,
@@ -128,9 +125,7 @@ impl DispatcherThread {
                         return Ok(exit_code);
                     }
                 }
-                DispatcherThreadMessage::BrokerToClient(BrokerToClient::TransferArtifact(
-                    digest,
-                )) => {
+                DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
                     let artifact_pusher = ArtifactPusherThread {
                         broker_addr: self.broker_addr,
                         path: artifacts.get(&digest).unwrap().clone(),
@@ -138,16 +133,16 @@ impl DispatcherThread {
                     };
                     thread::spawn(move || artifact_pusher.main());
                 }
-                DispatcherThreadMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+                DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                     unimplemented!("this client doesn't send statistics requests")
                 }
-                DispatcherThreadMessage::SenderCompleted => {
+                DispatcherMessage::SenderCompleted => {
                     stop_at_num_jobs = Some(next_client_job_id);
                     if stop_at_num_jobs == Some(jobs_completed) {
                         return Ok(exit_code);
                     }
                 }
-                DispatcherThreadMessage::AddJob(details) => {
+                DispatcherMessage::AddJob(details) => {
                     let cjid = next_client_job_id.into();
                     next_client_job_id = next_client_job_id.checked_add(1).unwrap();
                     net::write_message_to_socket(
@@ -155,7 +150,7 @@ impl DispatcherThread {
                         ClientToBroker::JobRequest(cjid, details),
                     )?;
                 }
-                DispatcherThreadMessage::AddArtifact(path, sender) => {
+                DispatcherMessage::AddArtifact(path, sender) => {
                     sender.send(add_artifact(&mut artifacts, path))?
                 }
             }
@@ -185,7 +180,7 @@ impl ArtifactPusherThread {
 }
 
 pub struct Client {
-    receiver_sender: SyncSender<DispatcherThreadMessage>,
+    receiver_sender: SyncSender<DispatcherMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
     paths: HashMap<PathBuf, Sha256Digest>,
 }
@@ -209,7 +204,7 @@ impl Client {
             net::socket_reader(
                 stream,
                 receiver_sender_clone,
-                DispatcherThreadMessage::BrokerToClient,
+                DispatcherMessage::BrokerToClient,
             )
         });
 
@@ -227,7 +222,7 @@ impl Client {
         }
         let (sender, receiver) = mpsc::sync_channel(1);
         self.receiver_sender
-            .send(DispatcherThreadMessage::AddArtifact(path.clone(), sender))?;
+            .send(DispatcherMessage::AddArtifact(path.clone(), sender))?;
         let digest = receiver.recv()??;
         self.paths.insert(path, digest.clone()).assert_is_none();
         Ok(digest)
@@ -239,12 +234,12 @@ impl Client {
         // `wait_for_oustanding_job`.
         let _ = self
             .receiver_sender
-            .send(DispatcherThreadMessage::AddJob(details));
+            .send(DispatcherMessage::AddJob(details));
     }
 
     pub fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
         self.receiver_sender
-            .send(DispatcherThreadMessage::SenderCompleted)?;
+            .send(DispatcherMessage::SenderCompleted)?;
         self.receiver_handle.join().unwrap()
     }
 }
