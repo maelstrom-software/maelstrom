@@ -54,7 +54,7 @@ fn main() -> Result<ExitCode> {
             .layers
             .unwrap_or(vec![])
             .iter()
-            .map(|layer| client.add_artifact(Path::new(layer)))
+            .map(|layer| client.add_artifact(Path::new(layer).to_owned()))
             .collect::<Result<Vec<_>>>()?;
         client.add_job(JobDetails {
             program: job.program,

@@ -12,12 +12,9 @@ use std::{
     fs::{self, File},
     io::{self, Read, Write as _},
     net::{SocketAddr, TcpStream},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
-    sync::{
-        mpsc::{self, Receiver, SyncSender},
-        Arc, Mutex,
-    },
+    sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
 };
 
@@ -25,13 +22,41 @@ enum DispatcherThreadMessage {
     BrokerToClient(BrokerToClient),
     SenderCompleted,
     AddJob(JobDetails),
+    AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
 }
 
 struct DispatcherThread {
     receiver: Receiver<DispatcherThreadMessage>,
     stream: TcpStream,
-    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     broker_addr: SocketAddr,
+}
+
+fn add_artifact(
+    artifacts: &mut HashMap<Sha256Digest, PathBuf>,
+    path: PathBuf,
+) -> Result<Sha256Digest> {
+    let mut hasher = Sha256::new();
+    match path.extension() {
+        Some(ext) if ext == "tar" => {}
+        _ => {
+            return Err(anyhow!(
+                "path \"{}\" does not end in \".tar\"",
+                path.to_string_lossy()
+            ));
+        }
+    }
+    let mut f = File::open(&path)?;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    let digest = Sha256Digest::new(hasher.finalize().into());
+    artifacts.insert(digest.clone(), path);
+    Ok(digest)
 }
 
 impl DispatcherThread {
@@ -40,6 +65,7 @@ impl DispatcherThread {
         let mut stop_at_num_jobs: Option<u32> = None;
         let mut exit_code = ExitCode::SUCCESS;
         let mut next_client_job_id = 0u32;
+        let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
         loop {
             let msg = self.receiver.recv()?;
             match msg {
@@ -105,10 +131,9 @@ impl DispatcherThread {
                 DispatcherThreadMessage::BrokerToClient(BrokerToClient::TransferArtifact(
                     digest,
                 )) => {
-                    let path = self.artifacts.lock().unwrap().get(&digest).unwrap().clone();
                     let artifact_pusher = ArtifactPusherThread {
                         broker_addr: self.broker_addr,
-                        path,
+                        path: artifacts.get(&digest).unwrap().clone(),
                         digest,
                     };
                     thread::spawn(move || artifact_pusher.main());
@@ -129,6 +154,9 @@ impl DispatcherThread {
                         &mut self.stream,
                         ClientToBroker::JobRequest(cjid, details),
                     )?;
+                }
+                DispatcherThreadMessage::AddArtifact(path, sender) => {
+                    sender.send(add_artifact(&mut artifacts, path))?
                 }
             }
         }
@@ -159,7 +187,6 @@ impl ArtifactPusherThread {
 pub struct Client {
     receiver_sender: SyncSender<DispatcherThreadMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
-    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
     paths: HashMap<PathBuf, Sha256Digest>,
 }
 
@@ -170,12 +197,9 @@ impl Client {
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
-        let artifacts = Arc::new(Mutex::new(HashMap::default()));
-
         let receiver = DispatcherThread {
             receiver: receiver_receiver,
             stream: stream.try_clone()?,
-            artifacts: artifacts.clone(),
             broker_addr,
         };
         let receiver_handle = thread::spawn(|| receiver.main());
@@ -192,40 +216,20 @@ impl Client {
         Ok(Client {
             receiver_sender,
             receiver_handle,
-            artifacts,
             paths: HashMap::default(),
         })
     }
 
-    pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+    pub fn add_artifact(&mut self, path: PathBuf) -> Result<Sha256Digest> {
         let path = fs::canonicalize(path)?;
         if let Some(digest) = self.paths.get(&path) {
             return Ok(digest.clone());
         }
-        let mut hasher = Sha256::new();
-        match path.extension() {
-            Some(ext) if ext == "tar" => {}
-            _ => {
-                return Err(anyhow!(
-                    "path \"{}\" does not end in \".tar\"",
-                    path.to_string_lossy()
-                ));
-            }
-        }
-        let mut f = File::open(&path)?;
-        let mut buf = [0u8; 8192];
-        loop {
-            let n = f.read(&mut buf)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buf[..n]);
-        }
-        let digest = Sha256Digest::new(hasher.finalize().into());
-        self.paths
-            .insert(path.clone(), digest.clone())
-            .assert_is_none();
-        self.artifacts.lock().unwrap().insert(digest.clone(), path);
+        let (sender, receiver) = mpsc::sync_channel(1);
+        self.receiver_sender
+            .send(DispatcherThreadMessage::AddArtifact(path.clone(), sender))?;
+        let digest = receiver.recv()??;
+        self.paths.insert(path, digest.clone()).assert_is_none();
         Ok(digest)
     }
 
