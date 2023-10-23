@@ -2,7 +2,10 @@
 
 use anyhow::Result;
 use serde::{de::DeserializeOwned, Serialize};
-use std::io::{Read, Write};
+use std::{
+    io::{Read, Write},
+    sync::mpsc::SyncSender,
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _},
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
@@ -90,6 +93,23 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
     MessageT: DeserializeOwned,
 {
     while let Ok(msg) = read_message_from_async_socket(&mut socket).await {
+        if channel.send(transform(msg)).is_err() {
+            break;
+        }
+    }
+}
+
+/// Loop, reading messages from a socket and writing them to an mpsc channel. The `transform`
+/// parameter is used to log the messages and wrap them in any necessary structure for internal use
+/// by the program.
+pub fn socket_reader<MessageT, TransformedT>(
+    mut socket: impl Read,
+    channel: SyncSender<TransformedT>,
+    transform: impl Fn(MessageT) -> TransformedT,
+) where
+    MessageT: DeserializeOwned,
+{
+    while let Ok(msg) = read_message_from_socket(&mut socket) {
         if channel.send(transform(msg)).is_err() {
             break;
         }

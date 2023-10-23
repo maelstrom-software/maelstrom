@@ -3,7 +3,7 @@ use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
-    ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus, Sha256Digest,
+    JobDetails, JobOutputResult, JobResult, JobStatus, Sha256Digest,
 };
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
@@ -22,7 +22,7 @@ use std::{
 };
 
 enum DispatcherThreadMessage {
-    Result(ClientJobId, JobResult),
+    BrokerToClient(BrokerToClient),
     SenderCompleted,
     AddJob(JobDetails),
 }
@@ -30,6 +30,8 @@ enum DispatcherThreadMessage {
 struct DispatcherThread {
     receiver: Receiver<DispatcherThreadMessage>,
     stream: TcpStream,
+    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
+    broker_addr: SocketAddr,
 }
 
 impl DispatcherThread {
@@ -41,7 +43,10 @@ impl DispatcherThread {
         loop {
             let msg = self.receiver.recv()?;
             match msg {
-                DispatcherThreadMessage::Result(cjid, result) => {
+                DispatcherThreadMessage::BrokerToClient(BrokerToClient::JobResponse(
+                    cjid,
+                    result,
+                )) => {
                     match result {
                         JobResult::Ran {
                             status,
@@ -97,6 +102,20 @@ impl DispatcherThread {
                         return Ok(exit_code);
                     }
                 }
+                DispatcherThreadMessage::BrokerToClient(BrokerToClient::TransferArtifact(
+                    digest,
+                )) => {
+                    let path = self.artifacts.lock().unwrap().get(&digest).unwrap().clone();
+                    let artifact_pusher = ArtifactPusherThread {
+                        broker_addr: self.broker_addr,
+                        path,
+                        digest,
+                    };
+                    thread::spawn(move || artifact_pusher.main());
+                }
+                DispatcherThreadMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+                    unimplemented!("this client doesn't send statistics requests")
+                }
                 DispatcherThreadMessage::SenderCompleted => {
                     stop_at_num_jobs = Some(next_client_job_id);
                     if stop_at_num_jobs == Some(jobs_completed) {
@@ -110,39 +129,6 @@ impl DispatcherThread {
                         &mut self.stream,
                         ClientToBroker::JobRequest(cjid, details),
                     )?;
-                }
-            }
-        }
-    }
-}
-
-struct SocketReaderThread {
-    artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
-    broker_addr: SocketAddr,
-    receiver_sender: SyncSender<DispatcherThreadMessage>,
-    stream: TcpStream,
-}
-
-impl SocketReaderThread {
-    fn main(mut self) -> Result<()> {
-        loop {
-            match net::read_message_from_socket::<BrokerToClient>(&mut self.stream)? {
-                BrokerToClient::JobResponse(cjid, result) => {
-                    self.receiver_sender
-                        .send(DispatcherThreadMessage::Result(cjid, result))
-                        .unwrap();
-                }
-                BrokerToClient::TransferArtifact(digest) => {
-                    let path = self.artifacts.lock().unwrap().get(&digest).unwrap().clone();
-                    let artifact_pusher = ArtifactPusherThread {
-                        broker_addr: self.broker_addr,
-                        path,
-                        digest,
-                    };
-                    thread::spawn(move || artifact_pusher.main());
-                }
-                BrokerToClient::StatisticsResponse(_) => {
-                    unimplemented!("this client doesn't send statistics requests")
                 }
             }
         }
@@ -184,22 +170,24 @@ impl Client {
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
+        let artifacts = Arc::new(Mutex::new(HashMap::default()));
+
         let receiver = DispatcherThread {
             receiver: receiver_receiver,
             stream: stream.try_clone()?,
+            artifacts: artifacts.clone(),
+            broker_addr,
         };
         let receiver_handle = thread::spawn(|| receiver.main());
 
-        let artifacts = Arc::new(Mutex::new(HashMap::default()));
-
-        let socket_reader = SocketReaderThread {
-            artifacts: artifacts.clone(),
-            broker_addr,
-            receiver_sender: receiver_sender.clone(),
-            stream,
-        };
-
-        thread::spawn(move || socket_reader.main());
+        let receiver_sender_clone = receiver_sender.clone();
+        thread::spawn(move || {
+            net::socket_reader(
+                stream,
+                receiver_sender_clone,
+                DispatcherThreadMessage::BrokerToClient,
+            )
+        });
 
         Ok(Client {
             receiver_sender,
