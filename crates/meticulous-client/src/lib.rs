@@ -3,7 +3,7 @@ use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
-    JobDetails, JobOutputResult, JobResult, JobStatus, Sha256Digest,
+    ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus, Sha256Digest,
 };
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
@@ -70,6 +70,59 @@ enum DispatcherMessage {
     Stop,
 }
 
+fn visitor(cjid: ClientJobId, result: JobResult) -> Result<Option<ExitCode>> {
+    match result {
+        JobResult::Ran {
+            status,
+            stdout,
+            stderr,
+        } => {
+            match stdout {
+                JobOutputResult::None => {}
+                JobOutputResult::Inline(bytes) => {
+                    io::stdout().lock().write_all(&bytes)?;
+                }
+                JobOutputResult::Truncated { first, truncated } => {
+                    io::stdout().lock().write_all(&first)?;
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
+                }
+            }
+            match stderr {
+                JobOutputResult::None => {}
+                JobOutputResult::Inline(bytes) => {
+                    io::stderr().lock().write_all(&bytes)?;
+                }
+                JobOutputResult::Truncated { first, truncated } => {
+                    io::stderr().lock().write_all(&first)?;
+                    eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                }
+            }
+            Ok(match status {
+                JobStatus::Exited(0) => None,
+                JobStatus::Exited(code) => {
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: exited with code {code}");
+                    Some(ExitCode::from(code))
+                }
+                JobStatus::Signalled(signum) => {
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: killed by signal {signum}");
+                    Some(ExitCode::FAILURE)
+                }
+            })
+        }
+        JobResult::ExecutionError(err) => {
+            eprintln!("job {cjid}: execution error: {err}");
+            Ok(Some(ExitCode::FAILURE))
+        }
+        JobResult::SystemError(err) => {
+            eprintln!("job {cjid}: system error: {err}");
+            Ok(Some(ExitCode::FAILURE))
+        }
+    }
+}
+
 fn dispatcher_main(
     receiver: Receiver<DispatcherMessage>,
     mut stream: TcpStream,
@@ -77,62 +130,20 @@ fn dispatcher_main(
 ) -> Result<ExitCode> {
     let mut jobs_completed = 0u32;
     let mut stop_when_all_completed = false;
-    let mut exit_code = ExitCode::SUCCESS;
+    let mut exit_code = Some(ExitCode::SUCCESS);
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
     loop {
         let msg = receiver.recv()?;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                match result {
-                    JobResult::Ran {
-                        status,
-                        stdout,
-                        stderr,
-                    } => {
-                        match stdout {
-                            JobOutputResult::None => {}
-                            JobOutputResult::Inline(bytes) => {
-                                io::stdout().lock().write_all(&bytes)?;
-                            }
-                            JobOutputResult::Truncated { first, truncated } => {
-                                io::stdout().lock().write_all(&first)?;
-                                io::stdout().lock().flush()?;
-                                eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
-                            }
-                        }
-                        match stderr {
-                            JobOutputResult::None => {}
-                            JobOutputResult::Inline(bytes) => {
-                                io::stderr().lock().write_all(&bytes)?;
-                            }
-                            JobOutputResult::Truncated { first, truncated } => {
-                                io::stderr().lock().write_all(&first)?;
-                                eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
-                            }
-                        }
-                        match status {
-                            JobStatus::Exited(0) => {}
-                            JobStatus::Exited(code) => {
-                                io::stdout().lock().flush()?;
-                                eprintln!("job {cjid}: exited with code {code}");
-                                exit_code = ExitCode::from(code)
-                            }
-                            JobStatus::Signalled(signum) => {
-                                io::stdout().lock().flush()?;
-                                eprintln!("job {cjid}: killed by signal {signum}");
-                                exit_code = ExitCode::FAILURE
-                            }
-                        }
-                    }
-                    JobResult::ExecutionError(err) => {
-                        eprintln!("job {cjid}: execution error: {err}")
-                    }
-                    JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
+                let code = visitor(cjid, result)?;
+                if exit_code.is_none() {
+                    exit_code = code
                 }
                 jobs_completed = jobs_completed.checked_add(1).unwrap();
                 if stop_when_all_completed && jobs_completed == next_client_job_id {
-                    return Ok(exit_code);
+                    return Ok(exit_code.unwrap_or(ExitCode::SUCCESS));
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -155,7 +166,7 @@ fn dispatcher_main(
             }
             DispatcherMessage::Stop => {
                 if jobs_completed == next_client_job_id {
-                    return Ok(exit_code);
+                    return Ok(exit_code.unwrap_or(ExitCode::SUCCESS));
                 }
                 stop_when_all_completed = true;
             }
