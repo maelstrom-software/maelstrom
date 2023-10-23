@@ -18,12 +18,6 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-struct DispatcherThread {
-    receiver: Receiver<DispatcherMessage>,
-    stream: TcpStream,
-    broker_addr: SocketAddr,
-}
-
 fn add_artifact(
     artifacts: &mut HashMap<Sha256Digest, PathBuf>,
     path: PathBuf,
@@ -59,100 +53,98 @@ enum DispatcherMessage {
     AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
 }
 
-impl DispatcherThread {
-    fn main(mut self) -> Result<ExitCode> {
-        let mut jobs_completed = 0u32;
-        let mut stop_at_num_jobs: Option<u32> = None;
-        let mut exit_code = ExitCode::SUCCESS;
-        let mut next_client_job_id = 0u32;
-        let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
-        loop {
-            let msg = self.receiver.recv()?;
-            match msg {
-                DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                    match result {
-                        JobResult::Ran {
-                            status,
-                            stdout,
-                            stderr,
-                        } => {
-                            match stdout {
-                                JobOutputResult::None => {}
-                                JobOutputResult::Inline(bytes) => {
-                                    io::stdout().lock().write_all(&bytes)?;
-                                }
-                                JobOutputResult::Truncated { first, truncated } => {
-                                    io::stdout().lock().write_all(&first)?;
-                                    io::stdout().lock().flush()?;
-                                    eprintln!(
-                                        "job {cjid}: stdout truncated, {truncated} bytes lost"
-                                    );
-                                }
+fn dispatcher_main(
+    receiver: Receiver<DispatcherMessage>,
+    mut stream: TcpStream,
+    broker_addr: SocketAddr,
+) -> Result<ExitCode> {
+    let mut jobs_completed = 0u32;
+    let mut stop_at_num_jobs: Option<u32> = None;
+    let mut exit_code = ExitCode::SUCCESS;
+    let mut next_client_job_id = 0u32;
+    let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
+    loop {
+        let msg = receiver.recv()?;
+        match msg {
+            DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
+                match result {
+                    JobResult::Ran {
+                        status,
+                        stdout,
+                        stderr,
+                    } => {
+                        match stdout {
+                            JobOutputResult::None => {}
+                            JobOutputResult::Inline(bytes) => {
+                                io::stdout().lock().write_all(&bytes)?;
                             }
-                            match stderr {
-                                JobOutputResult::None => {}
-                                JobOutputResult::Inline(bytes) => {
-                                    io::stderr().lock().write_all(&bytes)?;
-                                }
-                                JobOutputResult::Truncated { first, truncated } => {
-                                    io::stderr().lock().write_all(&first)?;
-                                    eprintln!(
-                                        "job {cjid}: stderr truncated, {truncated} bytes lost"
-                                    );
-                                }
-                            }
-                            match status {
-                                JobStatus::Exited(0) => {}
-                                JobStatus::Exited(code) => {
-                                    io::stdout().lock().flush()?;
-                                    eprintln!("job {cjid}: exited with code {code}");
-                                    exit_code = ExitCode::from(code)
-                                }
-                                JobStatus::Signalled(signum) => {
-                                    io::stdout().lock().flush()?;
-                                    eprintln!("job {cjid}: killed by signal {signum}");
-                                    exit_code = ExitCode::FAILURE
-                                }
+                            JobOutputResult::Truncated { first, truncated } => {
+                                io::stdout().lock().write_all(&first)?;
+                                io::stdout().lock().flush()?;
+                                eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
                             }
                         }
-                        JobResult::ExecutionError(err) => {
-                            eprintln!("job {cjid}: execution error: {err}")
+                        match stderr {
+                            JobOutputResult::None => {}
+                            JobOutputResult::Inline(bytes) => {
+                                io::stderr().lock().write_all(&bytes)?;
+                            }
+                            JobOutputResult::Truncated { first, truncated } => {
+                                io::stderr().lock().write_all(&first)?;
+                                eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                            }
                         }
-                        JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
+                        match status {
+                            JobStatus::Exited(0) => {}
+                            JobStatus::Exited(code) => {
+                                io::stdout().lock().flush()?;
+                                eprintln!("job {cjid}: exited with code {code}");
+                                exit_code = ExitCode::from(code)
+                            }
+                            JobStatus::Signalled(signum) => {
+                                io::stdout().lock().flush()?;
+                                eprintln!("job {cjid}: killed by signal {signum}");
+                                exit_code = ExitCode::FAILURE
+                            }
+                        }
                     }
-                    jobs_completed = jobs_completed.checked_add(1).unwrap();
-                    if stop_at_num_jobs == Some(jobs_completed) {
-                        return Ok(exit_code);
+                    JobResult::ExecutionError(err) => {
+                        eprintln!("job {cjid}: execution error: {err}")
                     }
+                    JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
                 }
-                DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                    let artifact_pusher = ArtifactPusherThread {
-                        broker_addr: self.broker_addr,
-                        path: artifacts.get(&digest).unwrap().clone(),
-                        digest,
-                    };
-                    thread::spawn(move || artifact_pusher.main());
+                jobs_completed = jobs_completed.checked_add(1).unwrap();
+                if stop_at_num_jobs == Some(jobs_completed) {
+                    return Ok(exit_code);
                 }
-                DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
-                    unimplemented!("this client doesn't send statistics requests")
+            }
+            DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
+                let artifact_pusher = ArtifactPusherThread {
+                    broker_addr,
+                    path: artifacts.get(&digest).unwrap().clone(),
+                    digest,
+                };
+                thread::spawn(move || artifact_pusher.main());
+            }
+            DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+                unimplemented!("this client doesn't send statistics requests")
+            }
+            DispatcherMessage::SenderCompleted => {
+                stop_at_num_jobs = Some(next_client_job_id);
+                if stop_at_num_jobs == Some(jobs_completed) {
+                    return Ok(exit_code);
                 }
-                DispatcherMessage::SenderCompleted => {
-                    stop_at_num_jobs = Some(next_client_job_id);
-                    if stop_at_num_jobs == Some(jobs_completed) {
-                        return Ok(exit_code);
-                    }
-                }
-                DispatcherMessage::AddJob(details) => {
-                    let cjid = next_client_job_id.into();
-                    next_client_job_id = next_client_job_id.checked_add(1).unwrap();
-                    net::write_message_to_socket(
-                        &mut self.stream,
-                        ClientToBroker::JobRequest(cjid, details),
-                    )?;
-                }
-                DispatcherMessage::AddArtifact(path, sender) => {
-                    sender.send(add_artifact(&mut artifacts, path))?
-                }
+            }
+            DispatcherMessage::AddJob(details) => {
+                let cjid = next_client_job_id.into();
+                next_client_job_id = next_client_job_id.checked_add(1).unwrap();
+                net::write_message_to_socket(
+                    &mut stream,
+                    ClientToBroker::JobRequest(cjid, details),
+                )?;
+            }
+            DispatcherMessage::AddArtifact(path, sender) => {
+                sender.send(add_artifact(&mut artifacts, path))?
             }
         }
     }
@@ -192,12 +184,9 @@ impl Client {
 
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
-        let receiver = DispatcherThread {
-            receiver: receiver_receiver,
-            stream: stream.try_clone()?,
-            broker_addr,
-        };
-        let receiver_handle = thread::spawn(|| receiver.main());
+        let stream_clone = stream.try_clone()?;
+        let receiver_handle =
+            thread::spawn(move || dispatcher_main(receiver_receiver, stream_clone, broker_addr));
 
         let receiver_sender_clone = receiver_sender.clone();
         thread::spawn(move || {
