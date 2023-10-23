@@ -101,6 +101,7 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
             if let Some(msg) = self.rpc.try_recv().unwrap() {
                 match msg {
                     BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
+                    BrokerToClient::JobResponse(..) => (),
                     _ => unimplemented!(),
                 }
             }
