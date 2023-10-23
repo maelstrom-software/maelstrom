@@ -14,7 +14,10 @@ use std::{
     net::{SocketAddr, TcpStream},
     path::PathBuf,
     process::ExitCode,
-    sync::mpsc::{self, Receiver, SyncSender},
+    sync::{
+        mpsc::{self, Receiver, SyncSender},
+        Mutex,
+    },
     thread::{self, JoinHandle},
 };
 
@@ -70,7 +73,25 @@ enum DispatcherMessage {
     Stop,
 }
 
-fn visitor(cjid: ClientJobId, result: JobResult) -> Result<Option<ExitCode>> {
+struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
+
+impl Default for ExitCodeAccumulator {
+    fn default() -> Self {
+        ExitCodeAccumulator(Mutex::new(None))
+    }
+}
+
+impl ExitCodeAccumulator {
+    fn add(&mut self, code: ExitCode) {
+        self.0.lock().unwrap().get_or_insert(code);
+    }
+
+    fn get(self) -> ExitCode {
+        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
+    }
+}
+
+fn visitor(cjid: ClientJobId, result: JobResult, accum: &mut ExitCodeAccumulator) -> Result<()> {
     match result {
         JobResult::Ran {
             status,
@@ -98,29 +119,30 @@ fn visitor(cjid: ClientJobId, result: JobResult) -> Result<Option<ExitCode>> {
                     eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
                 }
             }
-            Ok(match status {
-                JobStatus::Exited(0) => None,
+            match status {
+                JobStatus::Exited(0) => {}
                 JobStatus::Exited(code) => {
                     io::stdout().lock().flush()?;
                     eprintln!("job {cjid}: exited with code {code}");
-                    Some(ExitCode::from(code))
+                    accum.add(ExitCode::from(code));
                 }
                 JobStatus::Signalled(signum) => {
                     io::stdout().lock().flush()?;
                     eprintln!("job {cjid}: killed by signal {signum}");
-                    Some(ExitCode::FAILURE)
+                    accum.add(ExitCode::FAILURE);
                 }
-            })
+            };
         }
         JobResult::ExecutionError(err) => {
             eprintln!("job {cjid}: execution error: {err}");
-            Ok(Some(ExitCode::FAILURE))
+            accum.add(ExitCode::FAILURE);
         }
         JobResult::SystemError(err) => {
             eprintln!("job {cjid}: system error: {err}");
-            Ok(Some(ExitCode::FAILURE))
+            accum.add(ExitCode::FAILURE);
         }
     }
+    Ok(())
 }
 
 fn dispatcher_main(
@@ -130,20 +152,17 @@ fn dispatcher_main(
 ) -> Result<ExitCode> {
     let mut jobs_completed = 0u32;
     let mut stop_when_all_completed = false;
-    let mut exit_code = Some(ExitCode::SUCCESS);
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
+    let mut accum = ExitCodeAccumulator::default();
     loop {
         let msg = receiver.recv()?;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                let code = visitor(cjid, result)?;
-                if exit_code.is_none() {
-                    exit_code = code
-                }
+                visitor(cjid, result, &mut accum)?;
                 jobs_completed = jobs_completed.checked_add(1).unwrap();
                 if stop_when_all_completed && jobs_completed == next_client_job_id {
-                    return Ok(exit_code.unwrap_or(ExitCode::SUCCESS));
+                    return Ok(accum.get());
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -166,7 +185,7 @@ fn dispatcher_main(
             }
             DispatcherMessage::Stop => {
                 if jobs_completed == next_client_job_id {
-                    return Ok(exit_code.unwrap_or(ExitCode::SUCCESS));
+                    return Ok(accum.get());
                 }
                 stop_when_all_completed = true;
             }
