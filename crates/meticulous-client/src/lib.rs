@@ -76,7 +76,7 @@ fn dispatcher_main(
     broker_addr: SocketAddr,
 ) -> Result<ExitCode> {
     let mut jobs_completed = 0u32;
-    let mut stop_at_num_jobs: Option<u32> = None;
+    let mut stop_when_all_completed = false;
     let mut exit_code = ExitCode::SUCCESS;
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
@@ -131,7 +131,7 @@ fn dispatcher_main(
                     JobResult::SystemError(err) => eprintln!("job {cjid}: system error: {err}"),
                 }
                 jobs_completed = jobs_completed.checked_add(1).unwrap();
-                if stop_at_num_jobs == Some(jobs_completed) {
+                if stop_when_all_completed && jobs_completed == next_client_job_id {
                     return Ok(exit_code);
                 }
             }
@@ -154,10 +154,10 @@ fn dispatcher_main(
                 )?;
             }
             DispatcherMessage::Stop => {
-                stop_at_num_jobs = Some(next_client_job_id);
-                if stop_at_num_jobs == Some(jobs_completed) {
+                if jobs_completed == next_client_job_id {
                     return Ok(exit_code);
                 }
+                stop_when_all_completed = true;
             }
         }
     }
