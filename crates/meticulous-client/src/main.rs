@@ -1,15 +1,16 @@
 use anyhow::Result;
 use clap::Parser;
-use meticulous_base::JobDetails;
+use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
 use meticulous_client::Client;
 use serde::Deserialize;
 use serde_json::{self, Deserializer};
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
     path::{Path, PathBuf},
     process::ExitCode,
+    sync::{Arc, Mutex},
 };
 
 /// The meticulous client. This process sends jobs to the broker to be executed.
@@ -39,9 +40,86 @@ struct JobDescription {
     layers: Option<Vec<String>>,
 }
 
+struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
+
+impl Default for ExitCodeAccumulator {
+    fn default() -> Self {
+        ExitCodeAccumulator(Mutex::new(None))
+    }
+}
+
+impl ExitCodeAccumulator {
+    fn add(&self, code: ExitCode) {
+        self.0.lock().unwrap().get_or_insert(code);
+    }
+
+    fn get(&self) -> ExitCode {
+        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
+    }
+}
+
+fn visitor(cjid: ClientJobId, result: JobResult, accum: &ExitCodeAccumulator) -> Result<()> {
+    match result {
+        JobResult::Ran {
+            status,
+            stdout,
+            stderr,
+        } => {
+            match stdout {
+                JobOutputResult::None => {}
+                JobOutputResult::Inline(bytes) => {
+                    io::stdout().lock().write_all(&bytes)?;
+                }
+                JobOutputResult::Truncated { first, truncated } => {
+                    io::stdout().lock().write_all(&first)?;
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
+                }
+            }
+            match stderr {
+                JobOutputResult::None => {}
+                JobOutputResult::Inline(bytes) => {
+                    io::stderr().lock().write_all(&bytes)?;
+                }
+                JobOutputResult::Truncated { first, truncated } => {
+                    io::stderr().lock().write_all(&first)?;
+                    eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                }
+            }
+            match status {
+                JobStatus::Exited(0) => {}
+                JobStatus::Exited(code) => {
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: exited with code {code}");
+                    accum.add(ExitCode::from(code));
+                }
+                JobStatus::Signalled(signum) => {
+                    io::stdout().lock().flush()?;
+                    eprintln!("job {cjid}: killed by signal {signum}");
+                    accum.add(ExitCode::FAILURE);
+                }
+            };
+        }
+        JobResult::ExecutionError(err) => {
+            eprintln!("job {cjid}: execution error: {err}");
+            accum.add(ExitCode::FAILURE);
+        }
+        JobResult::SystemError(err) => {
+            eprintln!("job {cjid}: system error: {err}");
+            accum.add(ExitCode::FAILURE);
+        }
+    }
+    Ok(())
+}
+
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
-    let mut client = Client::new(parse_socket_addr(cli_options.broker)?)?;
+    let accum = Arc::new(ExitCodeAccumulator::default());
+    let accum_clone = accum.clone();
+    let mut client = Client::new(
+        parse_socket_addr(cli_options.broker)?,
+        move |cjid, result| visitor(cjid, result, &accum_clone),
+    )?;
     let reader: Box<dyn Read> = if let Some(file) = cli_options.file {
         Box::new(File::open(file)?)
     } else {
@@ -62,7 +140,8 @@ fn main() -> Result<ExitCode> {
             layers,
         });
     }
-    client.wait_for_oustanding_jobs()
+    client.wait_for_oustanding_jobs()?;
+    Ok(accum.get())
 }
 
 #[test]
