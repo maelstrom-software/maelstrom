@@ -6,12 +6,20 @@ use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, enum_map::Enum, Serialize, Deserialize)]
+#[derive(
+    Copy, Clone, Debug, PartialEq, Eq, enum_map::Enum, strum::EnumIter, Serialize, Deserialize,
+)]
 pub enum JobState {
     WaitingForArtifacts,
     Pending,
     Running,
     Complete,
+}
+
+impl JobState {
+    pub fn iter() -> impl Iterator<Item = Self> {
+        <Self as strum::IntoEnumIterator>::iter()
+    }
 }
 
 /// For a single client, counts of jobs in various states
@@ -62,6 +70,18 @@ impl JobStatisticsTimeSeries {
 
     pub fn insert(&mut self, entry: JobStatisticsSample) {
         self.entries.insert(entry);
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &JobStatisticsSample> {
+        self.entries.iter()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.entries.capacity()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 }
 
