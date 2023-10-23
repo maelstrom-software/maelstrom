@@ -21,40 +21,23 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-struct SenderThread {
-    receiver: Receiver<JobDetails>,
-    stream: TcpStream,
-    next_client_job_id: u32,
-}
-
-impl SenderThread {
-    fn main(mut self) -> Result<u32> {
-        while let Ok(details) = self.receiver.recv() {
-            let cjid = self.next_client_job_id.into();
-            self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
-            net::write_message_to_socket(
-                &mut self.stream,
-                ClientToBroker::JobRequest(cjid, details),
-            )?;
-        }
-        Ok(self.next_client_job_id)
-    }
-}
-
 enum DispatcherThreadMessage {
     Result(ClientJobId, JobResult),
-    SenderCompleted(u32),
+    SenderCompleted,
+    AddJob(JobDetails),
 }
 
 struct DispatcherThread {
     receiver: Receiver<DispatcherThreadMessage>,
+    stream: TcpStream,
 }
 
 impl DispatcherThread {
-    fn main(self) -> Result<ExitCode> {
+    fn main(mut self) -> Result<ExitCode> {
         let mut jobs_completed = 0u32;
         let mut stop_at_num_jobs: Option<u32> = None;
         let mut exit_code = ExitCode::SUCCESS;
+        let mut next_client_job_id = 0u32;
         loop {
             let msg = self.receiver.recv()?;
             match msg {
@@ -114,11 +97,19 @@ impl DispatcherThread {
                         return Ok(exit_code);
                     }
                 }
-                DispatcherThreadMessage::SenderCompleted(num_jobs) => {
-                    stop_at_num_jobs = Some(num_jobs);
+                DispatcherThreadMessage::SenderCompleted => {
+                    stop_at_num_jobs = Some(next_client_job_id);
                     if stop_at_num_jobs == Some(jobs_completed) {
                         return Ok(exit_code);
                     }
+                }
+                DispatcherThreadMessage::AddJob(details) => {
+                    let cjid = next_client_job_id.into();
+                    next_client_job_id = next_client_job_id.checked_add(1).unwrap();
+                    net::write_message_to_socket(
+                        &mut self.stream,
+                        ClientToBroker::JobRequest(cjid, details),
+                    )?;
                 }
             }
         }
@@ -180,8 +171,6 @@ impl ArtifactPusherThread {
 }
 
 pub struct Client {
-    sender_sender: SyncSender<JobDetails>,
-    sender_handle: JoinHandle<Result<u32>>,
     receiver_sender: SyncSender<DispatcherThreadMessage>,
     receiver_handle: JoinHandle<Result<ExitCode>>,
     artifacts: Arc<Mutex<HashMap<Sha256Digest, PathBuf>>>,
@@ -193,21 +182,11 @@ impl Client {
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
-        let sender_stream = stream.try_clone()?;
-
-        let (sender_sender, sender_receiver) = mpsc::sync_channel(1000);
-
-        let sender = SenderThread {
-            receiver: sender_receiver,
-            stream: sender_stream,
-            next_client_job_id: 0,
-        };
-        let sender_handle = thread::spawn(|| sender.main());
-
         let (receiver_sender, receiver_receiver) = mpsc::sync_channel(1000);
 
         let receiver = DispatcherThread {
             receiver: receiver_receiver,
+            stream: stream.try_clone()?,
         };
         let receiver_handle = thread::spawn(|| receiver.main());
 
@@ -223,8 +202,6 @@ impl Client {
         thread::spawn(move || socket_reader.main());
 
         Ok(Client {
-            sender_sender,
-            sender_handle,
             receiver_sender,
             receiver_handle,
             artifacts,
@@ -268,15 +245,14 @@ impl Client {
         // We will only get an error if the sender has closed its receiver, which will only happen
         // if it had an error writing to the socket. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
-        let _ = self.sender_sender.send(details);
+        let _ = self
+            .receiver_sender
+            .send(DispatcherThreadMessage::AddJob(details));
     }
 
     pub fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
-        drop(self.sender_sender);
-        let num_jobs = self.sender_handle.join().unwrap()?;
         self.receiver_sender
-            .send(DispatcherThreadMessage::SenderCompleted(num_jobs))
-            .unwrap();
+            .send(DispatcherThreadMessage::SenderCompleted)?;
         self.receiver_handle.join().unwrap()
     }
 }
