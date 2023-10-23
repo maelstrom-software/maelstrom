@@ -67,6 +67,10 @@ impl<T> RingBuffer<T> {
         self.buf.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.buf.is_empty()
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.buf[self.cursor..]
             .iter()

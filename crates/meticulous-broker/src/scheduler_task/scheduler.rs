@@ -517,8 +517,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             .workers
             .0
             .values()
-            .map(|w| w.pending.iter())
-            .flatten()
+            .flat_map(|w| w.pending.iter())
             .filter(|jid| jid.cid == cid)
             .count() as u64;
 

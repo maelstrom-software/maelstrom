@@ -83,6 +83,10 @@ impl JobStatisticsTimeSeries {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 /// Useful information for a client to display about the broker's state.
