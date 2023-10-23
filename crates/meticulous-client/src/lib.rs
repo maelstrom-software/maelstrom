@@ -65,7 +65,7 @@ fn add_artifact(
 enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
-    AddJob(JobDetails),
+    AddJob(JobDetails, JobResponseHandler),
     Stop,
 }
 
@@ -73,19 +73,17 @@ fn dispatcher_main(
     receiver: Receiver<DispatcherMessage>,
     mut stream: TcpStream,
     broker_addr: SocketAddr,
-    mut visitor: impl FnMut(ClientJobId, JobResult) -> Result<()>,
 ) -> Result<()> {
-    let mut jobs_completed = 0u32;
     let mut stop_when_all_completed = false;
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
+    let mut handlers = HashMap::<ClientJobId, JobResponseHandler>::default();
     loop {
         let msg = receiver.recv()?;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                visitor(cjid, result)?;
-                jobs_completed = jobs_completed.checked_add(1).unwrap();
-                if stop_when_all_completed && jobs_completed == next_client_job_id {
+                handlers.remove(&cjid).unwrap()(cjid, result)?;
+                if stop_when_all_completed && handlers.is_empty() {
                     return Ok(());
                 }
             }
@@ -99,8 +97,9 @@ fn dispatcher_main(
             DispatcherMessage::AddArtifact(path, sender) => {
                 sender.send(add_artifact(&mut artifacts, path))?
             }
-            DispatcherMessage::AddJob(details) => {
+            DispatcherMessage::AddJob(details, handler) => {
                 let cjid = next_client_job_id.into();
+                handlers.insert(cjid, handler).assert_is_none();
                 next_client_job_id = next_client_job_id.checked_add(1).unwrap();
                 net::write_message_to_socket(
                     &mut stream,
@@ -108,7 +107,7 @@ fn dispatcher_main(
                 )?;
             }
             DispatcherMessage::Stop => {
-                if jobs_completed == next_client_job_id {
+                if handlers.is_empty() {
                     return Ok(());
                 }
                 stop_when_all_completed = true;
@@ -117,6 +116,8 @@ fn dispatcher_main(
     }
 }
 
+pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<()> + Send + Sync>;
+
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     dispatcher_handle: JoinHandle<Result<()>>,
@@ -124,19 +125,15 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(
-        broker_addr: SocketAddr,
-        visitor: impl FnMut(ClientJobId, JobResult) -> Result<()> + Send + 'static,
-    ) -> Result<Self> {
+    pub fn new(broker_addr: SocketAddr) -> Result<Self> {
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
 
         let stream_clone = stream.try_clone()?;
-        let dispatcher_handle = thread::spawn(move || {
-            dispatcher_main(dispatcher_receiver, stream_clone, broker_addr, visitor)
-        });
+        let dispatcher_handle =
+            thread::spawn(move || dispatcher_main(dispatcher_receiver, stream_clone, broker_addr));
 
         let dispatcher_sender_clone = dispatcher_sender.clone();
         thread::spawn(move || {
@@ -167,13 +164,13 @@ impl Client {
         Ok(digest)
     }
 
-    pub fn add_job(&mut self, details: JobDetails) {
+    pub fn add_job(&mut self, details: JobDetails, handler: JobResponseHandler) {
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
         let _ = self
             .dispatcher_sender
-            .send(DispatcherMessage::AddJob(details));
+            .send(DispatcherMessage::AddJob(details, handler));
     }
 
     pub fn wait_for_oustanding_jobs(self) -> Result<()> {

@@ -115,11 +115,7 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: &ExitCodeAccumulator) ->
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let accum_clone = accum.clone();
-    let mut client = Client::new(
-        parse_socket_addr(cli_options.broker)?,
-        move |cjid, result| visitor(cjid, result, &accum_clone),
-    )?;
+    let mut client = Client::new(parse_socket_addr(cli_options.broker)?)?;
     let reader: Box<dyn Read> = if let Some(file) = cli_options.file {
         Box::new(File::open(file)?)
     } else {
@@ -134,11 +130,15 @@ fn main() -> Result<ExitCode> {
             .iter()
             .map(|layer| client.add_artifact(Path::new(layer).to_owned()))
             .collect::<Result<Vec<_>>>()?;
-        client.add_job(JobDetails {
-            program: job.program,
-            arguments: job.arguments.unwrap_or(vec![]),
-            layers,
-        });
+        let accum_clone = accum.clone();
+        client.add_job(
+            JobDetails {
+                program: job.program,
+                arguments: job.arguments.unwrap_or(vec![]),
+                layers,
+            },
+            Box::new(move |cjid, result| visitor(cjid, result, &accum_clone)),
+        );
     }
     client.wait_for_oustanding_jobs()?;
     Ok(accum.get())
