@@ -23,8 +23,8 @@ fn artifact_pusher_main(
     path: PathBuf,
     digest: Sha256Digest,
 ) -> Result<()> {
-    let file = File::open(path)?;
     let mut stream = TcpStream::connect(broker_addr)?;
+    let file = File::open(path)?;
     let size = file.metadata()?.len();
     let mut file = FixedSizeReader::new(file, size);
     net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
@@ -65,9 +65,9 @@ fn add_artifact(
 
 enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
-    SenderCompleted,
-    AddJob(JobDetails),
     AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
+    AddJob(JobDetails),
+    Stop,
 }
 
 fn dispatcher_main(
@@ -142,11 +142,8 @@ fn dispatcher_main(
             DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
             }
-            DispatcherMessage::SenderCompleted => {
-                stop_at_num_jobs = Some(next_client_job_id);
-                if stop_at_num_jobs == Some(jobs_completed) {
-                    return Ok(exit_code);
-                }
+            DispatcherMessage::AddArtifact(path, sender) => {
+                sender.send(add_artifact(&mut artifacts, path))?
             }
             DispatcherMessage::AddJob(details) => {
                 let cjid = next_client_job_id.into();
@@ -156,8 +153,11 @@ fn dispatcher_main(
                     ClientToBroker::JobRequest(cjid, details),
                 )?;
             }
-            DispatcherMessage::AddArtifact(path, sender) => {
-                sender.send(add_artifact(&mut artifacts, path))?
+            DispatcherMessage::Stop => {
+                stop_at_num_jobs = Some(next_client_job_id);
+                if stop_at_num_jobs == Some(jobs_completed) {
+                    return Ok(exit_code);
+                }
             }
         }
     }
@@ -219,8 +219,7 @@ impl Client {
     }
 
     pub fn wait_for_oustanding_jobs(self) -> Result<ExitCode> {
-        self.dispatcher_sender
-            .send(DispatcherMessage::SenderCompleted)?;
+        self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         self.dispatcher_handle.join().unwrap()
     }
 }
