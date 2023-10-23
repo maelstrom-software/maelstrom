@@ -18,6 +18,23 @@ use std::{
     thread::{self, JoinHandle},
 };
 
+fn artifact_pusher_main(
+    broker_addr: SocketAddr,
+    path: PathBuf,
+    digest: Sha256Digest,
+) -> Result<()> {
+    let file = File::open(path)?;
+    let mut stream = TcpStream::connect(broker_addr)?;
+    let size = file.metadata()?.len();
+    let mut file = FixedSizeReader::new(file, size);
+    net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
+    net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
+    let copied = io::copy(&mut file, &mut stream)?;
+    assert_eq!(copied, size);
+    let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
+    resp.map_err(|e| anyhow!("Error from broker: {e}"))
+}
+
 fn add_artifact(
     artifacts: &mut HashMap<Sha256Digest, PathBuf>,
     path: PathBuf,
@@ -119,12 +136,8 @@ fn dispatcher_main(
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                let artifact_pusher = ArtifactPusherThread {
-                    broker_addr,
-                    path: artifacts.get(&digest).unwrap().clone(),
-                    digest,
-                };
-                thread::spawn(move || artifact_pusher.main());
+                let path = artifacts.get(&digest).unwrap().clone();
+                thread::spawn(move || artifact_pusher_main(broker_addr, path, digest));
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
@@ -147,27 +160,6 @@ fn dispatcher_main(
                 sender.send(add_artifact(&mut artifacts, path))?
             }
         }
-    }
-}
-
-struct ArtifactPusherThread {
-    broker_addr: SocketAddr,
-    path: PathBuf,
-    digest: Sha256Digest,
-}
-
-impl ArtifactPusherThread {
-    fn main(self) -> Result<()> {
-        let file = File::open(self.path)?;
-        let mut stream = TcpStream::connect(self.broker_addr)?;
-        let size = file.metadata()?.len();
-        let mut file = FixedSizeReader::new(file, size);
-        net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
-        net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(self.digest, size))?;
-        let copied = io::copy(&mut file, &mut stream)?;
-        assert_eq!(copied, size);
-        let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
-        resp.map_err(|e| anyhow!("Error from broker: {e}"))
     }
 }
 
