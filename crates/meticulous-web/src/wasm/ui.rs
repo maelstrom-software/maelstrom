@@ -64,6 +64,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                 .show(ui, |plot_ui| {
                     let mut prev_points: Option<Vec<[f64; 2]>> = None;
                     let mut lines = vec![];
+                    let mut max_height = 100.0;
                     for state in JobState::iter().rev() {
                         let mut points: Vec<_> = stats
                             .job_statistics
@@ -76,11 +77,19 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                             })
                             .collect();
 
-                        if let Some(prev_points) = prev_points.take() {
+                        if let Some(prev_points) = &prev_points {
                             for (p, prev) in points.iter_mut().zip(prev_points.iter()) {
                                 p[1] += prev[1];
                             }
+                        }
 
+                        for p in &points {
+                            if p[1] > max_height {
+                                max_height = p[1];
+                            }
+                        }
+
+                        if let Some(prev_points) = prev_points.take() {
                             lines.push(
                                 StackedLine::new(PlotPoints::new(points.clone()))
                                     .stacked_on(prev_points)
@@ -102,7 +111,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                     let capacity = stats.job_statistics.capacity();
                     plot_ui.set_plot_bounds(PlotBounds::from_min_max(
                         [0.0, 0.0],
-                        [capacity as f64, 100.0],
+                        [capacity as f64, max_height],
                     ))
                 });
         }
