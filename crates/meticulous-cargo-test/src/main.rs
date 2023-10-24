@@ -1,18 +1,18 @@
 use anyhow::Result;
 use clap::Parser;
-use meticulous_base::{
-    proto::{BrokerToClient, ClientToBroker, Hello},
-    JobDetails,
-};
-use meticulous_util::net;
+use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
+use meticulous_client::Client;
 use regex::Regex;
 use std::{
-    collections::HashMap,
-    io::{self, BufReader},
-    net::{SocketAddr, TcpStream, ToSocketAddrs as _},
-    process::Command,
+    io::{self, Write as _},
+    net::{SocketAddr, ToSocketAddrs as _},
+    process::{Command, ExitCode},
     str,
+    sync::{Arc, Mutex},
 };
+use unicode_width::UnicodeWidthStr as _;
+use unicode_truncate::UnicodeTruncateStr as _;
+use colored::{Colorize as _, ColoredString};
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -34,7 +34,7 @@ fn get_test_binaries() -> Result<Vec<String>> {
     let output = Command::new("cargo").arg("test").arg("--no-run").output()?;
     Ok(Regex::new(r"Executable unittests.*\((.*)\)")?
         .captures_iter(str::from_utf8(&output.stderr)?)
-        .map(|capture| capture.get(1).unwrap().as_str().to_string())
+        .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
         .collect())
 }
 
@@ -46,58 +46,122 @@ fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
         .output()?;
     Ok(Regex::new(r"\b([^ ]*): test")?
         .captures_iter(str::from_utf8(&output.stdout)?)
-        .map(|capture| capture.get(1).unwrap().as_str().to_string())
+        .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
         .collect())
+}
+
+struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
+
+impl Default for ExitCodeAccumulator {
+    fn default() -> Self {
+        ExitCodeAccumulator(Mutex::new(None))
+    }
+}
+
+impl ExitCodeAccumulator {
+    fn add(&self, code: ExitCode) {
+        self.0.lock().unwrap().get_or_insert(code);
+    }
+
+    fn get(&self) -> ExitCode {
+        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
+    }
+}
+
+fn visitor(
+    cjid: ClientJobId,
+    result: JobResult,
+    accum: Arc<ExitCodeAccumulator>,
+    case: String,
+    width: Option<usize>,
+) -> Result<()> {
+    let result_str: ColoredString;
+    let mut result_details: Option<String> = None;
+    match result {
+        JobResult::Ran { status, stderr, .. } => {
+            match stderr {
+                JobOutputResult::None => {}
+                JobOutputResult::Inline(bytes) => {
+                    io::stderr().lock().write_all(&bytes)?;
+                }
+                JobOutputResult::Truncated { first, truncated } => {
+                    io::stderr().lock().write_all(&first)?;
+                    eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                }
+            }
+            match status {
+                JobStatus::Exited(0) => {
+                    result_str = "OK".green();
+                }
+                JobStatus::Exited(code) => {
+                    result_str = "FAIL".red();
+                    accum.add(ExitCode::from(code));
+                }
+                JobStatus::Signalled(signo) => {
+                    result_str = "FAIL".red();
+                    result_details = Some(format!("killed by signal {signo}"));
+                    accum.add(ExitCode::FAILURE);
+                }
+            };
+        }
+        JobResult::ExecutionError(err)  => {
+            result_str = "ERR".yellow();
+            result_details = Some(format!("execution error: {err}"));
+            accum.add(ExitCode::FAILURE);
+        }
+        JobResult::SystemError(err) => {
+            result_str = "ERR".yellow();
+            result_details = Some(format!("system error: {err}"));
+            accum.add(ExitCode::FAILURE);
+        }
+    }
+    match width {
+        Some(width) if width > 10 => {
+            let case_width = case.width();
+            let result_width = result_str.width();
+            if case_width + result_width + 1 <= width {
+                let dots_width = width - result_width - case_width;
+                let case = case.bold();
+                println!("{case}{empty:.<dots_width$}{result_str}", empty="");
+            } else {
+                let (case, case_width) = case.unicode_truncate_start(width - 2 - result_width);
+                let case = case.bold();
+                let dots_width = width - result_width - case_width - 1;
+                println!("<{case}{empty:.<dots_width$}{result_str}", empty="");
+            }
+        },
+        _ => {
+            println!("{case} {result_str}");
+        },
+    }
+    if let Some(details_str) = result_details {
+        println!("{details_str}");
+    }
+    Ok(())
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
-pub fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let mut pairs = vec![];
+pub fn main() -> Result<ExitCode> {
+    let cli_options = Cli::parse();
+    let accum = Arc::new(ExitCodeAccumulator::default());
+    let mut client = Client::new(cli_options.broker)?;
+    let width = term_size::dimensions().map(|(w, _)| w);
     for binary in get_test_binaries()? {
         for case in get_cases_from_binary(&binary)? {
-            pairs.push((binary.clone(), case))
-        }
-    }
-    let mut write_stream = TcpStream::connect(cli.broker)?;
-    let read_stream = write_stream.try_clone()?;
-    let mut read_stream = BufReader::new(read_stream);
-
-    net::write_message_to_socket(&mut write_stream, Hello::Client)?;
-    let mut map = HashMap::new();
-    for (id, (binary, case)) in pairs.into_iter().enumerate() {
-        let id = (id as u32).into();
-        map.insert(id, case.clone());
-        net::write_message_to_socket(
-            &mut write_stream,
-            ClientToBroker::JobRequest(
-                id,
+            let accum_clone = accum.clone();
+            client.add_job(
                 JobDetails {
-                    program: binary,
-                    arguments: vec!["--exact".to_string(), case],
+                    program: binary.clone(),
+                    arguments: vec![case.clone()],
                     layers: vec![],
                 },
-            ),
-        )?;
-    }
-
-    while !map.is_empty() {
-        match net::read_message_from_socket(&mut read_stream)? {
-            BrokerToClient::JobResponse(id, result) => {
-                let case = map.remove(&id).unwrap();
-                println!("{case}: {result:?}");
-            }
-            BrokerToClient::TransferArtifact(_) => {
-                todo!();
-            }
-            BrokerToClient::StatisticsResponse(_) => {
-                panic!("Got a StatisticsResponse even though we don't send requests");
-            }
+                Box::new(move |cjid, result| visitor(cjid, result, accum_clone, case, width)),
+            );
         }
     }
-
-    Ok(())
+    client.wait_for_oustanding_jobs()?;
+    Ok(accum.get())
 }
 
 #[test]
