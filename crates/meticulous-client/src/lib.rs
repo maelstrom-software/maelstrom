@@ -5,7 +5,7 @@ use meticulous_base::{
     },
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
-use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
+use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net, process::ExitCode};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
@@ -13,7 +13,6 @@ use std::{
     io::{self, Read},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
-    process::ExitCode,
     sync::{
         mpsc::{self, Receiver, SyncSender},
         Mutex,

@@ -9,6 +9,7 @@ colored = { workspace = true }
 clap = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-client = { workspace = true }
+meticulous-util = { workspace = true }
 regex = { workspace = true }
 term_size = { workspace = true }
 unicode-truncate = { workspace = true }

@@ -3,11 +3,12 @@ use clap::Parser;
 use colored::{ColoredString, Colorize as _};
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
 use meticulous_client::{Client, ExitCodeAccumulator};
+use meticulous_util::process::ExitCode;
 use regex::Regex;
 use std::{
     io::{self, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
-    process::{Command, ExitCode},
+    process::Command,
     str,
     sync::Arc,
 };

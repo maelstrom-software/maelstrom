@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
 use meticulous_client::{Client, ExitCodeAccumulator};
+use meticulous_util::process::ExitCode;
 use serde::Deserialize;
 use serde_json::{self, Deserializer};
 use std::{
@@ -9,7 +10,6 @@ use std::{
     io::{self, Read, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
     path::{Path, PathBuf},
-    process::ExitCode,
     sync::Arc,
 };
 

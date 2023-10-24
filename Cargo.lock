@@ -1847,6 +1847,7 @@ dependencies = [
  "colored",
  "meticulous-base",
  "meticulous-client",
+ "meticulous-util",
  "regex",
  "term_size",
  "unicode-truncate",
