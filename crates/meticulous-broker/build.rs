@@ -16,6 +16,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../meticulous-web/Cargo.toml");
     println!("cargo:rerun-if-changed=../meticulous-web/src/");
     println!("cargo:rerun-if-changed=../meticulous-web/www/");
+    println!("cargo:rerun-if-changed=../meticulous-plot/src/");
+    println!("cargo:rerun-if-changed=../meticulous-base/src/");
 
     sh(["crates/meticulous-web/build.sh"], "../..");
 }

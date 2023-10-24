@@ -1,10 +1,11 @@
 //! Contains data-structures for maintaining historical statistics of jobs
 
-pub use crate::ring_buffer::RingBuffer;
+use crate::ring_buffer::RingBuffer;
 use crate::ClientId;
 use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, enum_map::Enum, strum::EnumIter, Serialize, Deserialize,
@@ -16,10 +17,36 @@ pub enum JobState {
     Complete,
 }
 
+impl fmt::Display for JobState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WaitingForArtifacts => write!(f, "waiting for artifacts"),
+            Self::Pending => write!(f, "pending"),
+            Self::Running => write!(f, "running"),
+            Self::Complete => write!(f, "complete"),
+        }
+    }
+}
+
 impl JobState {
-    pub fn iter() -> impl Iterator<Item = Self> {
+    pub fn iter() -> impl DoubleEndedIterator<Item = Self> {
         <Self as strum::IntoEnumIterator>::iter()
     }
+}
+
+#[test]
+fn job_state_iter() {
+    let exp = vec![
+        JobState::WaitingForArtifacts,
+        JobState::Pending,
+        JobState::Running,
+        JobState::Complete,
+    ];
+    assert_eq!(Vec::from_iter(JobState::iter()), exp);
+    assert_eq!(
+        Vec::from_iter(JobState::iter().rev()),
+        Vec::from_iter(exp.into_iter().rev())
+    );
 }
 
 /// For a single client, counts of jobs in various states
