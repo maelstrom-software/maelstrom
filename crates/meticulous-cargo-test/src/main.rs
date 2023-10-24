@@ -2,14 +2,14 @@ use anyhow::Result;
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
-use meticulous_client::Client;
+use meticulous_client::{Client, ExitCodeAccumulator};
 use regex::Regex;
 use std::{
     io::{self, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
     process::{Command, ExitCode},
     str,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
@@ -48,24 +48,6 @@ fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
         .captures_iter(str::from_utf8(&output.stdout)?)
         .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
         .collect())
-}
-
-struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
-
-impl Default for ExitCodeAccumulator {
-    fn default() -> Self {
-        ExitCodeAccumulator(Mutex::new(None))
-    }
-}
-
-impl ExitCodeAccumulator {
-    fn add(&self, code: ExitCode) {
-        self.0.lock().unwrap().get_or_insert(code);
-    }
-
-    fn get(&self) -> ExitCode {
-        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
-    }
 }
 
 fn visitor(

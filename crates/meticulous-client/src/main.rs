@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
-use meticulous_client::Client;
+use meticulous_client::{Client, ExitCodeAccumulator};
 use serde::Deserialize;
 use serde_json::{self, Deserializer};
 use std::{
@@ -10,7 +10,7 @@ use std::{
     net::{SocketAddr, ToSocketAddrs as _},
     path::{Path, PathBuf},
     process::ExitCode,
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 /// The meticulous client. This process sends jobs to the broker to be executed.
@@ -40,25 +40,7 @@ struct JobDescription {
     layers: Option<Vec<String>>,
 }
 
-struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
-
-impl Default for ExitCodeAccumulator {
-    fn default() -> Self {
-        ExitCodeAccumulator(Mutex::new(None))
-    }
-}
-
-impl ExitCodeAccumulator {
-    fn add(&self, code: ExitCode) {
-        self.0.lock().unwrap().get_or_insert(code);
-    }
-
-    fn get(&self) -> ExitCode {
-        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
-    }
-}
-
-fn visitor(cjid: ClientJobId, result: JobResult, accum: &ExitCodeAccumulator) -> Result<()> {
+fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
     match result {
         JobResult::Ran {
             status,
@@ -137,7 +119,7 @@ fn main() -> Result<ExitCode> {
                 arguments: job.arguments.unwrap_or(vec![]),
                 layers,
             },
-            Box::new(move |cjid, result| visitor(cjid, result, &accum_clone)),
+            Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );
     }
     client.wait_for_oustanding_jobs()?;
