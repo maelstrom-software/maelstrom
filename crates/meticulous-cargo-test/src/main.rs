@@ -1,10 +1,9 @@
 use anyhow::Result;
-use clap::{builder::NonEmptyStringValueParser, Parser};
+use clap::Parser;
 use std::{
     io,
     net::{SocketAddr, ToSocketAddrs as _},
 };
-use tokio::runtime::Runtime;
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -20,22 +19,11 @@ struct Cli {
     /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
     #[arg(value_parser = parse_socket_addr)]
     broker: SocketAddr,
-
-    /// Name of the client provided to the broker.
-    #[arg(
-        short,
-        long,
-        default_value_t = gethostname::gethostname().into_string().unwrap(),
-        value_parser = NonEmptyStringValueParser::new()
-    )]
-    name: String,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let runtime = Runtime::new()?;
-    runtime.block_on(async { meticulous_cargo_test::main(cli.name, cli.broker).await })?;
-    Ok(())
+    meticulous_cargo_test::main(cli.broker)
 }
 
 #[test]
