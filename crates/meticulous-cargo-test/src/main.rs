@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use colored::{ColoredString, Colorize as _};
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
 use meticulous_client::Client;
 use regex::Regex;
@@ -10,9 +11,8 @@ use std::{
     str,
     sync::{Arc, Mutex},
 };
-use unicode_width::UnicodeWidthStr as _;
 use unicode_truncate::UnicodeTruncateStr as _;
-use colored::{Colorize as _, ColoredString};
+use unicode_width::UnicodeWidthStr as _;
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -104,7 +104,7 @@ fn visitor(
                 }
             };
         }
-        JobResult::ExecutionError(err)  => {
+        JobResult::ExecutionError(err) => {
             result_str = "ERR".yellow();
             result_details = Some(format!("execution error: {err}"));
             accum.add(ExitCode::FAILURE);
@@ -119,20 +119,20 @@ fn visitor(
         Some(width) if width > 10 => {
             let case_width = case.width();
             let result_width = result_str.width();
-            if case_width + result_width + 1 <= width {
+            if case_width + result_width < width {
                 let dots_width = width - result_width - case_width;
                 let case = case.bold();
-                println!("{case}{empty:.<dots_width$}{result_str}", empty="");
+                println!("{case}{empty:.<dots_width$}{result_str}", empty = "");
             } else {
                 let (case, case_width) = case.unicode_truncate_start(width - 2 - result_width);
                 let case = case.bold();
                 let dots_width = width - result_width - case_width - 1;
-                println!("<{case}{empty:.<dots_width$}{result_str}", empty="");
+                println!("<{case}{empty:.<dots_width$}{result_str}", empty = "");
             }
-        },
+        }
         _ => {
             println!("{case} {result_str}");
-        },
+        }
     }
     if let Some(details_str) = result_details {
         println!("{details_str}");
