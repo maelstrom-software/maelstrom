@@ -308,6 +308,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 self.cache.decrement_refcount(artifact);
             }
         }
+        self.job_statistics.remove_client(id);
 
         self.queued_requests.retain(|JobId { cid, .. }| *cid != id);
         for worker in self.workers.0.values_mut() {
@@ -1420,5 +1421,64 @@ mod tests {
                 }].into_iter().collect()
             }))
         }
+    }
+
+    script_test! {
+        job_statistics_deleted_after_disconnect,
+        ClientConnected(cid![1], client_sender![1]) => {};
+        ClientConnected(cid![2], client_sender![2]) => {};
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 2,
+                num_workers: 0,
+                job_statistics: [JobStatisticsSample {
+                    client_to_stats: hashmap! {
+                        cid![1] => enum_map! {
+                            JobState::WaitingForArtifacts => 0,
+                            JobState::Pending => 0,
+                            JobState::Running => 0,
+                            JobState::Complete => 0,
+                        },
+                        cid![2] => enum_map! {
+                            JobState::WaitingForArtifacts => 0,
+                            JobState::Pending => 0,
+                            JobState::Running => 0,
+                            JobState::Complete => 0,
+                        }
+                    }
+                }].into_iter().collect()
+            }))
+        };
+        ClientDisconnected(cid![2]) => {
+            CacheClientDisconnected(cid![2]),
+        };
+        FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
+            ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
+                num_clients: 1,
+                num_workers: 0,
+                job_statistics: [
+                    JobStatisticsSample {
+                        client_to_stats: hashmap! {
+                            cid![1] => enum_map! {
+                                JobState::WaitingForArtifacts => 0,
+                                JobState::Pending => 0,
+                                JobState::Running => 0,
+                                JobState::Complete => 0,
+                            },
+                        }
+                    },
+                    JobStatisticsSample {
+                        client_to_stats: hashmap! {
+                            cid![1] => enum_map! {
+                                JobState::WaitingForArtifacts => 0,
+                                JobState::Pending => 0,
+                                JobState::Running => 0,
+                                JobState::Complete => 0,
+                            },
+                        }
+                    }
+                ].into_iter().collect()
+            }))
+        };
     }
 }
