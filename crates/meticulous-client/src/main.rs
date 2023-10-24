@@ -1,8 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
-use meticulous_client::{Client, ExitCodeAccumulator};
-use meticulous_util::process::ExitCode;
+use meticulous_client::Client;
+use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use serde::Deserialize;
 use serde_json::{self, Deserializer};
 use std::{

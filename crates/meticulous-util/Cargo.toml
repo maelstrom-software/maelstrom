@@ -9,7 +9,8 @@ bincode = { workspace = true }
 meticulous-base = { workspace = true }
 serde = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 rand = { workspace = true }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread"] }

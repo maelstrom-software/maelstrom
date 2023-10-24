@@ -5,7 +5,7 @@ use meticulous_base::{
     },
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
-use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net, process::ExitCode};
+use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::HashMap,
@@ -13,30 +13,9 @@ use std::{
     io::{self, Read},
     net::{SocketAddr, TcpStream},
     path::PathBuf,
-    sync::{
-        mpsc::{self, Receiver, SyncSender},
-        Mutex,
-    },
+    sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
 };
-
-pub struct ExitCodeAccumulator(Mutex<Option<ExitCode>>);
-
-impl Default for ExitCodeAccumulator {
-    fn default() -> Self {
-        ExitCodeAccumulator(Mutex::new(None))
-    }
-}
-
-impl ExitCodeAccumulator {
-    pub fn add(&self, code: ExitCode) {
-        self.0.lock().unwrap().get_or_insert(code);
-    }
-
-    pub fn get(&self) -> ExitCode {
-        self.0.lock().unwrap().unwrap_or(ExitCode::SUCCESS)
-    }
-}
 
 fn artifact_pusher_main(
     broker_addr: SocketAddr,

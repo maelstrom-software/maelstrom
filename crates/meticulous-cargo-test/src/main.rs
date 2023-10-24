@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
-use meticulous_client::{Client, ExitCodeAccumulator};
-use meticulous_util::process::ExitCode;
+use meticulous_client::Client;
+use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use regex::Regex;
 use std::{
     io::{self, Write as _},
