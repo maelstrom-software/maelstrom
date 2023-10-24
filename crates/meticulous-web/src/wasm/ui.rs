@@ -3,12 +3,19 @@ use eframe::{App, CreationContext, Frame};
 use egui::{CentralPanel, Context, Ui};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
-    stats::{BrokerStatistics, JobState, JobStateCounts, JobStatisticsTimeSeries},
-    ClientId, ClientJobId, JobDetails,
+    stats::{BrokerStatistics, JobState, JobStateCounts},
+    ClientJobId, JobDetails,
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use std::collections::BTreeSet;
 use std::time::Duration;
+
+fn merge_job_state_counts(mut a: JobStateCounts, b: &JobStateCounts) -> JobStateCounts {
+    for state in JobState::iter() {
+        a[state] += b[state];
+    }
+    a
+}
 
 pub struct UiHandler<RpcConnectionT> {
     rpc: RpcConnectionT,
@@ -96,36 +103,53 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         self.next_job_id += 1;
     }
 
-    fn plot_graph(
+    fn plot_graph<'a>(
         &self,
-        job_statistics: &JobStatisticsTimeSeries,
-        client: &ClientId,
+        capacity: usize,
+        data: impl Iterator<Item = &'a JobStateCounts> + 'a + Clone,
         plot_ui: &mut PlotUi,
     ) {
         let mut stacker = LineStacker::new();
         let mut lines = vec![];
 
         for state in JobState::iter().rev() {
-            let data = job_statistics
-                .iter()
-                .filter_map(|s| s.client_to_stats.get(client));
-            lines.push(stacker.plot_line(state, data));
+            lines.push(stacker.plot_line(state, data.clone()));
         }
 
         for line in lines.into_iter().rev() {
             plot_ui.stacked_line(line);
         }
 
-        let capacity = job_statistics.capacity();
         plot_ui.set_plot_bounds(PlotBounds::from_min_max(
             [0.0, 0.0],
             [capacity as f64, stacker.max_height],
         ))
     }
 
-    fn draw_stats(&self, ui: &mut Ui, stats: &BrokerStatistics) {
-        ui.label(&format!("number of clients: {}", stats.num_clients));
-        ui.label(&format!("number of workers: {}", stats.num_workers));
+    fn draw_all_clients_graph(&self, ui: &mut Ui, stats: &BrokerStatistics) {
+        let capacity = stats.job_statistics.capacity();
+
+        let all_jobs: Vec<_> = stats
+            .job_statistics
+            .iter()
+            .map(|s| {
+                s.client_to_stats
+                    .values()
+                    .fold(JobStateCounts::default(), merge_job_state_counts)
+            })
+            .collect();
+        ui.heading(&format!("All Clients"));
+        Plot::new(&format!("all_clients_job_statistics"))
+            .width(1000.0)
+            .height(200.0)
+            .legend(Legend::default())
+            .show(ui, |plot_ui| {
+                self.plot_graph(capacity, all_jobs.iter(), plot_ui)
+            });
+    }
+
+    fn draw_client_graphs(&self, ui: &mut Ui, stats: &BrokerStatistics) {
+        let capacity = stats.job_statistics.capacity();
 
         let clients: BTreeSet<_> = stats
             .job_statistics
@@ -136,14 +160,25 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
 
         for client in clients {
             ui.heading(&format!("Client {client}"));
+
+            let data = stats
+                .job_statistics
+                .iter()
+                .filter_map(|s| s.client_to_stats.get(client));
             Plot::new(&format!("client_{client}_job_statistics"))
                 .width(1000.0)
                 .height(200.0)
                 .legend(Legend::default())
-                .show(ui, |plot_ui| {
-                    self.plot_graph(&stats.job_statistics, client, plot_ui)
-                });
+                .show(ui, |plot_ui| self.plot_graph(capacity, data, plot_ui));
         }
+    }
+
+    fn draw_stats(&self, ui: &mut Ui, stats: &BrokerStatistics) {
+        ui.label(&format!("number of clients: {}", stats.num_clients));
+        ui.label(&format!("number of workers: {}", stats.num_workers));
+
+        self.draw_all_clients_graph(ui, stats);
+        self.draw_client_graphs(ui, stats);
     }
 }
 

@@ -4,7 +4,7 @@ use serde::{
     ser::{SerializeSeq as _, SerializeStruct as _},
     Deserialize, Serialize, Serializer,
 };
-use std::fmt;
+use std::{fmt, iter, slice};
 
 #[derive(Clone, Eq, Deserialize)]
 #[serde(from = "RingBufferDeserProxy<T>")]
@@ -71,12 +71,14 @@ impl<T> RingBuffer<T> {
         self.buf.is_empty()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &T> {
+    pub fn iter(&self) -> RingBufferIter<'_, T> {
         self.buf[self.cursor..]
             .iter()
             .chain(self.buf[0..self.cursor].iter())
     }
 }
+
+pub type RingBufferIter<'a, T> = iter::Chain<slice::Iter<'a, T>, slice::Iter<'a, T>>;
 
 #[cfg(test)]
 fn insert_test(capacity: usize) {
