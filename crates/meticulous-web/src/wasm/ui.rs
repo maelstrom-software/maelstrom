@@ -3,10 +3,10 @@ use eframe::{App, CreationContext, Frame};
 use egui::{CentralPanel, Context, Ui};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
-    stats::{BrokerStatistics, JobState},
-    ClientJobId, JobDetails,
+    stats::{BrokerStatistics, JobState, JobStateCounts, JobStatisticsTimeSeries},
+    ClientId, ClientJobId, JobDetails,
 };
-use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, StackedLine};
+use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use std::collections::BTreeSet;
 use std::time::Duration;
 
@@ -16,6 +16,58 @@ pub struct UiHandler<RpcConnectionT> {
     next_job_id: u32,
     command: String,
     freshness: f64,
+}
+
+struct LineStacker {
+    prev_points: Option<Vec<[f64; 2]>>,
+    max_height: f64,
+}
+
+impl LineStacker {
+    fn new() -> Self {
+        Self {
+            prev_points: None,
+            max_height: 100.0,
+        }
+    }
+
+    fn stack_points(&self, points: &mut Vec<[f64; 2]>) {
+        if let Some(prev_points) = &self.prev_points {
+            for (p, prev) in points.iter_mut().zip(prev_points.iter()) {
+                p[1] += prev[1];
+            }
+        }
+    }
+
+    fn find_max(&mut self, points: &[[f64; 2]]) {
+        for p in points {
+            if p[1] > self.max_height {
+                self.max_height = p[1];
+            }
+        }
+    }
+
+    fn plot_line<'a>(
+        &mut self,
+        state: JobState,
+        data: impl Iterator<Item = &'a JobStateCounts> + 'a,
+    ) -> StackedLine {
+        let mut points: Vec<_> = data
+            .enumerate()
+            .map(|(i, e)| [i as f64, e[state] as f64])
+            .collect();
+
+        self.stack_points(&mut points);
+        self.find_max(&points);
+
+        let mut line = StackedLine::new(PlotPoints::new(points.clone())).name(state.to_string());
+        if let Some(prev_points) = self.prev_points.take() {
+            line = line.stacked_on(prev_points);
+        }
+        self.prev_points = Some(points);
+
+        line
+    }
 }
 
 impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
@@ -44,6 +96,33 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         self.next_job_id += 1;
     }
 
+    fn plot_graph(
+        &self,
+        job_statistics: &JobStatisticsTimeSeries,
+        client: &ClientId,
+        plot_ui: &mut PlotUi,
+    ) {
+        let mut stacker = LineStacker::new();
+        let mut lines = vec![];
+
+        for state in JobState::iter().rev() {
+            let data = job_statistics
+                .iter()
+                .filter_map(|s| s.client_to_stats.get(client));
+            lines.push(stacker.plot_line(state, data));
+        }
+
+        for line in lines.into_iter().rev() {
+            plot_ui.stacked_line(line);
+        }
+
+        let capacity = job_statistics.capacity();
+        plot_ui.set_plot_bounds(PlotBounds::from_min_max(
+            [0.0, 0.0],
+            [capacity as f64, stacker.max_height],
+        ))
+    }
+
     fn draw_stats(&self, ui: &mut Ui, stats: &BrokerStatistics) {
         ui.label(&format!("number of clients: {}", stats.num_clients));
         ui.label(&format!("number of workers: {}", stats.num_workers));
@@ -57,62 +136,12 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
 
         for client in clients {
             ui.heading(&format!("Client {client}"));
-            Plot::new("job_statistics")
+            Plot::new(&format!("client_{client}_job_statistics"))
                 .width(1000.0)
                 .height(200.0)
                 .legend(Legend::default())
                 .show(ui, |plot_ui| {
-                    let mut prev_points: Option<Vec<[f64; 2]>> = None;
-                    let mut lines = vec![];
-                    let mut max_height = 100.0;
-                    for state in JobState::iter().rev() {
-                        let mut points: Vec<_> = stats
-                            .job_statistics
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(i, s)| {
-                                s.client_to_stats
-                                    .get(client)
-                                    .map(|e| [i as f64, e[state] as f64])
-                            })
-                            .collect();
-
-                        if let Some(prev_points) = &prev_points {
-                            for (p, prev) in points.iter_mut().zip(prev_points.iter()) {
-                                p[1] += prev[1];
-                            }
-                        }
-
-                        for p in &points {
-                            if p[1] > max_height {
-                                max_height = p[1];
-                            }
-                        }
-
-                        if let Some(prev_points) = prev_points.take() {
-                            lines.push(
-                                StackedLine::new(PlotPoints::new(points.clone()))
-                                    .stacked_on(prev_points)
-                                    .name(state.to_string()),
-                            );
-                        } else {
-                            lines.push(
-                                StackedLine::new(PlotPoints::new(points.clone()))
-                                    .name(state.to_string()),
-                            );
-                        }
-                        prev_points = Some(points);
-                    }
-
-                    for line in lines.into_iter().rev() {
-                        plot_ui.stacked_line(line);
-                    }
-
-                    let capacity = stats.job_statistics.capacity();
-                    plot_ui.set_plot_bounds(PlotBounds::from_min_max(
-                        [0.0, 0.0],
-                        [capacity as f64, max_height],
-                    ))
+                    self.plot_graph(&stats.job_statistics, client, plot_ui)
                 });
         }
     }
