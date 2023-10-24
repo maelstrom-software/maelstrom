@@ -73,11 +73,12 @@ fn visitor(
                 }
             }
             match status {
-                JobStatus::Exited(0) => {
-                    result_str = "OK".green();
-                }
                 JobStatus::Exited(code) => {
-                    result_str = "FAIL".red();
+                    result_str = if code == 0 {
+                        "OK".green()
+                    } else {
+                        "FAIL".red()
+                    };
                     accum.add(ExitCode::from(code));
                 }
                 JobStatus::Signalled(signo) => {

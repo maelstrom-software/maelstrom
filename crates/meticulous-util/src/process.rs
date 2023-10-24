@@ -109,11 +109,11 @@ mod tests {
 
     #[test]
     fn test_exit_code_properties() {
-	is_clone::<ExitCode>();
-	is_copy::<ExitCode>();
-	is_debug::<ExitCode>();
-	is_send::<ExitCode>();
-	is_sync::<ExitCode>();
+        is_clone::<ExitCode>();
+        is_copy::<ExitCode>();
+        is_debug::<ExitCode>();
+        is_send::<ExitCode>();
+        is_sync::<ExitCode>();
     }
 
     #[test]
@@ -150,10 +150,10 @@ mod tests {
 
     #[test]
     fn test_exit_code_accumulator_properties() {
-	is_clone::<ExitCodeAccumulator>();
-	is_copy::<ExitCodeAccumulator>();
-	is_debug::<ExitCodeAccumulator>();
-	is_send::<ExitCodeAccumulator>();
-	is_sync::<ExitCodeAccumulator>();
+        is_clone::<ExitCodeAccumulator>();
+        is_copy::<ExitCodeAccumulator>();
+        is_debug::<ExitCodeAccumulator>();
+        is_send::<ExitCodeAccumulator>();
+        is_sync::<ExitCodeAccumulator>();
     }
 }
