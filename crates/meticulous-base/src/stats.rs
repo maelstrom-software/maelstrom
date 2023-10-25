@@ -59,12 +59,6 @@ pub struct JobStatisticsSample {
     pub client_to_stats: HashMap<ClientId, JobStateCounts>,
 }
 
-impl JobStatisticsSample {
-    fn remove_client(&mut self, cid: ClientId) {
-        self.client_to_stats.remove(&cid);
-    }
-}
-
 /// The number of data-points to save before it is deleted
 pub const CAPACITY: usize = 1024;
 
@@ -119,17 +113,6 @@ impl JobStatisticsTimeSeries {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
-    }
-
-    pub fn remove_client(&mut self, cid: ClientId) {
-        // XXX There is no iter_mut for RingBuffer
-        let mut new_entries = RingBuffer::new(self.entries.capacity());
-        for entry in self.entries.iter() {
-            let mut new_entry = entry.clone();
-            new_entry.remove_client(cid);
-            new_entries.insert(new_entry);
-        }
-        self.entries = new_entries;
     }
 }
 

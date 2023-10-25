@@ -151,9 +151,9 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
     fn draw_client_graphs(&self, ui: &mut Ui, stats: &BrokerStatistics) {
         let capacity = stats.job_statistics.capacity();
 
-        let clients: BTreeSet<_> = stats
-            .job_statistics
-            .iter()
+        let last_entry = stats.job_statistics.iter().last();
+        let clients: BTreeSet<_> = last_entry
+            .into_iter()
             .map(|s| s.client_to_stats.keys())
             .flatten()
             .collect();
