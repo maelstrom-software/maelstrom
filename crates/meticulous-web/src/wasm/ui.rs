@@ -1,13 +1,13 @@
 use crate::wasm::rpc::ClientConnection;
 use eframe::{App, CreationContext, Frame};
-use egui::{CentralPanel, Context, Ui};
+use egui::{CentralPanel, CollapsingHeader, Context, ScrollArea, Ui};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts},
-    ClientJobId, JobDetails,
+    ClientJobId, JobDetails, JobResult,
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
 fn merge_job_state_counts(mut a: JobStateCounts, b: &JobStateCounts) -> JobStateCounts {
@@ -17,12 +17,18 @@ fn merge_job_state_counts(mut a: JobStateCounts, b: &JobStateCounts) -> JobState
     a
 }
 
+struct JobInfo {
+    command: String,
+    result: Option<JobResult>,
+}
+
 pub struct UiHandler<RpcConnectionT> {
     rpc: RpcConnectionT,
     stats: Option<BrokerStatistics>,
     next_job_id: u32,
     command: String,
     freshness: f64,
+    jobs: BTreeMap<ClientJobId, JobInfo>,
 }
 
 struct LineStacker {
@@ -85,14 +91,23 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             next_job_id: 0,
             command: String::new(),
             freshness: 0.0,
+            jobs: BTreeMap::new(),
         }
     }
 
     fn submit_job(&mut self) {
         let mut command_parts = self.command.split(" ").map(|p| p.to_string());
+        let job_id = ClientJobId::from(self.next_job_id);
+        self.jobs.insert(
+            job_id.clone(),
+            JobInfo {
+                command: self.command.clone(),
+                result: None,
+            },
+        );
         self.rpc
             .send(ClientToBroker::JobRequest(
-                ClientJobId::from(self.next_job_id),
+                job_id,
                 JobDetails {
                     program: command_parts.next().unwrap_or_default(),
                     arguments: command_parts.collect(),
@@ -138,13 +153,16 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                     .fold(JobStateCounts::default(), merge_job_state_counts)
             })
             .collect();
-        ui.heading(&format!("All Clients"));
-        Plot::new(&format!("all_clients_job_statistics"))
-            .width(1000.0)
-            .height(200.0)
-            .legend(Legend::default())
-            .show(ui, |plot_ui| {
-                self.plot_graph(capacity, all_jobs.iter(), plot_ui)
+        CollapsingHeader::new(&format!("All Clients Job Graph"))
+            .default_open(true)
+            .show(ui, |ui| {
+                Plot::new(&format!("all_clients_job_statistics"))
+                    .width(1000.0)
+                    .height(200.0)
+                    .legend(Legend::default())
+                    .show(ui, |plot_ui| {
+                        self.plot_graph(capacity, all_jobs.iter(), plot_ui)
+                    });
             });
     }
 
@@ -159,17 +177,17 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             .collect();
 
         for client in clients {
-            ui.heading(&format!("Client {client}"));
-
             let data = stats
                 .job_statistics
                 .iter()
                 .filter_map(|s| s.client_to_stats.get(client));
-            Plot::new(&format!("client_{client}_job_statistics"))
-                .width(1000.0)
-                .height(200.0)
-                .legend(Legend::default())
-                .show(ui, |plot_ui| self.plot_graph(capacity, data, plot_ui));
+            ui.collapsing(&format!("Client {client} Job Graph"), |ui| {
+                Plot::new(&format!("client_{client}_job_statistics"))
+                    .width(1000.0)
+                    .height(200.0)
+                    .legend(Legend::default())
+                    .show(ui, |plot_ui| self.plot_graph(capacity, data, plot_ui));
+            });
         }
     }
 
@@ -180,6 +198,24 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         self.draw_all_clients_graph(ui, stats);
         self.draw_client_graphs(ui, stats);
     }
+
+    fn handle_rpcs(&mut self) {
+        let now = crate::wasm::window().performance().unwrap().now();
+        if now - self.freshness > REFRESH_INTERVAL as f64 {
+            self.rpc.send(ClientToBroker::StatisticsRequest).unwrap();
+            self.freshness = now;
+        }
+
+        if let Some(msg) = self.rpc.try_recv().unwrap() {
+            match msg {
+                BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
+                BrokerToClient::JobResponse(job_id, result) => {
+                    self.jobs.get_mut(&job_id).unwrap().result = Some(result);
+                }
+                _ => unimplemented!(),
+            }
+        }
+    }
 }
 
 const REFRESH_INTERVAL: u64 = 100;
@@ -189,30 +225,33 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
         CentralPanel::default().show(ctx, |ui| {
             ui.heading("Meticulous UI");
 
-            ui.add(egui::TextEdit::singleline(&mut self.command));
-            if ui.button("submit").clicked() {
-                self.submit_job();
-            }
-
             if let Some(stats) = &self.stats {
                 self.draw_stats(ui, stats)
             } else {
                 ui.label("loading..");
             }
 
-            let now = crate::wasm::window().performance().unwrap().now();
-            if now - self.freshness > REFRESH_INTERVAL as f64 {
-                self.rpc.send(ClientToBroker::StatisticsRequest).unwrap();
-                self.freshness = now;
-            }
+            ui.collapsing("Submit a Job", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("command");
+                    ui.add(egui::TextEdit::singleline(&mut self.command));
+                    if ui.button("submit").clicked() {
+                        self.submit_job();
+                    }
+                });
+                ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                    for (id, job) in &self.jobs {
+                        let result = if let Some(res) = &job.result {
+                            format!("{res:?}")
+                        } else {
+                            "pending".into()
+                        };
+                        ui.label(&format!("{} {}: {}", id, &job.command, result));
+                    }
+                });
+            });
 
-            if let Some(msg) = self.rpc.try_recv().unwrap() {
-                match msg {
-                    BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
-                    BrokerToClient::JobResponse(..) => (),
-                    _ => unimplemented!(),
-                }
-            }
+            self.handle_rpcs();
 
             ctx.request_repaint_after(Duration::from_millis(REFRESH_INTERVAL / 2));
         });
