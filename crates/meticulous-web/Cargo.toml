@@ -12,6 +12,7 @@ bincode = { workspace = true }
 console_error_panic_hook = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
+egui_gauge = { workspace = true }
 meticulous-plot = { workspace = true }
 futures = { workspace = true }
 gloo-net = { workspace = true }

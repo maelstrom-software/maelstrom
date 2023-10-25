@@ -6,6 +6,7 @@ use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
+        WorkerStatistics,
     },
     ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
 };
@@ -365,9 +366,11 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn receive_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
         self.sample_job_statistics();
 
+        let worker_iter = self.workers.0.iter();
         let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
-            num_clients: self.clients.len() as u64,
-            num_workers: self.workers.0.len() as u64,
+            worker_statistics: worker_iter
+                .map(|(id, w)| (*id, WorkerStatistics { slots: w.slots }))
+                .collect(),
             job_statistics: self.job_statistics.clone(),
         });
         deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
@@ -1331,8 +1334,9 @@ mod tests {
         };
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
-                num_clients: 1,
-                num_workers: 1,
+                worker_statistics: hashmap! {
+                    wid![1] => WorkerStatistics { slots: 2 }
+                },
                 job_statistics: [JobStatisticsSample {
                     client_to_stats: hashmap! {
                         cid![1] => enum_map! {
@@ -1353,8 +1357,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
-                num_clients: 1,
-                num_workers: 0,
+                worker_statistics: hashmap!{},
                 job_statistics: [JobStatisticsSample {
                     client_to_stats: hashmap! {
                         cid![1] => enum_map! {
@@ -1378,8 +1381,9 @@ mod tests {
         };
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
-                num_clients: 1,
-                num_workers: 1,
+                worker_statistics: hashmap! {
+                    wid![1] => WorkerStatistics { slots: 2 }
+                },
                 job_statistics: [JobStatisticsSample {
                     client_to_stats: hashmap! {
                         cid![1] => enum_map! {
@@ -1406,8 +1410,9 @@ mod tests {
         };
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
-                num_clients: 1,
-                num_workers: 1,
+                worker_statistics: hashmap! {
+                    wid![1] => WorkerStatistics { slots: 2 }
+                },
                 job_statistics: [JobStatisticsSample {
                     client_to_stats: hashmap! {
                         cid![1] => enum_map! {

@@ -1,7 +1,7 @@
 //! Contains data-structures for maintaining historical statistics of jobs
 
 use crate::ring_buffer::{RingBuffer, RingBufferIter};
-use crate::ClientId;
+use crate::{ClientId, WorkerId};
 use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -116,10 +116,14 @@ impl JobStatisticsTimeSeries {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WorkerStatistics {
+    pub slots: usize,
+}
+
 /// Useful information for a client to display about the broker's state.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BrokerStatistics {
-    pub num_clients: u64,
-    pub num_workers: u64,
+    pub worker_statistics: HashMap<WorkerId, WorkerStatistics>,
     pub job_statistics: JobStatisticsTimeSeries,
 }

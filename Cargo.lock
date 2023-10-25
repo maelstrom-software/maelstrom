@@ -954,6 +954,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "egui_gauge"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521779f768221eb0c3f93e83be20aec0f2d6c6013af4bc1a27e9c8f0a09ad612"
+dependencies = [
+ "egui",
+ "emath",
+ "epaint",
+]
+
+[[package]]
 name = "egui_glow"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1903,6 +1914,7 @@ dependencies = [
  "console_error_panic_hook",
  "eframe",
  "egui",
+ "egui_gauge",
  "futures",
  "gloo-net",
  "gloo-utils",

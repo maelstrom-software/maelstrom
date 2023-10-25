@@ -1,6 +1,7 @@
 use crate::wasm::rpc::ClientConnection;
 use eframe::{App, CreationContext, Frame};
-use egui::{CentralPanel, CollapsingHeader, Context, ScrollArea, Ui};
+use egui::{CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
+use egui_gauge::Gauge;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts},
@@ -192,8 +193,54 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
     }
 
     fn draw_stats(&self, ui: &mut Ui, stats: &BrokerStatistics) {
-        ui.label(&format!("number of clients: {}", stats.num_clients));
-        ui.label(&format!("number of workers: {}", stats.num_workers));
+        let last_stat = stats.job_statistics.iter().last();
+        let num_clients = last_stat.map(|s| s.client_to_stats.len()).unwrap_or(0);
+        let num_workers = stats.worker_statistics.len();
+
+        let num_slots: u64 = stats
+            .worker_statistics
+            .values()
+            .map(|s| s.slots as u64)
+            .sum();
+        let num_running_jobs = last_stat
+            .map(|s| {
+                s.client_to_stats
+                    .values()
+                    .map(|c| c[JobState::Running])
+                    .sum()
+            })
+            .unwrap_or(0);
+        let num_total_jobs = last_stat
+            .map(|s| {
+                s.client_to_stats
+                    .values()
+                    .map(|c| {
+                        JobState::iter()
+                            .filter(|s| s != &JobState::Complete)
+                            .map(|s| c[s])
+                            .sum::<u64>()
+                    })
+                    .sum()
+            })
+            .unwrap_or(0);
+
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.heading(num_clients.to_string());
+                ui.label("client(s) connected");
+                ui.heading(num_workers.to_string());
+                ui.label("worker(s) connected");
+                ui.heading(num_total_jobs.to_string());
+                ui.label("total job(s)");
+            });
+
+            if num_slots > 0 {
+                ui.add(
+                    Gauge::new(num_running_jobs, 0..=(num_slots * 2), 150.0, Color32::RED)
+                        .text("used slots"),
+                );
+            }
+        });
 
         self.draw_all_clients_graph(ui, stats);
         self.draw_client_graphs(ui, stats);
@@ -223,31 +270,33 @@ const REFRESH_INTERVAL: u64 = 100;
 impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Meticulous UI");
+            ScrollArea::vertical().show(ui, |ui| {
+                ui.heading("Meticulous UI");
 
-            if let Some(stats) = &self.stats {
-                self.draw_stats(ui, stats)
-            } else {
-                ui.label("loading..");
-            }
+                if let Some(stats) = &self.stats {
+                    self.draw_stats(ui, stats)
+                } else {
+                    ui.label("loading..");
+                }
 
-            ui.collapsing("Submit a Job", |ui| {
-                ui.horizontal(|ui| {
-                    ui.label("command");
-                    ui.add(egui::TextEdit::singleline(&mut self.command));
-                    if ui.button("submit").clicked() {
-                        self.submit_job();
-                    }
-                });
-                ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                    for (id, job) in &self.jobs {
-                        let result = if let Some(res) = &job.result {
-                            format!("{res:?}")
-                        } else {
-                            "pending".into()
-                        };
-                        ui.label(&format!("{} {}: {}", id, &job.command, result));
-                    }
+                ui.collapsing("Submit a Job", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("command");
+                        ui.add(egui::TextEdit::singleline(&mut self.command));
+                        if ui.button("submit").clicked() {
+                            self.submit_job();
+                        }
+                    });
+                    ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                        for (id, job) in &self.jobs {
+                            let result = if let Some(res) = &job.result {
+                                format!("{res:?}")
+                            } else {
+                                "pending".into()
+                            };
+                            ui.label(&format!("{} {}: {}", id, &job.command, result));
+                        }
+                    });
                 });
             });
 
