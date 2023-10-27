@@ -4,12 +4,14 @@ use egui::{CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
-    stats::{BrokerStatistics, JobState, JobStateCounts},
+    stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
     ClientJobId, JobDetails, JobResult,
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
+
+const REFRESH_INTERVAL: Duration = BROKER_STATISTICS_INTERVAL;
 
 fn merge_job_state_counts(mut a: JobStateCounts, b: &JobStateCounts) -> JobStateCounts {
     for state in JobState::iter() {
@@ -248,7 +250,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
 
     fn handle_rpcs(&mut self) {
         let now = crate::wasm::window().performance().unwrap().now();
-        if now - self.freshness > REFRESH_INTERVAL as f64 {
+        if now - self.freshness > REFRESH_INTERVAL.as_millis() as f64 {
             self.rpc.send(ClientToBroker::StatisticsRequest).unwrap();
             self.freshness = now;
         }
@@ -264,8 +266,6 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         }
     }
 }
-
-const REFRESH_INTERVAL: u64 = 100;
 
 impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
@@ -302,7 +302,7 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
 
             self.handle_rpcs();
 
-            ctx.request_repaint_after(Duration::from_millis(REFRESH_INTERVAL / 2));
+            ctx.request_repaint_after(REFRESH_INTERVAL / 2);
         });
     }
 }

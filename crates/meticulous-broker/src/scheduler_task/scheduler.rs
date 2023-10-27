@@ -97,6 +97,7 @@ pub enum Message<DepsT: SchedulerDeps> {
     GotArtifact(Sha256Digest, PathBuf, u64),
     GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
     DecrementRefcount(Sha256Digest),
+    StatisticsHeartbeat,
 }
 
 impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
@@ -134,6 +135,7 @@ impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
             Message::DecrementRefcount(digest) => {
                 f.debug_tuple("DecrementRefcount").field(digest).finish()
             }
+            Message::StatisticsHeartbeat => f.debug_tuple("StatisticsHeartbeat").finish(),
         }
     }
 }
@@ -174,6 +176,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 self.receive_get_artifact_for_worker(deps, digest, sender)
             }
             Message::DecrementRefcount(digest) => self.receive_decrement_refcount(digest),
+            Message::StatisticsHeartbeat => self.receive_statistics_heartbeat(),
         }
     }
 }
@@ -364,8 +367,6 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     }
 
     fn receive_client_statistics_request(&mut self, deps: &mut DepsT, cid: ClientId) {
-        self.sample_job_statistics();
-
         let worker_iter = self.workers.0.iter();
         let resp = BrokerToClient::StatisticsResponse(BrokerStatistics {
             worker_statistics: worker_iter
@@ -529,7 +530,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         counts
     }
 
-    fn sample_job_statistics(&mut self) {
+    fn receive_statistics_heartbeat(&mut self) {
         let sample = JobStatisticsSample {
             client_to_stats: self
                 .clients
@@ -1332,6 +1333,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1, [42]])) => {
             CacheGetArtifact(jid![1, 1], digest![42]),
         };
+        StatisticsHeartbeat => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
@@ -1355,6 +1357,7 @@ mod tests {
         job_statistics_pending,
         ClientConnected(cid![1], client_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {};
+        StatisticsHeartbeat => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap!{},
@@ -1379,6 +1382,7 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
             ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
         };
+        StatisticsHeartbeat => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {
@@ -1408,6 +1412,7 @@ mod tests {
         FromWorker(wid![1], WorkerToBroker(jid![1, 1], result![1])) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], result![1])),
         };
+        StatisticsHeartbeat => {};
         FromClient(cid![1], ClientToBroker::StatisticsRequest) => {
             ToClient(cid![1], BrokerToClient::StatisticsResponse(BrokerStatistics {
                 worker_statistics: hashmap! {

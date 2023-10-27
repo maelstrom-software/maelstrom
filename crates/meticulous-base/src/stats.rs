@@ -6,6 +6,10 @@ use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
+use std::time::Duration;
+
+/// The amount of time between broker statistic samples
+pub const BROKER_STATISTICS_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(
     Copy, Clone, Debug, PartialEq, Eq, enum_map::Enum, strum::EnumIter, Serialize, Deserialize,

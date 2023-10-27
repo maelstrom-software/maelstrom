@@ -8,7 +8,8 @@ mod http;
 mod scheduler_task;
 
 use config::{CacheBytesUsedTarget, CacheRoot};
-use scheduler_task::SchedulerTask;
+use meticulous_base::stats::BROKER_STATISTICS_INTERVAL;
+use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, Logger};
 use std::sync::{
     atomic::{AtomicU32, Ordering},
@@ -42,6 +43,13 @@ async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
     error!(log, "received {signame}")
 }
 
+async fn stats_heartbeat(sender: SchedulerSender) {
+    let mut interval = tokio::time::interval(BROKER_STATISTICS_INTERVAL);
+    while sender.send(SchedulerMessage::StatisticsHeartbeat).is_ok() {
+        interval.tick().await;
+    }
+}
+
 /// The main function for the broker. This should be called on a task of its own. It will return
 /// when a signal is received, or when the broker or http listener socket returns an error at
 /// accept time.
@@ -72,6 +80,7 @@ pub async fn main(
         scheduler_task.cache_tmp_path().to_owned(),
         log.clone(),
     ));
+    join_set.spawn(stats_heartbeat(scheduler_task.scheduler_sender().clone()));
     join_set.spawn(scheduler_task.run());
     join_set.spawn(signal_handler(
         SignalKind::interrupt(),
