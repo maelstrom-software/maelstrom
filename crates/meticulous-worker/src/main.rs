@@ -6,6 +6,14 @@ use figment::{
     Figment,
 };
 use meticulous_worker::config::Config;
+use nix::{
+    errno::Errno,
+    sys::{
+        signal,
+        wait::{self, WaitStatus},
+    },
+    unistd::{self, Pid},
+};
 use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
@@ -13,7 +21,7 @@ use serde::{
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{CompactFormat, TermDecorator};
-use std::path::PathBuf;
+use std::{fs, mem, path::PathBuf, process};
 use tokio::runtime::Runtime;
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
@@ -109,6 +117,92 @@ impl Serialize for CliOptions {
     }
 }
 
+fn clone_into_pid_and_user_namespace() -> Result<()> {
+    let parent_pid = unistd::getpid();
+    let parent_uid = unistd::getuid();
+    let parent_gid = unistd::getgid();
+
+    // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
+    // early.
+    let parent_pidfd =
+        unsafe { nc::pidfd_open(parent_pid.as_raw(), 0) }.map_err(|e| Errno::from_i32(e))?;
+
+    // Clone a new process into new user and pid namespaces.
+    let mut clone_args = nc::clone_args_t::default();
+    clone_args.flags = nc::CLONE_NEWUSER as u64 | nc::CLONE_NEWPID as u64;
+    clone_args.exit_signal = nc::SIGCHLD as u64;
+    match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) }
+        .map_err(|e| Errno::from_i32(e))?
+    {
+        0 => {
+            // Child.
+
+            // Set parent death signal.
+            unsafe { nc::prctl(nc::PR_SET_PDEATHSIG, nc::types::SIGKILL as usize, 0, 0, 0) }
+                .map_err(|e| Errno::from_i32(e))?;
+
+            // Check if the parent has already terminated.
+            let mut pollfds = [nc::pollfd_t {
+                fd: parent_pidfd,
+                events: nc::POLLIN,
+                revents: 0,
+            }];
+            if unsafe { nc::poll(&mut pollfds, 0) }.map_err(|e| Errno::from_i32(e))? == 1 {
+                process::abort();
+            }
+
+            // We are done with the parent_pidfd now.
+            unsafe { nc::close(parent_pidfd) }.map_err(|e| Errno::from_i32(e))?;
+
+            // Map uid and guid.
+            fs::write("/proc/self/setgroups", "deny\n")?;
+            fs::write("/proc/self/uid_map", format!("0 {parent_uid} 1"))?;
+            fs::write("/proc/self/gid_map", format!("0 {parent_gid} 1"))?;
+
+            // Set up stdin to be a file that will always return EOF. We could do something similar
+            // by opening /dev/null but then we would depend on /dev being mounted. The few
+            // dependencies, the better.
+            let mut stdin_pipe_fds = [-1i32; 2];
+            unsafe { nc::pipe(&mut stdin_pipe_fds) }.map_err(|e| Errno::from_i32(e))?;
+            unsafe { nc::dup2(stdin_pipe_fds[0], 0) }.map_err(|e| Errno::from_i32(e))?;
+            if stdin_pipe_fds[0] != 0 {
+                unsafe { nc::close(stdin_pipe_fds[0]) }.map_err(|e| Errno::from_i32(e))?;
+            }
+            if stdin_pipe_fds[1] != 0 {
+                unsafe { nc::close(stdin_pipe_fds[1]) }.map_err(|e| Errno::from_i32(e))?;
+            }
+
+            Ok(())
+        }
+        child_pid => {
+            // Parent.
+
+            // The parent_pidfd is only used in the child.
+            unsafe { nc::close(parent_pidfd) }.unwrap_or_else(|e| {
+                panic!("unexpected error closing pidfd: {}", Errno::from_i32(e))
+            });
+
+            // Wait for the child and mimick how it terminated.
+            match wait::waitpid(Some(Pid::from_raw(child_pid)), None).unwrap_or_else(|e| {
+                panic!("unexpected error waiting on child process {child_pid}: {e}")
+            }) {
+                WaitStatus::Exited(_, code) => {
+                    process::exit(code);
+                }
+                WaitStatus::Signaled(_, signal, _) => {
+                    signal::raise(signal).unwrap_or_else(|e| {
+                        panic!("unexpected error raising signal {signal}: {e}")
+                    });
+                    panic!("raised signal {signal} but failed to terminate");
+                }
+                unknown_status => {
+                    panic!("child terminated with unexpected status: {unknown_status:?}");
+                }
+            }
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
@@ -131,6 +225,7 @@ fn main() -> Result<()> {
         println!("{config:#?}");
         return Ok(());
     }
+    clone_into_pid_and_user_namespace()?;
     let decorator = TermDecorator::new().build();
     let drain = CompactFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();

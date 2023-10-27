@@ -11,6 +11,7 @@ figment = { workspace = true }
 gethostname = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }
+nc = { workspace = true }
 nix = { workspace = true }
 num_cpus = { workspace = true }
 rand = { workspace = true }
