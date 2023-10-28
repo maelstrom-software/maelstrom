@@ -19,5 +19,14 @@ fn main() {
     println!("cargo:rerun-if-changed=../meticulous-plot/src/");
     println!("cargo:rerun-if-changed=../meticulous-base/src/");
 
-    sh(["crates/meticulous-web/build.sh"], "../..");
+    #[cfg(not(debug_assertions))]
+    let profile = "release";
+
+    #[cfg(debug_assertions)]
+    let profile = "dev";
+
+    sh(
+        ["crates/meticulous-web/build.sh", &format!("wasm_{profile}")],
+        "../..",
+    );
 }

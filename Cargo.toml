@@ -2,6 +2,12 @@
 resolver = "2"
 members = [ "crates/*" ]
 
+[profile.wasm_dev]
+inherits = "dev"
+
+[profile.wasm_release]
+inherits = "release"
+
 [workspace.dependencies]
 anyhow = "1.0.71"
 bincode = "1.3.3"
