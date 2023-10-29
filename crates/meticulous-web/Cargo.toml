@@ -13,6 +13,7 @@ console_error_panic_hook = { workspace = true }
 eframe = { workspace = true }
 egui = { workspace = true }
 egui_gauge = { workspace = true }
+egui-toast = { workspace = true }
 meticulous-plot = { workspace = true }
 futures = { workspace = true }
 gloo-net = { workspace = true }

@@ -17,8 +17,9 @@ colored = "2.0.4"
 console_error_panic_hook = "0.1.7"
 eframe = "0.23"
 egui = "0.23"
-enum-map = { version = "2.7.0", features = ["serde"] }
 egui_gauge = "0.1"
+egui-toast = "0.9"
+enum-map = { version = "2.7.0", features = ["serde"] }
 figment = { version = "0.10.10", features = ["env", "toml"] }
 futures = "0.3"
 gethostname = "0.4.2"

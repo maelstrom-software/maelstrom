@@ -1,7 +1,9 @@
 use crate::wasm::rpc::ClientConnection;
+use anyhow::{anyhow, Result};
 use eframe::{App, CreationContext, Frame};
-use egui::{CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
+use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
+use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
@@ -26,7 +28,7 @@ struct JobInfo {
 }
 
 pub struct UiHandler<RpcConnectionT> {
-    rpc: RpcConnectionT,
+    rpc: Option<RpcConnectionT>,
     stats: Option<BrokerStatistics>,
     next_job_id: u32,
     command: String,
@@ -89,7 +91,7 @@ impl LineStacker {
 impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
     pub fn new(rpc: RpcConnectionT, _cc: &CreationContext<'_>) -> Self {
         Self {
-            rpc,
+            rpc: Some(rpc),
             stats: None,
             next_job_id: 0,
             command: String::new(),
@@ -98,27 +100,28 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         }
     }
 
-    fn submit_job(&mut self) {
-        let mut command_parts = self.command.split(" ").map(|p| p.to_string());
-        let job_id = ClientJobId::from(self.next_job_id);
-        self.jobs.insert(
-            job_id.clone(),
-            JobInfo {
-                command: self.command.clone(),
-                result: None,
-            },
-        );
-        self.rpc
-            .send(ClientToBroker::JobRequest(
+    fn submit_job(&mut self) -> Result<()> {
+        if let Some(rpc) = self.rpc.as_mut() {
+            let mut command_parts = self.command.split(" ").map(|p| p.to_string());
+            let job_id = ClientJobId::from(self.next_job_id);
+            self.jobs.insert(
+                job_id.clone(),
+                JobInfo {
+                    command: self.command.clone(),
+                    result: None,
+                },
+            );
+            rpc.send(ClientToBroker::JobRequest(
                 job_id,
                 JobDetails {
                     program: command_parts.next().unwrap_or_default(),
                     arguments: command_parts.collect(),
                     layers: vec![],
                 },
-            ))
-            .unwrap();
-        self.next_job_id += 1;
+            ))?;
+            self.next_job_id += 1;
+        }
+        Ok(())
     }
 
     fn plot_graph<'a>(
@@ -248,22 +251,60 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         self.draw_client_graphs(ui, stats);
     }
 
-    fn handle_rpcs(&mut self) {
-        let now = crate::wasm::window().performance().unwrap().now();
-        if now - self.freshness > REFRESH_INTERVAL.as_millis() as f64 {
-            self.rpc.send(ClientToBroker::StatisticsRequest).unwrap();
-            self.freshness = now;
-        }
+    fn handle_rpcs(&mut self) -> Result<()> {
+        if let Some(rpc) = self.rpc.as_mut() {
+            let now = crate::wasm::window().performance().unwrap().now();
+            if now - self.freshness > REFRESH_INTERVAL.as_millis() as f64 {
+                rpc.send(ClientToBroker::StatisticsRequest)?;
+                self.freshness = now;
+            }
 
-        if let Some(msg) = self.rpc.try_recv().unwrap() {
-            match msg {
-                BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
-                BrokerToClient::JobResponse(job_id, result) => {
-                    self.jobs.get_mut(&job_id).unwrap().result = Some(result);
+            if let Some(msg) = rpc.try_recv()? {
+                match msg {
+                    BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
+                    BrokerToClient::JobResponse(job_id, result) => {
+                        self.jobs.get_mut(&job_id).unwrap().result = Some(result);
+                    }
+                    r => return Err(anyhow!("unexpected response: {r:?}")),
                 }
-                _ => unimplemented!(),
             }
         }
+
+        Ok(())
+    }
+
+    fn update_failable(&mut self, ui: &mut Ui) -> Result<()> {
+        let mut res = Ok(());
+
+        if let Some(stats) = &self.stats {
+            self.draw_stats(ui, stats)
+        } else {
+            ui.label("loading..");
+        }
+
+        ui.collapsing("Submit a Job", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("command");
+                ui.add(egui::TextEdit::singleline(&mut self.command));
+                if ui.button("submit").clicked() {
+                    res = self.submit_job();
+                }
+            });
+            ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                for (id, job) in &self.jobs {
+                    let result = if let Some(res) = &job.result {
+                        format!("{res:?}")
+                    } else {
+                        "pending".into()
+                    };
+                    ui.label(&format!("{} {}: {}", id, &job.command, result));
+                }
+            });
+        });
+        res?;
+
+        self.handle_rpcs()?;
+        Ok(())
     }
 }
 
@@ -272,37 +313,21 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
         CentralPanel::default().show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
                 ui.heading("Meticulous UI");
-
-                if let Some(stats) = &self.stats {
-                    self.draw_stats(ui, stats)
-                } else {
-                    ui.label("loading..");
+                let mut toasts = Toasts::new()
+                    .anchor(Align2::RIGHT_BOTTOM, (-10.0, -10.0))
+                    .direction(egui::Direction::BottomUp);
+                if let Err(e) = self.update_failable(ui) {
+                    toasts.add(Toast {
+                        text: format!("error: {e}").into(),
+                        kind: ToastKind::Error,
+                        options: ToastOptions::default(),
+                    });
+                    self.rpc = None;
                 }
+                toasts.show(ctx);
 
-                ui.collapsing("Submit a Job", |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("command");
-                        ui.add(egui::TextEdit::singleline(&mut self.command));
-                        if ui.button("submit").clicked() {
-                            self.submit_job();
-                        }
-                    });
-                    ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                        for (id, job) in &self.jobs {
-                            let result = if let Some(res) = &job.result {
-                                format!("{res:?}")
-                            } else {
-                                "pending".into()
-                            };
-                            ui.label(&format!("{} {}: {}", id, &job.command, result));
-                        }
-                    });
-                });
+                ctx.request_repaint_after(REFRESH_INTERVAL / 2);
             });
-
-            self.handle_rpcs();
-
-            ctx.request_repaint_after(REFRESH_INTERVAL / 2);
         });
     }
 }
