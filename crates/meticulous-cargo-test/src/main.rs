@@ -1,12 +1,15 @@
 use anyhow::Result;
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
-use indicatif::ProgressBar;
-use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use meticulous_base::{
+    stats::JobState, ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus,
+};
 use meticulous_client::Client;
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use regex::Regex;
 use std::{
+    collections::HashMap,
     io::{self, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
     process::Command,
@@ -149,6 +152,9 @@ fn visitor(
     Ok(())
 }
 
+//                      waiting for artifacts, pending, running, complete
+const COLORS: [&str; 4] = ["red", "yellow", "blue", "green"];
+
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -162,10 +168,27 @@ pub fn main() -> Result<ExitCode> {
             cases.push((binary.clone(), case));
         }
     }
-    let bar = ProgressBar::new(cases.len().try_into().unwrap());
+    let total_jobs = cases.len().try_into().unwrap();
+    let multi_bar = MultiProgress::new();
+    let mut bars = HashMap::new();
+    for (state, color) in JobState::iter().zip(COLORS) {
+        let bar = multi_bar.add(
+            ProgressBar::new(total_jobs)
+                .with_message(state.to_string())
+                .with_style(
+                    ProgressStyle::with_template(&format!(
+                        "{{wide_bar:.{color}}} {{pos}}/{{len}} {{msg:21}}"
+                    ))
+                    .unwrap()
+                    .progress_chars("##-"),
+                ),
+        );
+        bars.insert(state, bar);
+    }
+
     for (binary, case) in cases.into_iter() {
         let accum_clone = accum.clone();
-        let bar_clone = bar.clone();
+        let bar_clone = bars.get(&JobState::Complete).unwrap().clone();
         client.add_job(
             JobDetails {
                 program: binary.clone(),
@@ -177,7 +200,17 @@ pub fn main() -> Result<ExitCode> {
             }),
         );
     }
-    client.wait_for_oustanding_jobs()?;
+
+    while bars[&JobState::Complete].position() < total_jobs {
+        let counts = client.get_job_state_counts()?;
+        for state in JobState::iter().filter(|s| s != &JobState::Complete) {
+            let jobs = JobState::iter()
+                .filter(|s| s >= &state)
+                .map(|s| counts[s])
+                .sum();
+            bars.get(&state).unwrap().set_position(jobs);
+        }
+    }
     Ok(accum.get())
 }
 

@@ -3,12 +3,13 @@ use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
+    stats::JobStateCounts,
     ClientJobId, JobDetails, JobResult, Sha256Digest,
 };
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs::{self, File},
     io::{self, Read},
     net::{SocketAddr, TcpStream},
@@ -66,6 +67,7 @@ enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
     AddJob(JobDetails, JobResponseHandler),
+    GetJobStateCounts(SyncSender<JobStateCounts>),
     Stop,
 }
 
@@ -78,6 +80,7 @@ fn dispatcher_main(
     let mut next_client_job_id = 0u32;
     let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
     let mut handlers = HashMap::<ClientJobId, JobResponseHandler>::default();
+    let mut stats_reqs: VecDeque<SyncSender<JobStateCounts>> = VecDeque::new();
     loop {
         let msg = receiver.recv()?;
         match msg {
@@ -93,6 +96,9 @@ fn dispatcher_main(
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
+            }
+            DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
+                stats_reqs.pop_front().unwrap().send(res).ok();
             }
             DispatcherMessage::AddArtifact(path, sender) => {
                 sender.send(add_artifact(&mut artifacts, path))?
@@ -111,6 +117,10 @@ fn dispatcher_main(
                     return Ok(());
                 }
                 stop_when_all_completed = true;
+            }
+            DispatcherMessage::GetJobStateCounts(sender) => {
+                net::write_message_to_socket(&mut stream, ClientToBroker::JobStateCountsRequest)?;
+                stats_reqs.push_back(sender);
             }
         }
     }
@@ -177,5 +187,12 @@ impl Client {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         self.dispatcher_handle.join().unwrap()?;
         Ok(())
+    }
+
+    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
+        let (sender, recv) = mpsc::sync_channel(1);
+        self.dispatcher_sender
+            .send(DispatcherMessage::GetJobStateCounts(sender))?;
+        Ok(recv.recv()?)
     }
 }

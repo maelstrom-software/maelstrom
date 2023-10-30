@@ -1,6 +1,9 @@
 //! Messages sent between various binaries.
 
-use crate::{stats::BrokerStatistics, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest};
+use crate::{
+    stats::{BrokerStatistics, JobStateCounts},
+    ClientJobId, JobDetails, JobId, JobResult, Sha256Digest,
+};
 use serde::{Deserialize, Serialize};
 
 /// The first message sent by a connector to the broker. It identifies what the connector is, and
@@ -34,6 +37,7 @@ pub enum BrokerToClient {
     JobResponse(ClientJobId, JobResult),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
+    JobStateCountsResponse(JobStateCounts),
 }
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
@@ -42,6 +46,7 @@ pub enum BrokerToClient {
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobDetails),
     StatisticsRequest,
+    JobStateCountsRequest,
 }
 
 /// Message sent from the broker to an artifact fetcher. This will be in response to an

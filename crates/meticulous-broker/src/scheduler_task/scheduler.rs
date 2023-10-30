@@ -162,6 +162,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             Message::FromClient(cid, ClientToBroker::StatisticsRequest) => {
                 self.receive_client_statistics_request(deps, cid)
             }
+            Message::FromClient(cid, ClientToBroker::JobStateCountsRequest) => {
+                self.receive_client_job_state_counts(deps, cid)
+            }
             Message::WorkerConnected(id, slots, sender) => {
                 self.receive_worker_connected(deps, id, slots, sender)
             }
@@ -374,6 +377,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 .collect(),
             job_statistics: self.job_statistics.clone(),
         });
+        deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
+    }
+
+    fn receive_client_job_state_counts(&mut self, deps: &mut DepsT, cid: ClientId) {
+        let resp =
+            BrokerToClient::JobStateCountsResponse(self.sample_job_statistics_for_client(cid));
         deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
     }
 
@@ -1429,6 +1438,25 @@ mod tests {
                     }
                 }].into_iter().collect()
             }))
+        }
+    }
+
+    script_test! {
+        job_state_counts,
+        ClientConnected(cid![1], client_sender![1]) => {};
+        WorkerConnected(wid![1], 2, worker_sender![1]) => {};
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], details![1])) => {
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], details![1])),
+        };
+        FromClient(cid![1], ClientToBroker::JobStateCountsRequest) => {
+            ToClient(cid![1], BrokerToClient::JobStateCountsResponse(
+                enum_map! {
+                    JobState::WaitingForArtifacts => 0,
+                    JobState::Pending => 0,
+                    JobState::Running => 1,
+                    JobState::Complete => 0,
+                }
+            ))
         }
     }
 }

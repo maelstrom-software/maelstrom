@@ -12,7 +12,18 @@ use std::time::Duration;
 pub const BROKER_STATISTICS_INTERVAL: Duration = Duration::from_millis(500);
 
 #[derive(
-    Copy, Clone, Debug, PartialEq, Eq, enum_map::Enum, strum::EnumIter, Serialize, Deserialize,
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    enum_map::Enum,
+    strum::EnumIter,
+    Serialize,
+    Deserialize,
+    Hash,
+    PartialOrd,
+    Ord,
 )]
 pub enum JobState {
     WaitingForArtifacts,
