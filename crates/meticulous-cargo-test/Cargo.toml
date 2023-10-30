@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = { workspace = true }
 colored = { workspace = true }
 clap = { workspace = true }
+indicatif = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-client = { workspace = true }
 meticulous-util = { workspace = true }

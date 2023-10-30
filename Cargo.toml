@@ -27,6 +27,7 @@ gloo-net = "0.4"
 gloo-utils = "0.2"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
+indicatif = "0.17"
 itertools = "0.10.5"
 maplit = "1"
 meticulous-base = { path = "crates/meticulous-base" }

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
+use indicatif::ProgressBar;
 use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
 use meticulous_client::Client;
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
@@ -73,6 +74,7 @@ fn visitor(
     accum: Arc<ExitCodeAccumulator>,
     case: String,
     width: Option<usize>,
+    bar: ProgressBar,
 ) -> Result<()> {
     let result_str: ColoredString;
     let mut result_details: Option<String> = None;
@@ -122,21 +124,28 @@ fn visitor(
             if case_width + result_width < width {
                 let dots_width = width - result_width - case_width;
                 let case = case.bold();
-                println!("{case}{empty:.<dots_width$}{result_str}", empty = "");
+                bar.println(format!(
+                    "{case}{empty:.<dots_width$}{result_str}",
+                    empty = ""
+                ));
             } else {
                 let (case, case_width) = case.unicode_truncate_start(width - 2 - result_width);
                 let case = case.bold();
                 let dots_width = width - result_width - case_width - 1;
-                println!("<{case}{empty:.<dots_width$}{result_str}", empty = "");
+                bar.println(format!(
+                    "<{case}{empty:.<dots_width$}{result_str}",
+                    empty = ""
+                ));
             }
         }
         _ => {
-            println!("{case} {result_str}");
+            bar.println(format!("{case} {result_str}"));
         }
     }
     if let Some(details_str) = result_details {
-        println!("{details_str}");
+        bar.println(format!("{details_str}"));
     }
+    bar.inc(1);
     Ok(())
 }
 
@@ -147,18 +156,26 @@ pub fn main() -> Result<ExitCode> {
     let accum = Arc::new(ExitCodeAccumulator::default());
     let mut client = Client::new(cli_options.broker())?;
     let width = term_size::dimensions().map(|(w, _)| w);
+    let mut cases = vec![];
     for binary in get_test_binaries()? {
         for case in get_cases_from_binary(&binary)? {
-            let accum_clone = accum.clone();
-            client.add_job(
-                JobDetails {
-                    program: binary.clone(),
-                    arguments: vec![case.clone()],
-                    layers: vec![],
-                },
-                Box::new(move |cjid, result| visitor(cjid, result, accum_clone, case, width)),
-            );
+            cases.push((binary.clone(), case));
         }
+    }
+    let bar = ProgressBar::new(cases.len().try_into().unwrap());
+    for (binary, case) in cases.into_iter() {
+        let accum_clone = accum.clone();
+        let bar_clone = bar.clone();
+        client.add_job(
+            JobDetails {
+                program: binary.clone(),
+                arguments: vec![case.clone()],
+                layers: vec![],
+            },
+            Box::new(move |cjid, result| {
+                visitor(cjid, result, accum_clone, case, width, bar_clone)
+            }),
+        );
     }
     client.wait_for_oustanding_jobs()?;
     Ok(accum.get())
