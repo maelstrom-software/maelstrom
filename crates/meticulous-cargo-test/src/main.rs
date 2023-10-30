@@ -24,11 +24,27 @@ fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser)]
-#[command(version)]
+#[command(version, bin_name = "cargo")]
 struct Cli {
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
-    #[arg(value_parser = parse_socket_addr)]
-    broker: SocketAddr,
+    #[clap(subcommand)]
+    subcommand: Subcommand,
+}
+
+impl Cli {
+    fn broker(&self) -> SocketAddr {
+        match &self.subcommand {
+            Subcommand::Metest { broker } => *broker,
+        }
+    }
+}
+
+#[derive(Debug, clap::Subcommand)]
+enum Subcommand {
+    Metest {
+        /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
+        #[arg(value_parser = parse_socket_addr)]
+        broker: SocketAddr,
+    },
 }
 
 fn get_test_binaries() -> Result<Vec<String>> {
@@ -129,7 +145,7 @@ fn visitor(
 pub fn main() -> Result<ExitCode> {
     let cli_options = Cli::parse();
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(cli_options.broker)?;
+    let mut client = Client::new(cli_options.broker())?;
     let width = term_size::dimensions().map(|(w, _)| w);
     for binary in get_test_binaries()? {
         for case in get_cases_from_binary(&binary)? {
