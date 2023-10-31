@@ -19,6 +19,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
+    time::Duration,
 };
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
@@ -193,15 +194,20 @@ struct ProgressBars {
     _multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
     done_queuing_jobs: AtomicBool,
+    build_spinner: ProgressBar,
 }
 
 impl ProgressBars {
     fn new() -> Self {
         let multi_bar = MultiProgress::new();
+        let build_spinner =
+            multi_bar.add(ProgressBar::new_spinner().with_message("building artifacts..."));
+        build_spinner.enable_steady_tick(Duration::from_millis(500));
+
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
             let bar = multi_bar.add(
-                ProgressBar::new(1)
+                ProgressBar::new(0)
                     .with_message(state.to_string())
                     .with_style(
                         ProgressStyle::with_template(&format!(
@@ -216,6 +222,7 @@ impl ProgressBars {
         Self {
             _multi_bar: multi_bar,
             bars,
+            build_spinner,
             done_queuing_jobs: AtomicBool::new(false),
         }
     }
@@ -245,6 +252,9 @@ impl ProgressBars {
 
     fn done_queuing_jobs(&self) {
         self.done_queuing_jobs.store(true, Ordering::Relaxed);
+
+        self.build_spinner.disable_steady_tick();
+        self.build_spinner.finish_and_clear();
     }
 }
 
