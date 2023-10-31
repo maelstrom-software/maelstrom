@@ -211,6 +211,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use concat_idents::concat_idents;
     use std::collections::HashMap;
 
     struct TestElement {
@@ -385,20 +386,35 @@ mod tests {
         }
     }
 
-    #[test]
-    fn sift_up_and_sift_down_random() {
-        let mut fixture = Fixture::default();
-        for i in 0..1000 {
-            fixture.push(i, rand::random());
-            fixture.validate();
-        }
-        for _ in 0..10 {
-            for i in 0..1000 {
-                fixture.reweigh(i, rand::random());
-                fixture.validate();
-            }
+    macro_rules! sift_up_and_sift_down_random {
+        ($i:literal) => {
+            concat_idents!(test_name = sift_up_and_sift_down_random_, $i {
+                #[test]
+                fn test_name() {
+                    let mut fixture = Fixture::default();
+                    for i in 0..1000 {
+                        fixture.push(i, rand::random());
+                        fixture.validate();
+                    }
+                    for i in 0..1000 {
+                        fixture.reweigh(i, rand::random());
+                        fixture.validate();
+                    }
+                }
+            });
         }
     }
+
+    sift_up_and_sift_down_random!(1);
+    sift_up_and_sift_down_random!(2);
+    sift_up_and_sift_down_random!(3);
+    sift_up_and_sift_down_random!(4);
+    sift_up_and_sift_down_random!(5);
+    sift_up_and_sift_down_random!(6);
+    sift_up_and_sift_down_random!(7);
+    sift_up_and_sift_down_random!(8);
+    sift_up_and_sift_down_random!(9);
+    sift_up_and_sift_down_random!(10);
 
     #[test]
     fn rebuild_random() {
