@@ -4,7 +4,7 @@ use cargo_metadata::{
 };
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
 use meticulous_base::{
     stats::JobState, ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus,
 };
@@ -219,6 +219,7 @@ impl ProgressBars {
             );
             bars.insert(state, bar);
         }
+        multi_bar.set_draw_target(ProgressDrawTarget::stdout());
         Self {
             _multi_bar: multi_bar,
             bars,
