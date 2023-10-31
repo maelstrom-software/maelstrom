@@ -52,11 +52,26 @@ enum Subcommand {
 }
 
 fn get_test_binaries() -> Result<Vec<String>> {
-    let output = Command::new("cargo").arg("test").arg("--no-run").output()?;
-    Ok(Regex::new(r"Executable unittests.*\((.*)\)")?
-        .captures_iter(str::from_utf8(&output.stderr)?)
-        .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
-        .collect())
+    use cargo_metadata::Message;
+    let output = Command::new("cargo")
+        .arg("test")
+        .arg("--no-run")
+        .arg("--message-format=json-render-diagnostics")
+        .output()?;
+    let mut paths = vec![];
+    for message in Message::parse_stream(std::io::BufReader::new(&output.stdout[..])) {
+        match message? {
+            Message::CompilerArtifact(artifact) => {
+                if let Some(path) = artifact.executable {
+                    if artifact.profile.test {
+                        paths.push(path.to_string());
+                    }
+                }
+            }
+            _ => continue,
+        }
+    }
+    Ok(paths)
 }
 
 fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
