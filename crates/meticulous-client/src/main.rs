@@ -122,7 +122,7 @@ fn main() -> Result<ExitCode> {
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );
     }
-    client.wait_for_oustanding_jobs()?;
+    client.wait_for_outstanding_jobs()?;
     Ok(accum.get())
 }
 

@@ -183,7 +183,7 @@ impl Client {
             .send(DispatcherMessage::AddJob(details, handler));
     }
 
-    pub fn wait_for_oustanding_jobs(self) -> Result<()> {
+    pub fn wait_for_outstanding_jobs(self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         self.dispatcher_handle.join().unwrap()?;
         Ok(())
