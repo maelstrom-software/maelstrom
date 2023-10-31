@@ -18,6 +18,7 @@ use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     mem,
     path::PathBuf,
+    result::Result as StdResult,
 };
 
 /*              _     _ _
@@ -98,9 +99,9 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 #[derive(Debug)]
 pub enum Message {
     Broker(BrokerToWorker),
-    JobStdout(JobId, JobOutputResult),
-    JobStderr(JobId, JobOutputResult),
-    PidStatus(Pid, JobStatus),
+    JobStdout(JobId, StdResult<JobOutputResult, String>),
+    JobStderr(JobId, StdResult<JobOutputResult, String>),
+    PidStatus(Pid, StdResult<JobStatus, String>),
     ArtifactFetcher(Sha256Digest, Result<u64>),
 }
 
@@ -169,9 +170,9 @@ impl AwaitingLayersEntry {
 
 struct ExecutingJob {
     pid: Pid,
-    status: Option<std::result::Result<JobStatus, String>>,
-    stdout: Option<std::result::Result<JobOutputResult, String>>,
-    stderr: Option<std::result::Result<JobOutputResult, String>>,
+    status: Option<StdResult<JobStatus, String>>,
+    stdout: Option<StdResult<JobOutputResult, String>>,
+    stderr: Option<StdResult<JobOutputResult, String>>,
     layers: Vec<Sha256Digest>,
 }
 
@@ -276,124 +277,69 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
-    fn receive_job_stdout(&mut self, jid: JobId, result: JobOutputResult) {
-        if let Entry::Occupied(mut oe) = self.executing.entry(jid) {
-            let entry = oe.get_mut();
-            entry.stdout = Some(Ok(result));
-            if entry.status.is_some() && entry.stderr.is_some() {
-                let (
-                    _,
-                    ExecutingJob {
-                        status: Some(status),
-                        stdout: Some(stdout),
-                        stderr: Some(stderr),
-                        layers,
-                        ..
-                    },
-                ) = oe.remove_entry()
-                else {
-                    panic!();
-                };
-                let result = match (status, stdout, stderr) {
-                    (Ok(status), Ok(stdout), Ok(stderr)) => JobResult::Ran {
+    fn update_entry_and_potentially_finish_job(
+        &mut self,
+        jid: JobId,
+        f: impl FnOnce(&mut ExecutingJob),
+    ) {
+        let Entry::Occupied(mut oe) = self.executing.entry(jid) else {
+            return;
+        };
+        f(oe.get_mut());
+        let entry = oe.get();
+        if entry.status.is_some() && entry.stdout.is_some() && entry.stderr.is_some() {
+            let (
+                jid,
+                ExecutingJob {
+                    status: Some(status),
+                    stdout: Some(stdout),
+                    stderr: Some(stderr),
+                    layers,
+                    ..
+                },
+            ) = oe.remove_entry()
+            else {
+                panic!();
+            };
+            let result = match (status, stdout, stderr) {
+                (StdResult::Ok(status), StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
+                    JobResult::Ran {
                         status,
                         stdout,
                         stderr,
-                    },
-                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => JobResult::SystemError(e),
-                };
-                self.deps
-                    .send_message_to_broker(WorkerToBroker(jid, result));
-                for digest in layers {
-                    self.cache.decrement_ref_count(&digest);
+                    }
                 }
-                self.possibly_start_job();
+                (StdResult::Err(e), _, _)
+                | (_, StdResult::Err(e), _)
+                | (_, _, StdResult::Err(e)) => JobResult::SystemError(e),
+            };
+            self.deps
+                .send_message_to_broker(WorkerToBroker(jid, result));
+            for digest in layers {
+                self.cache.decrement_ref_count(&digest);
             }
+            self.possibly_start_job();
         }
     }
 
-    fn receive_job_stderr(&mut self, jid: JobId, result: JobOutputResult) {
-        if let Entry::Occupied(mut oe) = self.executing.entry(jid) {
-            let entry = oe.get_mut();
-            entry.stderr = Some(Ok(result));
-            if entry.status.is_some() && entry.stdout.is_some() {
-                let (
-                    _,
-                    ExecutingJob {
-                        status: Some(status),
-                        stdout: Some(stdout),
-                        stderr: Some(stderr),
-                        layers,
-                        ..
-                    },
-                ) = oe.remove_entry()
-                else {
-                    panic!();
-                };
-                let result = match (status, stdout, stderr) {
-                    (Ok(status), Ok(stdout), Ok(stderr)) => JobResult::Ran {
-                        status,
-                        stdout,
-                        stderr,
-                    },
-                    (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => JobResult::SystemError(e),
-                };
-                self.deps
-                    .send_message_to_broker(WorkerToBroker(jid, result));
-                for digest in layers {
-                    self.cache.decrement_ref_count(&digest);
-                }
-                self.possibly_start_job();
-            }
-        }
+    fn receive_job_stdout(&mut self, jid: JobId, result: StdResult<JobOutputResult, String>) {
+        self.update_entry_and_potentially_finish_job(jid, move |entry| entry.stdout = Some(result));
     }
 
-    fn receive_pid_status(&mut self, pid: Pid, status: JobStatus) {
-        let mut target_jid = Option::<JobId>::None;
-        for (jid, entry) in self.executing.iter() {
-            if entry.pid == pid {
-                target_jid = Some(*jid);
-                break;
-            }
-        }
+    fn receive_job_stderr(&mut self, jid: JobId, result: StdResult<JobOutputResult, String>) {
+        self.update_entry_and_potentially_finish_job(jid, move |entry| entry.stderr = Some(result));
+    }
+
+    fn receive_pid_status(&mut self, pid: Pid, status: StdResult<JobStatus, String>) {
+        let target_jid =
+            self.executing
+                .iter()
+                .find_map(|(jid, entry)| if entry.pid == pid { Some(*jid) } else { None });
         match target_jid {
             Some(jid) => {
-                let Entry::Occupied(mut oe) = self.executing.entry(jid) else {
-                    panic!()
-                };
-                let entry = oe.get_mut();
-                entry.status = Some(Ok(status));
-                if entry.stdout.is_some() && entry.stderr.is_some() {
-                    let (
-                        _,
-                        ExecutingJob {
-                            status: Some(status),
-                            stdout: Some(stdout),
-                            stderr: Some(stderr),
-                            layers,
-                            ..
-                        },
-                    ) = oe.remove_entry()
-                    else {
-                        panic!();
-                    };
-                    let result = match (status, stdout, stderr) {
-                        (Ok(status), Ok(stdout), Ok(stderr)) => JobResult::Ran {
-                            status,
-                            stdout,
-                            stderr,
-                        },
-                        (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
-                            JobResult::SystemError(e)
-                        }
-                    };
-                    self.deps
-                        .send_message_to_broker(WorkerToBroker(jid, result));
-                    for digest in layers {
-                        self.cache.decrement_ref_count(&digest);
-                    }
-                    self.possibly_start_job();
-                }
+                self.update_entry_and_potentially_finish_job(jid, move |entry| {
+                    entry.status = Some(status)
+                });
             }
             None => {
                 if let Some(layers) = self.canceled.remove(&pid) {
@@ -712,9 +658,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -731,9 +677,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -750,9 +696,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -769,9 +715,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
-        JobStdout(jid!(1), JobOutputResult::None) => {
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -788,9 +734,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -807,9 +753,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1, [42]))) =>  {
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]) };
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        JobStdout(jid!(1), JobOutputResult::None) => {
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -825,9 +771,9 @@ mod tests {
         Broker(EnqueueJob(jid!(1), details!(1))) => { StartJob(jid!(1), details!(1), vec![]) };
         Broker(EnqueueJob(jid!(2), details!(2))) => { StartJob(jid!(2), details!(2), vec![]) };
         Broker(EnqueueJob(jid!(3), details!(3))) => {};
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(3), details!(3), vec![]),
         };
@@ -842,9 +788,9 @@ mod tests {
         ], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => { StartJob(jid!(1), details!(1), vec![]) };
         Broker(EnqueueJob(jid!(2), details!(2))) => { StartJob(jid!(2), details!(2), vec![]) };
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1)))
         };
         Broker(EnqueueJob(jid!(3), details!(3))) => { StartJob(jid!(3), details!(3), vec![]) };
@@ -874,9 +820,9 @@ mod tests {
             CacheDecrementRefCount(digest!(42)),
             CacheDecrementRefCount(digest!(43)),
         };
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        JobStderr(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(4), details!(4), vec![]),
         };
@@ -905,13 +851,13 @@ mod tests {
             Kill(pid!(1)),
             StartJob(jid!(3), details!(3), vec![])
         };
-        JobStdout(jid!(1), JobOutputResult::None) => {};
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
             CacheDecrementRefCount(digest!(43)),
         };
-        JobStderr(jid!(1), JobOutputResult::None) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
     }
 
     script_test! {
@@ -953,7 +899,7 @@ mod tests {
             };
             Broker(CancelJob(jid!(2))) => {};
             Broker(CancelJob(jid!(2))) => {};
-            PidStatus(pid!(2), JobStatus::Exited(1)) => {};
+            PidStatus(pid!(2), Ok(JobStatus::Exited(1))) => {};
             Broker(CancelJob(jid!(2))) => {};
             Broker(CancelJob(jid!(2))) => {};
         }
