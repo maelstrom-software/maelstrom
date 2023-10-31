@@ -228,13 +228,15 @@ impl ProgressBars {
     }
 
     fn update_progress(&self, client: &Mutex<Client>) -> Result<()> {
-        let counts = client.lock().unwrap().get_job_state_counts()?;
-        for state in JobState::iter().filter(|s| s != &JobState::Complete) {
-            let jobs = JobState::iter()
-                .filter(|s| s >= &state)
-                .map(|s| counts[s])
-                .sum();
-            self.bars.get(&state).unwrap().set_position(jobs);
+        while !self.finished() {
+            let counts = client.lock().unwrap().get_job_state_counts()?;
+            for state in JobState::iter().filter(|s| s != &JobState::Complete) {
+                let jobs = JobState::iter()
+                    .filter(|s| s >= &state)
+                    .map(|s| counts[s])
+                    .sum();
+                self.bars.get(&state).unwrap().set_position(jobs);
+            }
         }
         Ok(())
     }
@@ -302,15 +304,10 @@ pub fn main() -> Result<ExitCode> {
     let width = term_size::dimensions().map(|(w, _)| w);
 
     let bars = ProgressBars::new();
+    let complete_bar = bars.bars.get(&JobState::Complete).unwrap().clone();
     std::thread::scope(|scope| -> Result<()> {
-        let bars_thread = scope.spawn(|| -> Result<()> {
-            while !bars.finished() {
-                bars.update_progress(&client)?
-            }
-            Ok(())
-        });
-        let bar = bars.bars.get(&JobState::Complete).unwrap().clone();
-        let res = queue_jobs_and_wait(&client, accum.clone(), width, bar, |num_jobs| {
+        let bars_thread = scope.spawn(|| bars.update_progress(&client));
+        let res = queue_jobs_and_wait(&client, accum.clone(), width, complete_bar, |num_jobs| {
             bars.update_length(num_jobs)
         });
         bars.done_queuing_jobs();
