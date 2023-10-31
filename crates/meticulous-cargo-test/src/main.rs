@@ -1,5 +1,7 @@
 use anyhow::Result;
-use cargo_metadata::{Message as CargoMessage, MessageIter as CargoMessageIter};
+use cargo_metadata::{
+    Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
+};
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -56,22 +58,20 @@ enum Subcommand {
     },
 }
 
-struct TestBinaryGetter {
+struct TestArtifactGetter {
     stream: CargoMessageIter<BufReader<ChildStdout>>,
 }
 
-impl Iterator for TestBinaryGetter {
-    type Item = Result<String>;
+impl Iterator for TestArtifactGetter {
+    type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.stream.next()? {
                 Err(e) => return Some(Err(e.into())),
                 Ok(CargoMessage::CompilerArtifact(artifact)) => {
-                    if let Some(path) = artifact.executable {
-                        if artifact.profile.test {
-                            return Some(Ok(path.to_string()));
-                        }
+                    if artifact.executable.is_some() && artifact.profile.test {
+                        return Some(Ok(artifact));
                     }
                 }
                 _ => continue,
@@ -80,7 +80,7 @@ impl Iterator for TestBinaryGetter {
     }
 }
 
-fn get_test_binaries() -> Result<TestBinaryGetter> {
+fn get_test_artifacts() -> Result<TestArtifactGetter> {
     let child = Command::new("cargo")
         .arg("test")
         .arg("--no-run")
@@ -89,7 +89,7 @@ fn get_test_binaries() -> Result<TestBinaryGetter> {
         .stderr(Stdio::null())
         .spawn()?;
 
-    Ok(TestBinaryGetter {
+    Ok(TestArtifactGetter {
         stream: CargoMessage::parse_stream(BufReader::new(child.stdout.unwrap())),
     })
 }
@@ -266,14 +266,17 @@ fn queue_jobs_and_wait(
     mut cb: impl FnMut(u64),
 ) -> Result<()> {
     let mut total_jobs = 0;
-    for binary in get_test_binaries()? {
-        let binary = binary?;
+    for artifact in get_test_artifacts()? {
+        let artifact = artifact?;
+        let binary = artifact.executable.unwrap().to_string();
+        let package_name = artifact.target.name;
         for case in get_cases_from_binary(&binary)? {
             total_jobs += 1;
             cb(total_jobs);
 
             let accum_clone = accum.clone();
             let bar_clone = bar.clone();
+            let case_str = format!("{package_name} {case}");
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
@@ -281,7 +284,7 @@ fn queue_jobs_and_wait(
                     layers: vec![],
                 },
                 Box::new(move |cjid, result| {
-                    visitor(cjid, result, accum_clone, case, width, bar_clone)
+                    visitor(cjid, result, accum_clone, case_str, width, bar_clone)
                 }),
             );
         }
