@@ -120,7 +120,7 @@ pub enum JobResult {
 
     /// There was something wrong with the job that made it unable to be executed. This error
     /// indicates that there was something wrong with the job itself, and thus is obstensibly the
-    /// fault of the client. An error of this type might happen if the execution path was't found, or
+    /// fault of the client. An error of this type might happen if the execution path wasn't found, or
     /// if the binary couldn't be executed because it was for the wrong architecture.
     ExecutionError(String),
 

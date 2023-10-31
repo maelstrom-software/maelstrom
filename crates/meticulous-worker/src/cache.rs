@@ -74,7 +74,7 @@ impl CacheFs for StdCacheFs {
 }
 
 /// Type returned from [Cache::get_artifact].
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GetArtifact {
     /// The artifact in the cache. The caller has been given a reference that must later be
     /// released by calling [Cache::decrement_ref_count]. The provided [PathBuf] contains the
