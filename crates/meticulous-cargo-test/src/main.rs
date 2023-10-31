@@ -204,7 +204,7 @@ fn visitor(
         }
     }
     if let Some(details_str) = result_details {
-        bar.println(format!("{details_str}"));
+        bar.println(details_str);
     }
     bar.inc(1);
     Ok(())

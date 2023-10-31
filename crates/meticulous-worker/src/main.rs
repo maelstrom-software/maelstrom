@@ -125,21 +125,23 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
     // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
     // early.
     let parent_pidfd =
-        unsafe { nc::pidfd_open(parent_pid.as_raw(), 0) }.map_err(|e| Errno::from_i32(e))?;
+        unsafe { nc::pidfd_open(parent_pid.as_raw(), 0) }.map_err(Errno::from_i32)?;
 
     // Clone a new process into new user and pid namespaces.
-    let mut clone_args = nc::clone_args_t::default();
-    clone_args.flags = nc::CLONE_NEWUSER as u64 | nc::CLONE_NEWPID as u64;
-    clone_args.exit_signal = nc::SIGCHLD as u64;
+    let mut clone_args = nc::clone_args_t {
+        flags: nc::CLONE_NEWUSER as u64 | nc::CLONE_NEWPID as u64,
+        exit_signal: nc::SIGCHLD as u64,
+        ..Default::default()
+    };
     match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) }
-        .map_err(|e| Errno::from_i32(e))?
+        .map_err(Errno::from_i32)?
     {
         0 => {
             // Child.
 
             // Set parent death signal.
             unsafe { nc::prctl(nc::PR_SET_PDEATHSIG, nc::types::SIGKILL as usize, 0, 0, 0) }
-                .map_err(|e| Errno::from_i32(e))?;
+                .map_err(Errno::from_i32)?;
 
             // Check if the parent has already terminated.
             let mut pollfds = [nc::pollfd_t {
@@ -147,12 +149,12 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 events: nc::POLLIN,
                 revents: 0,
             }];
-            if unsafe { nc::poll(&mut pollfds, 0) }.map_err(|e| Errno::from_i32(e))? == 1 {
+            if unsafe { nc::poll(&mut pollfds, 0) }.map_err(Errno::from_i32)? == 1 {
                 process::abort();
             }
 
             // We are done with the parent_pidfd now.
-            unsafe { nc::close(parent_pidfd) }.map_err(|e| Errno::from_i32(e))?;
+            unsafe { nc::close(parent_pidfd) }.map_err(Errno::from_i32)?;
 
             // Map uid and guid.
             fs::write("/proc/self/setgroups", "deny\n")?;
@@ -163,13 +165,13 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             // by opening /dev/null but then we would depend on /dev being mounted. The few
             // dependencies, the better.
             let mut stdin_pipe_fds = [-1i32; 2];
-            unsafe { nc::pipe(&mut stdin_pipe_fds) }.map_err(|e| Errno::from_i32(e))?;
-            unsafe { nc::dup2(stdin_pipe_fds[0], 0) }.map_err(|e| Errno::from_i32(e))?;
+            unsafe { nc::pipe(&mut stdin_pipe_fds) }.map_err(Errno::from_i32)?;
+            unsafe { nc::dup2(stdin_pipe_fds[0], 0) }.map_err(Errno::from_i32)?;
             if stdin_pipe_fds[0] != 0 {
-                unsafe { nc::close(stdin_pipe_fds[0]) }.map_err(|e| Errno::from_i32(e))?;
+                unsafe { nc::close(stdin_pipe_fds[0]) }.map_err(Errno::from_i32)?;
             }
             if stdin_pipe_fds[1] != 0 {
-                unsafe { nc::close(stdin_pipe_fds[1]) }.map_err(|e| Errno::from_i32(e))?;
+                unsafe { nc::close(stdin_pipe_fds[1]) }.map_err(Errno::from_i32)?;
             }
 
             Ok(())
