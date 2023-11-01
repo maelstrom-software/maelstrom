@@ -41,8 +41,11 @@ pub enum StartJobResult {
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
-    /// Start a new job. When the job terminates, the notification must come through as
-    /// a [Message::Executor] message.
+    /// Start a new job. If this returns [`StartJobResult::Ok`], then the dispatcher is expecting
+    /// three separate messages to know when the job has completed: [`Message::PidStatus`],
+    /// [`Message::JobStdout`], and [`Message::JobStderr`]. These messages don't have to come in
+    /// any particular order, but the dispatcher won't proceed with the next job until all three
+    /// have arrived.
     fn start_job(
         &mut self,
         jid: JobId,
@@ -50,7 +53,7 @@ pub trait DispatcherDeps {
         layers: Vec<PathBuf>,
     ) -> StartJobResult;
 
-    /// Kill a running job.
+    /// Kill a running job using the [`Pid`] obtained from [`StartJobResult::Ok`].
     fn kill_job(&mut self, pid: Pid);
 
     /// Send a message to the broker.
@@ -60,8 +63,8 @@ pub trait DispatcherDeps {
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 }
 
-/// The [Cache] dependency for [Dispatcher]. This should be exactly the same as [Cache]'s public
-/// interface. We have this so we can isolate [Dispatcher] when testing.
+/// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
+/// public interface. We have this so we can isolate [`Dispatcher`] when testing.
 pub trait DispatcherCache {
     fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact;
     fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId>;
@@ -73,7 +76,7 @@ pub trait DispatcherCache {
     fn decrement_ref_count(&mut self, digest: &Sha256Digest);
 }
 
-/// The standard implementation of [DispatcherCache] that just calls into [Cache].
+/// The standard implementation of [`DispatcherCache`] that just calls into [`Cache`].
 impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
     fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
         self.get_artifact(artifact, jid)
@@ -178,6 +181,22 @@ struct ExecutingJob {
     layers: Vec<Sha256Digest>,
 }
 
+impl ExecutingJob {
+    fn new(pid: Pid, layers: Vec<Sha256Digest>) -> Self {
+        ExecutingJob {
+            pid,
+            status: None,
+            stdout: None,
+            stderr: None,
+            layers,
+        }
+    }
+
+    fn is_complete(&self) -> bool {
+        self.status.is_some() && self.stdout.is_some() && self.stderr.is_some()
+    }
+}
+
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
 /// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
 /// broker to order the requests properly.
@@ -199,13 +218,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let (jid, details, layer_paths) = self.queued.pop_front().unwrap();
             match self.deps.start_job(jid, &details, layer_paths) {
                 StartJobResult::Ok(pid) => {
-                    let executing_job = ExecutingJob {
-                        pid,
-                        status: None,
-                        stdout: None,
-                        stderr: None,
-                        layers: details.layers,
-                    };
+                    let executing_job = ExecutingJob::new(pid, details.layers);
                     self.executing.insert(jid, executing_job).assert_is_none();
                 }
                 StartJobResult::ExecutionError(e) => {
@@ -294,21 +307,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             return;
         };
         f(oe.get_mut());
-        let entry = oe.get();
-        if entry.status.is_some() && entry.stdout.is_some() && entry.stderr.is_some() {
-            let (
-                jid,
-                ExecutingJob {
-                    status: Some(status),
-                    stdout: Some(stdout),
-                    stderr: Some(stderr),
-                    layers,
-                    ..
-                },
-            ) = oe.remove_entry()
-            else {
-                panic!();
-            };
+        if oe.get().is_complete() {
+            let (jid, entry) = oe.remove_entry();
+            let status = entry.status.unwrap();
+            let stdout = entry.stdout.unwrap();
+            let stderr = entry.stderr.unwrap();
             let result = match (status, stdout, stderr) {
                 (StdResult::Ok(status), StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
                     JobResult::Ran {
@@ -323,7 +326,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             };
             self.deps
                 .send_message_to_broker(WorkerToBroker(jid, result));
-            for digest in layers {
+            for digest in entry.layers {
                 self.cache.decrement_ref_count(&digest);
             }
             self.possibly_start_job();
@@ -1110,10 +1113,13 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: self.is_none()")]
     fn duplicate_ids_from_broker_panics() {
-        let mut fixture = Fixture::new(2, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
-        ], [], [], []);
+        let mut fixture = Fixture::new(
+            2,
+            [StartJobResult::Ok(pid!(1)), StartJobResult::Ok(pid!(2))],
+            [],
+            [],
+            [],
+        );
         fixture
             .dispatcher
             .receive_message(Broker(EnqueueJob(jid!(1), details!(1))));
