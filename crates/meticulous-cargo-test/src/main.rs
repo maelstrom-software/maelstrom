@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Error, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     io::{self, BufReader, Write as _},
     net::{SocketAddr, ToSocketAddrs as _},
-    process::{ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio},
     str,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -58,11 +58,48 @@ enum Subcommand {
     },
 }
 
-struct TestArtifactGetter {
+struct CargoBuild {
+    child: Child,
+}
+
+impl CargoBuild {
+    fn new() -> Result<Self> {
+        let child = Command::new("cargo")
+            .arg("test")
+            .arg("--no-run")
+            .arg("--message-format=json-render-diagnostics")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+
+        Ok(Self { child })
+    }
+
+    fn artifact_stream(&mut self) -> TestArtifactStream {
+        TestArtifactStream {
+            stream: CargoMessage::parse_stream(BufReader::new(self.child.stdout.take().unwrap())),
+        }
+    }
+
+    fn check_status(mut self) -> Result<()> {
+        let exit_status = self.child.wait()?;
+        if !exit_status.success() {
+            std::io::copy(
+                self.child.stderr.as_mut().unwrap(),
+                &mut std::io::stderr().lock(),
+            )?;
+            return Err(Error::msg(format!("build failure")));
+        }
+
+        Ok(())
+    }
+}
+
+struct TestArtifactStream {
     stream: CargoMessageIter<BufReader<ChildStdout>>,
 }
 
-impl Iterator for TestArtifactGetter {
+impl Iterator for TestArtifactStream {
     type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -78,20 +115,6 @@ impl Iterator for TestArtifactGetter {
             }
         }
     }
-}
-
-fn get_test_artifacts() -> Result<TestArtifactGetter> {
-    let child = Command::new("cargo")
-        .arg("test")
-        .arg("--no-run")
-        .arg("--message-format=json-render-diagnostics")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-
-    Ok(TestArtifactGetter {
-        stream: CargoMessage::parse_stream(BufReader::new(child.stdout.unwrap())),
-    })
 }
 
 fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
@@ -269,7 +292,9 @@ fn queue_jobs_and_wait(
     mut cb: impl FnMut(u64),
 ) -> Result<()> {
     let mut total_jobs = 0;
-    for artifact in get_test_artifacts()? {
+    let mut cargo_build = CargoBuild::new()?;
+
+    for artifact in cargo_build.artifact_stream() {
         let artifact = artifact?;
         let binary = artifact.executable.unwrap().to_string();
         let package_name = artifact.target.name;
@@ -292,6 +317,8 @@ fn queue_jobs_and_wait(
             );
         }
     }
+
+    cargo_build.check_status()?;
 
     Ok(())
 }
