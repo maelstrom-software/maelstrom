@@ -576,12 +576,6 @@ mod tests {
         };
     }
 
-    macro_rules! boxed_u8 {
-        ($n:literal) => {
-            Vec::from(&$n[..]).into_boxed_slice()
-        };
-    }
-
     macro_rules! script_test {
         ($test_name:ident, $fixture:expr, $($in_msg:expr => { $($out_msg:expr),* $(,)? });+ $(;)?) => {
             #[test]

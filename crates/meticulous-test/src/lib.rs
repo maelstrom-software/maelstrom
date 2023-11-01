@@ -146,3 +146,10 @@ macro_rules! short_path {
         format!("{}/{:0>16x}.{}", $prefix, $n, $s).into()
     };
 }
+
+#[macro_export]
+macro_rules! boxed_u8 {
+    ($n:literal) => {
+        $n.to_vec().into_boxed_slice()
+    };
+}
