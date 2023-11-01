@@ -1,7 +1,5 @@
 //! Easily start and stop processes.
 
-#![allow(dead_code)]
-
 use crate::config::InlineLimit;
 use anyhow::{Error, Result};
 use meticulous_base::{JobDetails, JobOutputResult, JobStatus};
@@ -27,6 +25,7 @@ use tokio::{
 pub enum StartResult {
     Ok(Pid),
     ExecutionError(Error),
+    #[allow(dead_code)]
     SystemError(Error),
 }
 

@@ -1,5 +1,7 @@
 //! Easily start and stop processes.
 
+#![allow(dead_code)]
+
 use crate::config::InlineLimit;
 use anyhow::Result;
 use meticulous_base::{JobDetails, JobOutputResult, JobResult, JobStatus};

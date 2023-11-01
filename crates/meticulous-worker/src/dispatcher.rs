@@ -1,6 +1,8 @@
 //! Central processing module for the worker. Receive messages from the broker, executors, and
 //! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
+#![allow(dead_code)]
+
 use crate::{
     cache::{Cache, CacheFs, GetArtifact},
     config::Slots,

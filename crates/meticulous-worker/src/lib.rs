@@ -11,13 +11,17 @@ mod fetcher;
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{BrokerAddr, Config, InlineLimit};
-use dispatcher::{Dispatcher, DispatcherDeps, Message};
-use executor::Handle;
+use dispatcher2::{Dispatcher, DispatcherDeps, Message, StartJobResult};
+use executor2::StartResult;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobId, Sha256Digest,
 };
 use meticulous_util::{net, sync};
+use nix::{
+    sys::signal::{self, Signal},
+    unistd::Pid,
+};
 use slog::{debug, error, info, o, Logger};
 use std::{path::PathBuf, process, thread};
 use tokio::{
@@ -59,23 +63,55 @@ impl DispatcherAdapter {
 }
 
 impl DispatcherDeps for DispatcherAdapter {
-    type JobHandle = Handle;
-
     fn start_job(
         &mut self,
-        id: JobId,
+        jid: JobId,
         details: &JobDetails,
         _layers: Vec<PathBuf>,
-    ) -> Self::JobHandle {
+    ) -> StartJobResult {
         let sender = self.dispatcher_sender.clone();
+        let sender2 = sender.clone();
+        let sender3 = sender.clone();
         let log = self
             .log
-            .new(o!("id" => format!("{id:?}"), "details" => format!("{details:?}")));
+            .new(o!("jid" => format!("{jid:?}"), "details" => format!("{details:?}")));
         debug!(log, "job starting");
-        executor::start(details, self.inline_limit, move |result| {
-            debug!(log, "job completed"; "result" => ?result);
-            sender.send(Message::Executor(id, result)).ok();
-        })
+        let log2 = log.clone();
+        let log3 = log.clone();
+        let result = executor2::start(
+            details,
+            self.inline_limit,
+            move |pid, status| {
+                debug!(log, "job completed"; "status" => ?status);
+                sender
+                    .send(Message::PidStatus(
+                        pid,
+                        status.expect("unexpected error getting job status"),
+                    ))
+                    .ok();
+            },
+            move |result| {
+                debug!(log2, "job stdout"; "result" => ?result);
+                sender2
+                    .send(Message::JobStdout(jid, result.map_err(|e| e.to_string())))
+                    .ok();
+            },
+            move |result| {
+                debug!(log3, "job stderr"; "result" => ?result);
+                sender3
+                    .send(Message::JobStderr(jid, result.map_err(|e| e.to_string())))
+                    .ok();
+            },
+        );
+        match result {
+            StartResult::Ok(pid) => StartJobResult::Ok(pid),
+            StartResult::ExecutionError(err) => StartJobResult::ExecutionError(err.to_string()),
+            StartResult::SystemError(err) => StartJobResult::SystemError(err.to_string()),
+        }
+    }
+
+    fn kill_job(&mut self, pid: Pid) {
+        signal::kill(pid, Signal::SIGKILL).expect("unexpected error from kill");
     }
 
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
