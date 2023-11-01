@@ -104,7 +104,7 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 #[derive(Debug)]
 pub enum Message {
     Broker(BrokerToWorker),
-    PidStatus(Pid, StdResult<JobStatus, String>),
+    PidStatus(Pid, JobStatus),
     JobStdout(JobId, StdResult<JobOutputResult, String>),
     JobStderr(JobId, StdResult<JobOutputResult, String>),
     ArtifactFetcher(Sha256Digest, Result<u64>),
@@ -175,7 +175,7 @@ impl AwaitingLayersEntry {
 
 struct ExecutingJob {
     pid: Pid,
-    status: Option<StdResult<JobStatus, String>>,
+    status: Option<JobStatus>,
     stdout: Option<StdResult<JobOutputResult, String>>,
     stderr: Option<StdResult<JobOutputResult, String>>,
     layers: Vec<Sha256Digest>,
@@ -313,15 +313,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let stdout = entry.stdout.unwrap();
             let stderr = entry.stderr.unwrap();
             let result = match (status, stdout, stderr) {
-                (StdResult::Ok(status), StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
+                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
                     JobResult::Ran {
                         status,
                         stdout,
                         stderr,
                     }
                 }
-                (StdResult::Err(e), _, _)
-                | (_, StdResult::Err(e), _)
+                (_, StdResult::Err(e), _)
                 | (_, _, StdResult::Err(e)) => JobResult::SystemError(e),
             };
             self.deps
@@ -333,7 +332,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
-    fn receive_pid_status(&mut self, pid: Pid, status: StdResult<JobStatus, String>) {
+    fn receive_pid_status(&mut self, pid: Pid, status: JobStatus) {
         let target_jid =
             self.executing
                 .iter()
@@ -710,7 +709,7 @@ mod tests {
         Broker(EnqueueJob(jid!(4), details!(4))) => {};
         Broker(EnqueueJob(jid!(5), details!(5))) => {};
         Broker(EnqueueJob(jid!(6), details!(6))) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
@@ -763,7 +762,7 @@ mod tests {
             Kill(pid!(1)),
             StartJob(jid!(2), details!(2, [43]), path_buf_vec!["/c"]),
         };
-        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -795,7 +794,7 @@ mod tests {
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(4), details!(4), vec![]),
         };
@@ -819,7 +818,7 @@ mod tests {
     script_test! {
         receive_pid_status_unknown,
         Fixture::new(1, [], [], [], []),
-        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
     }
 
     script_test! {
@@ -834,7 +833,7 @@ mod tests {
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Exited(0))) => {
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -856,7 +855,7 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
         };
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -892,7 +891,7 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
                 status: JobStatus::Signalled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
@@ -920,7 +919,7 @@ mod tests {
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {};
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
@@ -956,7 +955,7 @@ mod tests {
             truncated: 100,
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
                 status: JobStatus::Signalled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
@@ -987,7 +986,7 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {};
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
                 status: JobStatus::Signalled(9),
@@ -1015,7 +1014,7 @@ mod tests {
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {};
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
@@ -1047,7 +1046,7 @@ mod tests {
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
-        PidStatus(pid!(1), Ok(JobStatus::Signalled(9))) => {};
+        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
