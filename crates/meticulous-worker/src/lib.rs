@@ -3,16 +3,14 @@
 mod cache;
 pub mod config;
 mod dispatcher;
-mod dispatcher2;
 mod executor;
-mod executor2;
 mod fetcher;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{BrokerAddr, Config, InlineLimit};
-use dispatcher2::{Dispatcher, DispatcherDeps, Message, StartJobResult};
-use executor2::StartResult;
+use dispatcher::{Dispatcher, DispatcherDeps, Message, StartJobResult};
+use executor::StartResult;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobId, Sha256Digest,
@@ -78,7 +76,7 @@ impl DispatcherDeps for DispatcherAdapter {
         debug!(log, "job starting");
         let log2 = log.clone();
         let log3 = log.clone();
-        let result = executor2::start(
+        let result = executor::start(
             details,
             self.inline_limit,
             move |pid, status| {
