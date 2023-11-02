@@ -8,6 +8,7 @@ anyhow = { workspace = true }
 bytesize = { workspace = true }
 clap = { workspace = true }
 figment = { workspace = true }
+futures = { workspace = true }
 gethostname = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }
@@ -22,10 +23,13 @@ slog-term = { workspace = true }
 slog = { workspace = true }
 tar = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync"] }
+tuple = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 anyhow = { workspace = true }
 itertools = { workspace = true }
 meticulous-test = { workspace = true }
+serial_test = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }

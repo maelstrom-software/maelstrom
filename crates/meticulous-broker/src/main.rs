@@ -12,7 +12,7 @@ use serde::{
 };
 use slog::{info, o, Drain, Logger};
 use slog_async::Async;
-use slog_term::{CompactFormat, TermDecorator};
+use slog_term::{FullFormat, TermDecorator};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},
     path::PathBuf,
@@ -119,7 +119,7 @@ fn main() -> Result<()> {
         return Ok(());
     }
     let decorator = TermDecorator::new().build();
-    let drain = CompactFormat::new(decorator).build().fuse();
+    let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
     let log = Logger::root(drain, o!());
     Runtime::new()
