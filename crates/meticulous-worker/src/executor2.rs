@@ -37,7 +37,7 @@ pub enum StartResult {
 pub fn start(
     details: &JobDetails,
     inline_limit: InlineLimit,
-    status_done: impl FnOnce(Result<JobStatus>) + Send + 'static,
+    status_done: impl FnOnce(Pid, Result<JobStatus>) + Send + 'static,
     stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
 ) -> StartResult {
@@ -115,8 +115,12 @@ async fn waiter(mut child: Child) -> Result<JobStatus> {
     })
 }
 
-async fn waiter_task_main(child: Child, done: impl FnOnce(Result<JobStatus>) + Send + 'static) {
-    done(waiter(child).await);
+async fn waiter_task_main(
+    child: Child,
+    done: impl FnOnce(Pid, Result<JobStatus>) + Send + 'static,
+) {
+    let pid = Pid::from_raw(child.id().unwrap() as i32);
+    done(pid, waiter(child).await);
 }
 
 /*  _            _
@@ -160,7 +164,7 @@ mod tests {
             start(
                 &details,
                 InlineLimit::from(inline_limit),
-                |status| status_tx.send(status.unwrap()).unwrap(),
+                |_, status| status_tx.send(status.unwrap()).unwrap(),
                 |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                 |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
             ),
@@ -302,7 +306,7 @@ mod tests {
             start(
                 &details,
                 0.into(),
-                |_| unreachable!(),
+                |_, _| unreachable!(),
                 |_| unreachable!(),
                 |_| unreachable!()
             ),

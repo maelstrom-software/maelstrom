@@ -313,15 +313,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let stdout = entry.stdout.unwrap();
             let stderr = entry.stderr.unwrap();
             let result = match (status, stdout, stderr) {
-                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
-                    JobResult::Ran {
-                        status,
-                        stdout,
-                        stderr,
-                    }
-                }
-                (_, StdResult::Err(e), _)
-                | (_, _, StdResult::Err(e)) => JobResult::SystemError(e),
+                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => JobResult::Ran {
+                    status,
+                    stdout,
+                    stderr,
+                },
+                (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => JobResult::SystemError(e),
             };
             self.deps
                 .send_message_to_broker(WorkerToBroker(jid, result));
