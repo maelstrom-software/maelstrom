@@ -350,6 +350,19 @@ mod tests {
         };
     }
 
+    macro_rules! python {
+        ($($tokens:expr),*) => {
+            JobDetails {
+                program: "/usr/bin/python3".to_string(),
+                arguments: vec![
+                    "-c".to_string(),
+                    format!($($tokens),*),
+                ],
+                layers: vec![],
+            }
+        };
+    }
+
     struct ReaperAdapter {
         pid: Pid,
         result: Option<JobStatus>,
@@ -376,7 +389,6 @@ mod tests {
                 self.result = Some(status);
                 ReaperInstruction::Stop
             } else {
-                eprintln!("got result for pid {pid}, not {}", self.pid);
                 ReaperInstruction::Continue
             }
         }
@@ -445,14 +457,20 @@ mod tests {
     // $$ returns the pid of outer-most bash. This doesn't do what we expect it to do when using
     // our executor. We should probably rewrite these tests to run python or something, and take
     // input from stdin.
-    #[ignore]
     #[tokio::test]
     #[serial]
-    async fn signalled_15() {
+    async fn signalled_11() {
         start_and_expect(
-            bash!("echo a && echo b>&2 && kill $$"),
+            python!(concat!(
+                "import os;",
+                "import sys;",
+                "print('a');",
+                "sys.stdout.flush();",
+                "print('b', file=sys.stderr);",
+                "os.abort()",
+            )),
             2,
-            JobStatus::Signalled(15),
+            JobStatus::Signalled(11),
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
             JobOutputResult::Inline(boxed_u8!(b"b\n")),
         )
