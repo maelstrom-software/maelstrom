@@ -7,11 +7,11 @@ use meticulous_base::{JobDetails, JobOutputResult};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
-    unistd::{self, Pid},
+    unistd::{self, Gid, Pid, Uid},
 };
 use std::{
     ffi::CString,
-    fs::File,
+    fs::{self, File},
     io::Read as _,
     io::Write as _,
     iter, mem,
@@ -35,6 +35,19 @@ use tuple::Map as _;
  *  FIGLET: public
  */
 
+pub struct Executor {
+    uid: Uid,
+    gid: Gid,
+}
+
+impl Default for Executor {
+    fn default() -> Self {
+        let uid = unistd::getuid();
+        let gid = unistd::getgid();
+        Executor { uid, gid }
+    }
+}
+
 /// Return value from [`start`]. See [`meticulous_base::JobResult`] for an explanation of the
 /// [`StartResult::ExecutionError`] and [`StartResult::SystemError`] variants.
 #[derive(Debug)]
@@ -44,33 +57,36 @@ pub enum StartResult {
     SystemError(Error),
 }
 
-/// Start a process (i.e. job).
-///
-/// Two callbacks are provided: one for stdout and one for stderr. These will be called on a
-/// separate task (they should not block) when the job has closed its stdout/stderr. This will
-/// likely happen when the job completes.
-///
-/// No callback is called when the process actually terminates. For that, the caller should use
-/// waitid(2) or something similar to wait on the pid returned from this function. In production,
-/// that role will be filled by [`crate::reaper::main`].
-///
-/// This function is designed to be callable in an async context, even though it temporarily blocks
-/// the calling thread while the child is starting up.
-///
-/// If this function returns [`StartResult::Ok`], then the child process obviously will be started
-/// and the caller will need to waitid(2) on the child eventually. However, if this function
-/// returns an error result, it's still possible that a child was spawned (and has now terminated).
-/// It is assumed that the caller will be reaping all children, not just those positively
-/// identified by this function. If that assumption proves invalid, the return values of this
-/// function should be adjusted to return optional pids in error cases.
-#[must_use]
-pub fn start(
-    details: &JobDetails,
-    inline_limit: InlineLimit,
-    stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-) -> StartResult {
-    start_inner(details, inline_limit, stdout_done, stderr_done)
+impl Executor {
+    /// Start a process (i.e. job).
+    ///
+    /// Two callbacks are provided: one for stdout and one for stderr. These will be called on a
+    /// separate task (they should not block) when the job has closed its stdout/stderr. This will
+    /// likely happen when the job completes.
+    ///
+    /// No callback is called when the process actually terminates. For that, the caller should use
+    /// waitid(2) or something similar to wait on the pid returned from this function. In
+    /// production, that role will be filled by [`crate::reaper::main`].
+    ///
+    /// This function is designed to be callable in an async context, even though it temporarily
+    /// blocks the calling thread while the child is starting up.
+    ///
+    /// If this function returns [`StartResult::Ok`], then the child process obviously will be
+    /// started and the caller will need to waitid(2) on the child eventually. However, if this
+    /// function returns an error result, it's still possible that a child was spawned (and has now
+    /// terminated). It is assumed that the caller will be reaping all children, not just those
+    /// positively identified by this function. If that assumption proves invalid, the return
+    /// values of this function should be adjusted to return optional pids in error cases.
+    #[must_use]
+    pub fn start(
+        &self,
+        details: &JobDetails,
+        inline_limit: InlineLimit,
+        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+    ) -> StartResult {
+        self.start_inner(details, inline_limit, stdout_done, stderr_done)
+    }
 }
 
 /*             _            _
@@ -136,186 +152,190 @@ async fn output_reader_task_main(
     done(output_reader(inline_limit, stream).await);
 }
 
-/// The guts of the child code. This function can return a [`Result`].
-fn start_and_exec_in_child_inner(
-    details: &JobDetails,
-    stdout_write_fd: RawFd,
-    stderr_write_fd: RawFd,
-    _exec_result_write_fd: RawFd,
-) -> Result<()> {
-    unsafe { nc::setsid() }.map_err(Errno::from_i32)?;
-    unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
-    unsafe { nc::dup2(stderr_write_fd, 2) }.map_err(Errno::from_i32)?;
-    unsafe { nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC) }.map_err(Errno::from_i32)?;
-    let program_cstr = CString::new(details.program.as_str())?;
-    let program_ptr = program_cstr.as_bytes_with_nul().as_ptr();
-    let arguments = details
-        .arguments
-        .iter()
-        .map(String::as_str)
-        .map(CString::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    let argument_ptrs = iter::once(program_ptr)
-        .chain(
-            arguments
-                .iter()
-                .map(|cstr| cstr.as_bytes_with_nul().as_ptr()),
-        )
-        .chain(iter::once(ptr::null()))
-        .collect::<Vec<_>>();
-    let env: [*const u8; 1] = [ptr::null()];
-    match unsafe {
-        nc::syscalls::syscall3(
-            nc::SYS_EXECVE,
-            program_ptr as usize,
-            argument_ptrs.as_ptr() as usize,
-            env.as_ptr() as usize,
-        )
-    } {
-        Err(errno) => Err(Errno::from_i32(errno).into()),
-        Ok(_) => unreachable!(),
-    }
-}
-
-/// Try to exec the job and write the error message to the pipe on failure.
-fn start_and_exec_in_child(
-    details: &JobDetails,
-    stdout_write_fd: RawFd,
-    stderr_write_fd: RawFd,
-    exec_result_write_fd: RawFd,
-) -> ! {
-    // TODO: https://github.com/meticulous-software/meticulous/issues/47
-    //
-    // We assume any error we encounter in the child is an execution error. While highly unlikely,
-    // we could theoretically encounter a system error.
-    let Err(err) = start_and_exec_in_child_inner(
-        details,
-        stdout_write_fd,
-        stderr_write_fd,
-        exec_result_write_fd,
-    ) else {
-        unreachable!();
-    };
-    // TODO: https://github.com/meticulous-software/meticulous/issues/46
-    //
-    // This is technically broken since we could fill up the pipe and block. The parent won't read
-    // from the pipe because we used the CLONE_VFORK flag.
-    let _ = unsafe { File::from_raw_fd(exec_result_write_fd) }.write_fmt(format_args!("{}", err));
-    std::process::exit(1);
-}
-
-#[must_use]
-fn start_inner(
-    details: &JobDetails,
-    inline_limit: InlineLimit,
-    stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-) -> StartResult {
-    macro_rules! try_system_error {
-        ($e:expr) => {
-            match $e {
-                Ok(val) => val,
-                Err(err) => return StartResult::SystemError(err.into()),
-            }
-        };
-    }
-
-    // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
-    // error that occurs in the child before it execs. It's easiest to create the pipes in the
-    // parent before cloning and then closing the unnecessary ends in the parent and child.
-    let (stdout_read_fd, stdout_write_fd) =
-        try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-    let (stderr_read_fd, stderr_write_fd) =
-        try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-    let (exec_result_read_fd, exec_result_write_fd) =
-        try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-
-    // Do the clone.
-    let mut clone_args = nc::clone_args_t {
-        flags: nc::CLONE_NEWCGROUP as u64
-            | nc::CLONE_NEWIPC as u64
-            | nc::CLONE_NEWNET as u64
-            | nc::CLONE_NEWNS as u64
-            | nc::CLONE_NEWPID as u64
-            | nc::CLONE_NEWUSER as u64
-            | nc::CLONE_VFORK as u64,
-        exit_signal: nc::SIGCHLD as u64,
-        ..Default::default()
-    };
-    let child_pid = match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) }
-    {
-        Ok(val) => val,
-        Err(err) => {
-            return StartResult::SystemError(Errno::from_i32(err).into());
+impl Executor {
+    /// The guts of the child code. This function can return a [`Result`].
+    fn start_and_exec_in_child_inner(
+        &self,
+        details: &JobDetails,
+        stdout_write_fd: RawFd,
+        stderr_write_fd: RawFd,
+        _exec_result_write_fd: RawFd,
+    ) -> Result<()> {
+        fs::write("/proc/self/setgroups", "deny\n")?;
+        fs::write("/proc/self/uid_map", format!("0 {} 1\n", self.uid))?;
+        fs::write("/proc/self/gid_map", format!("0 {} 1\n", self.gid))?;
+        unsafe { nc::setsid() }.map_err(Errno::from_i32)?;
+        unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
+        unsafe { nc::dup2(stderr_write_fd, 2) }.map_err(Errno::from_i32)?;
+        unsafe { nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC) }.map_err(Errno::from_i32)?;
+        let program_cstr = CString::new(details.program.as_str())?;
+        let program_ptr = program_cstr.as_bytes_with_nul().as_ptr();
+        let arguments = details
+            .arguments
+            .iter()
+            .map(String::as_str)
+            .map(CString::new)
+            .collect::<Result<Vec<_>, _>>()?;
+        let argument_ptrs = iter::once(program_ptr)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|cstr| cstr.as_bytes_with_nul().as_ptr()),
+            )
+            .chain(iter::once(ptr::null()))
+            .collect::<Vec<_>>();
+        let env: [*const u8; 1] = [ptr::null()];
+        match unsafe {
+            nc::syscalls::syscall3(
+                nc::SYS_EXECVE,
+                program_ptr as usize,
+                argument_ptrs.as_ptr() as usize,
+                env.as_ptr() as usize,
+            )
+        } {
+            Err(errno) => Err(Errno::from_i32(errno).into()),
+            Ok(_) => unreachable!(),
         }
-    };
-    if child_pid == 0 {
-        // This is the child process.
+    }
+
+    /// Try to exec the job and write the error message to the pipe on failure.
+    fn start_and_exec_in_child(
+        &self,
+        details: &JobDetails,
+        stdout_write_fd: RawFd,
+        stderr_write_fd: RawFd,
+        exec_result_write_fd: RawFd,
+    ) -> ! {
+        // TODO: https://github.com/meticulous-software/meticulous/issues/47
         //
-        // N.B. We have to be cognizant of the fact that anything multi-threaded is likely to be
-        // broken in here, and we will likely deadlock if we do anything that attempts to acquire a
-        // lock. So, no use of println!, eprintln!, tokio, etc.
-        //
-        // We forget all of the fds instead of closing the ones we don't need. This saves us some
-        // syscalls. We're going to set all fds other than stdin, stdout, and stderr as
-        // exec-on-close. Then, we're going to exec and let the kernel handle the closing for us.
-        mem::forget(stdout_read_fd);
-        mem::forget(stderr_read_fd);
-        mem::forget(exec_result_read_fd);
-        start_and_exec_in_child(
+        // We assume any error we encounter in the child is an execution error. While highly unlikely,
+        // we could theoretically encounter a system error.
+        let Err(err) = self.start_and_exec_in_child_inner(
             details,
-            stdout_write_fd.into_raw_fd(),
-            stderr_write_fd.into_raw_fd(),
-            exec_result_write_fd.into_raw_fd(),
-        );
+            stdout_write_fd,
+            stderr_write_fd,
+            exec_result_write_fd,
+        ) else {
+            unreachable!();
+        };
+        let _ =
+            unsafe { File::from_raw_fd(exec_result_write_fd) }.write_fmt(format_args!("{}", err));
+        std::process::exit(1);
     }
 
-    // At this point, it's still okay to return early in the parent. The child will continue to
-    // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
-    // Otherwise, it will continue until it's done, and then we'll reap the zombie. Since we won't
-    // have any jid->pid association, we'll just ignore the result.
+    #[must_use]
+    fn start_inner(
+        &self,
+        details: &JobDetails,
+        inline_limit: InlineLimit,
+        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+    ) -> StartResult {
+        macro_rules! try_system_error {
+            ($e:expr) => {
+                match $e {
+                    Ok(val) => val,
+                    Err(err) => return StartResult::SystemError(err.into()),
+                }
+            };
+        }
 
-    // Drop the write sides of the pipes in the parent. It's important that we drop
-    // exec_result_write_fd before reading from that pipe next.
-    drop(stdout_write_fd);
-    drop(stderr_write_fd);
-    drop(exec_result_write_fd);
+        // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
+        // error that occurs in the child before it execs. It's easiest to create the pipes in the
+        // parent before cloning and then closing the unnecessary ends in the parent and child.
+        let (stdout_read_fd, stdout_write_fd) =
+            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        let (stderr_read_fd, stderr_write_fd) =
+            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        let (exec_result_read_fd, exec_result_write_fd) =
+            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
-    // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
-    // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
-    // we'll read an immediate EOF if the exec is successful.
-    let mut exec_result_buf = vec![];
-    try_system_error!(File::from(exec_result_read_fd).read_to_end(&mut exec_result_buf));
-    if !exec_result_buf.is_empty() {
-        return StartResult::ExecutionError(anyhow!("exec-ing job's process: {}", unsafe {
-            String::from_utf8_unchecked(exec_result_buf)
-        }));
+        // Do the clone.
+        let mut clone_args = nc::clone_args_t {
+            flags: nc::CLONE_NEWCGROUP as u64
+                | nc::CLONE_NEWIPC as u64
+                | nc::CLONE_NEWNET as u64
+                | nc::CLONE_NEWNS as u64
+                | nc::CLONE_NEWPID as u64
+                | nc::CLONE_NEWUSER as u64,
+            exit_signal: nc::SIGCHLD as u64,
+            ..Default::default()
+        };
+        let child_pid =
+            match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) } {
+                Ok(val) => val,
+                Err(err) => {
+                    return StartResult::SystemError(Errno::from_i32(err).into());
+                }
+            };
+        if child_pid == 0 {
+            // This is the child process.
+            //
+            // N.B. We have to be cognizant of the fact that anything multi-threaded is likely to be
+            // broken in here, and we will likely deadlock if we do anything that attempts to acquire a
+            // lock. So, no use of println!, eprintln!, tokio, etc.
+            //
+            // We forget all of the fds instead of closing the ones we don't need. This saves us some
+            // syscalls. We're going to set all fds other than stdin, stdout, and stderr as
+            // exec-on-close. Then, we're going to exec and let the kernel handle the closing for us.
+            mem::forget(stdout_read_fd);
+            mem::forget(stderr_read_fd);
+            mem::forget(exec_result_read_fd);
+            self.start_and_exec_in_child(
+                details,
+                stdout_write_fd.into_raw_fd(),
+                stderr_write_fd.into_raw_fd(),
+                exec_result_write_fd.into_raw_fd(),
+            );
+        }
+
+        // At this point, it's still okay to return early in the parent. The child will continue to
+        // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
+        // Otherwise, it will continue until it's done, and then we'll reap the zombie. Since we won't
+        // have any jid->pid association, we'll just ignore the result.
+
+        // Drop the write sides of the pipes in the parent. It's important that we drop
+        // exec_result_write_fd before reading from that pipe next.
+        drop(stdout_write_fd);
+        drop(stderr_write_fd);
+        drop(exec_result_write_fd);
+
+        // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
+        // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
+        // we'll read an immediate EOF if the exec is successful.
+        let mut exec_result_buf = vec![];
+        try_system_error!(File::from(exec_result_read_fd).read_to_end(&mut exec_result_buf));
+        if !exec_result_buf.is_empty() {
+            return StartResult::ExecutionError(anyhow!("exec-ing job's process: {}", unsafe {
+                String::from_utf8_unchecked(exec_result_buf)
+            }));
+        }
+
+        // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
+        // Tokio.
+        try_system_error!(fcntl::fcntl(
+            stdout_read_fd.as_raw_fd(),
+            FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
+        ));
+        try_system_error!(fcntl::fcntl(
+            stderr_read_fd.as_raw_fd(),
+            FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
+        ));
+
+        // Spawn reader tasks to consume stdout and stderr.
+        task::spawn(output_reader_task_main(
+            inline_limit,
+            AsyncFile(try_system_error!(AsyncFd::new(File::from(stdout_read_fd)))),
+            stdout_done,
+        ));
+        task::spawn(output_reader_task_main(
+            inline_limit,
+            AsyncFile(try_system_error!(AsyncFd::new(File::from(stderr_read_fd)))),
+            stderr_done,
+        ));
+
+        StartResult::Ok(Pid::from_raw(child_pid))
     }
-
-    // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
-    // Tokio.
-    try_system_error!(fcntl::fcntl(
-        stdout_read_fd.as_raw_fd(),
-        FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
-    ));
-    try_system_error!(fcntl::fcntl(
-        stderr_read_fd.as_raw_fd(),
-        FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
-    ));
-
-    // Spawn reader tasks to consume stdout and stderr.
-    task::spawn(output_reader_task_main(
-        inline_limit,
-        AsyncFile(try_system_error!(AsyncFd::new(File::from(stdout_read_fd)))),
-        stdout_done,
-    ));
-    task::spawn(output_reader_task_main(
-        inline_limit,
-        AsyncFile(try_system_error!(AsyncFd::new(File::from(stderr_read_fd)))),
-        stderr_done,
-    ));
-
-    StartResult::Ok(Pid::from_raw(child_pid))
 }
 
 /*  _            _
@@ -404,7 +424,7 @@ mod tests {
         let dummy_child_pid = reaper::clone_dummy_child().unwrap();
         let (stdout_tx, stdout_rx) = oneshot::channel();
         let (stderr_tx, stderr_rx) = oneshot::channel();
-        let start_result = start(
+        let start_result = Executor::default().start(
             &details,
             InlineLimit::from(inline_limit),
             |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
@@ -572,7 +592,7 @@ mod tests {
             layers: vec![],
         };
         assert_matches!(
-            start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
+            Executor::default().start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
             StartResult::ExecutionError(_)
         );
     }

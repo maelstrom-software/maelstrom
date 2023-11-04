@@ -158,8 +158,8 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
             // Map uid and guid.
             fs::write("/proc/self/setgroups", "deny\n")?;
-            fs::write("/proc/self/uid_map", format!("0 {parent_uid} 1"))?;
-            fs::write("/proc/self/gid_map", format!("0 {parent_gid} 1"))?;
+            fs::write("/proc/self/uid_map", format!("0 {parent_uid} 1\n"))?;
+            fs::write("/proc/self/gid_map", format!("0 {parent_gid} 1\n"))?;
 
             // Set up stdin to be a file that will always return EOF. We could do something similar
             // by opening /dev/null but then we would depend on /dev being mounted. The few

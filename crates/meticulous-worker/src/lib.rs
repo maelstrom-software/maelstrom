@@ -11,7 +11,7 @@ use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{BrokerAddr, Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message, StartJobResult};
-use executor::StartResult;
+use executor::{Executor, StartResult};
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobId, JobStatus, Sha256Digest,
@@ -43,6 +43,7 @@ struct DispatcherAdapter {
     broker_addr: BrokerAddr,
     inline_limit: InlineLimit,
     log: Logger,
+    executor: Executor,
 }
 
 impl DispatcherAdapter {
@@ -59,6 +60,7 @@ impl DispatcherAdapter {
             broker_addr,
             inline_limit,
             log,
+            executor: Executor::default(),
         }
     }
 }
@@ -77,7 +79,7 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "details" => format!("{details:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let result = executor::start(
+        let result = self.executor.start(
             details,
             self.inline_limit,
             move |result| {
