@@ -531,7 +531,7 @@ where
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
-                    arguments: vec!["--nocapture".into(), case.clone()],
+                    arguments: vec!["--exact".into(), "--nocapture".into(), case.clone()],
                     layers: vec![],
                 },
                 Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
