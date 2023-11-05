@@ -501,7 +501,6 @@ impl ProgressIndicator for QuietNoBar {
     ) -> Result<()> {
         let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
-        drop(self);
         println!("all jobs completed");
         res
     }
@@ -540,7 +539,6 @@ impl ProgressIndicator for NoBar {
     ) -> Result<()> {
         let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
-        drop(self);
         println!("all jobs completed");
         res
     }
