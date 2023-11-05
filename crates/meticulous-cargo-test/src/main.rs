@@ -70,10 +70,15 @@ struct CargoBuild {
 
 impl CargoBuild {
     fn new() -> Result<Self> {
+        let color = std::io::stderr().is_terminal();
         let child = Command::new("cargo")
             .arg("test")
             .arg("--no-run")
             .arg("--message-format=json-render-diagnostics")
+            .arg(&format!(
+                "--color={}",
+                if color { "always" } else { "never" }
+            ))
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
