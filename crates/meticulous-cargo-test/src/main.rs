@@ -171,8 +171,57 @@ trait ProgressIndicator {
     ) -> Result<()>;
 }
 
+#[derive(Default)]
+struct JobStatusTracker {
+    statuses: Mutex<Vec<(String, ExitCode)>>,
+    exit_code: ExitCodeAccumulator,
+}
+
+impl JobStatusTracker {
+    fn job_exited(&self, case: String, exit_code: ExitCode) {
+        let mut statuses = self.statuses.lock().unwrap();
+        statuses.push((case, exit_code));
+        self.exit_code.add(exit_code);
+    }
+
+    fn print_summary(&self, width: Option<usize>) {
+        println!();
+        let width = width.unwrap_or(80);
+        let heading = " Test Summary ";
+        let equal_width = (width - heading.width()) / 2;
+        println!(
+            "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
+            empty = ""
+        );
+
+        let success = "Successful Tests";
+        let failure = "Failed Tests";
+        let column1_width = std::cmp::max(success.width(), failure.width());
+        let max_digits = 9;
+        let statuses = self.statuses.lock().unwrap();
+        let failed = statuses
+            .iter()
+            .filter(|(_, exit_code)| exit_code != &ExitCode::SUCCESS);
+        let num_failed = failed.clone().count();
+        let num_succeeded = statuses.len() - num_failed;
+
+        println!(
+            "{:<column1_width$}: {num_succeeded:>max_digits$}",
+            success.green(),
+        );
+        println!(
+            "{:<column1_width$}: {num_failed:>max_digits$}",
+            failure.red(),
+        );
+        let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
+        for (failed, _) in failed {
+            println!("    {failed:<failed_width$}: {}", "failure".red());
+        }
+    }
+}
+
 struct JobStatusVisitor<ProgressIndicatorT> {
-    accum: Arc<ExitCodeAccumulator>,
+    tracker: Arc<JobStatusTracker>,
     case: String,
     width: Option<usize>,
     ind: ProgressIndicatorT,
@@ -180,13 +229,13 @@ struct JobStatusVisitor<ProgressIndicatorT> {
 
 impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     fn new(
-        accum: Arc<ExitCodeAccumulator>,
+        tracker: Arc<JobStatusTracker>,
         case: String,
         width: Option<usize>,
         ind: ProgressIndicatorT,
     ) -> Self {
         Self {
-            accum,
+            tracker,
             case,
             width,
             ind,
@@ -219,24 +268,28 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                         } else {
                             "FAIL".red()
                         };
-                        self.accum.add(ExitCode::from(code));
+                        self.tracker
+                            .job_exited(self.case.clone(), ExitCode::from(code));
                     }
                     JobStatus::Signalled(signo) => {
                         result_str = "FAIL".red();
                         result_details = Some(format!("killed by signal {signo}"));
-                        self.accum.add(ExitCode::FAILURE);
+                        self.tracker
+                            .job_exited(self.case.clone(), ExitCode::FAILURE);
                     }
                 };
             }
             JobResult::ExecutionError(err) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
-                self.accum.add(ExitCode::FAILURE);
+                self.tracker
+                    .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
             JobResult::SystemError(err) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("system error: {err}"));
-                self.accum.add(ExitCode::FAILURE);
+                self.tracker
+                    .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
         }
         match self.width {
@@ -507,7 +560,7 @@ impl ProgressIndicatorScope for NoBar {
 
 fn queue_jobs_and_wait<ProgressIndicatorT>(
     client: &Mutex<Client>,
-    accum: Arc<ExitCodeAccumulator>,
+    tracker: Arc<JobStatusTracker>,
     width: Option<usize>,
     ind: ProgressIndicatorT,
     mut cb: impl FnMut(u64),
@@ -527,7 +580,7 @@ where
             cb(total_jobs);
 
             let case_str = format!("{package_name} {case}");
-            let visitor = JobStatusVisitor::new(accum.clone(), case_str, width, ind.clone());
+            let visitor = JobStatusVisitor::new(tracker.clone(), case_str, width, ind.clone());
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
@@ -548,20 +601,22 @@ fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
     prog: ProgressIndicatorT,
     client: Mutex<Client>,
 ) -> Result<ExitCode> {
-    let accum = Arc::new(ExitCodeAccumulator::default());
+    let tracker = Arc::new(JobStatusTracker::default());
     let width = term_size::dimensions().map(|(w, _)| w);
 
     prog.run(client, |client, bar_scope| {
         queue_jobs_and_wait(
             client,
-            accum.clone(),
+            tracker.clone(),
             width,
             bar_scope.clone(),
             |num_jobs| bar_scope.update_length(num_jobs),
         )
     })?;
+    drop(prog);
 
-    Ok(accum.get())
+    tracker.print_summary(width);
+    Ok(tracker.exit_code.get())
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
