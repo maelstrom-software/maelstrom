@@ -129,30 +129,45 @@ fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-struct JobStatusVisitor {
+trait ProgressIndicator {
+    fn println(&self, msg: String);
+    fn job_finished(&self);
+}
+
+impl ProgressIndicator for ProgressBar {
+    fn println(&self, msg: String) {
+        ProgressBar::println(self, msg)
+    }
+
+    fn job_finished(&self) {
+        self.inc(1)
+    }
+}
+
+struct JobStatusVisitor<ProgressIndicatorT> {
     accum: Arc<ExitCodeAccumulator>,
     case: String,
     width: Option<usize>,
-    bar: ProgressBar,
+    ind: ProgressIndicatorT,
 }
 
-impl JobStatusVisitor {
+impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     fn new(
         accum: Arc<ExitCodeAccumulator>,
         case: String,
         width: Option<usize>,
-        bar: ProgressBar,
+        ind: ProgressIndicatorT,
     ) -> Self {
         Self {
             accum,
             case,
             width,
-            bar,
+            ind,
         }
     }
 }
 
-impl JobStatusVisitor {
+impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
     fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
@@ -202,7 +217,7 @@ impl JobStatusVisitor {
                 if case_width + result_width < width {
                     let dots_width = width - result_width - case_width;
                     let case = self.case.bold();
-                    self.bar.println(format!(
+                    self.ind.println(format!(
                         "{case}{empty:.<dots_width$}{result_str}",
                         empty = ""
                     ));
@@ -211,21 +226,21 @@ impl JobStatusVisitor {
                         self.case.unicode_truncate_start(width - 2 - result_width);
                     let case = case.bold();
                     let dots_width = width - result_width - case_width - 1;
-                    self.bar.println(format!(
+                    self.ind.println(format!(
                         "<{case}{empty:.<dots_width$}{result_str}",
                         empty = ""
                     ));
                 }
             }
             _ => {
-                self.bar
+                self.ind
                     .println(format!("{case} {result_str}", case = self.case));
             }
         }
         if let Some(details_str) = result_details {
-            self.bar.println(details_str);
+            self.ind.println(details_str);
         }
-        self.bar.inc(1);
+        self.ind.job_finished();
         Ok(())
     }
 }
@@ -304,13 +319,16 @@ impl ProgressBars {
     }
 }
 
-fn queue_jobs_and_wait(
+fn queue_jobs_and_wait<ProgressIndicatorT>(
     client: &Mutex<Client>,
     accum: Arc<ExitCodeAccumulator>,
     width: Option<usize>,
-    bar: ProgressBar,
+    ind: ProgressIndicatorT,
     mut cb: impl FnMut(u64),
-) -> Result<()> {
+) -> Result<()>
+where
+    ProgressIndicatorT: ProgressIndicator + Clone + Send + Sync + 'static,
+{
     let mut total_jobs = 0;
     let mut cargo_build = CargoBuild::new()?;
 
@@ -323,7 +341,7 @@ fn queue_jobs_and_wait(
             cb(total_jobs);
 
             let case_str = format!("{package_name} {case}");
-            let visitor = JobStatusVisitor::new(accum.clone(), case_str, width, bar.clone());
+            let visitor = JobStatusVisitor::new(accum.clone(), case_str, width, ind.clone());
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
