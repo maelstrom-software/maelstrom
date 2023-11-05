@@ -42,20 +42,25 @@ struct Cli {
 }
 
 impl Cli {
-    fn broker(&self) -> SocketAddr {
-        match &self.subcommand {
-            Subcommand::Metest { broker } => *broker,
+    fn subcommand(self) -> MetestCli {
+        match self.subcommand {
+            Subcommand::Metest(cmd) => cmd,
         }
     }
 }
 
+#[derive(Debug, clap::Args)]
+struct MetestCli {
+    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
+    #[arg(value_parser = parse_socket_addr)]
+    broker: SocketAddr,
+    #[arg(short, long)]
+    quiet: bool,
+}
+
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
-    Metest {
-        /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
-        #[arg(value_parser = parse_socket_addr)]
-        broker: SocketAddr,
-    },
+    Metest(MetestCli),
 }
 
 struct CargoBuild {
@@ -147,8 +152,8 @@ trait ProgressIndicator {
     /// progress in the background.
     fn run(
         &self,
-        client: &Mutex<Client>,
-        body: impl FnOnce(&Self::Scope) -> Result<()>,
+        client: Mutex<Client>,
+        body: impl FnOnce(&Mutex<Client>, &Self::Scope) -> Result<()>,
     ) -> Result<()>;
 }
 
@@ -256,13 +261,23 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
 //                      waiting for artifacts, pending, running, complete
 const COLORS: [&str; 4] = ["red", "yellow", "blue", "green"];
 
-struct ProgressBars {
+fn make_progress_bar(color: &str, message: impl Into<String>, msg_len: usize) -> ProgressBar {
+    ProgressBar::new(0).with_message(message.into()).with_style(
+        ProgressStyle::with_template(&format!(
+            "{{wide_bar:.{color}}} {{pos}}/{{len}} {{msg:{msg_len}}}"
+        ))
+        .unwrap()
+        .progress_chars("##-"),
+    )
+}
+
+struct MultipleProgressBars {
     scope: ProgressBarsScope,
     done_queuing_jobs: AtomicBool,
     build_spinner: ProgressBar,
 }
 
-impl ProgressBars {
+impl MultipleProgressBars {
     fn new() -> Self {
         let multi_bar = MultiProgress::new();
         let build_spinner =
@@ -271,17 +286,7 @@ impl ProgressBars {
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
-            let bar = multi_bar.add(
-                ProgressBar::new(0)
-                    .with_message(state.to_string())
-                    .with_style(
-                        ProgressStyle::with_template(&format!(
-                            "{{wide_bar:.{color}}} {{pos}}/{{len}} {{msg:21}}"
-                        ))
-                        .unwrap()
-                        .progress_chars("##-"),
-                    ),
-            );
+            let bar = multi_bar.add(make_progress_bar(color, state.to_string(), 21));
             bars.insert(state, bar);
         }
         multi_bar.set_draw_target(ProgressDrawTarget::stdout());
@@ -342,24 +347,69 @@ impl ProgressIndicatorScope for ProgressBarsScope {
     }
 }
 
-impl ProgressIndicator for ProgressBars {
+impl ProgressIndicator for MultipleProgressBars {
     type Scope = ProgressBarsScope;
 
     fn run(
         &self,
-        client: &Mutex<Client>,
-        body: impl FnOnce(&ProgressBarsScope) -> Result<()>,
+        client: Mutex<Client>,
+        body: impl FnOnce(&Mutex<Client>, &ProgressBarsScope) -> Result<()>,
     ) -> Result<()> {
         std::thread::scope(|scope| -> Result<()> {
             let update_thread = scope.spawn(|| self.update_progress(&client));
-            let res = body(&self.scope);
+            let res = body(&client, &self.scope);
             self.done_queuing_jobs();
 
             res?;
             update_thread.join().unwrap()?;
             Ok(())
         })?;
+
+        // not necessary, but might as well
+        client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct QuietProgressBar {
+    bar: ProgressBar,
+}
+
+impl QuietProgressBar {
+    fn new() -> Self {
+        Self {
+            bar: make_progress_bar("white", "jobs", 4),
+        }
+    }
+}
+
+impl ProgressIndicator for QuietProgressBar {
+    type Scope = Self;
+
+    fn run(
+        &self,
+        client: Mutex<Client>,
+        body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
+    ) -> Result<()> {
+        let res = body(&client, self);
+        client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+        res
+    }
+}
+
+impl ProgressIndicatorScope for QuietProgressBar {
+    fn println(&self, _msg: String) {
+        // quiet mode doesn't print anything
+    }
+
+    fn job_finished(&self) {
+        self.bar.inc(1);
+    }
+
+    fn update_length(&self, new_length: u64) {
+        self.bar.set_length(new_length);
     }
 }
 
@@ -402,18 +452,16 @@ where
     Ok(())
 }
 
-/// The main function for the client. This should be called on a task of its own. It will return
-/// when a signal is received or when all work has been processed by the broker.
-pub fn main() -> Result<ExitCode> {
-    let cli_options = Cli::parse();
+fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
+    prog: ProgressIndicatorT,
+    client: Mutex<Client>,
+) -> Result<ExitCode> {
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let client = Mutex::new(Client::new(cli_options.broker())?);
     let width = term_size::dimensions().map(|(w, _)| w);
 
-    let bars = ProgressBars::new();
-    bars.run(&client, |bar_scope| {
+    prog.run(client, |client, bar_scope| {
         queue_jobs_and_wait(
-            &client,
+            client,
             accum.clone(),
             width,
             bar_scope.clone(),
@@ -422,6 +470,18 @@ pub fn main() -> Result<ExitCode> {
     })?;
 
     Ok(accum.get())
+}
+
+/// The main function for the client. This should be called on a task of its own. It will return
+/// when a signal is received or when all work has been processed by the broker.
+pub fn main() -> Result<ExitCode> {
+    let cli_options = Cli::parse().subcommand();
+    let client = Mutex::new(Client::new(cli_options.broker)?);
+
+    match cli_options.quiet {
+        true => Ok(main_with_progress(QuietProgressBar::new(), client)?),
+        false => Ok(main_with_progress(MultipleProgressBars::new(), client)?),
+    }
 }
 
 #[test]
