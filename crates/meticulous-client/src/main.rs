@@ -75,7 +75,7 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
                     eprintln!("job {cjid}: exited with code {code}");
                     accum.add(ExitCode::from(code));
                 }
-                JobStatus::Signalled(signum) => {
+                JobStatus::Signaled(signum) => {
                     io::stdout().lock().flush()?;
                     eprintln!("job {cjid}: killed by signal {signum}");
                     accum.add(ExitCode::FAILURE);

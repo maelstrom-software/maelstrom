@@ -479,7 +479,7 @@ mod tests {
     // input from stdin.
     #[tokio::test]
     #[serial]
-    async fn signalled_11() {
+    async fn signaled_11() {
         start_and_expect(
             python!(concat!(
                 "import os;",
@@ -490,7 +490,7 @@ mod tests {
                 "os.abort()",
             )),
             2,
-            JobStatus::Signalled(11),
+            JobStatus::Signaled(11),
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
             JobOutputResult::Inline(boxed_u8!(b"b\n")),
         )

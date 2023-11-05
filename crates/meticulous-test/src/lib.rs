@@ -92,7 +92,7 @@ macro_rules! result {
     };
     [3] => {
         meticulous_base::JobResult::Ran{
-            status: meticulous_base::JobStatus::Signalled(15),
+            status: meticulous_base::JobStatus::Signaled(15),
             stdout: meticulous_base::JobOutputResult::None,
             stderr: meticulous_base::JobOutputResult::None,
         }

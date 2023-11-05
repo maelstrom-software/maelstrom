@@ -115,7 +115,7 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                         self.tracker
                             .job_exited(self.case.clone(), ExitCode::from(code));
                     }
-                    JobStatus::Signalled(signo) => {
+                    JobStatus::Signaled(signo) => {
                         result_str = "FAIL".red();
                         result_details = Some(format!("killed by signal {signo}"));
                         self.tracker

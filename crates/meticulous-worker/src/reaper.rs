@@ -44,7 +44,7 @@ pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
                             .on_child_termination(pid, JobStatus::Exited(clip_to_u8(child_status))),
                         CLD_KILLED | CLD_DUMPED => deps.on_child_termination(
                             pid,
-                            JobStatus::Signalled(clip_to_u8(child_status)),
+                            JobStatus::Signaled(clip_to_u8(child_status)),
                         ),
                         _ => deps.on_unexpected_wait_code(pid),
                     }

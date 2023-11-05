@@ -850,7 +850,7 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
         };
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -886,9 +886,9 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -914,13 +914,13 @@ mod tests {
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -950,9 +950,9 @@ mod tests {
             truncated: 100,
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -981,10 +981,10 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -1009,14 +1009,14 @@ mod tests {
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -1041,14 +1041,14 @@ mod tests {
             StartJob(jid!(1), details!(1, [42]), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {};
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
-                status: JobStatus::Signalled(9),
+                status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
@@ -1078,7 +1078,7 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), JobResult::SystemError("stdout error".to_string()))
             ),
@@ -1102,7 +1102,7 @@ mod tests {
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Err("stderr error".to_string())) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), JobResult::SystemError("stderr error".to_string()))
             ),
@@ -1126,7 +1126,7 @@ mod tests {
         Broker(EnqueueJob(jid!(2), details!(2))) => {};
         JobStdout(jid!(1), Err("stdout error".to_string())) => {};
         JobStderr(jid!(1), Err("stderr error".to_string())) => {};
-        PidStatus(pid!(1), JobStatus::Signalled(9)) => {
+        PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), JobResult::SystemError("stdout error".to_string()))
             ),

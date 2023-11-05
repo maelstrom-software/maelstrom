@@ -66,7 +66,7 @@ pub struct JobDetails {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum JobStatus {
     Exited(u8),
-    Signalled(u8),
+    Signaled(u8),
 }
 
 /// The result for stdout or stderr for a job.
