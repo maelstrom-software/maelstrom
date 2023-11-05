@@ -165,7 +165,7 @@ trait ProgressIndicator {
     /// Potentially runs background thread while body is running allowing implementations to update
     /// progress in the background.
     fn run(
-        &self,
+        self,
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &Self::Scope) -> Result<()>,
     ) -> Result<()>;
@@ -420,7 +420,7 @@ impl ProgressIndicator for MultipleProgressBars {
     type Scope = ProgressBarsScope;
 
     fn run(
-        &self,
+        self,
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &ProgressBarsScope) -> Result<()>,
     ) -> Result<()> {
@@ -458,11 +458,11 @@ impl ProgressIndicator for QuietProgressBar {
     type Scope = Self;
 
     fn run(
-        &self,
+        self,
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
     ) -> Result<()> {
-        let res = body(&client, self);
+        let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
         res
     }
@@ -495,12 +495,13 @@ impl ProgressIndicator for QuietNoBar {
     type Scope = Self;
 
     fn run(
-        &self,
+        self,
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
     ) -> Result<()> {
-        let res = body(&client, self);
+        let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+        drop(self);
         println!("all jobs completed");
         res
     }
@@ -533,12 +534,13 @@ impl ProgressIndicator for NoBar {
     type Scope = Self;
 
     fn run(
-        &self,
+        self,
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
     ) -> Result<()> {
-        let res = body(&client, self);
+        let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+        drop(self);
         println!("all jobs completed");
         res
     }
@@ -613,7 +615,6 @@ fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
             |num_jobs| bar_scope.update_length(num_jobs),
         )
     })?;
-    drop(prog);
 
     tracker.print_summary(width);
     Ok(tracker.exit_code.get())
