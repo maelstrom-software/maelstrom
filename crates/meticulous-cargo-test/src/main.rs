@@ -99,7 +99,7 @@ impl CargoBuild {
                 self.child.stderr.as_mut().unwrap(),
                 &mut std::io::stderr().lock(),
             )?;
-            return Err(Error::msg(format!("build failure")));
+            return Err(Error::msg("build failure".to_string()));
         }
 
         Ok(())
