@@ -129,85 +129,105 @@ fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-fn visitor(
-    cjid: ClientJobId,
-    result: JobResult,
+struct JobStatusVisitor {
     accum: Arc<ExitCodeAccumulator>,
     case: String,
     width: Option<usize>,
     bar: ProgressBar,
-) -> Result<()> {
-    let result_str: ColoredString;
-    let mut result_details: Option<String> = None;
-    match result {
-        JobResult::Ran { status, stderr, .. } => {
-            match stderr {
-                JobOutputResult::None => {}
-                JobOutputResult::Inline(bytes) => {
-                    io::stderr().lock().write_all(&bytes)?;
-                }
-                JobOutputResult::Truncated { first, truncated } => {
-                    io::stderr().lock().write_all(&first)?;
-                    eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
-                }
-            }
-            match status {
-                JobStatus::Exited(code) => {
-                    result_str = if code == 0 {
-                        "OK".green()
-                    } else {
-                        "FAIL".red()
-                    };
-                    accum.add(ExitCode::from(code));
-                }
-                JobStatus::Signalled(signo) => {
-                    result_str = "FAIL".red();
-                    result_details = Some(format!("killed by signal {signo}"));
-                    accum.add(ExitCode::FAILURE);
-                }
-            };
-        }
-        JobResult::ExecutionError(err) => {
-            result_str = "ERR".yellow();
-            result_details = Some(format!("execution error: {err}"));
-            accum.add(ExitCode::FAILURE);
-        }
-        JobResult::SystemError(err) => {
-            result_str = "ERR".yellow();
-            result_details = Some(format!("system error: {err}"));
-            accum.add(ExitCode::FAILURE);
+}
+
+impl JobStatusVisitor {
+    fn new(
+        accum: Arc<ExitCodeAccumulator>,
+        case: String,
+        width: Option<usize>,
+        bar: ProgressBar,
+    ) -> Self {
+        Self {
+            accum,
+            case,
+            width,
+            bar,
         }
     }
-    match width {
-        Some(width) if width > 10 => {
-            let case_width = case.width();
-            let result_width = result_str.width();
-            if case_width + result_width < width {
-                let dots_width = width - result_width - case_width;
-                let case = case.bold();
-                bar.println(format!(
-                    "{case}{empty:.<dots_width$}{result_str}",
-                    empty = ""
-                ));
-            } else {
-                let (case, case_width) = case.unicode_truncate_start(width - 2 - result_width);
-                let case = case.bold();
-                let dots_width = width - result_width - case_width - 1;
-                bar.println(format!(
-                    "<{case}{empty:.<dots_width$}{result_str}",
-                    empty = ""
-                ));
+}
+
+impl JobStatusVisitor {
+    fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
+        let result_str: ColoredString;
+        let mut result_details: Option<String> = None;
+        match result {
+            JobResult::Ran { status, stderr, .. } => {
+                match stderr {
+                    JobOutputResult::None => {}
+                    JobOutputResult::Inline(bytes) => {
+                        io::stderr().lock().write_all(&bytes)?;
+                    }
+                    JobOutputResult::Truncated { first, truncated } => {
+                        io::stderr().lock().write_all(&first)?;
+                        eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                    }
+                }
+                match status {
+                    JobStatus::Exited(code) => {
+                        result_str = if code == 0 {
+                            "OK".green()
+                        } else {
+                            "FAIL".red()
+                        };
+                        self.accum.add(ExitCode::from(code));
+                    }
+                    JobStatus::Signalled(signo) => {
+                        result_str = "FAIL".red();
+                        result_details = Some(format!("killed by signal {signo}"));
+                        self.accum.add(ExitCode::FAILURE);
+                    }
+                };
+            }
+            JobResult::ExecutionError(err) => {
+                result_str = "ERR".yellow();
+                result_details = Some(format!("execution error: {err}"));
+                self.accum.add(ExitCode::FAILURE);
+            }
+            JobResult::SystemError(err) => {
+                result_str = "ERR".yellow();
+                result_details = Some(format!("system error: {err}"));
+                self.accum.add(ExitCode::FAILURE);
             }
         }
-        _ => {
-            bar.println(format!("{case} {result_str}"));
+        match self.width {
+            Some(width) if width > 10 => {
+                let case_width = self.case.width();
+                let result_width = result_str.width();
+                if case_width + result_width < width {
+                    let dots_width = width - result_width - case_width;
+                    let case = self.case.bold();
+                    self.bar.println(format!(
+                        "{case}{empty:.<dots_width$}{result_str}",
+                        empty = ""
+                    ));
+                } else {
+                    let (case, case_width) =
+                        self.case.unicode_truncate_start(width - 2 - result_width);
+                    let case = case.bold();
+                    let dots_width = width - result_width - case_width - 1;
+                    self.bar.println(format!(
+                        "<{case}{empty:.<dots_width$}{result_str}",
+                        empty = ""
+                    ));
+                }
+            }
+            _ => {
+                self.bar
+                    .println(format!("{case} {result_str}", case = self.case));
+            }
         }
+        if let Some(details_str) = result_details {
+            self.bar.println(details_str);
+        }
+        self.bar.inc(1);
+        Ok(())
     }
-    if let Some(details_str) = result_details {
-        bar.println(details_str);
-    }
-    bar.inc(1);
-    Ok(())
 }
 
 //                      waiting for artifacts, pending, running, complete
@@ -302,18 +322,15 @@ fn queue_jobs_and_wait(
             total_jobs += 1;
             cb(total_jobs);
 
-            let accum_clone = accum.clone();
-            let bar_clone = bar.clone();
             let case_str = format!("{package_name} {case}");
+            let visitor = JobStatusVisitor::new(accum.clone(), case_str, width, bar.clone());
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
                     arguments: vec![case.clone()],
                     layers: vec![],
                 },
-                Box::new(move |cjid, result| {
-                    visitor(cjid, result, accum_clone, case_str, width, bar_clone)
-                }),
+                Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
             );
         }
     }
