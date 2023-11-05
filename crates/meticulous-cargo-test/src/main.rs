@@ -11,6 +11,7 @@ use meticulous_base::{
 use meticulous_client::Client;
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use regex::Regex;
+use std::io::IsTerminal as _;
 use std::{
     collections::HashMap,
     io::{self, BufReader, Write as _},
@@ -413,6 +414,82 @@ impl ProgressIndicatorScope for QuietProgressBar {
     }
 }
 
+#[derive(Clone)]
+struct QuietNoBar;
+
+impl QuietNoBar {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressIndicator for QuietNoBar {
+    type Scope = Self;
+
+    fn run(
+        &self,
+        client: Mutex<Client>,
+        body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
+    ) -> Result<()> {
+        let res = body(&client, self);
+        client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+        println!("all jobs completed");
+        res
+    }
+}
+
+impl ProgressIndicatorScope for QuietNoBar {
+    fn println(&self, _msg: String) {
+        // quiet mode doesn't print anything
+    }
+
+    fn job_finished(&self) {
+        // nothing to do
+    }
+
+    fn update_length(&self, _new_length: u64) {
+        // nothing to do
+    }
+}
+
+#[derive(Clone)]
+struct NoBar;
+
+impl NoBar {
+    fn new() -> Self {
+        Self
+    }
+}
+
+impl ProgressIndicator for NoBar {
+    type Scope = Self;
+
+    fn run(
+        &self,
+        client: Mutex<Client>,
+        body: impl FnOnce(&Mutex<Client>, &Self) -> Result<()>,
+    ) -> Result<()> {
+        let res = body(&client, self);
+        client.into_inner().unwrap().wait_for_outstanding_jobs()?;
+        println!("all jobs completed");
+        res
+    }
+}
+
+impl ProgressIndicatorScope for NoBar {
+    fn println(&self, msg: String) {
+        println!("{}", msg);
+    }
+
+    fn job_finished(&self) {
+        // nothing to do
+    }
+
+    fn update_length(&self, _new_length: u64) {
+        // nothing to do
+    }
+}
+
 fn queue_jobs_and_wait<ProgressIndicatorT>(
     client: &Mutex<Client>,
     accum: Arc<ExitCodeAccumulator>,
@@ -477,10 +554,13 @@ fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
 pub fn main() -> Result<ExitCode> {
     let cli_options = Cli::parse().subcommand();
     let client = Mutex::new(Client::new(cli_options.broker)?);
+    let is_tty = std::io::stdout().is_terminal();
 
-    match cli_options.quiet {
-        true => Ok(main_with_progress(QuietProgressBar::new(), client)?),
-        false => Ok(main_with_progress(MultipleProgressBars::new(), client)?),
+    match (is_tty, cli_options.quiet) {
+        (true, true) => Ok(main_with_progress(QuietProgressBar::new(), client)?),
+        (true, false) => Ok(main_with_progress(MultipleProgressBars::new(), client)?),
+        (false, true) => Ok(main_with_progress(QuietNoBar::new(), client)?),
+        (false, false) => Ok(main_with_progress(NoBar::new(), client)?),
     }
 }
 
