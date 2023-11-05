@@ -129,19 +129,27 @@ fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-trait ProgressIndicator {
+trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
+    /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
+
+    /// Meant to be called with the job is complete, it updates the complete bar with this status
     fn job_finished(&self);
+
+    /// Update the number of pending jobs indicated
+    fn update_length(&self, new_length: u64);
 }
 
-impl ProgressIndicator for ProgressBar {
-    fn println(&self, msg: String) {
-        ProgressBar::println(self, msg)
-    }
+trait ProgressIndicator {
+    type Scope: ProgressIndicatorScope;
 
-    fn job_finished(&self) {
-        self.inc(1)
-    }
+    /// Potentially runs background thread while body is running allowing implementations to update
+    /// progress in the background.
+    fn run(
+        &self,
+        client: &Mutex<Client>,
+        body: impl FnOnce(&Self::Scope) -> Result<()>,
+    ) -> Result<()>;
 }
 
 struct JobStatusVisitor<ProgressIndicatorT> {
@@ -167,7 +175,7 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     }
 }
 
-impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
+impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndicatorT> {
     fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
@@ -249,8 +257,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
 const COLORS: [&str; 4] = ["red", "yellow", "blue", "green"];
 
 struct ProgressBars {
-    _multi_bar: MultiProgress,
-    bars: HashMap<JobState, ProgressBar>,
+    scope: ProgressBarsScope,
     done_queuing_jobs: AtomicBool,
     build_spinner: ProgressBar,
 }
@@ -279,8 +286,7 @@ impl ProgressBars {
         }
         multi_bar.set_draw_target(ProgressDrawTarget::stdout());
         Self {
-            _multi_bar: multi_bar,
-            bars,
+            scope: ProgressBarsScope { bars },
             build_spinner,
             done_queuing_jobs: AtomicBool::new(false),
         }
@@ -294,21 +300,10 @@ impl ProgressBars {
                     .filter(|s| s >= &state)
                     .map(|s| counts[s])
                     .sum();
-                self.bars.get(&state).unwrap().set_position(jobs);
+                self.scope.bars.get(&state).unwrap().set_position(jobs);
             }
         }
         Ok(())
-    }
-
-    fn update_length(&self, new_length: u64) {
-        for bar in self.bars.values() {
-            bar.set_length(new_length);
-        }
-    }
-
-    fn finished(&self) -> bool {
-        let com = self.bars.get(&JobState::Complete).unwrap();
-        self.done_queuing_jobs.load(Ordering::Relaxed) && com.position() >= com.length().unwrap()
     }
 
     fn done_queuing_jobs(&self) {
@@ -316,6 +311,55 @@ impl ProgressBars {
 
         self.build_spinner.disable_steady_tick();
         self.build_spinner.finish_and_clear();
+    }
+
+    fn finished(&self) -> bool {
+        let com = self.scope.bars.get(&JobState::Complete).unwrap();
+        self.done_queuing_jobs.load(Ordering::Relaxed) && com.position() >= com.length().unwrap()
+    }
+}
+
+#[derive(Clone)]
+struct ProgressBarsScope {
+    bars: HashMap<JobState, ProgressBar>,
+}
+
+impl ProgressIndicatorScope for ProgressBarsScope {
+    fn println(&self, msg: String) {
+        let com = self.bars.get(&JobState::Complete).unwrap();
+        com.println(msg);
+    }
+
+    fn job_finished(&self) {
+        let com = self.bars.get(&JobState::Complete).unwrap();
+        com.inc(1);
+    }
+
+    fn update_length(&self, new_length: u64) {
+        for bar in self.bars.values() {
+            bar.set_length(new_length);
+        }
+    }
+}
+
+impl ProgressIndicator for ProgressBars {
+    type Scope = ProgressBarsScope;
+
+    fn run(
+        &self,
+        client: &Mutex<Client>,
+        body: impl FnOnce(&ProgressBarsScope) -> Result<()>,
+    ) -> Result<()> {
+        std::thread::scope(|scope| -> Result<()> {
+            let update_thread = scope.spawn(|| self.update_progress(&client));
+            let res = body(&self.scope);
+            self.done_queuing_jobs();
+
+            res?;
+            update_thread.join().unwrap()?;
+            Ok(())
+        })?;
+        Ok(())
     }
 }
 
@@ -327,7 +371,7 @@ fn queue_jobs_and_wait<ProgressIndicatorT>(
     mut cb: impl FnMut(u64),
 ) -> Result<()>
 where
-    ProgressIndicatorT: ProgressIndicator + Clone + Send + Sync + 'static,
+    ProgressIndicatorT: ProgressIndicatorScope,
 {
     let mut total_jobs = 0;
     let mut cargo_build = CargoBuild::new()?;
@@ -367,17 +411,14 @@ pub fn main() -> Result<ExitCode> {
     let width = term_size::dimensions().map(|(w, _)| w);
 
     let bars = ProgressBars::new();
-    let complete_bar = bars.bars.get(&JobState::Complete).unwrap().clone();
-    std::thread::scope(|scope| -> Result<()> {
-        let bars_thread = scope.spawn(|| bars.update_progress(&client));
-        let res = queue_jobs_and_wait(&client, accum.clone(), width, complete_bar, |num_jobs| {
-            bars.update_length(num_jobs)
-        });
-        bars.done_queuing_jobs();
-
-        res?;
-        bars_thread.join().unwrap()?;
-        Ok(())
+    bars.run(&client, |bar_scope| {
+        queue_jobs_and_wait(
+            &client,
+            accum.clone(),
+            width,
+            bar_scope.clone(),
+            |num_jobs| bar_scope.update_length(num_jobs),
+        )
     })?;
 
     Ok(accum.get())
