@@ -14,7 +14,7 @@ use regex::Regex;
 use std::io::IsTerminal as _;
 use std::{
     collections::HashMap,
-    io::{self, BufReader, Write as _},
+    io::{self, BufReader},
     net::{SocketAddr, ToSocketAddrs as _},
     process::{Child, ChildStdout, Command, Stdio},
     str,
@@ -144,6 +144,14 @@ trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
 
+    /// Prints a line to stdout while not interfering with any progress bars and indicating it was
+    /// stderr
+    fn eprintln(&self, msg: impl AsRef<str>) {
+        for line in msg.as_ref().lines() {
+            self.println(format!("{} {line}", "stderr:".red()))
+        }
+    }
+
     /// Meant to be called with the job is complete, it updates the complete bar with this status
     fn job_finished(&self);
 
@@ -195,11 +203,13 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                 match stderr {
                     JobOutputResult::None => {}
                     JobOutputResult::Inline(bytes) => {
-                        io::stderr().lock().write_all(&bytes)?;
+                        self.ind.eprintln(String::from_utf8_lossy(&bytes));
                     }
                     JobOutputResult::Truncated { first, truncated } => {
-                        io::stderr().lock().write_all(&first)?;
-                        eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+                        self.ind.eprintln(String::from_utf8_lossy(&first));
+                        self.ind.eprintln(format!(
+                            "job {cjid}: stderr truncated, {truncated} bytes lost"
+                        ));
                     }
                 }
                 match status {
@@ -521,7 +531,7 @@ where
             client.lock().unwrap().add_job(
                 JobDetails {
                     program: binary.clone(),
-                    arguments: vec![case.clone()],
+                    arguments: vec!["--nocapture".into(), case.clone()],
                     layers: vec![],
                 },
                 Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
