@@ -63,13 +63,15 @@ fn queue_jobs_and_wait<ProgressIndicatorT>(
     tracker: Arc<JobStatusTracker>,
     width: Option<usize>,
     ind: ProgressIndicatorT,
+    stderr: impl io::Write,
+    stderr_color: bool,
     mut cb: impl FnMut(u64),
 ) -> Result<()>
 where
     ProgressIndicatorT: ProgressIndicatorScope,
 {
     let mut total_jobs = 0;
-    let mut cargo_build = CargoBuild::new()?;
+    let mut cargo_build = CargoBuild::new(stderr_color)?;
 
     for artifact in cargo_build.artifact_stream() {
         let artifact = artifact?;
@@ -92,30 +94,59 @@ where
         }
     }
 
-    cargo_build.check_status()?;
+    cargo_build.check_status(stderr)?;
 
     Ok(())
 }
 
-fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
-    prog: ProgressIndicatorT,
+pub struct MainApp<StdErr> {
     client: Mutex<Client>,
-) -> Result<ExitCode> {
-    let tracker = Arc::new(JobStatusTracker::default());
-    let width = term_size::dimensions().map(|(w, _)| w);
+    stderr: StdErr,
+    stderr_color: bool,
+}
 
-    prog.run(client, |client, bar_scope| {
-        queue_jobs_and_wait(
+impl<StdErr> MainApp<StdErr> {
+    fn new(client: Mutex<Client>, stderr: StdErr, stderr_color: bool) -> Self {
+        Self {
             client,
-            tracker.clone(),
-            width,
-            bar_scope.clone(),
-            |num_jobs| bar_scope.update_length(num_jobs),
-        )
-    })?;
+            stderr,
+            stderr_color,
+        }
+    }
+}
 
-    tracker.print_summary(width);
-    Ok(tracker.exit_code())
+impl<StdErr: io::Write> MainApp<StdErr> {
+    fn run_with_progress<ProgressIndicatorT: ProgressIndicator>(
+        self,
+        prog: ProgressIndicatorT,
+    ) -> Result<ExitCode> {
+        let tracker = Arc::new(JobStatusTracker::default());
+        let width = term_size::dimensions().map(|(w, _)| w);
+
+        prog.run(self.client, |client, bar_scope| {
+            queue_jobs_and_wait(
+                client,
+                tracker.clone(),
+                width,
+                bar_scope.clone(),
+                self.stderr,
+                self.stderr_color,
+                |num_jobs| bar_scope.update_length(num_jobs),
+            )
+        })?;
+
+        tracker.print_summary(width);
+        Ok(tracker.exit_code())
+    }
+
+    fn run(self, stdout_tty: bool, quiet: bool) -> Result<ExitCode> {
+        match (stdout_tty, quiet) {
+            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new())?),
+            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new())?),
+            (false, true) => Ok(self.run_with_progress(QuietNoBar::new())?),
+            (false, false) => Ok(self.run_with_progress(NoBar::new())?),
+        }
+    }
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
@@ -123,14 +154,14 @@ fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
 pub fn main() -> Result<ExitCode> {
     let cli_options = Cli::parse().subcommand();
     let client = Mutex::new(Client::new(cli_options.broker)?);
-    let is_tty = std::io::stdout().is_terminal();
+    let app = MainApp::new(
+        client,
+        std::io::stderr().lock(),
+        std::io::stderr().is_terminal(),
+    );
 
-    match (is_tty, cli_options.quiet) {
-        (true, true) => Ok(main_with_progress(QuietProgressBar::new(), client)?),
-        (true, false) => Ok(main_with_progress(MultipleProgressBars::new(), client)?),
-        (false, true) => Ok(main_with_progress(QuietNoBar::new(), client)?),
-        (false, false) => Ok(main_with_progress(NoBar::new(), client)?),
-    }
+    let stdout_tty = std::io::stdout().is_terminal();
+    app.run(stdout_tty, cli_options.quiet)
 }
 
 #[test]

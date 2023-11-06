@@ -3,7 +3,7 @@ use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
 use regex::Regex;
-use std::io::IsTerminal as _;
+use std::io;
 use std::{
     io::BufReader,
     process::{Child, ChildStdout, Command, Stdio},
@@ -15,8 +15,7 @@ pub struct CargoBuild {
 }
 
 impl CargoBuild {
-    pub fn new() -> Result<Self> {
-        let color = std::io::stderr().is_terminal();
+    pub fn new(color: bool) -> Result<Self> {
         let child = Command::new("cargo")
             .arg("test")
             .arg("--no-run")
@@ -38,13 +37,10 @@ impl CargoBuild {
         }
     }
 
-    pub fn check_status(mut self) -> Result<()> {
+    pub fn check_status(mut self, mut stderr: impl io::Write) -> Result<()> {
         let exit_status = self.child.wait()?;
         if !exit_status.success() {
-            std::io::copy(
-                self.child.stderr.as_mut().unwrap(),
-                &mut std::io::stderr().lock(),
-            )?;
+            std::io::copy(self.child.stderr.as_mut().unwrap(), &mut stderr)?;
             return Err(Error::msg("build failure".to_string()));
         }
 
