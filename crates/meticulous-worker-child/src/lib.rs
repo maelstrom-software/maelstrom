@@ -1,15 +1,10 @@
 use anyhow::Result;
-use meticulous_base::JobDetails;
-use nix::{
-    errno::Errno,
-};
+use nix::errno::Errno;
 use std::{
-    ffi::{CString, c_int},
+    ffi::{c_char, c_int},
     fs::{self, File},
     io::Write as _,
-    iter,
-    os::fd::{FromRawFd as _},
-    ptr,
+    os::fd::FromRawFd as _,
 };
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
@@ -20,7 +15,9 @@ pub type gid_t = u32;
 
 /// The guts of the child code. This function can return a [`Result`].
 fn start_and_exec_in_child_inner(
-    details: &JobDetails,
+    program: *const c_char,
+    argv: *const *const c_char,
+    env: *const *const c_char,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     parent_uid: uid_t,
@@ -33,29 +30,12 @@ fn start_and_exec_in_child_inner(
     unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stderr_write_fd, 2) }.map_err(Errno::from_i32)?;
     unsafe { nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC) }.map_err(Errno::from_i32)?;
-    let program_cstr = CString::new(details.program.as_str())?;
-    let program_ptr = program_cstr.as_bytes_with_nul().as_ptr();
-    let arguments = details
-        .arguments
-        .iter()
-        .map(String::as_str)
-        .map(CString::new)
-        .collect::<Result<Vec<_>, _>>()?;
-    let argument_ptrs = iter::once(program_ptr)
-        .chain(
-            arguments
-                .iter()
-                .map(|cstr| cstr.as_bytes_with_nul().as_ptr()),
-        )
-        .chain(iter::once(ptr::null()))
-        .collect::<Vec<_>>();
-    let env: [*const u8; 1] = [ptr::null()];
     match unsafe {
         nc::syscalls::syscall3(
             nc::SYS_EXECVE,
-            program_ptr as usize,
-            argument_ptrs.as_ptr() as usize,
-            env.as_ptr() as usize,
+            program as usize,
+            argv as usize,
+            env as usize,
         )
     } {
         Err(errno) => Err(Errno::from_i32(errno).into()),
@@ -66,7 +46,9 @@ fn start_and_exec_in_child_inner(
 /// Try to exec the job and write the error message to the pipe on failure.
 #[allow(clippy::too_many_arguments)]
 pub fn start_and_exec_in_child(
-    details: &JobDetails,
+    program: *const c_char,
+    argv: *const *const c_char,
+    env: *const *const c_char,
     _stdout_read_fd: c_int,
     stdout_write_fd: c_int,
     _stderr_read_fd: c_int,
@@ -81,7 +63,9 @@ pub fn start_and_exec_in_child(
     // We assume any error we encounter in the child is an execution error. While highly unlikely,
     // we could theoretically encounter a system error.
     let Err(err) = start_and_exec_in_child_inner(
-        details,
+        program,
+        argv,
+        env,
         stdout_write_fd,
         stderr_write_fd,
         parent_uid,

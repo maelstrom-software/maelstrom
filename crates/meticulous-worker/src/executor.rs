@@ -10,11 +10,13 @@ use nix::{
     unistd::{self, Gid, Pid, Uid},
 };
 use std::{
+    ffi::{c_char, CString},
     fs::File,
     io::Read as _,
-    mem,
+    iter, mem,
     os::fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
     pin::Pin,
+    ptr,
     task::{Context, Poll},
 };
 use tokio::{
@@ -177,6 +179,27 @@ impl Executor {
         let (exec_result_read_fd, exec_result_write_fd) =
             try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
+        // Set up the arguments to pass to the child process.
+        let program = try_system_error!(CString::new(details.program.as_str()));
+        let program_ptr: *const u8 = program.as_bytes_with_nul().as_ptr();
+        let arguments = try_system_error!(details
+            .arguments
+            .iter()
+            .map(String::as_str)
+            .map(CString::new)
+            .collect::<Result<Vec<_>, _>>());
+        let argv = iter::once(program_ptr)
+            .chain(
+                arguments
+                    .iter()
+                    .map(|cstr| cstr.as_bytes_with_nul().as_ptr()),
+            )
+            .chain(iter::once(ptr::null()))
+            .collect::<Vec<_>>();
+        let argv_ptr: *const *const u8 = argv.as_ptr();
+        let env: [*const u8; 1] = [ptr::null()];
+        let env_ptr: *const *const u8 = env.as_ptr();
+
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
             flags: nc::CLONE_NEWCGROUP as u64
@@ -207,7 +230,9 @@ impl Executor {
             // syscalls. We're going to set all fds other than stdin, stdout, and stderr as
             // exec-on-close. Then, we're going to exec and let the kernel handle the closing for us.
             meticulous_worker_child::start_and_exec_in_child(
-                details,
+                program_ptr as *const c_char,
+                argv_ptr as *const *const c_char,
+                env_ptr as *const *const c_char,
                 stdout_read_fd.into_raw_fd(),
                 stdout_write_fd.into_raw_fd(),
                 stderr_read_fd.into_raw_fd(),

@@ -2122,7 +2122,6 @@ name = "meticulous-worker-child"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "meticulous-base",
  "nc",
  "nix 0.26.4",
  "tuple",
