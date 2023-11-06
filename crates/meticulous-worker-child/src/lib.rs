@@ -5,20 +5,19 @@ use nix::{
     unistd::{Gid, Uid},
 };
 use std::{
-    ffi::CString,
+    ffi::{CString, c_int},
     fs::{self, File},
     io::Write as _,
     iter,
-    os::fd::{FromRawFd as _, RawFd},
+    os::fd::{FromRawFd as _},
     ptr,
 };
 
 /// The guts of the child code. This function can return a [`Result`].
 fn start_and_exec_in_child_inner(
     details: &JobDetails,
-    stdout_write_fd: RawFd,
-    stderr_write_fd: RawFd,
-    _exec_result_write_fd: RawFd,
+    stdout_write_fd: c_int,
+    stderr_write_fd: c_int,
     parent_uid: Uid,
     parent_gid: Gid,
 ) -> Result<()> {
@@ -62,9 +61,12 @@ fn start_and_exec_in_child_inner(
 /// Try to exec the job and write the error message to the pipe on failure.
 pub fn start_and_exec_in_child(
     details: &JobDetails,
-    stdout_write_fd: RawFd,
-    stderr_write_fd: RawFd,
-    exec_result_write_fd: RawFd,
+    _stdout_read_fd: c_int,
+    stdout_write_fd: c_int,
+    _stderr_read_fd: c_int,
+    stderr_write_fd: c_int,
+    _exec_result_read_fd: c_int,
+    exec_result_write_fd: c_int,
     parent_uid: Uid,
     parent_gid: Gid,
 ) -> ! {
@@ -76,7 +78,6 @@ pub fn start_and_exec_in_child(
         details,
         stdout_write_fd,
         stderr_write_fd,
-        exec_result_write_fd,
         parent_uid,
         parent_gid,
     ) else {

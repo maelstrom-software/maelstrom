@@ -206,13 +206,13 @@ impl Executor {
             // We forget all of the fds instead of closing the ones we don't need. This saves us some
             // syscalls. We're going to set all fds other than stdin, stdout, and stderr as
             // exec-on-close. Then, we're going to exec and let the kernel handle the closing for us.
-            mem::forget(stdout_read_fd);
-            mem::forget(stderr_read_fd);
-            mem::forget(exec_result_read_fd);
             meticulous_worker_child::start_and_exec_in_child(
                 details,
+                stdout_read_fd.into_raw_fd(),
                 stdout_write_fd.into_raw_fd(),
+                stderr_read_fd.into_raw_fd(),
                 stderr_write_fd.into_raw_fd(),
+                exec_result_read_fd.into_raw_fd(),
                 exec_result_write_fd.into_raw_fd(),
                 self.uid,
                 self.gid,
