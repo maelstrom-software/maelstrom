@@ -151,7 +151,7 @@ fn run_complete_test(fake_tests: FakeTests, quiet: bool) -> String {
         state.job_responses.push(JobResult::Ran {
             status: JobStatus::Exited(0),
             stdout: JobOutputResult::None,
-            stderr: JobOutputResult::None,
+            stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
         })
     }
     let broker_address = fake_broker(state);
