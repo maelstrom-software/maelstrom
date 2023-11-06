@@ -254,7 +254,8 @@ impl Executor {
         let mut clone_args = nc::clone_args_t {
             flags: nc::CLONE_NEWCGROUP as u64
                 | nc::CLONE_NEWIPC as u64
-                | nc::CLONE_NEWNET as u64
+                // If we create a new network namespace, we probably need to configure it
+                // | nc::CLONE_NEWNET as u64
                 | nc::CLONE_NEWNS as u64
                 | nc::CLONE_NEWPID as u64
                 | nc::CLONE_NEWUSER as u64,
