@@ -1,11 +1,6 @@
 use anyhow::Result;
 use nix::errno::Errno;
-use std::{
-    ffi::{c_char, c_int},
-    fs::File,
-    io::Write as _,
-    os::fd::FromRawFd as _,
-};
+use std::ffi::{c_char, c_int};
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
 #[allow(non_camel_case_types)]
@@ -87,6 +82,9 @@ pub fn start_and_exec_in_child(
     ) else {
         unreachable!();
     };
-    let _ = unsafe { File::from_raw_fd(exec_result_write_fd) }.write_fmt(format_args!("{}", err));
-    std::process::exit(1);
+    let error = format!("{}", err);
+    let error_ptr = error.as_ptr();
+    let error_len = error.len();
+    let _ = unsafe { nc::write(exec_result_write_fd, error_ptr as usize, error_len) };
+    unsafe { nc::exit(1) };
 }
