@@ -2,7 +2,7 @@ use anyhow::Result;
 use nix::errno::Errno;
 use std::{
     ffi::{c_char, c_int},
-    fs::{self, File},
+    fs::File,
     io::Write as _,
     os::fd::FromRawFd as _,
 };
@@ -12,6 +12,15 @@ use std::{
 pub type uid_t = u32;
 #[allow(non_camel_case_types)]
 pub type gid_t = u32;
+
+fn write_file(path: &str, contents: &str) -> Result<()> {
+    let fd = unsafe { nc::open(path, nc::O_WRONLY | nc::O_TRUNC, 0) }.map_err(Errno::from_i32)?;
+    let buf_ptr = contents.as_ptr();
+    let buf_len = contents.len();
+    unsafe { nc::write(fd, buf_ptr as usize, buf_len) }.map_err(Errno::from_i32)?;
+    unsafe { nc::close(fd) }.map_err(Errno::from_i32)?;
+    Ok(())
+}
 
 /// The guts of the child code. This function can return a [`Result`].
 fn start_and_exec_in_child_inner(
@@ -23,9 +32,9 @@ fn start_and_exec_in_child_inner(
     parent_uid: uid_t,
     parent_gid: gid_t,
 ) -> Result<()> {
-    fs::write("/proc/self/setgroups", "deny\n")?;
-    fs::write("/proc/self/uid_map", format!("0 {} 1\n", parent_uid))?;
-    fs::write("/proc/self/gid_map", format!("0 {} 1\n", parent_gid))?;
+    write_file("/proc/self/setgroups", "deny\n")?;
+    write_file("/proc/self/uid_map", format!("0 {} 1\n", parent_uid).as_str())?;
+    write_file("/proc/self/gid_map", format!("0 {} 1\n", parent_gid).as_str())?;
     unsafe { nc::setsid() }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stderr_write_fd, 2) }.map_err(Errno::from_i32)?;
