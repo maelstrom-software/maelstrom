@@ -12,6 +12,7 @@ futures = { workspace = true }
 gethostname = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-util = { workspace = true }
+meticulous-worker-child = { workspace = true }
 nc = { workspace = true }
 nix = { workspace = true }
 num_cpus = { workspace = true }
