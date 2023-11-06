@@ -1,6 +1,12 @@
+#![no_std]
+
 use anyhow::Result;
+use core::{
+    ffi::{c_char, c_int},
+    fmt::{self, Arguments, Error, Write},
+    result,
+};
 use nix::errno::Errno;
-use std::ffi::{c_char, c_int};
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
 #[allow(non_camel_case_types)]
@@ -8,11 +14,43 @@ pub type uid_t = u32;
 #[allow(non_camel_case_types)]
 pub type gid_t = u32;
 
-fn write_file(path: &str, contents: &str) -> Result<()> {
+struct Buf<const N: usize> {
+    buf: [u8; N],
+    used: usize,
+}
+
+impl<const N: usize> Default for Buf<N> {
+    fn default() -> Self {
+        Buf {
+            buf: [0u8; N],
+            used: 0,
+        }
+    }
+}
+
+impl<const N: usize> Buf<N> {
+    unsafe fn write_to_fd(&self, fd: i32) -> result::Result<(), nc::Errno> {
+        nc::write(fd, self.buf.as_ptr() as usize, self.used).map(|_| ())
+    }
+}
+
+impl<const N: usize> Write for Buf<N> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        if self.used + s.len() > N {
+            Err(Error)
+        } else {
+            self.buf[self.used..self.used + s.len()].copy_from_slice(s.as_bytes());
+            self.used += s.len();
+            Ok(())
+        }
+    }
+}
+
+fn write_file<const N: usize>(path: &str, args: Arguments) -> Result<()> {
     let fd = unsafe { nc::open(path, nc::O_WRONLY | nc::O_TRUNC, 0) }.map_err(Errno::from_i32)?;
-    let buf_ptr = contents.as_ptr();
-    let buf_len = contents.len();
-    unsafe { nc::write(fd, buf_ptr as usize, buf_len) }.map_err(Errno::from_i32)?;
+    let mut buf: Buf<N> = Buf::default();
+    buf.write_fmt(args)?;
+    unsafe { buf.write_to_fd(fd) }.map_err(Errno::from_i32)?;
     unsafe { nc::close(fd) }.map_err(Errno::from_i32)?;
     Ok(())
 }
@@ -27,14 +65,17 @@ fn start_and_exec_in_child_inner(
     parent_uid: uid_t,
     parent_gid: gid_t,
 ) -> Result<()> {
-    write_file("/proc/self/setgroups", "deny\n")?;
-    write_file(
+    write_file::<5>("/proc/self/setgroups", format_args!("deny\n"))?;
+    //            '0' ' '  {}  ' ' '1' '\n'
+    write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
+        //write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
         "/proc/self/uid_map",
-        format!("0 {} 1\n", parent_uid).as_str(),
+        format_args!("0 {} 1\n", parent_uid),
     )?;
-    write_file(
+    //            '0' ' '  {}  ' ' '1' '\n'
+    write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
         "/proc/self/gid_map",
-        format!("0 {} 1\n", parent_gid).as_str(),
+        format_args!("0 {} 1\n", parent_gid),
     )?;
     unsafe { nc::setsid() }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
@@ -82,9 +123,8 @@ pub fn start_and_exec_in_child(
     ) else {
         unreachable!();
     };
-    let error = format!("{}", err);
-    let error_ptr = error.as_ptr();
-    let error_len = error.len();
-    let _ = unsafe { nc::write(exec_result_write_fd, error_ptr as usize, error_len) };
+    let mut buf: Buf<1024> = Buf::default();
+    buf.write_fmt(format_args!("{:1024}", err)).unwrap();
+    unsafe { buf.write_to_fd(exec_result_write_fd) }.unwrap();
     unsafe { nc::exit(1) };
 }
