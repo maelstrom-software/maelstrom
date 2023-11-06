@@ -2001,6 +2001,8 @@ name = "meticulous-cargo-test"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "assert_matches",
+ "bincode",
  "cargo_metadata",
  "clap",
  "colored",
@@ -2012,7 +2014,9 @@ dependencies = [
  "meticulous-util",
  "meticulous-worker",
  "regex",
+ "serde",
  "serde_json",
+ "tempfile",
  "unicode-truncate",
  "unicode-width",
 ]
