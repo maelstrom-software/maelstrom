@@ -60,62 +60,76 @@ enum Subcommand {
     Metest(MetestCli),
 }
 
-fn queue_jobs_and_wait<ProgressIndicatorT>(
-    client: &Mutex<Client>,
-    tracker: Arc<JobStatusTracker>,
-    cargo: &str,
-    width: usize,
-    ind: ProgressIndicatorT,
-    stderr: impl io::Write,
+struct JobQueuer<StdErr> {
+    cargo: String,
+    stderr: StdErr,
     stderr_color: bool,
-    mut cb: impl FnMut(u64),
-) -> Result<()>
-where
-    ProgressIndicatorT: ProgressIndicatorScope,
-{
-    let mut total_jobs = 0;
-    let mut cargo_build = CargoBuild::new(cargo, stderr_color)?;
+    tracker: Arc<JobStatusTracker>,
+}
 
-    for artifact in cargo_build.artifact_stream() {
-        let artifact = artifact?;
-        let binary = artifact.executable.unwrap().to_string();
-        let package_name = artifact.target.name;
-        for case in get_cases_from_binary(&binary)? {
-            total_jobs += 1;
-            cb(total_jobs);
-
-            let case_str = format!("{package_name} {case}");
-            let visitor = JobStatusVisitor::new(tracker.clone(), case_str, width, ind.clone());
-            client.lock().unwrap().add_job(
-                JobDetails {
-                    program: binary.clone(),
-                    arguments: vec!["--exact".into(), "--nocapture".into(), case.clone()],
-                    layers: vec![],
-                },
-                Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
-            );
+impl<StdErr> JobQueuer<StdErr> {
+    fn new(cargo: String, stderr: StdErr, stderr_color: bool) -> Self {
+        Self {
+            cargo,
+            stderr,
+            stderr_color,
+            tracker: Arc::new(JobStatusTracker::default()),
         }
     }
+}
 
-    cargo_build.check_status(stderr)?;
+impl<StdErr: io::Write> JobQueuer<StdErr> {
+    fn queue_jobs_and_wait<ProgressIndicatorT>(
+        self,
+        client: &Mutex<Client>,
+        width: usize,
+        ind: ProgressIndicatorT,
+        mut cb: impl FnMut(u64),
+    ) -> Result<()>
+    where
+        ProgressIndicatorT: ProgressIndicatorScope,
+    {
+        let mut total_jobs = 0;
+        let mut cargo_build = CargoBuild::new(&self.cargo, self.stderr_color)?;
 
-    Ok(())
+        for artifact in cargo_build.artifact_stream() {
+            let artifact = artifact?;
+            let binary = artifact.executable.unwrap().to_string();
+            let package_name = artifact.target.name;
+            for case in get_cases_from_binary(&binary)? {
+                total_jobs += 1;
+                cb(total_jobs);
+
+                let case_str = format!("{package_name} {case}");
+                let visitor =
+                    JobStatusVisitor::new(self.tracker.clone(), case_str, width, ind.clone());
+                client.lock().unwrap().add_job(
+                    JobDetails {
+                        program: binary.clone(),
+                        arguments: vec!["--exact".into(), "--nocapture".into(), case.clone()],
+                        layers: vec![],
+                    },
+                    Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
+                );
+            }
+        }
+
+        cargo_build.check_status(self.stderr)?;
+
+        Ok(())
+    }
 }
 
 pub struct MainApp<StdErr> {
     client: Mutex<Client>,
-    stderr: StdErr,
-    stderr_color: bool,
-    cargo: String,
+    queuer: JobQueuer<StdErr>,
 }
 
 impl<StdErr> MainApp<StdErr> {
     fn new(client: Mutex<Client>, cargo: String, stderr: StdErr, stderr_color: bool) -> Self {
         Self {
             client,
-            stderr,
-            stderr_color,
-            cargo,
+            queuer: JobQueuer::new(cargo, stderr, stderr_color),
         }
     }
 }
@@ -130,21 +144,14 @@ impl<StdErr: io::Write> MainApp<StdErr> {
         ProgressIndicatorT: ProgressIndicator,
         Term: TermLike + Clone + 'static,
     {
-        let tracker = Arc::new(JobStatusTracker::default());
         let width = term.width() as usize;
         let prog = prog_factory(term.clone());
+        let tracker = self.queuer.tracker.clone();
 
         prog.run(self.client, |client, bar_scope| {
-            queue_jobs_and_wait(
-                client,
-                tracker.clone(),
-                &self.cargo,
-                width,
-                bar_scope.clone(),
-                self.stderr,
-                self.stderr_color,
-                |num_jobs| bar_scope.update_length(num_jobs),
-            )
+            let cb = |num_jobs| bar_scope.update_length(num_jobs);
+            self.queuer
+                .queue_jobs_and_wait(client, width, bar_scope.clone(), cb)
         })?;
 
         tracker.print_summary(width, term)?;
