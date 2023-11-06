@@ -93,21 +93,11 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
         let mut result_details: Option<String> = None;
         match result {
             JobResult::Ran { status, stderr, .. } => {
-                match stderr {
-                    JobOutputResult::None => {}
-                    JobOutputResult::Inline(bytes) => {
-                        self.ind.eprintln(String::from_utf8_lossy(&bytes));
-                    }
-                    JobOutputResult::Truncated { first, truncated } => {
-                        self.ind.eprintln(String::from_utf8_lossy(&first));
-                        self.ind.eprintln(format!(
-                            "job {cjid}: stderr truncated, {truncated} bytes lost"
-                        ));
-                    }
-                }
+                let mut job_failed = true;
                 match status {
                     JobStatus::Exited(code) => {
                         result_str = if code == 0 {
+                            job_failed = false;
                             "OK".green()
                         } else {
                             "FAIL".red()
@@ -122,6 +112,20 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                             .job_exited(self.case.clone(), ExitCode::FAILURE);
                     }
                 };
+                if job_failed {
+                    match stderr {
+                        JobOutputResult::None => {}
+                        JobOutputResult::Inline(bytes) => {
+                            self.ind.eprintln(String::from_utf8_lossy(&bytes));
+                        }
+                        JobOutputResult::Truncated { first, truncated } => {
+                            self.ind.eprintln(String::from_utf8_lossy(&first));
+                            self.ind.eprintln(format!(
+                                "job {cjid}: stderr truncated, {truncated} bytes lost"
+                            ));
+                        }
+                    }
+                }
             }
             JobResult::ExecutionError(err) => {
                 result_str = "ERR".yellow();
