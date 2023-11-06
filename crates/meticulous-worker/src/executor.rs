@@ -261,9 +261,20 @@ impl Executor {
         let mut exec_result_buf = vec![];
         try_system_error!(File::from(exec_result_read_fd).read_to_end(&mut exec_result_buf));
         if !exec_result_buf.is_empty() {
-            return StartResult::ExecutionError(anyhow!("exec-ing job's process: {}", unsafe {
-                String::from_utf8_unchecked(exec_result_buf)
-            }));
+            return StartResult::ExecutionError(anyhow!(
+                "exec-ing job's process: {}",
+                match meticulous_worker_child::Error::try_from(exec_result_buf.as_slice()) {
+                    Err(err) => {
+                        err
+                    }
+                    Ok(meticulous_worker_child::Error::Errno(errno)) => {
+                        Errno::from_i32(errno).desc()
+                    }
+                    Ok(meticulous_worker_child::Error::BufferTooSmall) => {
+                        "buffer_to_small"
+                    }
+                }
+            ));
         }
 
         // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
