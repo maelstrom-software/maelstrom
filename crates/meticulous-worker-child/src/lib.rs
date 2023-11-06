@@ -2,7 +2,6 @@ use anyhow::Result;
 use meticulous_base::JobDetails;
 use nix::{
     errno::Errno,
-    unistd::{Gid, Uid},
 };
 use std::{
     ffi::{CString, c_int},
@@ -13,13 +12,19 @@ use std::{
     ptr,
 };
 
+// These might not work for all linux architectures. We can fix them as we add more architectures.
+#[allow(non_camel_case_types)]
+pub type uid_t = u32;
+#[allow(non_camel_case_types)]
+pub type gid_t = u32;
+
 /// The guts of the child code. This function can return a [`Result`].
 fn start_and_exec_in_child_inner(
     details: &JobDetails,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
-    parent_uid: Uid,
-    parent_gid: Gid,
+    parent_uid: uid_t,
+    parent_gid: gid_t,
 ) -> Result<()> {
     fs::write("/proc/self/setgroups", "deny\n")?;
     fs::write("/proc/self/uid_map", format!("0 {} 1\n", parent_uid))?;
@@ -59,6 +64,7 @@ fn start_and_exec_in_child_inner(
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
+#[allow(clippy::too_many_arguments)]
 pub fn start_and_exec_in_child(
     details: &JobDetails,
     _stdout_read_fd: c_int,
@@ -67,8 +73,8 @@ pub fn start_and_exec_in_child(
     stderr_write_fd: c_int,
     _exec_result_read_fd: c_int,
     exec_result_write_fd: c_int,
-    parent_uid: Uid,
-    parent_gid: Gid,
+    parent_uid: uid_t,
+    parent_gid: gid_t,
 ) -> ! {
     // TODO: https://github.com/meticulous-software/meticulous/issues/47
     //

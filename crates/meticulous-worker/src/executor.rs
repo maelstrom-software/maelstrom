@@ -214,8 +214,8 @@ impl Executor {
                 stderr_write_fd.into_raw_fd(),
                 exec_result_read_fd.into_raw_fd(),
                 exec_result_write_fd.into_raw_fd(),
-                self.uid,
-                self.gid,
+                self.uid.as_raw(),
+                self.gid.as_raw(),
             );
         }
 
