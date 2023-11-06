@@ -91,6 +91,7 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
     pub fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
+        let mut test_output_lines: Vec<String> = vec![];
         match result {
             JobResult::Ran { status, stderr, .. } => {
                 let mut job_failed = true;
@@ -116,11 +117,11 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                     match stderr {
                         JobOutputResult::None => {}
                         JobOutputResult::Inline(bytes) => {
-                            self.ind.eprintln(String::from_utf8_lossy(&bytes));
+                            test_output_lines.push(String::from_utf8_lossy(&bytes).into());
                         }
                         JobOutputResult::Truncated { first, truncated } => {
-                            self.ind.eprintln(String::from_utf8_lossy(&first));
-                            self.ind.eprintln(format!(
+                            test_output_lines.push(String::from_utf8_lossy(&first).into());
+                            test_output_lines.push(format!(
                                 "job {cjid}: stderr truncated, {truncated} bytes lost"
                             ));
                         }
@@ -167,6 +168,9 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
         }
         if let Some(details_str) = result_details {
             self.ind.println(details_str);
+        }
+        for line in test_output_lines {
+            self.ind.eprintln(line);
         }
         self.ind.job_finished();
         Ok(())

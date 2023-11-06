@@ -239,17 +239,17 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
 }
 
 #[test]
-fn failed_test() {
+fn failed_tests() {
     let fake_tests = FakeTests {
         tests: vec!["foo".into(), "bar".into()],
     };
     assert_eq!(
         run_failed_tests(fake_tests),
         "\
-        stderr: error output\n\
         foo test_it...................................FAIL\n\
         stderr: error output\n\
         bar test_it...................................FAIL\n\
+        stderr: error output\n\
         all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
