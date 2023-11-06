@@ -33,23 +33,28 @@ fn start_and_exec_in_child_inner(
     parent_gid: gid_t,
 ) -> Result<()> {
     write_file("/proc/self/setgroups", "deny\n")?;
-    write_file("/proc/self/uid_map", format!("0 {} 1\n", parent_uid).as_str())?;
-    write_file("/proc/self/gid_map", format!("0 {} 1\n", parent_gid).as_str())?;
+    write_file(
+        "/proc/self/uid_map",
+        format!("0 {} 1\n", parent_uid).as_str(),
+    )?;
+    write_file(
+        "/proc/self/gid_map",
+        format!("0 {} 1\n", parent_gid).as_str(),
+    )?;
     unsafe { nc::setsid() }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stdout_write_fd, 1) }.map_err(Errno::from_i32)?;
     unsafe { nc::dup2(stderr_write_fd, 2) }.map_err(Errno::from_i32)?;
     unsafe { nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC) }.map_err(Errno::from_i32)?;
-    match unsafe {
+    unsafe {
         nc::syscalls::syscall3(
             nc::SYS_EXECVE,
             program as usize,
             argv as usize,
             env as usize,
         )
-    } {
-        Err(errno) => Err(Errno::from_i32(errno).into()),
-        Ok(_) => unreachable!(),
     }
+    .map_err(Errno::from_i32)?;
+    unreachable!();
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
