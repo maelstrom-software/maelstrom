@@ -1,7 +1,5 @@
-use anyhow::{Error, Result};
-use cargo_metadata::{
-    Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
-};
+use anyhow::Result;
+use cargo::{get_cases_from_binary, CargoBuild};
 use clap::Parser;
 use colored::{ColoredString, Colorize as _};
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -10,13 +8,11 @@ use meticulous_base::{
 };
 use meticulous_client::Client;
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
-use regex::Regex;
 use std::io::IsTerminal as _;
 use std::{
     collections::HashMap,
-    io::{self, BufReader},
+    io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
-    process::{Child, ChildStdout, Command, Stdio},
     str,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,6 +22,8 @@ use std::{
 };
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
+
+mod cargo;
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -62,82 +60,6 @@ struct MetestCli {
 #[derive(Debug, clap::Subcommand)]
 enum Subcommand {
     Metest(MetestCli),
-}
-
-struct CargoBuild {
-    child: Child,
-}
-
-impl CargoBuild {
-    fn new() -> Result<Self> {
-        let color = std::io::stderr().is_terminal();
-        let child = Command::new("cargo")
-            .arg("test")
-            .arg("--no-run")
-            .arg("--message-format=json-render-diagnostics")
-            .arg(&format!(
-                "--color={}",
-                if color { "always" } else { "never" }
-            ))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        Ok(Self { child })
-    }
-
-    fn artifact_stream(&mut self) -> TestArtifactStream {
-        TestArtifactStream {
-            stream: CargoMessage::parse_stream(BufReader::new(self.child.stdout.take().unwrap())),
-        }
-    }
-
-    fn check_status(mut self) -> Result<()> {
-        let exit_status = self.child.wait()?;
-        if !exit_status.success() {
-            std::io::copy(
-                self.child.stderr.as_mut().unwrap(),
-                &mut std::io::stderr().lock(),
-            )?;
-            return Err(Error::msg("build failure".to_string()));
-        }
-
-        Ok(())
-    }
-}
-
-struct TestArtifactStream {
-    stream: CargoMessageIter<BufReader<ChildStdout>>,
-}
-
-impl Iterator for TestArtifactStream {
-    type Item = Result<CargoArtifact>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.stream.next()? {
-                Err(e) => return Some(Err(e.into())),
-                Ok(CargoMessage::CompilerArtifact(artifact)) => {
-                    if artifact.executable.is_some() && artifact.profile.test {
-                        return Some(Ok(artifact));
-                    }
-                }
-                _ => continue,
-            }
-        }
-    }
-}
-
-fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
-    let output = Command::new(binary)
-        .arg("--list")
-        .arg("--format")
-        .arg("terse")
-        .output()?;
-    Ok(Regex::new(r"\b([^ ]*): test")?
-        .captures_iter(str::from_utf8(&output.stdout)?)
-        .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
-        .collect())
 }
 
 trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
