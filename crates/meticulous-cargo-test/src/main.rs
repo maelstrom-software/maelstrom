@@ -63,6 +63,7 @@ enum Subcommand {
 fn queue_jobs_and_wait<ProgressIndicatorT>(
     client: &Mutex<Client>,
     tracker: Arc<JobStatusTracker>,
+    cargo: &str,
     width: usize,
     ind: ProgressIndicatorT,
     stderr: impl io::Write,
@@ -73,7 +74,7 @@ where
     ProgressIndicatorT: ProgressIndicatorScope,
 {
     let mut total_jobs = 0;
-    let mut cargo_build = CargoBuild::new(stderr_color)?;
+    let mut cargo_build = CargoBuild::new(cargo, stderr_color)?;
 
     for artifact in cargo_build.artifact_stream() {
         let artifact = artifact?;
@@ -105,14 +106,16 @@ pub struct MainApp<StdErr> {
     client: Mutex<Client>,
     stderr: StdErr,
     stderr_color: bool,
+    cargo: String,
 }
 
 impl<StdErr> MainApp<StdErr> {
-    fn new(client: Mutex<Client>, stderr: StdErr, stderr_color: bool) -> Self {
+    fn new(client: Mutex<Client>, cargo: String, stderr: StdErr, stderr_color: bool) -> Self {
         Self {
             client,
             stderr,
             stderr_color,
+            cargo,
         }
     }
 }
@@ -135,6 +138,7 @@ impl<StdErr: io::Write> MainApp<StdErr> {
             queue_jobs_and_wait(
                 client,
                 tracker.clone(),
+                &self.cargo,
                 width,
                 bar_scope.clone(),
                 self.stderr,
@@ -167,6 +171,7 @@ pub fn main() -> Result<ExitCode> {
     let client = Mutex::new(Client::new(cli_options.broker)?);
     let app = MainApp::new(
         client,
+        "cargo".into(),
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
     );
@@ -180,3 +185,6 @@ fn test_cli() {
     use clap::CommandFactory;
     Cli::command().debug_assert()
 }
+
+#[cfg(test)]
+mod integration_test;

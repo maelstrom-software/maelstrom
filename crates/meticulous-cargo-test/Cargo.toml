@@ -18,6 +18,10 @@ serde_json = { workspace = true }
 unicode-truncate = { workspace = true }
 unicode-width = { workspace = true }
 
+[dev-dependencies]
+meticulous-broker = { path = "../meticulous-broker" }
+meticulous-worker = { path = "../meticulous-worker" }
+
 [[bin]]
 name = "cargo-metest"
 path = "src/main.rs"

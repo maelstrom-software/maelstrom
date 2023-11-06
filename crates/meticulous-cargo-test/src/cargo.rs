@@ -15,8 +15,8 @@ pub struct CargoBuild {
 }
 
 impl CargoBuild {
-    pub fn new(color: bool) -> Result<Self> {
-        let child = Command::new("cargo")
+    pub fn new(program: &str, color: bool) -> Result<Self> {
+        let child = Command::new(program)
             .arg("test")
             .arg("--no-run")
             .arg("--message-format=json-render-diagnostics")
