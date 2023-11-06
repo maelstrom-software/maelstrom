@@ -2003,13 +2003,13 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "colored",
+ "console",
  "indicatif",
  "meticulous-base",
  "meticulous-client",
  "meticulous-util",
  "regex",
  "serde_json",
- "term_size",
  "unicode-truncate",
  "unicode-width",
 ]
@@ -3161,16 +3161,6 @@ checksum = "c59df8ac95d96ff9bede18eb7300b0fda5e5d8d90960e76f8e14ae765eedbf1f"
 dependencies = [
  "dirs-next",
  "rustversion",
- "winapi",
-]
-
-[[package]]
-name = "term_size"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e4129646ca0ed8f45d09b929036bafad5377103edd06e50bf574b353d2b08d9"
-dependencies = [
- "libc",
  "winapi",
 ]
 

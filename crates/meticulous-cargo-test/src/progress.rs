@@ -1,6 +1,6 @@
 use anyhow::Result;
 use colored::Colorize as _;
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
 use meticulous_base::stats::JobState;
 use meticulous_client::Client;
 use std::{
@@ -64,8 +64,9 @@ pub struct MultipleProgressBars {
 }
 
 impl MultipleProgressBars {
-    pub fn new() -> Self {
+    pub fn new(term: impl TermLike + 'static) -> Self {
         let multi_bar = MultiProgress::new();
+        multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
         let build_spinner =
             multi_bar.add(ProgressBar::new_spinner().with_message("building artifacts..."));
         build_spinner.enable_steady_tick(Duration::from_millis(500));
@@ -75,7 +76,6 @@ impl MultipleProgressBars {
             let bar = multi_bar.add(make_progress_bar(color, state.to_string(), 21));
             bars.insert(state, bar);
         }
-        multi_bar.set_draw_target(ProgressDrawTarget::stdout());
         Self {
             scope: ProgressBarsScope { bars },
             build_spinner,
@@ -164,10 +164,10 @@ pub struct QuietProgressBar {
 }
 
 impl QuietProgressBar {
-    pub fn new() -> Self {
-        Self {
-            bar: make_progress_bar("white", "jobs", 4),
-        }
+    pub fn new(term: impl TermLike + 'static) -> Self {
+        let bar = make_progress_bar("white", "jobs", 4);
+        bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
+        Self { bar }
     }
 }
 
@@ -200,15 +200,20 @@ impl ProgressIndicatorScope for QuietProgressBar {
 }
 
 #[derive(Clone)]
-pub struct QuietNoBar;
+pub struct QuietNoBar<Term> {
+    term: Term,
+}
 
-impl QuietNoBar {
-    pub fn new() -> Self {
-        Self
+impl<Term> QuietNoBar<Term> {
+    pub fn new(term: Term) -> Self {
+        Self { term }
     }
 }
 
-impl ProgressIndicator for QuietNoBar {
+impl<Term> ProgressIndicator for QuietNoBar<Term>
+where
+    Term: TermLike + Clone + Send + Sync + 'static,
+{
     type Scope = Self;
 
     fn run(
@@ -218,12 +223,16 @@ impl ProgressIndicator for QuietNoBar {
     ) -> Result<()> {
         let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
-        println!("all jobs completed");
+        self.term.write_line("all jobs completed")?;
+        self.term.flush()?;
         res
     }
 }
 
-impl ProgressIndicatorScope for QuietNoBar {
+impl<Term> ProgressIndicatorScope for QuietNoBar<Term>
+where
+    Term: Clone + Send + Sync + 'static,
+{
     fn println(&self, _msg: String) {
         // quiet mode doesn't print anything
     }
@@ -238,15 +247,20 @@ impl ProgressIndicatorScope for QuietNoBar {
 }
 
 #[derive(Clone)]
-pub struct NoBar;
+pub struct NoBar<Term> {
+    term: Term,
+}
 
-impl NoBar {
-    pub fn new() -> Self {
-        Self
+impl<Term> NoBar<Term> {
+    pub fn new(term: Term) -> Self {
+        Self { term }
     }
 }
 
-impl ProgressIndicator for NoBar {
+impl<Term> ProgressIndicator for NoBar<Term>
+where
+    Term: TermLike + Clone + Send + Sync + 'static,
+{
     type Scope = Self;
 
     fn run(
@@ -256,14 +270,18 @@ impl ProgressIndicator for NoBar {
     ) -> Result<()> {
         let res = body(&client, &self);
         client.into_inner().unwrap().wait_for_outstanding_jobs()?;
-        println!("all jobs completed");
+        self.term.write_line("all jobs completed")?;
+        self.term.flush()?;
         res
     }
 }
 
-impl ProgressIndicatorScope for NoBar {
+impl<Term> ProgressIndicatorScope for NoBar<Term>
+where
+    Term: TermLike + Clone + Send + Sync + 'static,
+{
     fn println(&self, msg: String) {
-        println!("{}", msg);
+        self.term.write_line(&msg).ok();
     }
 
     fn job_finished(&self) {

@@ -1,6 +1,8 @@
 use anyhow::Result;
 use cargo::{get_cases_from_binary, CargoBuild};
 use clap::Parser;
+use console::Term;
+use indicatif::TermLike;
 use meticulous_base::JobDetails;
 use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
@@ -61,7 +63,7 @@ enum Subcommand {
 fn queue_jobs_and_wait<ProgressIndicatorT>(
     client: &Mutex<Client>,
     tracker: Arc<JobStatusTracker>,
-    width: Option<usize>,
+    width: usize,
     ind: ProgressIndicatorT,
     stderr: impl io::Write,
     stderr_color: bool,
@@ -116,12 +118,18 @@ impl<StdErr> MainApp<StdErr> {
 }
 
 impl<StdErr: io::Write> MainApp<StdErr> {
-    fn run_with_progress<ProgressIndicatorT: ProgressIndicator>(
+    fn run_with_progress<ProgressIndicatorT, Term>(
         self,
-        prog: ProgressIndicatorT,
-    ) -> Result<ExitCode> {
+        prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
+        term: Term,
+    ) -> Result<ExitCode>
+    where
+        ProgressIndicatorT: ProgressIndicator,
+        Term: TermLike + Clone + 'static,
+    {
         let tracker = Arc::new(JobStatusTracker::default());
-        let width = term_size::dimensions().map(|(w, _)| w);
+        let width = term.width() as usize;
+        let prog = prog_factory(term.clone());
 
         prog.run(self.client, |client, bar_scope| {
             queue_jobs_and_wait(
@@ -135,16 +143,19 @@ impl<StdErr: io::Write> MainApp<StdErr> {
             )
         })?;
 
-        tracker.print_summary(width);
+        tracker.print_summary(width, term)?;
         Ok(tracker.exit_code())
     }
 
-    fn run(self, stdout_tty: bool, quiet: bool) -> Result<ExitCode> {
+    fn run<Term>(self, stdout_tty: bool, quiet: bool, term: Term) -> Result<ExitCode>
+    where
+        Term: TermLike + Clone + Send + Sync + 'static,
+    {
         match (stdout_tty, quiet) {
-            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new())?),
-            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new())?),
-            (false, true) => Ok(self.run_with_progress(QuietNoBar::new())?),
-            (false, false) => Ok(self.run_with_progress(NoBar::new())?),
+            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term)?),
+            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term)?),
+            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term)?),
+            (false, false) => Ok(self.run_with_progress(NoBar::new, term)?),
         }
     }
 }
@@ -161,7 +172,7 @@ pub fn main() -> Result<ExitCode> {
     );
 
     let stdout_tty = std::io::stdout().is_terminal();
-    app.run(stdout_tty, cli_options.quiet)
+    app.run(stdout_tty, cli_options.quiet, Term::buffered_stdout())
 }
 
 #[test]

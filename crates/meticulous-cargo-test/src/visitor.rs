@@ -1,6 +1,7 @@
 use crate::ProgressIndicatorScope;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
+use indicatif::TermLike;
 use meticulous_base::{ClientJobId, JobOutputResult, JobResult, JobStatus};
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Mutex};
@@ -20,15 +21,15 @@ impl JobStatusTracker {
         self.exit_code.add(exit_code);
     }
 
-    pub fn print_summary(&self, width: Option<usize>) {
-        println!();
-        let width = width.unwrap_or(80);
+    pub fn print_summary(&self, width: usize, term: impl TermLike) -> Result<()> {
+        term.write_line("")?;
+
         let heading = " Test Summary ";
         let equal_width = (width - heading.width()) / 2;
-        println!(
+        term.write_line(&format!(
             "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
             empty = ""
-        );
+        ))?;
 
         let success = "Successful Tests";
         let failure = "Failed Tests";
@@ -41,18 +42,21 @@ impl JobStatusTracker {
         let num_failed = failed.clone().count();
         let num_succeeded = statuses.len() - num_failed;
 
-        println!(
+        term.write_line(&format!(
             "{:<column1_width$}: {num_succeeded:>max_digits$}",
             success.green(),
-        );
-        println!(
+        ))?;
+        term.write_line(&format!(
             "{:<column1_width$}: {num_failed:>max_digits$}",
             failure.red(),
-        );
+        ))?;
         let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
         for (failed, _) in failed {
-            println!("    {failed:<failed_width$}: {}", "failure".red());
+            term.write_line(&format!("    {failed:<failed_width$}: {}", "failure".red()))?;
         }
+
+        term.flush()?;
+        Ok(())
     }
 
     pub fn exit_code(&self) -> ExitCode {
@@ -63,7 +67,7 @@ impl JobStatusTracker {
 pub struct JobStatusVisitor<ProgressIndicatorT> {
     tracker: Arc<JobStatusTracker>,
     case: String,
-    width: Option<usize>,
+    width: usize,
     ind: ProgressIndicatorT,
 }
 
@@ -71,7 +75,7 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     pub fn new(
         tracker: Arc<JobStatusTracker>,
         case: String,
-        width: Option<usize>,
+        width: usize,
         ind: ProgressIndicatorT,
     ) -> Self {
         Self {
@@ -132,32 +136,30 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
         }
-        match self.width {
-            Some(width) if width > 10 => {
-                let case_width = self.case.width();
-                let result_width = result_str.width();
-                if case_width + result_width < width {
-                    let dots_width = width - result_width - case_width;
-                    let case = self.case.bold();
-                    self.ind.println(format!(
-                        "{case}{empty:.<dots_width$}{result_str}",
-                        empty = ""
-                    ));
-                } else {
-                    let (case, case_width) =
-                        self.case.unicode_truncate_start(width - 2 - result_width);
-                    let case = case.bold();
-                    let dots_width = width - result_width - case_width - 1;
-                    self.ind.println(format!(
-                        "<{case}{empty:.<dots_width$}{result_str}",
-                        empty = ""
-                    ));
-                }
+        if self.width > 10 {
+            let case_width = self.case.width();
+            let result_width = result_str.width();
+            if case_width + result_width < self.width {
+                let dots_width = self.width - result_width - case_width;
+                let case = self.case.bold();
+                self.ind.println(format!(
+                    "{case}{empty:.<dots_width$}{result_str}",
+                    empty = ""
+                ));
+            } else {
+                let (case, case_width) = self
+                    .case
+                    .unicode_truncate_start(self.width - 2 - result_width);
+                let case = case.bold();
+                let dots_width = self.width - result_width - case_width - 1;
+                self.ind.println(format!(
+                    "<{case}{empty:.<dots_width$}{result_str}",
+                    empty = ""
+                ));
             }
-            _ => {
-                self.ind
-                    .println(format!("{case} {result_str}", case = self.case));
-            }
+        } else {
+            self.ind
+                .println(format!("{case} {result_str}", case = self.case));
         }
         if let Some(details_str) = result_details {
             self.ind.println(details_str);
