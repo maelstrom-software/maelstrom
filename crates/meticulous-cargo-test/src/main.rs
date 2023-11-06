@@ -1,13 +1,11 @@
 use anyhow::Result;
 use cargo::{get_cases_from_binary, CargoBuild};
 use clap::Parser;
-use colored::{ColoredString, Colorize as _};
+use colored::Colorize as _;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle};
-use meticulous_base::{
-    stats::JobState, ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus,
-};
+use meticulous_base::{stats::JobState, JobDetails};
 use meticulous_client::Client;
-use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
+use meticulous_util::process::ExitCode;
 use std::io::IsTerminal as _;
 use std::{
     collections::HashMap,
@@ -20,10 +18,11 @@ use std::{
     },
     time::Duration,
 };
-use unicode_truncate::UnicodeTruncateStr as _;
-use unicode_width::UnicodeWidthStr as _;
+
+use visitor::{JobStatusTracker, JobStatusVisitor};
 
 mod cargo;
+mod visitor;
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -62,7 +61,7 @@ enum Subcommand {
     Metest(MetestCli),
 }
 
-trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
+pub trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
 
@@ -91,162 +90,6 @@ trait ProgressIndicator {
         client: Mutex<Client>,
         body: impl FnOnce(&Mutex<Client>, &Self::Scope) -> Result<()>,
     ) -> Result<()>;
-}
-
-#[derive(Default)]
-struct JobStatusTracker {
-    statuses: Mutex<Vec<(String, ExitCode)>>,
-    exit_code: ExitCodeAccumulator,
-}
-
-impl JobStatusTracker {
-    fn job_exited(&self, case: String, exit_code: ExitCode) {
-        let mut statuses = self.statuses.lock().unwrap();
-        statuses.push((case, exit_code));
-        self.exit_code.add(exit_code);
-    }
-
-    fn print_summary(&self, width: Option<usize>) {
-        println!();
-        let width = width.unwrap_or(80);
-        let heading = " Test Summary ";
-        let equal_width = (width - heading.width()) / 2;
-        println!(
-            "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
-            empty = ""
-        );
-
-        let success = "Successful Tests";
-        let failure = "Failed Tests";
-        let column1_width = std::cmp::max(success.width(), failure.width());
-        let max_digits = 9;
-        let statuses = self.statuses.lock().unwrap();
-        let failed = statuses
-            .iter()
-            .filter(|(_, exit_code)| exit_code != &ExitCode::SUCCESS);
-        let num_failed = failed.clone().count();
-        let num_succeeded = statuses.len() - num_failed;
-
-        println!(
-            "{:<column1_width$}: {num_succeeded:>max_digits$}",
-            success.green(),
-        );
-        println!(
-            "{:<column1_width$}: {num_failed:>max_digits$}",
-            failure.red(),
-        );
-        let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
-        for (failed, _) in failed {
-            println!("    {failed:<failed_width$}: {}", "failure".red());
-        }
-    }
-}
-
-struct JobStatusVisitor<ProgressIndicatorT> {
-    tracker: Arc<JobStatusTracker>,
-    case: String,
-    width: Option<usize>,
-    ind: ProgressIndicatorT,
-}
-
-impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
-    fn new(
-        tracker: Arc<JobStatusTracker>,
-        case: String,
-        width: Option<usize>,
-        ind: ProgressIndicatorT,
-    ) -> Self {
-        Self {
-            tracker,
-            case,
-            width,
-            ind,
-        }
-    }
-}
-
-impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndicatorT> {
-    fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
-        let result_str: ColoredString;
-        let mut result_details: Option<String> = None;
-        match result {
-            JobResult::Ran { status, stderr, .. } => {
-                match stderr {
-                    JobOutputResult::None => {}
-                    JobOutputResult::Inline(bytes) => {
-                        self.ind.eprintln(String::from_utf8_lossy(&bytes));
-                    }
-                    JobOutputResult::Truncated { first, truncated } => {
-                        self.ind.eprintln(String::from_utf8_lossy(&first));
-                        self.ind.eprintln(format!(
-                            "job {cjid}: stderr truncated, {truncated} bytes lost"
-                        ));
-                    }
-                }
-                match status {
-                    JobStatus::Exited(code) => {
-                        result_str = if code == 0 {
-                            "OK".green()
-                        } else {
-                            "FAIL".red()
-                        };
-                        self.tracker
-                            .job_exited(self.case.clone(), ExitCode::from(code));
-                    }
-                    JobStatus::Signalled(signo) => {
-                        result_str = "FAIL".red();
-                        result_details = Some(format!("killed by signal {signo}"));
-                        self.tracker
-                            .job_exited(self.case.clone(), ExitCode::FAILURE);
-                    }
-                };
-            }
-            JobResult::ExecutionError(err) => {
-                result_str = "ERR".yellow();
-                result_details = Some(format!("execution error: {err}"));
-                self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
-            }
-            JobResult::SystemError(err) => {
-                result_str = "ERR".yellow();
-                result_details = Some(format!("system error: {err}"));
-                self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
-            }
-        }
-        match self.width {
-            Some(width) if width > 10 => {
-                let case_width = self.case.width();
-                let result_width = result_str.width();
-                if case_width + result_width < width {
-                    let dots_width = width - result_width - case_width;
-                    let case = self.case.bold();
-                    self.ind.println(format!(
-                        "{case}{empty:.<dots_width$}{result_str}",
-                        empty = ""
-                    ));
-                } else {
-                    let (case, case_width) =
-                        self.case.unicode_truncate_start(width - 2 - result_width);
-                    let case = case.bold();
-                    let dots_width = width - result_width - case_width - 1;
-                    self.ind.println(format!(
-                        "<{case}{empty:.<dots_width$}{result_str}",
-                        empty = ""
-                    ));
-                }
-            }
-            _ => {
-                self.ind
-                    .println(format!("{case} {result_str}", case = self.case));
-            }
-        }
-        if let Some(details_str) = result_details {
-            self.ind.println(details_str);
-        }
-        self.ind.job_finished();
-        Ok(())
-    }
 }
 
 //                      waiting for artifacts, pending, running, complete
@@ -537,7 +380,7 @@ fn main_with_progress<ProgressIndicatorT: ProgressIndicator>(
     })?;
 
     tracker.print_summary(width);
-    Ok(tracker.exit_code.get())
+    Ok(tracker.exit_code())
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
