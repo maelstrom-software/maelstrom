@@ -3,7 +3,7 @@
 use core::{
     ffi::c_int,
     fmt::{self, Write as _},
-    result,
+    mem, result, slice, str,
 };
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
@@ -28,7 +28,7 @@ impl<const N: usize> Default for Buf<N> {
 
 impl<const N: usize> Buf<N> {
     unsafe fn write_to_fd(&self, fd: i32) -> Result<()> {
-        nc::write(fd, self.buf.as_ptr() as usize, self.used).map_err(Error::SystemErrno)?;
+        nc::write(fd, self.buf.as_ptr() as usize, self.used).map_system_errno("write")?;
         Ok(())
     }
 
@@ -51,8 +51,8 @@ impl<const N: usize> fmt::Write for Buf<N> {
 
 #[derive(Debug)]
 pub enum Error {
-    ExecutionErrno(i32),
-    SystemErrno(i32),
+    ExecutionErrno(i32, &'static str),
+    SystemErrno(i32, &'static str),
     BufferTooSmall,
 }
 
@@ -62,18 +62,29 @@ impl From<fmt::Error> for Error {
     }
 }
 
+fn encode_errno_error<const N: usize>(
+    code: u8,
+    errno: i32,
+    context: &'static str,
+    buf: &mut Buf<N>,
+) -> Result<()> {
+    buf.append([code; 1].as_slice())?;
+    buf.append(errno.to_ne_bytes().as_slice())?;
+    buf.append((context.as_ptr() as usize).to_ne_bytes().as_slice())?;
+    buf.append(context.len().to_ne_bytes().as_slice())?;
+    Ok(())
+}
+
 impl<const N: usize> TryFrom<Error> for Buf<N> {
     type Error = Error;
     fn try_from(err: Error) -> Result<Buf<N>> {
         let mut buf = Buf::<N>::default();
         match err {
-            Error::ExecutionErrno(errno) => {
-                buf.append([0u8; 1].as_slice())?;
-                buf.append(errno.to_ne_bytes().as_slice())?;
+            Error::ExecutionErrno(errno, context) => {
+                encode_errno_error(0, errno, context, &mut buf)?;
             }
-            Error::SystemErrno(errno) => {
-                buf.append([1u8; 1].as_slice())?;
-                buf.append(errno.to_ne_bytes().as_slice())?;
+            Error::SystemErrno(errno, context) => {
+                encode_errno_error(1, errno, context, &mut buf)?;
             }
             Error::BufferTooSmall => {
                 buf.append([2u8; 1].as_slice())?;
@@ -81,6 +92,38 @@ impl<const N: usize> TryFrom<Error> for Buf<N> {
         }
         Ok(buf)
     }
+}
+
+fn decode_errno_error(
+    constructor: impl Fn(i32, &'static str) -> Error,
+    buf: &[u8],
+    cursor: &mut usize,
+) -> result::Result<Error, &'static str> {
+    if *cursor + 4 > buf.len() {
+        return Err("not enough bytes for errno");
+    }
+    let errno = i32::from_ne_bytes(buf[*cursor..*cursor + 4].try_into().unwrap());
+    *cursor += 4;
+
+    let usize_size = mem::size_of::<usize>();
+    if *cursor + usize_size > buf.len() {
+        return Err("not enough bytes for context pointer");
+    }
+    let context_ptr =
+        usize::from_ne_bytes(buf[*cursor..*cursor + usize_size].try_into().unwrap()) as *const u8;
+    *cursor += usize_size;
+
+    if *cursor + usize_size > buf.len() {
+        return Err("not enough bytes for context length");
+    }
+    let context_len = usize::from_ne_bytes(buf[*cursor..*cursor + usize_size].try_into().unwrap());
+    *cursor += usize_size;
+
+    let context = unsafe {
+        str::from_utf8_unchecked(slice::from_raw_parts::<'static>(context_ptr, context_len))
+    };
+
+    Ok(constructor(errno, context))
 }
 
 impl TryFrom<&[u8]> for Error {
@@ -93,22 +136,8 @@ impl TryFrom<&[u8]> for Error {
         let t = buf[cursor];
         cursor += 1;
         let error = match t {
-            0 => {
-                if cursor + 4 > buf.len() {
-                    return Err("not enough bytes for errno");
-                }
-                let errno = i32::from_ne_bytes(buf[cursor..cursor + 4].try_into().unwrap());
-                cursor += 4;
-                Error::ExecutionErrno(errno)
-            }
-            1 => {
-                if cursor + 4 > buf.len() {
-                    return Err("not enough bytes for errno");
-                }
-                let errno = i32::from_ne_bytes(buf[cursor..cursor + 4].try_into().unwrap());
-                cursor += 4;
-                Error::SystemErrno(errno)
-            }
+            0 => decode_errno_error(Error::ExecutionErrno, buf, &mut cursor)?,
+            1 => decode_errno_error(Error::SystemErrno, buf, &mut cursor)?,
             2 => Error::BufferTooSmall,
             _ => {
                 return Err("bad type byte");
@@ -124,6 +153,27 @@ impl TryFrom<&[u8]> for Error {
 
 type Result<T> = result::Result<T, Error>;
 
+trait ErrnoExt<T> {
+    fn map_execution_errno(self, context: &'static str) -> Result<T>;
+    fn map_system_errno(self, context: &'static str) -> Result<T>;
+}
+
+impl<T> ErrnoExt<T> for result::Result<T, nc::Errno> {
+    fn map_execution_errno(self, context: &'static str) -> Result<T> {
+        match self {
+            Ok(val) => Ok(val),
+            Err(errno) => Err(Error::ExecutionErrno(errno, context)),
+        }
+    }
+
+    fn map_system_errno(self, context: &'static str) -> Result<T> {
+        match self {
+            Ok(val) => Ok(val),
+            Err(errno) => Err(Error::SystemErrno(errno, context)),
+        }
+    }
+}
+
 // path must be NUL-terminated
 unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32, nc::Errno> {
     assert!(!path.is_empty() && path[path.len() - 1] == 0u8);
@@ -135,11 +185,11 @@ unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32,
 
 // path must be NUL-terminated
 unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Result<()> {
-    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0).map_err(Error::SystemErrno)?;
+    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0).map_system_errno("opening file to write")?;
     let mut buf: Buf<N> = Buf::default();
     buf.write_fmt(args)?;
     buf.write_to_fd(fd)?;
-    nc::close(fd).map_err(Error::SystemErrno)?;
+    nc::close(fd).map_system_errno("closing file file descriptor")?;
     Ok(())
 }
 
@@ -164,17 +214,17 @@ unsafe fn start_and_exec_in_child_inner(
         b"/proc/self/gid_map\0",
         format_args!("0 {} 1\n", parent_gid),
     )?;
-    nc::setsid().map_err(Error::SystemErrno)?;
-    nc::dup2(stdout_write_fd, 1).map_err(Error::SystemErrno)?;
-    nc::dup2(stderr_write_fd, 2).map_err(Error::SystemErrno)?;
-    nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_err(Error::SystemErrno)?;
+    nc::setsid().map_system_errno("setsid")?;
+    nc::dup2(stdout_write_fd, 1).map_system_errno("dup2 to stdout")?;
+    nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
+    nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
         program as *const u8 as usize,
         argv.as_ptr() as usize,
         env.as_ptr() as usize,
     )
-    .map_err(Error::ExecutionErrno)?;
+    .map_execution_errno("execve")?;
     unreachable!();
 }
 

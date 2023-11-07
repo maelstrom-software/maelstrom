@@ -266,15 +266,18 @@ impl Executor {
                 Err(err) => {
                     StartResult::SystemError(anyhow!("parsing exec result pipe's contents: {err}"))
                 }
-                Ok(meticulous_worker_child::Error::ExecutionErrno(errno)) => {
+                Ok(meticulous_worker_child::Error::ExecutionErrno(errno, context)) => {
                     StartResult::ExecutionError(anyhow!(
-                        "executing job's process: {}",
+                        "executing job's process: {context}: {}",
                         Errno::from_i32(errno).desc()
                     ))
                 }
-                Ok(meticulous_worker_child::Error::SystemErrno(errno)) => StartResult::SystemError(
-                    anyhow!("executing job's process: {}", Errno::from_i32(errno).desc()),
-                ),
+                Ok(meticulous_worker_child::Error::SystemErrno(errno, context)) => {
+                    StartResult::SystemError(anyhow!(
+                        "executing job's process: {context}: {}",
+                        Errno::from_i32(errno).desc()
+                    ))
+                }
                 Ok(meticulous_worker_child::Error::BufferTooSmall) => {
                     StartResult::SystemError(anyhow!("executing job's process: buffer too small"))
                 }
