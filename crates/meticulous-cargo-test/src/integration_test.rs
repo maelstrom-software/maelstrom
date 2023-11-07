@@ -5,11 +5,12 @@ use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
-    JobOutputResult, JobResult, JobStatus,
+    JobDetails, JobOutputResult, JobResult, JobStatus,
 };
 use meticulous_client::Client;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6, TcpListener, TcpStream};
@@ -19,12 +20,18 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::{tempdir, TempDir};
 
+fn put_file(path: &Path, contents: &str) {
+    let mut f = File::create(path).unwrap();
+    f.write_all(contents.as_bytes()).unwrap();
+}
+
 fn put_script(path: &Path, contents: &str) {
     let mut f = File::create(path).unwrap();
     f.write_all(
         format!(
             "#!/bin/bash
             set -e
+            set -o pipefail
             {contents}
             "
         )
@@ -37,46 +44,62 @@ fn put_script(path: &Path, contents: &str) {
     f.set_permissions(perms).unwrap();
 }
 
-fn generate_fake_cargo(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
-    let cargo_path = tmp_dir.path().join("cargo");
+// XXX remi: This is a total hack to get around isolation issues
+const PATH: &'static str = env!("PATH");
+const HOME: &'static str = env!("HOME");
 
-    let mut json = String::new();
-    for name in &fake_tests.tests {
-        let executable_path = tmp_dir.path().join(name);
-        let test = serde_json::json!({
-            "reason": "compiler-artifact",
-            "package_id": format!("{name} 0.1.0 (path+file:///{name})"),
-            "manifest_path": format!("/{name}/Cargo.toml"),
-            "target": {
-                "name": &name,
-                "kind": ["lib"],
-                "crate_types": ["lib"],
-                "required_features": [],
-                "src_path": format!("/{name}/src/lib.rs"),
-                "edition": "2021",
-                "doctest": true,
-                "test": true,
-                "doc": true,
-            },
-            "profile": {
-                "opt_level": "0",
-                "debuginfo": 2,
-                "debug_assertions": false,
-                "overflow_checks": true,
-                "test": true,
-            },
-            "features": [],
-            "filenames": [&executable_path],
-            "executable": &executable_path,
-            "fresh": true,
-        });
-
-        json += &serde_json::to_string(&test).unwrap();
-        json += "\n";
-
-        put_script(&executable_path, &format!("echo 'test_it: test'"));
+fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
+    let workspace_dir = tmp_dir.path().join("workspace");
+    std::fs::create_dir(&workspace_dir).unwrap();
+    let cargo_path = workspace_dir.join("cargo");
+    put_script(
+        &cargo_path,
+        &format!(
+            "\
+            cd {workspace_dir:?}\n\
+            export HOME={HOME}
+            export PATH={PATH}
+            cargo $@ | sort\n\
+            "
+        ),
+    );
+    put_file(
+        &workspace_dir.join("Cargo.toml"),
+        "\
+        [workspace]\n\
+        members = [ \"crates/*\"]
+        ",
+    );
+    let crates_dir = workspace_dir.join("crates");
+    std::fs::create_dir(&crates_dir).unwrap();
+    for binary in &fake_tests.test_binaries {
+        let crate_name = &binary.name;
+        let project_dir = crates_dir.join(&crate_name);
+        std::fs::create_dir(&project_dir).unwrap();
+        put_file(
+            &project_dir.join("Cargo.toml"),
+            &format!(
+                "\
+                [package]\n\
+                name = \"{crate_name}\"\n\
+                version = \"0.1.0\"\n\
+                [lib]\n\
+                ",
+            ),
+        );
+        let src_dir = project_dir.join("src");
+        std::fs::create_dir(&src_dir).unwrap();
+        let mut test_src = String::new();
+        for test_name in &binary.tests {
+            test_src += &format!(
+                "\
+                #[test]\n\
+                fn {test_name}() {{}}\n\
+                ",
+            );
+        }
+        put_file(&src_dir.join("lib.rs"), &test_src);
     }
-    put_script(&cargo_path, &format!("echo '{json}'"));
 
     cargo_path.display().to_string()
 }
@@ -101,6 +124,26 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
     stream.write_all(&buf[..]).unwrap();
 }
 
+fn test_path(details: &JobDetails) -> TestPath {
+    let binary = details
+        .program
+        .split("/")
+        .last()
+        .unwrap()
+        .split("-")
+        .next()
+        .unwrap()
+        .into();
+    let test_name = details
+        .arguments
+        .iter()
+        .filter(|a| !a.starts_with("-"))
+        .next()
+        .unwrap()
+        .clone();
+    TestPath { binary, test_name }
+}
+
 fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
     let (stream, _) = listener.accept().unwrap();
     let mut messages = MessageStream { stream: &stream };
@@ -110,8 +153,9 @@ fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
 
     while let Ok(msg) = messages.next::<ClientToBroker>() {
         match msg {
-            ClientToBroker::JobRequest(id, _details) => {
-                if let Some(res) = state.job_responses.pop() {
+            ClientToBroker::JobRequest(id, details) => {
+                let test_path = test_path(&details);
+                if let Some(res) = state.job_responses.remove(&test_path) {
                     send_message(&stream, &BrokerToClient::JobResponse(id, res))
                 }
             }
@@ -127,7 +171,7 @@ fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
 
 #[derive(Default)]
 struct BrokerState {
-    job_responses: Vec<JobResult>,
+    job_responses: HashMap<TestPath, JobResult>,
     job_states: JobStateCounts,
 }
 
@@ -139,35 +183,80 @@ fn fake_broker(state: BrokerState) -> SocketAddr {
     broker_address
 }
 
-struct FakeTests {
+struct FakeTestBinary {
+    name: String,
     tests: Vec<String>,
+}
+
+struct FakeTests {
+    test_binaries: Vec<FakeTestBinary>,
+}
+
+#[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+struct TestPath {
+    binary: String,
+    test_name: String,
+}
+
+impl FakeTests {
+    fn all_tests(&self) -> impl Iterator<Item = TestPath> + '_ {
+        self.test_binaries
+            .iter()
+            .map(|b| {
+                b.tests.iter().map(|t| TestPath {
+                    binary: b.name.clone(),
+                    test_name: t.into(),
+                })
+            })
+            .flatten()
+    }
+}
+
+fn run_app(term: InMemoryTerm, state: BrokerState, cargo: String, stdout_tty: bool, quiet: bool) {
+    let broker_address = fake_broker(state);
+    let client = Mutex::new(Client::new(broker_address).unwrap());
+
+    let mut stderr = vec![];
+    let app = MainApp::new(client, cargo, None, &mut stderr, false);
+    app.run(stdout_tty, quiet, term.clone())
+        .unwrap_or_else(|e| {
+            panic!(
+                "err = {e:?} stderr = {}",
+                String::from_utf8_lossy(&stderr[..])
+            )
+        });
 }
 
 fn run_complete_test(fake_tests: FakeTests, quiet: bool) -> String {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for _ in 0..100 {
-        state.job_responses.push(JobResult::Ran {
-            status: JobStatus::Exited(0),
-            stdout: JobOutputResult::None,
-            stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
-        })
+    for test in fake_tests.all_tests() {
+        state.job_responses.insert(
+            test.clone(),
+            JobResult::Ran {
+                status: JobStatus::Exited(0),
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
+            },
+        );
     }
-    let broker_address = fake_broker(state);
-    let client = Mutex::new(Client::new(broker_address).unwrap());
 
-    let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
+    let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    app.run(false, quiet, term.clone()).unwrap();
+    run_app(term.clone(), state, cargo, false, quiet);
 
     term.contents()
 }
 
 #[test]
 fn no_tests_complete() {
-    let fake_tests = FakeTests { tests: vec![] };
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![],
+        }],
+    };
     assert_eq!(
         run_complete_test(fake_tests, false),
         "\
@@ -183,13 +272,22 @@ fn no_tests_complete() {
 #[test]
 fn two_tests_complete() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     assert_eq!(
         run_complete_test(fake_tests, false),
         "\
-        foo test_it.....................................OK\n\
         bar test_it.....................................OK\n\
+        foo test_it.....................................OK\n\
         all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
@@ -202,7 +300,16 @@ fn two_tests_complete() {
 #[test]
 fn two_tests_complete_quiet() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     assert_eq!(
         run_complete_test(fake_tests, true),
@@ -220,20 +327,20 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for _ in 0..100 {
-        state.job_responses.push(JobResult::Ran {
-            status: JobStatus::Exited(1),
-            stdout: JobOutputResult::None,
-            stderr: JobOutputResult::Inline(Box::new(*b"error output")),
-        })
+    for test in fake_tests.all_tests() {
+        state.job_responses.insert(
+            test.clone(),
+            JobResult::Ran {
+                status: JobStatus::Exited(1),
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::Inline(Box::new(*b"error output")),
+            },
+        );
     }
-    let broker_address = fake_broker(state);
-    let client = Mutex::new(Client::new(broker_address).unwrap());
 
-    let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
+    let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    app.run(false, false, term.clone()).unwrap();
+    run_app(term.clone(), state, cargo, false, false);
 
     term.contents()
 }
@@ -241,22 +348,31 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
 #[test]
 fn failed_tests() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     assert_eq!(
         run_failed_tests(fake_tests),
         "\
-        foo test_it...................................FAIL\n\
-        stderr: error output\n\
         bar test_it...................................FAIL\n\
+        stderr: error output\n\
+        foo test_it...................................FAIL\n\
         stderr: error output\n\
         all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         0\n\
         Failed Tests    :         2\n\
-        \x20\x20\x20\x20foo test_it: failure\n\
-        \x20\x20\x20\x20bar test_it: failure\
+        \x20\x20\x20\x20bar test_it: failure\n\
+        \x20\x20\x20\x20foo test_it: failure\
         "
     );
 }
@@ -265,27 +381,30 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for _ in 0..job_states[JobState::Complete] {
-        state.job_responses.push(JobResult::Ran {
-            status: JobStatus::Exited(0),
-            stdout: JobOutputResult::None,
-            stderr: JobOutputResult::None,
-        })
+    for test in fake_tests
+        .all_tests()
+        .take(job_states[JobState::Complete] as usize)
+    {
+        state.job_responses.insert(
+            test.clone(),
+            JobResult::Ran {
+                status: JobStatus::Exited(0),
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+            },
+        );
     }
     state.job_states = job_states;
-    let broker_address = fake_broker(state);
-    let client = Mutex::new(Client::new(broker_address).unwrap());
 
-    let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
+    let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
-    std::thread::spawn(move || app.run(true, quiet, term_clone).unwrap());
+    std::thread::spawn(move || run_app(term_clone, state, cargo, true, quiet));
 
     // wait until contents settles
     let mut last_contents = String::new();
     loop {
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(Duration::from_millis(550));
         let new_contents = term.contents();
         if new_contents == last_contents {
             return new_contents;
@@ -297,7 +416,16 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
 #[test]
 fn waiting_for_artifacts() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     let state = enum_map! {
         JobState::WaitingForArtifacts => 2,
@@ -319,7 +447,16 @@ fn waiting_for_artifacts() {
 #[test]
 fn pending() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     let state = enum_map! {
         JobState::WaitingForArtifacts => 0,
@@ -341,7 +478,16 @@ fn pending() {
 #[test]
 fn running() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     let state = enum_map! {
         JobState::WaitingForArtifacts => 0,
@@ -363,7 +509,16 @@ fn running() {
 #[test]
 fn complete() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     let state = enum_map! {
         JobState::WaitingForArtifacts => 0,
@@ -386,7 +541,16 @@ fn complete() {
 #[test]
 fn complete_quiet() {
     let fake_tests = FakeTests {
-        tests: vec!["foo".into(), "bar".into()],
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+        ],
     };
     let state = enum_map! {
         JobState::WaitingForArtifacts => 0,
