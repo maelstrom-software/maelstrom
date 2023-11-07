@@ -222,26 +222,25 @@ impl Executor {
         if child_pid == 0 {
             // This is the child process.
             //
-            // N.B. We have to be cognizant of the fact that anything multi-threaded is likely to be
+            // N.B. We have to be cognizant of the fact that anything multi-threaded is 
             // broken in here, and we will likely deadlock if we do anything that attempts to acquire a
-            // lock. So, no use of println!, eprintln!, tokio, etc.
-            //
-            // We forget all of the fds instead of closing the ones we don't need. This saves us some
-            // syscalls. We're going to set all fds other than stdin, stdout, and stderr as
-            // exec-on-close. Then, we're going to exec and let the kernel handle the closing for us.
-            meticulous_worker_child::start_and_exec_in_child(
-                program_ptr as *const c_char,
-                argv_ptr as *const *const c_char,
-                env_ptr as *const *const c_char,
-                stdout_read_fd.into_raw_fd(),
-                stdout_write_fd.into_raw_fd(),
-                stderr_read_fd.into_raw_fd(),
-                stderr_write_fd.into_raw_fd(),
-                exec_result_read_fd.into_raw_fd(),
-                exec_result_write_fd.into_raw_fd(),
-                self.uid.as_raw(),
-                self.gid.as_raw(),
-            );
+            // lock. So, no use of alloc, println!, eprintln!, tokio, etc. That's why the function
+            // we're calling lives in a separate, no_std, crate.
+            unsafe {
+                meticulous_worker_child::start_and_exec_in_child(
+                    program_ptr as *const c_char,
+                    argv_ptr as *const *const c_char,
+                    env_ptr as *const *const c_char,
+                    stdout_read_fd.into_raw_fd(),
+                    stdout_write_fd.into_raw_fd(),
+                    stderr_read_fd.into_raw_fd(),
+                    stderr_write_fd.into_raw_fd(),
+                    exec_result_read_fd.into_raw_fd(),
+                    exec_result_write_fd.into_raw_fd(),
+                    self.uid.as_raw(),
+                    self.gid.as_raw(),
+                )
+            };
         }
 
         // At this point, it's still okay to return early in the parent. The child will continue to

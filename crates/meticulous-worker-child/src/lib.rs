@@ -115,17 +115,27 @@ impl TryFrom<&[u8]> for Error {
 
 type Result<T> = result::Result<T, Error>;
 
-fn write_file<const N: usize>(path: &str, args: fmt::Arguments) -> Result<()> {
-    let fd = unsafe { nc::open(path, nc::O_WRONLY | nc::O_TRUNC, 0) }?;
+// path must be NUL-terminated
+unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32, nc::Errno> {
+    assert!(path.len() > 0 && path[path.len() - 1] == 0u8);
+    let path = path.as_ptr() as usize;
+    let flags = flags as usize;
+    let mode = mode as usize;
+    nc::syscalls::syscall3(nc::SYS_OPEN, path, flags, mode).map(|ret| ret as i32)
+}
+
+// path must be NUL-terminated
+unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Result<()> {
+    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0)?;
     let mut buf: Buf<N> = Buf::default();
     buf.write_fmt(args)?;
-    unsafe { buf.write_to_fd(fd) }?;
-    unsafe { nc::close(fd) }?;
+    buf.write_to_fd(fd)?;
+    nc::close(fd)?;
     Ok(())
 }
 
 /// The guts of the child code. This function can return a [`Result`].
-fn start_and_exec_in_child_inner(
+unsafe fn start_and_exec_in_child_inner(
     program: *const c_char,
     argv: *const *const c_char,
     env: *const *const c_char,
@@ -134,36 +144,33 @@ fn start_and_exec_in_child_inner(
     parent_uid: uid_t,
     parent_gid: gid_t,
 ) -> Result<()> {
-    write_file::<5>("/proc/self/setgroups", format_args!("deny\n"))?;
+    write_file::<5>(b"/proc/self/setgroups\0", format_args!("deny\n"))?;
     //            '0' ' '  {}  ' ' '1' '\n'
     write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
-        //write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
-        "/proc/self/uid_map",
+        b"/proc/self/uid_map\0",
         format_args!("0 {} 1\n", parent_uid),
     )?;
     //            '0' ' '  {}  ' ' '1' '\n'
     write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
-        "/proc/self/gid_map",
+        b"/proc/self/gid_map\0",
         format_args!("0 {} 1\n", parent_gid),
     )?;
-    unsafe { nc::setsid() }?;
-    unsafe { nc::dup2(stdout_write_fd, 1) }?;
-    unsafe { nc::dup2(stderr_write_fd, 2) }?;
-    unsafe { nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC) }?;
-    unsafe {
-        nc::syscalls::syscall3(
-            nc::SYS_EXECVE,
-            program as usize,
-            argv as usize,
-            env as usize,
-        )
-    }?;
+    nc::setsid()?;
+    nc::dup2(stdout_write_fd, 1)?;
+    nc::dup2(stderr_write_fd, 2)?;
+    nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC)?;
+    nc::syscalls::syscall3(
+        nc::SYS_EXECVE,
+        program as usize,
+        argv as usize,
+        env as usize,
+    )?;
     unreachable!();
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
 #[allow(clippy::too_many_arguments)]
-pub fn start_and_exec_in_child(
+pub unsafe fn start_and_exec_in_child(
     program: *const c_char,
     argv: *const *const c_char,
     env: *const *const c_char,
@@ -192,6 +199,6 @@ pub fn start_and_exec_in_child(
         unreachable!();
     };
     let buf = Buf::<1024>::try_from(err).unwrap();
-    unsafe { buf.write_to_fd(exec_result_write_fd) }.unwrap();
-    unsafe { nc::exit(1) };
+    buf.write_to_fd(exec_result_write_fd).unwrap();
+    nc::exit(1);
 }
