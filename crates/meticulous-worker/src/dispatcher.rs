@@ -119,6 +119,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             awaiting_layers: HashMap::default(),
             queued: VecDeque::default(),
             executing: HashMap::default(),
+            executing_pids: HashMap::default(),
             canceled: HashMap::default(),
         }
     }
@@ -207,6 +208,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
     queued: VecDeque<(JobId, JobDetails, Vec<PathBuf>)>,
     executing: HashMap<JobId, ExecutingJob>,
+    executing_pids: HashMap<Pid, JobId>,
     canceled: HashMap<Pid, Vec<Sha256Digest>>,
 }
 
@@ -218,6 +220,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 StartJobResult::Ok(pid) => {
                     let executing_job = ExecutingJob::new(pid, details.layers);
                     self.executing.insert(jid, executing_job).assert_is_none();
+                    self.executing_pids.insert(pid, jid).assert_is_none();
                 }
                 StartJobResult::ExecutionError(e) => {
                     for digest in details.layers {
@@ -276,6 +279,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // However, we wait to release the layers until the job has terminated. If we didn't it
             // would be possible for us to try to remove a directory that was still in use, which
             // would fail.
+            self.executing_pids.remove(&pid).assert_is_some();
             self.deps.kill_job(pid);
             self.canceled.insert(pid, layers).assert_is_none();
             self.possibly_start_job();
@@ -307,6 +311,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         f(oe.get_mut());
         if oe.get().is_complete() {
             let (jid, entry) = oe.remove_entry();
+            self.executing_pids.remove(&entry.pid).assert_is_some();
             let status = entry.status.unwrap();
             let stdout = entry.stdout.unwrap();
             let stderr = entry.stderr.unwrap();
@@ -328,13 +333,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_pid_status(&mut self, pid: Pid, status: JobStatus) {
-        let target_jid =
-            self.executing
-                .iter()
-                .find_map(|(jid, entry)| if entry.pid == pid { Some(*jid) } else { None });
+        let target_jid = self.executing_pids.get(&pid);
         match target_jid {
             Some(jid) => {
-                self.update_entry_and_potentially_finish_job(jid, move |entry| {
+                self.update_entry_and_potentially_finish_job(*jid, move |entry| {
                     entry.status = Some(status)
                 });
             }
