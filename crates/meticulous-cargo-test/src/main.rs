@@ -51,8 +51,11 @@ struct MetestCli {
     /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
     #[arg(value_parser = parse_socket_addr)]
     broker: SocketAddr,
+    /// Don't output information about the tests being run
     #[arg(short, long)]
     quiet: bool,
+    /// Only run tests whose names contain the given string
+    filter: Option<String>,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -62,15 +65,17 @@ enum Subcommand {
 
 struct JobQueuer<StdErr> {
     cargo: String,
+    filter: Option<String>,
     stderr: StdErr,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
-    fn new(cargo: String, stderr: StdErr, stderr_color: bool) -> Self {
+    fn new(cargo: String, filter: Option<String>, stderr: StdErr, stderr_color: bool) -> Self {
         Self {
             cargo,
+            filter,
             stderr,
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
@@ -96,7 +101,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             let artifact = artifact?;
             let binary = artifact.executable.unwrap().to_string();
             let package_name = artifact.target.name;
-            for case in get_cases_from_binary(&binary)? {
+            for case in get_cases_from_binary(&binary, &self.filter)? {
                 total_jobs += 1;
                 cb(total_jobs);
 
@@ -126,10 +131,16 @@ pub struct MainApp<StdErr> {
 }
 
 impl<StdErr> MainApp<StdErr> {
-    fn new(client: Mutex<Client>, cargo: String, stderr: StdErr, stderr_color: bool) -> Self {
+    fn new(
+        client: Mutex<Client>,
+        cargo: String,
+        filter: Option<String>,
+        stderr: StdErr,
+        stderr_color: bool,
+    ) -> Self {
         Self {
             client,
-            queuer: JobQueuer::new(cargo, stderr, stderr_color),
+            queuer: JobQueuer::new(cargo, filter, stderr, stderr_color),
         }
     }
 }
@@ -179,6 +190,7 @@ pub fn main() -> Result<ExitCode> {
     let app = MainApp::new(
         client,
         "cargo".into(),
+        cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
     );

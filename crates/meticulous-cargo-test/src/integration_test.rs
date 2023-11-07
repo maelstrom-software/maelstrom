@@ -158,7 +158,7 @@ fn run_complete_test(fake_tests: FakeTests, quiet: bool) -> String {
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, std::io::sink(), false);
+    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
     let term = InMemoryTerm::new(50, 50);
     app.run(false, quiet, term.clone()).unwrap();
 
@@ -231,7 +231,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, std::io::sink(), false);
+    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
     let term = InMemoryTerm::new(50, 50);
     app.run(false, false, term.clone()).unwrap();
 
@@ -277,7 +277,7 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let cargo = generate_fake_cargo(&tmp_dir, &fake_tests);
-    let app = MainApp::new(client, cargo, std::io::sink(), false);
+    let app = MainApp::new(client, cargo, None, std::io::sink(), false);
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
     std::thread::spawn(move || app.run(true, quiet, term_clone).unwrap());

@@ -70,12 +70,13 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-pub fn get_cases_from_binary(binary: &str) -> Result<Vec<String>> {
-    let output = Command::new(binary)
-        .arg("--list")
-        .arg("--format")
-        .arg("terse")
-        .output()?;
+pub fn get_cases_from_binary(binary: &str, filter: &Option<String>) -> Result<Vec<String>> {
+    let mut cmd = Command::new(binary);
+    cmd.arg("--list").arg("--format").arg("terse");
+    if let Some(filter) = filter {
+        cmd.arg(filter);
+    }
+    let output = cmd.output()?;
     Ok(Regex::new(r"\b([^ ]*): test")?
         .captures_iter(str::from_utf8(&output.stdout)?)
         .map(|capture| capture.get(1).unwrap().as_str().trim().to_string())
