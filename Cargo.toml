@@ -47,7 +47,7 @@ meticulous-plot = { path = "crates/meticulous-plot" }
 meticulous-test = { path = "crates/meticulous-test" }
 meticulous-util = { path = "crates/meticulous-util" }
 meticulous-worker-child = { path = "crates/meticulous-worker-child" }
-nc = "0.8.18"
+nc = { version = "0.8.18", default-features = false }
 nix = { version = "0.26.2", features = ["signal"] }
 num_cpus = "1.15.0"
 rand = "0.8.5"
