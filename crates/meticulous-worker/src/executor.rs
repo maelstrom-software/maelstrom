@@ -10,13 +10,12 @@ use nix::{
     unistd::{self, Gid, Pid, Uid},
 };
 use std::{
-    ffi::{c_char, CString},
+    ffi::CString,
     fs::File,
     io::Read as _,
     iter, mem,
     os::fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
     pin::Pin,
-    ptr,
     task::{Context, Poll},
 };
 use tokio::{
@@ -181,24 +180,21 @@ impl Executor {
 
         // Set up the arguments to pass to the child process.
         let program = try_system_error!(CString::new(details.program.as_str()));
-        let program_ptr: *const u8 = program.as_bytes_with_nul().as_ptr();
         let arguments = try_system_error!(details
             .arguments
             .iter()
             .map(String::as_str)
             .map(CString::new)
             .collect::<Result<Vec<_>, _>>());
-        let argv = iter::once(program_ptr)
+        let argv = iter::once(Some(&program.as_c_str().to_bytes_with_nul()[0]))
             .chain(
                 arguments
                     .iter()
-                    .map(|cstr| cstr.as_bytes_with_nul().as_ptr()),
+                    .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0])),
             )
-            .chain(iter::once(ptr::null()))
+            .chain(iter::once(None))
             .collect::<Vec<_>>();
-        let argv_ptr: *const *const u8 = argv.as_ptr();
-        let env: [*const u8; 1] = [ptr::null()];
-        let env_ptr: *const *const u8 = env.as_ptr();
+        let env = [None];
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
@@ -221,7 +217,7 @@ impl Executor {
             };
         if child_pid == 0 {
             // This is the child process.
-            
+
             // WARNING: We have to be extremely careful to not call any library functions that may
             // block on another thread, like allocating memory. When a multi-threaded process is
             // cloned, only the calling process is cloned into the child. From the child's point of
@@ -237,9 +233,9 @@ impl Executor {
 
             unsafe {
                 meticulous_worker_child::start_and_exec_in_child(
-                    program_ptr as *const c_char,
-                    argv_ptr as *const *const c_char,
-                    env_ptr as *const *const c_char,
+                    &program.as_c_str().to_bytes_with_nul()[0],
+                    argv.as_slice(),
+                    env.as_slice(),
                     stdout_write_fd.into_raw_fd(),
                     stderr_write_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),

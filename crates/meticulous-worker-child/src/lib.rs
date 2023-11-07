@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::{
-    ffi::{c_char, c_int},
+    ffi::c_int,
     fmt::{self, Write as _},
     result,
 };
@@ -136,9 +136,9 @@ unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Resul
 
 /// The guts of the child code. This function can return a [`Result`].
 unsafe fn start_and_exec_in_child_inner(
-    program: *const c_char,
-    argv: *const *const c_char,
-    env: *const *const c_char,
+    program: &u8,
+    argv: &[Option<&u8>],
+    env: &[Option<&u8>],
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     parent_uid: uid_t,
@@ -161,9 +161,9 @@ unsafe fn start_and_exec_in_child_inner(
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC)?;
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
-        program as usize,
-        argv as usize,
-        env as usize,
+        program as *const u8 as usize,
+        argv.as_ptr() as usize,
+        env.as_ptr() as usize,
     )?;
     unreachable!();
 }
@@ -177,9 +177,9 @@ unsafe fn start_and_exec_in_child_inner(
 /// file descriptors must be valid, open file descriptors.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn start_and_exec_in_child(
-    program: *const c_char,
-    argv: *const *const c_char,
-    env: *const *const c_char,
+    program: &u8,
+    argv: &[Option<&u8>],
+    env: &[Option<&u8>],
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     exec_result_write_fd: c_int,
