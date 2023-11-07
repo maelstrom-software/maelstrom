@@ -221,21 +221,27 @@ impl Executor {
             };
         if child_pid == 0 {
             // This is the child process.
-            //
-            // N.B. We have to be cognizant of the fact that anything multi-threaded is
-            // broken in here, and we will likely deadlock if we do anything that attempts to acquire a
-            // lock. So, no use of alloc, println!, eprintln!, tokio, etc. That's why the function
-            // we're calling lives in a separate, no_std, crate.
+            
+            // WARNING: We have to be extremely careful to not call any library functions that may
+            // block on another thread, like allocating memory. When a multi-threaded process is
+            // cloned, only the calling process is cloned into the child. From the child's point of
+            // view, it's like those other threads just disappeared. If those threads held any
+            // locks at the point when the process was cloned, thos locks effectively become dead
+            // in the child. This means that the child has to assume that every lock is dead, and
+            // must not try to acquire them. This is why the function we're calling lives in a
+            // separate, no_std, crate.
+
+            // N.B. We don't close any file descriptors here, like stdout_read_fd, stderr_read_fd,
+            // and exec_result_read_fd, because they will automatically be closed when the child
+            // execs.
+
             unsafe {
                 meticulous_worker_child::start_and_exec_in_child(
                     program_ptr as *const c_char,
                     argv_ptr as *const *const c_char,
                     env_ptr as *const *const c_char,
-                    stdout_read_fd.into_raw_fd(),
                     stdout_write_fd.into_raw_fd(),
-                    stderr_read_fd.into_raw_fd(),
                     stderr_write_fd.into_raw_fd(),
-                    exec_result_read_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),
                     self.uid.as_raw(),
                     self.gid.as_raw(),
