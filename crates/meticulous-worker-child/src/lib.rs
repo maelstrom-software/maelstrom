@@ -117,7 +117,7 @@ type Result<T> = result::Result<T, Error>;
 
 // path must be NUL-terminated
 unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32, nc::Errno> {
-    assert!(path.len() > 0 && path[path.len() - 1] == 0u8);
+    assert!(!path.is_empty() && path[path.len() - 1] == 0u8);
     let path = path.as_ptr() as usize;
     let flags = flags as usize;
     let mode = mode as usize;
@@ -169,6 +169,12 @@ unsafe fn start_and_exec_in_child_inner(
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
+///
+/// # Safety
+///
+/// The provided `program` variable must be a NUL-terminated C-string. The `argv` and `env`
+/// variables must be NULL-terminated arrays of pointers to NUL-terminated C-strings. The provided
+/// file descriptors must be valid, open file descriptors.
 #[allow(clippy::too_many_arguments)]
 pub unsafe fn start_and_exec_in_child(
     program: *const c_char,

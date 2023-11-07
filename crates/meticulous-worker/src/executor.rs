@@ -222,7 +222,7 @@ impl Executor {
         if child_pid == 0 {
             // This is the child process.
             //
-            // N.B. We have to be cognizant of the fact that anything multi-threaded is 
+            // N.B. We have to be cognizant of the fact that anything multi-threaded is
             // broken in here, and we will likely deadlock if we do anything that attempts to acquire a
             // lock. So, no use of alloc, println!, eprintln!, tokio, etc. That's why the function
             // we're calling lives in a separate, no_std, crate.
