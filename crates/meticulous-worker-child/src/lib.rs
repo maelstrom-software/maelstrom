@@ -28,7 +28,7 @@ impl<const N: usize> Default for Buf<N> {
 
 impl<const N: usize> Buf<N> {
     unsafe fn write_to_fd(&self, fd: i32) -> Result<()> {
-        nc::write(fd, self.buf.as_ptr() as usize, self.used)?;
+        nc::write(fd, self.buf.as_ptr() as usize, self.used).map_err(Error::SystemErrno)?;
         Ok(())
     }
 
@@ -51,14 +51,9 @@ impl<const N: usize> fmt::Write for Buf<N> {
 
 #[derive(Debug)]
 pub enum Error {
-    Errno(i32),
+    ExecutionErrno(i32),
+    SystemErrno(i32),
     BufferTooSmall,
-}
-
-impl From<nc::Errno> for Error {
-    fn from(val: nc::Errno) -> Self {
-        Error::Errno(val)
-    }
 }
 
 impl From<fmt::Error> for Error {
@@ -72,12 +67,16 @@ impl<const N: usize> TryFrom<Error> for Buf<N> {
     fn try_from(err: Error) -> Result<Buf<N>> {
         let mut buf = Buf::<N>::default();
         match err {
-            Error::Errno(errno) => {
+            Error::ExecutionErrno(errno) => {
                 buf.append([0u8; 1].as_slice())?;
                 buf.append(errno.to_ne_bytes().as_slice())?;
             }
-            Error::BufferTooSmall => {
+            Error::SystemErrno(errno) => {
                 buf.append([1u8; 1].as_slice())?;
+                buf.append(errno.to_ne_bytes().as_slice())?;
+            }
+            Error::BufferTooSmall => {
+                buf.append([2u8; 1].as_slice())?;
             }
         }
         Ok(buf)
@@ -93,17 +92,27 @@ impl TryFrom<&[u8]> for Error {
         }
         let t = buf[cursor];
         cursor += 1;
-        let error = if t == 0 {
-            if cursor + 4 > buf.len() {
-                return Err("not enough bytes for errno");
+        let error = match t {
+            0 => {
+                if cursor + 4 > buf.len() {
+                    return Err("not enough bytes for errno");
+                }
+                let errno = i32::from_ne_bytes(buf[cursor..cursor + 4].try_into().unwrap());
+                cursor += 4;
+                Error::ExecutionErrno(errno)
             }
-            let errno = i32::from_ne_bytes(buf[cursor..cursor + 4].try_into().unwrap());
-            cursor += 4;
-            Error::Errno(errno)
-        } else if t == 1 {
-            Error::BufferTooSmall
-        } else {
-            return Err("bad type byte");
+            1 => {
+                if cursor + 4 > buf.len() {
+                    return Err("not enough bytes for errno");
+                }
+                let errno = i32::from_ne_bytes(buf[cursor..cursor + 4].try_into().unwrap());
+                cursor += 4;
+                Error::SystemErrno(errno)
+            }
+            2 => Error::BufferTooSmall,
+            _ => {
+                return Err("bad type byte");
+            }
         };
         if cursor != buf.len() {
             Err("unexpected trailing bytes")
@@ -126,11 +135,11 @@ unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32,
 
 // path must be NUL-terminated
 unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Result<()> {
-    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0)?;
+    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0).map_err(Error::SystemErrno)?;
     let mut buf: Buf<N> = Buf::default();
     buf.write_fmt(args)?;
     buf.write_to_fd(fd)?;
-    nc::close(fd)?;
+    nc::close(fd).map_err(Error::SystemErrno)?;
     Ok(())
 }
 
@@ -155,16 +164,17 @@ unsafe fn start_and_exec_in_child_inner(
         b"/proc/self/gid_map\0",
         format_args!("0 {} 1\n", parent_gid),
     )?;
-    nc::setsid()?;
-    nc::dup2(stdout_write_fd, 1)?;
-    nc::dup2(stderr_write_fd, 2)?;
-    nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC)?;
+    nc::setsid().map_err(Error::SystemErrno)?;
+    nc::dup2(stdout_write_fd, 1).map_err(Error::SystemErrno)?;
+    nc::dup2(stderr_write_fd, 2).map_err(Error::SystemErrno)?;
+    nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_err(Error::SystemErrno)?;
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
         program as *const u8 as usize,
         argv.as_ptr() as usize,
         env.as_ptr() as usize,
-    )?;
+    )
+    .map_err(Error::ExecutionErrno)?;
     unreachable!();
 }
 
