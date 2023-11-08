@@ -184,7 +184,19 @@ impl Executor {
             )
             .chain(iter::once(None))
             .collect::<Vec<_>>();
-        let env = [None];
+        let environment = details
+            .environment
+            .iter()
+            .map(String::as_str)
+            .map(CString::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let env = environment
+            .iter()
+            .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0]))
+            .chain(iter::once(None))
+            .collect::<Vec<_>>();
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
@@ -337,14 +349,17 @@ mod tests {
     use tokio::sync::oneshot;
 
     macro_rules! bash {
-        ($($tokens:expr),*) => {
+        ($cmd:literal) => {
+            bash!($cmd,)
+        };
+        ($cmd:literal, $($env:literal),*) => {
             JobDetails {
                 program: "/usr/bin/bash".to_string(),
                 arguments: vec![
                     "-c".to_string(),
-                    format!($($tokens),*),
+                    $cmd.to_string(),
                 ],
-                environment: vec![],
+                environment: vec![$($env.to_string()),*],
                 layers: vec![],
             }
         };
@@ -577,5 +592,18 @@ mod tests {
             Executor::default().start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
             Err(JobError::Execution(_))
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn environment() {
+        start_and_expect(
+            bash!("echo -n $FOO - $BAR", "FOO=3", "BAR=4"),
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"3 - 4")),
+            JobOutputResult::None,
+        )
+        .await;
     }
 }
