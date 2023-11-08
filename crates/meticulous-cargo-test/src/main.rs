@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use cargo::{get_cases_from_binary, CargoBuild};
 use clap::Parser;
 use console::Term;
@@ -54,6 +54,9 @@ struct MetestCli {
     /// Don't output information about the tests being run
     #[arg(short, long)]
     quiet: bool,
+    /// Only run tests from the given package
+    #[arg(short, long)]
+    package: Option<String>,
     /// Only run tests whose names contain the given string
     filter: Option<String>,
 }
@@ -65,6 +68,7 @@ enum Subcommand {
 
 struct JobQueuer<StdErr> {
     cargo: String,
+    package: Option<String>,
     filter: Option<String>,
     stderr: StdErr,
     stderr_color: bool,
@@ -72,9 +76,16 @@ struct JobQueuer<StdErr> {
 }
 
 impl<StdErr> JobQueuer<StdErr> {
-    fn new(cargo: String, filter: Option<String>, stderr: StdErr, stderr_color: bool) -> Self {
+    fn new(
+        cargo: String,
+        package: Option<String>,
+        filter: Option<String>,
+        stderr: StdErr,
+        stderr_color: bool,
+    ) -> Self {
         Self {
             cargo,
+            package,
             filter,
             stderr,
             stderr_color,
@@ -95,12 +106,22 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         ProgressIndicatorT: ProgressIndicatorScope,
     {
         let mut total_jobs = 0;
-        let mut cargo_build = CargoBuild::new(&self.cargo, self.stderr_color)?;
+        let mut cargo_build =
+            CargoBuild::new(&self.cargo, self.stderr_color, self.package.clone())?;
+
+        let mut package_match = false;
 
         for artifact in cargo_build.artifact_stream() {
             let artifact = artifact?;
+            let package_name = artifact.package_id.repr.split(" ").next().unwrap();
+            if let Some(package) = &self.package {
+                if &package_name != package {
+                    continue;
+                } else {
+                    package_match = true;
+                }
+            }
             let binary = artifact.executable.unwrap().to_string();
-            let package_name = artifact.target.name;
             for case in get_cases_from_binary(&binary, &self.filter)? {
                 total_jobs += 1;
                 cb(total_jobs);
@@ -121,6 +142,12 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
 
         cargo_build.check_status(self.stderr)?;
 
+        if let Some(package) = self.package {
+            if !package_match {
+                return Err(anyhow!("package {package:?} unknown"));
+            }
+        }
+
         Ok(())
     }
 }
@@ -134,13 +161,14 @@ impl<StdErr> MainApp<StdErr> {
     fn new(
         client: Mutex<Client>,
         cargo: String,
+        package: Option<String>,
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
     ) -> Self {
         Self {
             client,
-            queuer: JobQueuer::new(cargo, filter, stderr, stderr_color),
+            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color),
         }
     }
 }
@@ -190,6 +218,7 @@ pub fn main() -> Result<ExitCode> {
     let app = MainApp::new(
         client,
         "cargo".into(),
+        cli_options.package,
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),

@@ -15,9 +15,9 @@ pub struct CargoBuild {
 }
 
 impl CargoBuild {
-    pub fn new(program: &str, color: bool) -> Result<Self> {
-        let child = Command::new(program)
-            .arg("test")
+    pub fn new(program: &str, color: bool, package: Option<String>) -> Result<Self> {
+        let mut cmd = Command::new(program);
+        cmd.arg("test")
             .arg("--no-run")
             .arg("--message-format=json-render-diagnostics")
             .arg(&format!(
@@ -25,8 +25,13 @@ impl CargoBuild {
                 if color { "always" } else { "never" }
             ))
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
+            .stderr(Stdio::piped());
+
+        if let Some(package) = package {
+            cmd.arg("--package").arg(package);
+        }
+
+        let child = cmd.spawn()?;
 
         Ok(Self { child })
     }

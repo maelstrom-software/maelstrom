@@ -217,7 +217,7 @@ fn run_app(term: InMemoryTerm, state: BrokerState, cargo: String, stdout_tty: bo
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let mut stderr = vec![];
-    let app = MainApp::new(client, cargo, None, &mut stderr, false);
+    let app = MainApp::new(client, cargo, None, None, &mut stderr, false);
     app.run(stdout_tty, quiet, term.clone())
         .unwrap_or_else(|e| {
             panic!(
