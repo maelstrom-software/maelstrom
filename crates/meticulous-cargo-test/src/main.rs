@@ -10,6 +10,7 @@ use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
+use std::collections::HashSet;
 use std::io::IsTerminal as _;
 use std::{
     io::{self},
@@ -122,6 +123,10 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 }
             }
             let binary = artifact.executable.unwrap().to_string();
+            let ignored_cases: HashSet<_> =
+                get_cases_from_binary(&binary, &Some("--ignored".into()))?
+                    .into_iter()
+                    .collect();
             for case in get_cases_from_binary(&binary, &self.filter)? {
                 total_jobs += 1;
                 cb(total_jobs);
@@ -129,6 +134,11 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 let case_str = format!("{package_name} {case}");
                 let visitor =
                     JobStatusVisitor::new(self.tracker.clone(), case_str, width, ind.clone());
+
+                if ignored_cases.contains(&case) {
+                    visitor.job_ignored();
+                    continue;
+                }
                 client.lock().unwrap().add_job(
                     JobDetails {
                         program: binary.clone(),

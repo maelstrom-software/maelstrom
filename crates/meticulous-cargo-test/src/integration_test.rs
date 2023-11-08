@@ -90,10 +90,13 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
         let src_dir = project_dir.join("src");
         std::fs::create_dir(&src_dir).unwrap();
         let mut test_src = String::new();
-        for test_name in &binary.tests {
+        for test_case in &binary.tests {
+            let test_name = &test_case.name;
+            let ignored = if test_case.ignored { "#[ignore]" } else { "" };
             test_src += &format!(
                 "\
                 #[test]\n\
+                {ignored}\
                 fn {test_name}() {{}}\n\
                 ",
             );
@@ -155,8 +158,11 @@ fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
         match msg {
             ClientToBroker::JobRequest(id, details) => {
                 let test_path = test_path(&details);
-                if let Some(res) = state.job_responses.remove(&test_path) {
-                    send_message(&stream, &BrokerToClient::JobResponse(id, res))
+                match state.job_responses.remove(&test_path).unwrap() {
+                    JobAction::Respond(res) => {
+                        send_message(&stream, &BrokerToClient::JobResponse(id, res))
+                    }
+                    JobAction::Ignore => (),
                 }
             }
             ClientToBroker::JobStateCountsRequest => send_message(
@@ -169,9 +175,14 @@ fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
     }
 }
 
+enum JobAction {
+    Ignore,
+    Respond(JobResult),
+}
+
 #[derive(Default)]
 struct BrokerState {
-    job_responses: HashMap<TestPath, JobResult>,
+    job_responses: HashMap<TestPath, JobAction>,
     job_states: JobStateCounts,
 }
 
@@ -183,9 +194,16 @@ fn fake_broker(state: BrokerState) -> SocketAddr {
     broker_address
 }
 
+#[derive(Default)]
+struct FakeTestCase {
+    name: String,
+    ignored: bool,
+}
+
+#[derive(Default)]
 struct FakeTestBinary {
     name: String,
-    tests: Vec<String>,
+    tests: Vec<FakeTestCase>,
 }
 
 struct FakeTests {
@@ -203,9 +221,11 @@ impl FakeTests {
         self.test_binaries
             .iter()
             .map(|b| {
-                b.tests.iter().map(|t| TestPath {
-                    binary: b.name.clone(),
-                    test_name: t.into(),
+                b.tests.iter().filter_map(|t| {
+                    (!t.ignored).then(|| TestPath {
+                        binary: b.name.clone(),
+                        test_name: t.name.clone(),
+                    })
                 })
             })
             .flatten()
@@ -247,11 +267,11 @@ fn run_all_tests_sync(
     for test in fake_tests.all_tests() {
         state.job_responses.insert(
             test.clone(),
-            JobResult::Ran {
+            JobAction::Respond(JobResult::Ran {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
-            },
+            }),
         );
     }
 
@@ -288,11 +308,17 @@ fn two_tests_all_tests_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -316,15 +342,24 @@ fn three_tests_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "baz".into(),
-                tests: vec!["testy".into()],
+                tests: vec![FakeTestCase {
+                    name: "testy".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -348,15 +383,24 @@ fn three_tests_single_package_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "baz".into(),
-                tests: vec!["testy".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -379,15 +423,30 @@ fn three_tests_single_package_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into(), "testy".into()],
+                tests: vec![
+                    FakeTestCase {
+                        name: "test_it".into(),
+                        ..Default::default()
+                    },
+                    FakeTestCase {
+                        name: "testy".into(),
+                        ..Default::default()
+                    },
+                ],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "baz".into(),
-                tests: vec!["testy".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -410,16 +469,67 @@ fn three_tests_single_package_filtered_sync() {
 }
 
 #[test]
+fn ignored_test_sync() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ignored: true,
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    assert_eq!(
+        run_all_tests_sync(fake_tests, false, None, None),
+        "\
+        bar test_it.....................................OK\n\
+        foo test_it................................IGNORED\n\
+        baz test_it.....................................OK\n\
+        all jobs completed\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         2\n\
+        Failed Tests    :         0\n\
+        Ignored Tests   :         1\n\
+        \x20\x20\x20\x20foo test_it: ignored\
+        "
+    );
+}
+
+#[test]
 fn two_tests_all_tests_sync_quiet() {
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -442,11 +552,11 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     for test in fake_tests.all_tests() {
         state.job_responses.insert(
             test.clone(),
-            JobResult::Ran {
+            JobAction::Respond(JobResult::Ran {
                 status: JobStatus::Exited(1),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"error output")),
-            },
+            }),
         );
     }
 
@@ -463,11 +573,17 @@ fn failed_tests() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -499,12 +615,18 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     {
         state.job_responses.insert(
             test.clone(),
-            JobResult::Ran {
+            JobAction::Respond(JobResult::Ran {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
-            },
+            }),
         );
+    }
+    for test in fake_tests
+        .all_tests()
+        .skip(job_states[JobState::Complete] as usize)
+    {
+        state.job_responses.insert(test.clone(), JobAction::Ignore);
     }
     state.job_states = job_states;
 
@@ -518,6 +640,9 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     loop {
         std::thread::sleep(Duration::from_millis(550));
         let new_contents = term.contents();
+        if new_contents.is_empty() {
+            continue;
+        }
         if new_contents == last_contents {
             return new_contents;
         }
@@ -531,11 +656,17 @@ fn waiting_for_artifacts() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -562,11 +693,17 @@ fn pending() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -593,11 +730,17 @@ fn running() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -624,11 +767,17 @@ fn complete() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
@@ -656,11 +805,17 @@ fn complete_quiet() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
             FakeTestBinary {
                 name: "bar".into(),
-                tests: vec!["test_it".into()],
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
             },
         ],
     };
