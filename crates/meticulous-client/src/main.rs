@@ -39,6 +39,7 @@ fn parse_socket_addr(value: String) -> Result<SocketAddr> {
 struct JobDescription {
     program: String,
     arguments: Option<Vec<String>>,
+    environment: Option<Vec<String>>,
     layers: Option<Vec<String>>,
 }
 
@@ -119,7 +120,7 @@ fn main() -> Result<ExitCode> {
             JobDetails {
                 program: job.program,
                 arguments: job.arguments.unwrap_or(vec![]),
-                environment: vec![],
+                environment: job.environment.unwrap_or(vec![]),
                 layers,
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
