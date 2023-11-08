@@ -212,12 +212,20 @@ impl FakeTests {
     }
 }
 
-fn run_app(term: InMemoryTerm, state: BrokerState, cargo: String, stdout_tty: bool, quiet: bool) {
+fn run_app(
+    term: InMemoryTerm,
+    state: BrokerState,
+    cargo: String,
+    stdout_tty: bool,
+    quiet: bool,
+    package: Option<String>,
+    filter: Option<String>,
+) {
     let broker_address = fake_broker(state);
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let mut stderr = vec![];
-    let app = MainApp::new(client, cargo, None, None, &mut stderr, false);
+    let app = MainApp::new(client, cargo, package, filter, &mut stderr, false);
     app.run(stdout_tty, quiet, term.clone())
         .unwrap_or_else(|e| {
             panic!(
@@ -227,7 +235,12 @@ fn run_app(term: InMemoryTerm, state: BrokerState, cargo: String, stdout_tty: bo
         });
 }
 
-fn run_complete_test(fake_tests: FakeTests, quiet: bool) -> String {
+fn run_all_tests_sync(
+    fake_tests: FakeTests,
+    quiet: bool,
+    package: Option<String>,
+    filter: Option<String>,
+) -> String {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
@@ -244,13 +257,13 @@ fn run_complete_test(fake_tests: FakeTests, quiet: bool) -> String {
 
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    run_app(term.clone(), state, cargo, false, quiet);
+    run_app(term.clone(), state, cargo, false, quiet, package, filter);
 
     term.contents()
 }
 
 #[test]
-fn no_tests_complete() {
+fn no_tests_all_tests_sync() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
@@ -258,7 +271,7 @@ fn no_tests_complete() {
         }],
     };
     assert_eq!(
-        run_complete_test(fake_tests, false),
+        run_all_tests_sync(fake_tests, false, None, None),
         "\
         all jobs completed\n\
         \n\
@@ -270,7 +283,7 @@ fn no_tests_complete() {
 }
 
 #[test]
-fn two_tests_complete() {
+fn two_tests_all_tests_sync() {
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -284,7 +297,7 @@ fn two_tests_complete() {
         ],
     };
     assert_eq!(
-        run_complete_test(fake_tests, false),
+        run_all_tests_sync(fake_tests, false, None, None),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -298,7 +311,106 @@ fn two_tests_complete() {
 }
 
 #[test]
-fn two_tests_complete_quiet() {
+fn three_tests_filtered_sync() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec!["testy".into()],
+            },
+        ],
+    };
+    assert_eq!(
+        run_all_tests_sync(fake_tests, false, None, Some("test_it".into())),
+        "\
+        bar test_it.....................................OK\n\
+        foo test_it.....................................OK\n\
+        all jobs completed\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         2\n\
+        Failed Tests    :         0\
+        "
+    );
+}
+
+#[test]
+fn three_tests_single_package_sync() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec!["testy".into()],
+            },
+        ],
+    };
+    assert_eq!(
+        run_all_tests_sync(fake_tests, false, Some("foo".into()), None),
+        "\
+        foo test_it.....................................OK\n\
+        all jobs completed\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         1\n\
+        Failed Tests    :         0\
+        "
+    );
+}
+
+#[test]
+fn three_tests_single_package_filtered_sync() {
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec!["test_it".into(), "testy".into()],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec!["test_it".into()],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec!["testy".into()],
+            },
+        ],
+    };
+    assert_eq!(
+        run_all_tests_sync(
+            fake_tests,
+            false,
+            Some("foo".into()),
+            Some("test_it".into())
+        ),
+        "\
+        foo test_it.....................................OK\n\
+        all jobs completed\n\
+        \n\
+        ================== Test Summary ==================\n\
+        Successful Tests:         1\n\
+        Failed Tests    :         0\
+        "
+    );
+}
+
+#[test]
+fn two_tests_all_tests_sync_quiet() {
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -312,7 +424,7 @@ fn two_tests_complete_quiet() {
         ],
     };
     assert_eq!(
-        run_complete_test(fake_tests, true),
+        run_all_tests_sync(fake_tests, true, None, None),
         "\
         all jobs completed\n\
         \n\
@@ -340,7 +452,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
 
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    run_app(term.clone(), state, cargo, false, false);
+    run_app(term.clone(), state, cargo, false, false, None, None);
 
     term.contents()
 }
@@ -399,7 +511,7 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
-    std::thread::spawn(move || run_app(term_clone, state, cargo, true, quiet));
+    std::thread::spawn(move || run_app(term_clone, state, cargo, true, quiet, None, None));
 
     // wait until contents settles
     let mut last_contents = String::new();
