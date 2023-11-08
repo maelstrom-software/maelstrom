@@ -22,9 +22,9 @@ use nix::{
     sys::signal::{self, Signal},
     unistd::Pid,
 };
-use reaper::{ReaperDeps, ReaperInstruction};
+use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{path::PathBuf, process, thread};
+use std::{ops::ControlFlow, path::PathBuf, process, thread};
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -160,22 +160,22 @@ struct ReaperAdapter {
 }
 
 impl ReaperDeps for ReaperAdapter {
-    fn on_waitid_error(&mut self, err: Errno) -> ReaperInstruction {
+    fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()> {
         warn!(self.log, "waitid errored"; "err" => %err);
-        ReaperInstruction::Continue
+        ControlFlow::Continue(())
     }
-    fn on_dummy_child_termination(&mut self) -> ReaperInstruction {
+    fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
         panic!("dummy child process terminated");
     }
-    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ReaperInstruction {
+    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ControlFlow<()> {
         warn!(self.log, "unexpected return from waitid"; "pid" => %pid);
-        ReaperInstruction::Continue
+        ControlFlow::Continue(())
     }
-    fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ReaperInstruction {
+    fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
         debug!(self.log, "waitid returned"; "pid" => %pid, "status" => ?status);
         self.sender
             .send(Message::PidStatus(pid, status))
-            .map_or(ReaperInstruction::Stop, |_| ReaperInstruction::Continue)
+            .map_or(ControlFlow::Break(()), |_| ControlFlow::Continue(()))
     }
 }
 

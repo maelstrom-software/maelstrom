@@ -327,12 +327,13 @@ impl Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reaper::{self, ReaperDeps, ReaperInstruction};
+    use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
     use meticulous_base::JobStatus;
     use meticulous_test::boxed_u8;
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
+    use std::ops::ControlFlow;
     use tokio::sync::oneshot;
 
     macro_rules! bash {
@@ -373,21 +374,21 @@ mod tests {
     }
 
     impl ReaperDeps for &mut ReaperAdapter {
-        fn on_waitid_error(&mut self, err: Errno) -> ReaperInstruction {
+        fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()> {
             panic!("waitid error: {err}");
         }
-        fn on_dummy_child_termination(&mut self) -> ReaperInstruction {
+        fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
             panic!("dummy child panicked");
         }
-        fn on_unexpected_wait_code(&mut self, _pid: Pid) -> ReaperInstruction {
+        fn on_unexpected_wait_code(&mut self, _pid: Pid) -> ControlFlow<()> {
             panic!("unexpected wait code");
         }
-        fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ReaperInstruction {
+        fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
             if self.pid == pid {
                 self.result = Some(status);
-                ReaperInstruction::Stop
+                ControlFlow::Break(())
             } else {
-                ReaperInstruction::Continue
+                ControlFlow::Continue(())
             }
         }
     }

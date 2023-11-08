@@ -2,7 +2,7 @@ use anyhow::{Error, Result};
 use meticulous_base::JobStatus;
 use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
 use nix::{errno::Errno, unistd::Pid};
-use std::mem;
+use std::{mem, ops::ControlFlow};
 
 fn clip_to_u8(val: i32) -> u8 {
     if val < 0 || val > u8::MAX as i32 {
@@ -12,21 +12,16 @@ fn clip_to_u8(val: i32) -> u8 {
     }
 }
 
-pub enum ReaperInstruction {
-    Continue,
-    Stop,
-}
-
 pub trait ReaperDeps {
-    fn on_waitid_error(&mut self, err: Errno) -> ReaperInstruction;
-    fn on_dummy_child_termination(&mut self) -> ReaperInstruction;
-    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ReaperInstruction;
-    fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ReaperInstruction;
+    fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()>;
+    fn on_dummy_child_termination(&mut self) -> ControlFlow<()>;
+    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ControlFlow<()>;
+    fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()>;
 }
 
 pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
-    let mut instruction = ReaperInstruction::Continue;
-    while let ReaperInstruction::Continue = instruction {
+    let mut instruction = ControlFlow::Continue(());
+    while let ControlFlow::Continue(()) = instruction {
         let mut siginfo = nc::siginfo_t::default();
         let options = nc::WEXITED;
         let mut usage = nc::rusage_t::default();
