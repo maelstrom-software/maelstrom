@@ -77,32 +77,32 @@ macro_rules! details {
 #[macro_export]
 macro_rules! result {
     [1] => {
-        meticulous_base::JobResult::Ran{
+        Ok(meticulous_base::JobSuccess {
             status: meticulous_base::JobStatus::Exited(0),
             stdout: meticulous_base::JobOutputResult::None,
             stderr: meticulous_base::JobOutputResult::None,
-        }
+        })
     };
     [2] => {
-        meticulous_base::JobResult::Ran{
+        Ok(meticulous_base::JobSuccess {
             status: meticulous_base::JobStatus::Exited(1),
             stdout: meticulous_base::JobOutputResult::None,
             stderr: meticulous_base::JobOutputResult::None,
-        }
+        })
     };
     [3] => {
-        meticulous_base::JobResult::Ran{
+        Ok(meticulous_base::JobSuccess {
             status: meticulous_base::JobStatus::Signaled(15),
             stdout: meticulous_base::JobOutputResult::None,
             stderr: meticulous_base::JobOutputResult::None,
-        }
+        })
     };
     [$n:expr] => {
-        meticulous_base::JobResult::Ran{
+        Ok(meticulous_base::JobSuccess {
             status: meticulous_base::JobStatus::Exited($n),
             stdout: meticulous_base::JobOutputResult::None,
             stderr: meticulous_base::JobOutputResult::None,
-        }
+        })
     };
 }
 

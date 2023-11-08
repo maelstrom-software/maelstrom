@@ -2,7 +2,7 @@ use crate::ProgressIndicatorScope;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
-use meticulous_base::{ClientJobId, JobOutputResult, JobResult, JobStatus};
+use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Mutex};
 use unicode_truncate::UnicodeTruncateStr as _;
@@ -154,7 +154,7 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
         let mut result_details: Option<String> = None;
         let mut test_output_lines: Vec<String> = vec![];
         match result {
-            JobResult::Ran { status, stderr, .. } => {
+            Ok(JobSuccess { status, stderr, .. }) => {
                 let mut job_failed = true;
                 match status {
                     JobStatus::Exited(code) => {
@@ -189,13 +189,13 @@ impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndica
                     }
                 }
             }
-            JobResult::ExecutionError(err) => {
+            Err(JobError::Execution(err)) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
                 self.tracker
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
-            JobResult::SystemError(err) => {
+            Err(JobError::System(err)) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("system error: {err}"));
                 self.tracker

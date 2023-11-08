@@ -1,6 +1,8 @@
 use anyhow::Result;
 use clap::Parser;
-use meticulous_base::{ClientJobId, JobDetails, JobOutputResult, JobResult, JobStatus};
+use meticulous_base::{
+    ClientJobId, JobDetails, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess,
+};
 use meticulous_client::Client;
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use serde::Deserialize;
@@ -42,11 +44,11 @@ struct JobDescription {
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
     match result {
-        JobResult::Ran {
+        Ok(JobSuccess {
             status,
             stdout,
             stderr,
-        } => {
+        }) => {
             match stdout {
                 JobOutputResult::None => {}
                 JobOutputResult::Inline(bytes) => {
@@ -82,11 +84,11 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
                 }
             };
         }
-        JobResult::ExecutionError(err) => {
+        Err(JobError::Execution(err)) => {
             eprintln!("job {cjid}: execution error: {err}");
             accum.add(ExitCode::FAILURE);
         }
-        JobResult::SystemError(err) => {
+        Err(JobError::System(err)) => {
             eprintln!("job {cjid}: system error: {err}");
             accum.add(ExitCode::FAILURE);
         }

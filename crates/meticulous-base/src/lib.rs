@@ -108,27 +108,49 @@ impl Debug for JobOutputResult {
     }
 }
 
-/// All relevant information about the outcome of a job.
+/// The output of a job that was successfully executed. This doesn't mean that the client will be
+/// happy with the job's output. Maybe the job was killed by a signal, or it exited with an error
+/// status code. From our point of view, it doesn't matter. We ran the job until it was terminated,
+/// and gathered its output.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum JobResult {
-    /// The job was successfully executed.
-    Ran {
-        status: JobStatus,
-        stdout: JobOutputResult,
-        stderr: JobOutputResult,
-    },
+pub struct JobSuccess {
+    pub status: JobStatus,
+    pub stdout: JobOutputResult,
+    pub stderr: JobOutputResult,
+}
 
+/// A job failed to execute for some reason. We separate the universe of errors into "execution"
+/// errors and "system" errors.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum JobError<T> {
     /// There was something wrong with the job that made it unable to be executed. This error
     /// indicates that there was something wrong with the job itself, and thus is obstensibly the
     /// fault of the client. An error of this type might happen if the execution path wasn't found, or
     /// if the binary couldn't be executed because it was for the wrong architecture.
-    ExecutionError(String),
+    Execution(T),
 
     /// There was something wrong with the system that made it impossible to execute the job. There
     /// isn't anything different the client could do to mitigate this error. An error of this type
     /// might happen if the broker ran out of disk space, or there was a software error.
-    SystemError(String),
+    System(T),
 }
+
+impl<T> JobError<T> {
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> JobError<U> {
+        match self {
+            JobError::Execution(e) => JobError::Execution(f(e)),
+            JobError::System(e) => JobError::System(f(e)),
+        }
+    }
+}
+
+/// A common Result type in the worker. We don't go with [`JobResult`] because that name is already
+/// taken to refer to something more common.
+pub type JobErrorResult<T, E> = Result<T, JobError<E>>;
+
+/// All relevant information about the outcome of a job. This is what's sent around between the
+/// Worker, Broker, and Client.
+pub type JobResult = JobErrorResult<JobSuccess, String>;
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(

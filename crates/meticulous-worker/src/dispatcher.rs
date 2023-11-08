@@ -8,7 +8,8 @@ use crate::{
 use anyhow::{Error, Result};
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    JobDetails, JobId, JobOutputResult, JobResult, JobStatus, Sha256Digest,
+    JobDetails, JobError, JobErrorResult, JobId, JobOutputResult, JobStatus, JobSuccess,
+    Sha256Digest,
 };
 use meticulous_util::ext::OptionExt as _;
 use nix::unistd::Pid;
@@ -28,14 +29,6 @@ use std::{
  *  FIGLET: public
  */
 
-/// Return value from [`DispatcherDeps::start_job`]. See [`JobResult`] for an explanation of the
-/// [`StartJobResult::ExecutionError`] and [`StartJobResult::SystemError`] variants.
-pub enum StartJobResult {
-    Ok(Pid),
-    ExecutionError(String),
-    SystemError(String),
-}
-
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
@@ -49,7 +42,7 @@ pub trait DispatcherDeps {
         jid: JobId,
         details: &JobDetails,
         layers: Vec<PathBuf>,
-    ) -> StartJobResult;
+    ) -> JobErrorResult<Pid, String>;
 
     /// Kill a running job using the [`Pid`] obtained from [`StartJobResult::Ok`].
     fn kill_job(&mut self, pid: Pid);
@@ -217,24 +210,17 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
             let (jid, details, layer_paths) = self.queued.pop_front().unwrap();
             match self.deps.start_job(jid, &details, layer_paths) {
-                StartJobResult::Ok(pid) => {
+                Ok(pid) => {
                     let executing_job = ExecutingJob::new(pid, details.layers);
                     self.executing.insert(jid, executing_job).assert_is_none();
                     self.executing_pids.insert(pid, jid).assert_is_none();
                 }
-                StartJobResult::ExecutionError(e) => {
+                Err(e) => {
                     for digest in details.layers {
                         self.cache.decrement_ref_count(&digest);
                     }
                     self.deps
-                        .send_message_to_broker(WorkerToBroker(jid, JobResult::ExecutionError(e)));
-                }
-                StartJobResult::SystemError(e) => {
-                    for digest in details.layers {
-                        self.cache.decrement_ref_count(&digest);
-                    }
-                    self.deps
-                        .send_message_to_broker(WorkerToBroker(jid, JobResult::SystemError(e)));
+                        .send_message_to_broker(WorkerToBroker(jid, Err(e)));
                 }
             }
         }
@@ -316,12 +302,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let stdout = entry.stdout.unwrap();
             let stderr = entry.stderr.unwrap();
             let result = match (status, stdout, stderr) {
-                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => JobResult::Ran {
+                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => Ok(JobSuccess {
                     status,
                     stdout,
                     stderr,
-                },
-                (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => JobResult::SystemError(e),
+                }),
+                (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => Err(JobError::System(e)),
             };
             self.deps
                 .send_message_to_broker(WorkerToBroker(jid, result));
@@ -368,9 +354,9 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 // nothing to do here.
                 self.deps.send_message_to_broker(WorkerToBroker(
                     jid,
-                    JobResult::SystemError(format!(
+                    Err(JobError::System(format!(
                         "Failed to download and extract layer artifact {digest}: {err}"
-                    )),
+                    ))),
                 ));
                 for digest in entry.layers.into_keys() {
                     self.cache.decrement_ref_count(&digest);
@@ -441,7 +427,7 @@ mod tests {
 
     struct TestState {
         messages: Vec<TestMessage>,
-        start_job_returns: Vec<StartJobResult>,
+        start_job_returns: Vec<JobErrorResult<Pid, String>>,
         get_artifact_returns: HashMap<Sha256Digest, GetArtifact>,
         got_artifact_success_returns: HashMap<Sha256Digest, (PathBuf, Vec<JobId>)>,
         got_artifact_failure_returns: HashMap<Sha256Digest, Vec<JobId>>,
@@ -453,7 +439,7 @@ mod tests {
             jid: JobId,
             details: &JobDetails,
             layers: Vec<PathBuf>,
-        ) -> StartJobResult {
+        ) -> JobErrorResult<Pid, String> {
             let mut mut_ref = self.borrow_mut();
             mut_ref
                 .messages
@@ -528,7 +514,7 @@ mod tests {
     impl Fixture {
         fn new<const K: usize, const L: usize, const M: usize, const N: usize>(
             slots: u16,
-            start_job_returns: [StartJobResult; K],
+            start_job_returns: [JobErrorResult<Pid, String>; K],
             get_artifact_returns: [(Sha256Digest, GetArtifact); L],
             got_artifact_success_returns: [(Sha256Digest, (PathBuf, Vec<JobId>)); M],
             got_artifact_failure_returns: [(Sha256Digest, Vec<JobId>); N],
@@ -587,7 +573,7 @@ mod tests {
 
     script_test! {
         enqueue_no_artifacts_no_error_slots_available,
-        Fixture::new(1, [StartJobResult::Ok(pid!(1))], [], [], []),
+        Fixture::new(1, [Ok(pid!(1))], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => { StartJob(jid!(1), details!(1), vec![]) };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
@@ -596,7 +582,7 @@ mod tests {
 
     script_test! {
         enqueue_immediate_artifacts_no_error_slots_available,
-        Fixture::new(1, [StartJobResult::Ok(pid!(1))], [
+        Fixture::new(1, [Ok(pid!(1))], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
@@ -613,7 +599,7 @@ mod tests {
     script_test! {
         enqueue_mixed_artifacts_no_error_slots_available,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
+            Ok(pid!(1)),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Get(path_buf!("/b"))),
@@ -633,7 +619,7 @@ mod tests {
     script_test! {
         enqueue_immediate_artifacts_system_error_slots_available,
         Fixture::new(1, [
-            StartJobResult::SystemError("se".to_string()),
+            Err(JobError::System("se".to_string())),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
@@ -642,7 +628,7 @@ mod tests {
             CacheGetArtifact(digest!(41), jid!(1)),
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [41, 42]), path_buf_vec!["/a", "/b"]),
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::SystemError("se".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System("se".to_string())))),
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -652,7 +638,7 @@ mod tests {
     script_test! {
         enqueue_immediate_artifacts_execution_error_slots_available,
         Fixture::new(1, [
-            StartJobResult::ExecutionError("ee".to_string()),
+            Err(JobError::Execution("ee".to_string())),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
@@ -661,7 +647,7 @@ mod tests {
             CacheGetArtifact(digest!(41), jid!(1)),
             CacheGetArtifact(digest!(42), jid!(1)),
             StartJob(jid!(1), details!(1, [41, 42]), path_buf_vec!["/a", "/b"]),
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::ExecutionError("ee".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::Execution("ee".to_string())))),
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
@@ -671,11 +657,11 @@ mod tests {
     script_test! {
         enqueue_fills_all_slots,
         Fixture::new(4, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
-            StartJobResult::Ok(pid!(3)),
-            StartJobResult::Ok(pid!(4)),
-            StartJobResult::Ok(pid!(5)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+            Ok(pid!(3)),
+            Ok(pid!(4)),
+            Ok(pid!(5)),
         ], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => { StartJob(jid!(1), details!(1), vec![]) };
         Broker(EnqueueJob(jid!(2), details!(2))) => { StartJob(jid!(2), details!(2), vec![]) };
@@ -691,12 +677,12 @@ mod tests {
     script_test! {
         possibly_start_job_loops_until_slots_full,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::ExecutionError("ee".to_string()),
-            StartJobResult::SystemError("se".to_string()),
-            StartJobResult::ExecutionError("ee".to_string()),
-            StartJobResult::SystemError("se".to_string()),
-            StartJobResult::Ok(pid!(6)),
+            Ok(pid!(1)),
+            Err(JobError::Execution("ee".to_string())),
+            Err(JobError::System("se".to_string())),
+            Err(JobError::Execution("ee".to_string())),
+            Err(JobError::System("se".to_string())),
+            Ok(pid!(6)),
         ], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => {
             StartJob(jid!(1), details!(1), vec![]),
@@ -711,13 +697,13 @@ mod tests {
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
             StartJob(jid!(2), details!(2), vec![]),
-            SendMessageToBroker(WorkerToBroker(jid!(2), JobResult::ExecutionError("ee".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(2), Err(JobError::Execution("ee".to_string())))),
             StartJob(jid!(3), details!(3), vec![]),
-            SendMessageToBroker(WorkerToBroker(jid!(3), JobResult::SystemError("se".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(3), Err(JobError::System("se".to_string())))),
             StartJob(jid!(4), details!(4), vec![]),
-            SendMessageToBroker(WorkerToBroker(jid!(4), JobResult::ExecutionError("ee".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(4), Err(JobError::Execution("ee".to_string())))),
             StartJob(jid!(5), details!(5), vec![]),
-            SendMessageToBroker(WorkerToBroker(jid!(5), JobResult::SystemError("se".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(5), Err(JobError::System("se".to_string())))),
             StartJob(jid!(6), details!(6), vec![]),
         };
     }
@@ -740,8 +726,8 @@ mod tests {
     script_test! {
         cancel_executing,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
@@ -768,9 +754,9 @@ mod tests {
     script_test! {
         cancel_queued,
         Fixture::new(2, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
-            StartJobResult::Ok(pid!(4)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+            Ok(pid!(4)),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
@@ -805,7 +791,7 @@ mod tests {
 
     script_test! {
         cancel_canceled,
-        Fixture::new(1, [StartJobResult::Ok(pid!(1))], [], [], []),
+        Fixture::new(1, [Ok(pid!(1))], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => { StartJob(jid!(1), details!(1), vec![]) };
         Broker(CancelJob(jid!(1))) => { Kill(pid!(1)) };
         Broker(CancelJob(jid!(1))) => {};
@@ -820,10 +806,7 @@ mod tests {
 
     script_test! {
         receive_pid_status_executing,
-        Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
-        ], [], [], []),
+        Fixture::new(1, [Ok(pid!(1)), Ok(pid!(2))], [], [], []),
         Broker(EnqueueJob(jid!(1), details!(1))) => {
             StartJob(jid!(1), details!(1), vec![]),
         };
@@ -839,7 +822,7 @@ mod tests {
     script_test! {
         receive_pid_status_canceled,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
+            Ok(pid!(1)),
         ], [
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
@@ -873,8 +856,8 @@ mod tests {
     script_test! {
         complete_stdout_stderr_status,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -889,14 +872,14 @@ mod tests {
             truncated: 100,
         })) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -905,8 +888,8 @@ mod tests {
     script_test! {
         complete_stdout_status_stderr,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -921,14 +904,14 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -937,8 +920,8 @@ mod tests {
     script_test! {
         complete_stderr_stdout_status,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -953,14 +936,14 @@ mod tests {
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -969,8 +952,8 @@ mod tests {
     script_test! {
         complete_stderr_status_stdout,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -985,14 +968,14 @@ mod tests {
         })) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -1001,8 +984,8 @@ mod tests {
     script_test! {
         complete_status_stdout_stderr,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -1017,14 +1000,14 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -1033,8 +1016,8 @@ mod tests {
     script_test! {
         complete_status_stderr_stdout,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -1049,14 +1032,14 @@ mod tests {
             truncated: 100,
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::Ran {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
                 status: JobStatus::Signaled(9),
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Truncated {
                     first: boxed_u8!(b"stderr"),
                     truncated: 100,
                 },
-            })),
+            }))),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
         };
@@ -1065,8 +1048,8 @@ mod tests {
     script_test! {
         complete_bad_stdout,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -1082,7 +1065,7 @@ mod tests {
         })) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
-                WorkerToBroker(jid!(1), JobResult::SystemError("stdout error".to_string()))
+                WorkerToBroker(jid!(1), Err(JobError::System("stdout error".to_string())))
             ),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
@@ -1092,8 +1075,8 @@ mod tests {
     script_test! {
         complete_bad_stderr,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -1106,7 +1089,7 @@ mod tests {
         JobStderr(jid!(1), Err("stderr error".to_string())) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
-                WorkerToBroker(jid!(1), JobResult::SystemError("stderr error".to_string()))
+                WorkerToBroker(jid!(1), Err(JobError::System("stderr error".to_string())))
             ),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
@@ -1116,8 +1099,8 @@ mod tests {
     script_test! {
         complete_bad_stdout_and_stderr,
         Fixture::new(1, [
-            StartJobResult::Ok(pid!(1)),
-            StartJobResult::Ok(pid!(2)),
+            Ok(pid!(1)),
+            Ok(pid!(2)),
         ], [
             (digest!(42), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
@@ -1130,7 +1113,7 @@ mod tests {
         JobStderr(jid!(1), Err("stderr error".to_string())) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             SendMessageToBroker(
-                WorkerToBroker(jid!(1), JobResult::SystemError("stdout error".to_string()))
+                WorkerToBroker(jid!(1), Err(JobError::System("stdout error".to_string())))
             ),
             CacheDecrementRefCount(digest!(42)),
             StartJob(jid!(2), details!(2), vec![]),
@@ -1162,8 +1145,8 @@ mod tests {
         };
         ArtifactFetcher(digest!(42), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(digest!(42)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), JobResult::SystemError(
-                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo".to_string()))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(
+                "Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo".to_string())))),
             CacheDecrementRefCount(digest!(41))
         };
         ArtifactFetcher(digest!(43), Ok(103)) => {
@@ -1178,13 +1161,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "assertion failed: self.is_none()")]
     fn duplicate_ids_from_broker_panics() {
-        let mut fixture = Fixture::new(
-            2,
-            [StartJobResult::Ok(pid!(1)), StartJobResult::Ok(pid!(2))],
-            [],
-            [],
-            [],
-        );
+        let mut fixture = Fixture::new(2, [Ok(pid!(1)), Ok(pid!(2))], [], [], []);
         fixture
             .dispatcher
             .receive_message(Broker(EnqueueJob(jid!(1), details!(1))));

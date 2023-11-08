@@ -5,7 +5,7 @@ use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
-    JobDetails, JobOutputResult, JobResult, JobStatus,
+    JobDetails, JobOutputResult, JobResult, JobStatus, JobSuccess,
 };
 use meticulous_client::Client;
 use serde::de::DeserializeOwned;
@@ -267,11 +267,11 @@ fn run_all_tests_sync(
     for test in fake_tests.all_tests() {
         state.job_responses.insert(
             test.clone(),
-            JobAction::Respond(JobResult::Ran {
+            JobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
-            }),
+            })),
         );
     }
 
@@ -552,11 +552,11 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     for test in fake_tests.all_tests() {
         state.job_responses.insert(
             test.clone(),
-            JobAction::Respond(JobResult::Ran {
+            JobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(1),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"error output")),
-            }),
+            })),
         );
     }
 
@@ -615,11 +615,11 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     {
         state.job_responses.insert(
             test.clone(),
-            JobAction::Respond(JobResult::Ran {
+            JobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
-            }),
+            })),
         );
     }
     for test in fake_tests

@@ -10,11 +10,11 @@ mod reaper;
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{BrokerAddr, Config, InlineLimit};
-use dispatcher::{Dispatcher, DispatcherDeps, Message, StartJobResult};
-use executor::{Executor, StartResult};
+use dispatcher::{Dispatcher, DispatcherDeps, Message};
+use executor::Executor;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
-    JobDetails, JobId, JobStatus, Sha256Digest,
+    JobDetails, JobErrorResult, JobId, JobStatus, Sha256Digest,
 };
 use meticulous_util::{net, sync};
 use nix::{
@@ -71,7 +71,7 @@ impl DispatcherDeps for DispatcherAdapter {
         jid: JobId,
         details: &JobDetails,
         _layers: Vec<PathBuf>,
-    ) -> StartJobResult {
+    ) -> JobErrorResult<Pid, String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self
@@ -95,11 +95,7 @@ impl DispatcherDeps for DispatcherAdapter {
                     .ok();
             },
         );
-        match result {
-            StartResult::Ok(pid) => StartJobResult::Ok(pid),
-            StartResult::ExecutionError(err) => StartJobResult::ExecutionError(err.to_string()),
-            StartResult::SystemError(err) => StartJobResult::SystemError(err.to_string()),
-        }
+        result.map_err(|e| e.map(|inner| inner.to_string()))
     }
 
     fn kill_job(&mut self, pid: Pid) {

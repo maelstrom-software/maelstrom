@@ -3,7 +3,7 @@
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
-use meticulous_base::{JobDetails, JobOutputResult};
+use meticulous_base::{JobDetails, JobError, JobErrorResult, JobOutputResult};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -46,15 +46,6 @@ impl Default for Executor {
     }
 }
 
-/// Return value from [`start`]. See [`meticulous_base::JobResult`] for an explanation of the
-/// [`StartResult::ExecutionError`] and [`StartResult::SystemError`] variants.
-#[derive(Debug)]
-pub enum StartResult {
-    Ok(Pid),
-    ExecutionError(Error),
-    SystemError(Error),
-}
-
 impl Executor {
     /// Start a process (i.e. job).
     ///
@@ -75,14 +66,13 @@ impl Executor {
     /// terminated). It is assumed that the caller will be reaping all children, not just those
     /// positively identified by this function. If that assumption proves invalid, the return
     /// values of this function should be adjusted to return optional pids in error cases.
-    #[must_use]
     pub fn start(
         &self,
         details: &JobDetails,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> StartResult {
+    ) -> JobErrorResult<Pid, Error> {
         self.start_inner(details, inline_limit, stdout_done, stderr_done)
     }
 }
@@ -151,41 +141,41 @@ async fn output_reader_task_main(
 }
 
 impl Executor {
-    #[must_use]
     fn start_inner(
         &self,
         details: &JobDetails,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> StartResult {
-        macro_rules! try_system_error {
-            ($e:expr) => {
-                match $e {
-                    Ok(val) => val,
-                    Err(err) => return StartResult::SystemError(err.into()),
-                }
-            };
-        }
-
+    ) -> JobErrorResult<Pid, Error> {
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
-        let (stdout_read_fd, stdout_write_fd) =
-            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-        let (stderr_read_fd, stderr_write_fd) =
-            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-        let (exec_result_read_fd, exec_result_write_fd) =
-            try_system_error!(unistd::pipe()).map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        let (stdout_read_fd, stdout_write_fd) = unistd::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        let (stderr_read_fd, stderr_write_fd) = unistd::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        let (exec_result_read_fd, exec_result_write_fd) = unistd::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
         // Set up the arguments to pass to the child process.
-        let program = try_system_error!(CString::new(details.program.as_str()));
-        let arguments = try_system_error!(details
+        let program = CString::new(details.program.as_str())
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let arguments = details
             .arguments
             .iter()
             .map(String::as_str)
             .map(CString::new)
-            .collect::<Result<Vec<_>, _>>());
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
         let argv = iter::once(Some(&program.as_c_str().to_bytes_with_nul()[0]))
             .chain(
                 arguments
@@ -212,7 +202,7 @@ impl Executor {
             match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) } {
                 Ok(val) => val,
                 Err(err) => {
-                    return StartResult::SystemError(Errno::from_i32(err).into());
+                    return Err(JobError::System(Errno::from_i32(err).into()));
                 }
             };
         if child_pid == 0 {
@@ -260,54 +250,69 @@ impl Executor {
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
         let mut exec_result_buf = vec![];
-        try_system_error!(File::from(exec_result_read_fd).read_to_end(&mut exec_result_buf));
+        File::from(exec_result_read_fd)
+            .read_to_end(&mut exec_result_buf)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
         if !exec_result_buf.is_empty() {
             return match meticulous_worker_child::Error::try_from(exec_result_buf.as_slice()) {
-                Err(err) => {
-                    StartResult::SystemError(anyhow!("parsing exec result pipe's contents: {err}"))
-                }
+                Err(err) => Err(JobError::System(anyhow!(
+                    "parsing exec result pipe's contents: {err}"
+                ))),
                 Ok(meticulous_worker_child::Error::ExecutionErrno(errno, context)) => {
-                    StartResult::ExecutionError(anyhow!(
+                    Err(JobError::Execution(anyhow!(
                         "executing job's process: {context}: {}",
                         Errno::from_i32(errno).desc()
-                    ))
+                    )))
                 }
                 Ok(meticulous_worker_child::Error::SystemErrno(errno, context)) => {
-                    StartResult::SystemError(anyhow!(
+                    Err(JobError::System(anyhow!(
                         "executing job's process: {context}: {}",
                         Errno::from_i32(errno).desc()
-                    ))
+                    )))
                 }
-                Ok(meticulous_worker_child::Error::BufferTooSmall) => {
-                    StartResult::SystemError(anyhow!("executing job's process: buffer too small"))
-                }
+                Ok(meticulous_worker_child::Error::BufferTooSmall) => Err(JobError::System(
+                    anyhow!("executing job's process: buffer too small"),
+                )),
             };
         }
 
         // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
         // Tokio.
-        try_system_error!(fcntl::fcntl(
+        fcntl::fcntl(
             stdout_read_fd.as_raw_fd(),
-            FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
-        ));
-        try_system_error!(fcntl::fcntl(
+            FcntlArg::F_SETFL(OFlag::O_NONBLOCK),
+        )
+        .map_err(Error::from)
+        .map_err(JobError::System)?;
+        fcntl::fcntl(
             stderr_read_fd.as_raw_fd(),
-            FcntlArg::F_SETFL(OFlag::O_NONBLOCK)
-        ));
+            FcntlArg::F_SETFL(OFlag::O_NONBLOCK),
+        )
+        .map_err(Error::from)
+        .map_err(JobError::System)?;
 
         // Spawn reader tasks to consume stdout and stderr.
         task::spawn(output_reader_task_main(
             inline_limit,
-            AsyncFile(try_system_error!(AsyncFd::new(File::from(stdout_read_fd)))),
+            AsyncFile(
+                AsyncFd::new(File::from(stdout_read_fd))
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?,
+            ),
             stdout_done,
         ));
         task::spawn(output_reader_task_main(
             inline_limit,
-            AsyncFile(try_system_error!(AsyncFd::new(File::from(stderr_read_fd)))),
+            AsyncFile(
+                AsyncFd::new(File::from(stderr_read_fd))
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?,
+            ),
             stderr_done,
         ));
 
-        StartResult::Ok(Pid::from_raw(child_pid))
+        Ok(Pid::from_raw(child_pid))
     }
 }
 
@@ -403,8 +408,8 @@ mod tests {
             |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
             |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
         );
-        assert_matches!(start_result, StartResult::Ok(_));
-        let StartResult::Ok(pid) = start_result else {
+        assert_matches!(start_result, Ok(_));
+        let Ok(pid) = start_result else {
             unreachable!();
         };
         let reaper = task::spawn_blocking(move || {
@@ -566,7 +571,7 @@ mod tests {
         };
         assert_matches!(
             Executor::default().start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
-            StartResult::ExecutionError(_)
+            Err(JobError::Execution(_))
         );
     }
 }
