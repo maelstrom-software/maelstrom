@@ -114,9 +114,9 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
 
         for artifact in cargo_build.artifact_stream() {
             let artifact = artifact?;
-            let package_name = artifact.package_id.repr.split(" ").next().unwrap();
+            let package_name = artifact.package_id.repr.split(' ').next().unwrap();
             if let Some(package) = &self.package {
-                if &package_name != package {
+                if package_name != package {
                     continue;
                 } else {
                     package_match = true;
