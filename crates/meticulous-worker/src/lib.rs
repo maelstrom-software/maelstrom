@@ -53,15 +53,15 @@ impl DispatcherAdapter {
         broker_addr: BrokerAddr,
         inline_limit: InlineLimit,
         log: Logger,
-    ) -> Self {
-        DispatcherAdapter {
+    ) -> Result<Self> {
+        Ok(DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
             broker_addr,
             inline_limit,
             log,
-            executor: Executor::default(),
-        }
+            executor: Executor::new()?,
+        })
     }
 }
 
@@ -135,15 +135,21 @@ async fn dispatcher_main(
         config.cache_bytes_used_target,
         log.clone(),
     );
-    let adapter = DispatcherAdapter::new(
+    match DispatcherAdapter::new(
         dispatcher_sender,
         broker_socket_sender,
         config.broker,
         config.inline_limit,
-        log,
-    );
-    let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
-    sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
+        log.clone(),
+    ) {
+        Err(err) => {
+            error!(log, "could not start executor"; "err" => ?err);
+        }
+        Ok(adapter) => {
+            let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
+            sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
+        }
+    }
 }
 
 async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {

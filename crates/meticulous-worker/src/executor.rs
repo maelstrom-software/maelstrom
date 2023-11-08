@@ -38,11 +38,33 @@ pub struct Executor {
     gid: Gid,
 }
 
-impl Default for Executor {
-    fn default() -> Self {
+impl Executor {
+    pub fn new() -> Result<Self> {
+        // Set up stdin to be a file that will always return EOF. We could do something similar
+        // by opening /dev/null but then we would depend on /dev being mounted. The fewer
+        // dependencies, the better.
+        let (stdin_read_fd, stdin_write_fd) =
+            unistd::pipe()?.map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+        if stdin_read_fd.as_raw_fd() == 0 {
+            // On the off chance that stdin was already closed, we may have already opened our read
+            // fd onto stdin.
+            mem::forget(stdin_read_fd);
+        } else if stdin_write_fd.as_raw_fd() == 0 {
+            // This would be a really weird scenario. Somehow we got the read end of the pipe to
+            // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
+            // done.
+            unsafe { nc::dup2(stdin_read_fd.as_raw_fd(), 0) }.map_err(Errno::from_i32)?;
+            mem::forget(stdin_read_fd);
+            mem::forget(stdin_write_fd);
+        } else {
+            // This is the normal case where neither fd is fd 0.
+            unsafe { nc::dup2(stdin_read_fd.as_raw_fd(), 0) }.map_err(Errno::from_i32)?;
+        }
+
         let uid = unistd::getuid();
         let gid = unistd::getgid();
-        Executor { uid, gid }
+
+        Ok(Executor { uid, gid })
     }
 }
 
@@ -420,7 +442,7 @@ mod tests {
         let dummy_child_pid = reaper::clone_dummy_child().unwrap();
         let (stdout_tx, stdout_rx) = oneshot::channel();
         let (stderr_tx, stderr_rx) = oneshot::channel();
-        let start_result = Executor::default().start(
+        let start_result = Executor::new().unwrap().start(
             &details,
             InlineLimit::from(inline_limit),
             |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
@@ -589,7 +611,12 @@ mod tests {
             layers: vec![],
         };
         assert_matches!(
-            Executor::default().start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
+            Executor::new().unwrap().start(
+                &details,
+                0.into(),
+                |_| unreachable!(),
+                |_| unreachable!()
+            ),
             Err(JobError::Execution(_))
         );
     }
@@ -602,6 +629,19 @@ mod tests {
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"3 - 4")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stdin_empty() {
+        start_and_expect(
+            bash!("cat"),
+            0,
+            JobStatus::Exited(0),
+            JobOutputResult::None,
             JobOutputResult::None,
         )
         .await;

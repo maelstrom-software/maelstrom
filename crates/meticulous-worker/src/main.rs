@@ -167,19 +167,6 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             fs::write("/proc/self/uid_map", format!("0 {parent_uid} 1\n"))?;
             fs::write("/proc/self/gid_map", format!("0 {parent_gid} 1\n"))?;
 
-            // Set up stdin to be a file that will always return EOF. We could do something similar
-            // by opening /dev/null but then we would depend on /dev being mounted. The few
-            // dependencies, the better.
-            let mut stdin_pipe_fds = [-1i32; 2];
-            unsafe { nc::pipe(&mut stdin_pipe_fds) }.map_err(Errno::from_i32)?;
-            unsafe { nc::dup2(stdin_pipe_fds[0], 0) }.map_err(Errno::from_i32)?;
-            if stdin_pipe_fds[0] != 0 {
-                unsafe { nc::close(stdin_pipe_fds[0]) }.map_err(Errno::from_i32)?;
-            }
-            if stdin_pipe_fds[1] != 0 {
-                unsafe { nc::close(stdin_pipe_fds[1]) }.map_err(Errno::from_i32)?;
-            }
-
             Ok(())
         }
         child_pid => {
