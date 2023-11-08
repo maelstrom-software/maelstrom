@@ -21,7 +21,7 @@ use serde::{
 use slog::{o, Drain, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
-use std::{fs, mem, path::PathBuf, process};
+use std::{fs, mem, path::PathBuf, process, slice};
 use tokio::runtime::Runtime;
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
@@ -117,6 +117,12 @@ impl Serialize for CliOptions {
     }
 }
 
+/// Clone a child process and continue executing in the child. The child process will be in a new
+/// pid namespace, meaning when it terminates all of its descendant processes will also terminate.
+/// The child process will also be in a new user namespace, and have uid 0, gid 0 in that
+/// namespace. The user namespace is required in order to create the pid namespace.
+///
+/// WARNING: This function must only be called while the program is single-threaded.
 fn clone_into_pid_and_user_namespace() -> Result<()> {
     let parent_pid = unistd::getpid();
     let parent_uid = unistd::getuid();
@@ -144,12 +150,12 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 .map_err(Errno::from_i32)?;
 
             // Check if the parent has already terminated.
-            let mut pollfds = [nc::pollfd_t {
+            let mut pollfd = nc::pollfd_t {
                 fd: parent_pidfd,
                 events: nc::POLLIN,
                 revents: 0,
-            }];
-            if unsafe { nc::poll(&mut pollfds, 0) }.map_err(Errno::from_i32)? == 1 {
+            };
+            if unsafe { nc::poll(slice::from_mut(&mut pollfd), 0) }.map_err(Errno::from_i32)? == 1 {
                 process::abort();
             }
 
