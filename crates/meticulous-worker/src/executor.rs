@@ -14,7 +14,11 @@ use std::{
     fs::File,
     io::Read as _,
     iter, mem,
-    os::fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
+    os::{
+        fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
+        unix::ffi::OsStrExt as _,
+    },
+    path::PathBuf,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -91,11 +95,12 @@ impl Executor {
     pub fn start(
         &self,
         details: &JobDetails,
+        layers: Vec<PathBuf>,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        self.start_inner(details, inline_limit, stdout_done, stderr_done)
+        self.start_inner(details, layers, inline_limit, stdout_done, stderr_done)
     }
 }
 
@@ -166,6 +171,7 @@ impl Executor {
     fn start_inner(
         &self,
         details: &JobDetails,
+        layers: Vec<PathBuf>,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
@@ -206,6 +212,7 @@ impl Executor {
             )
             .chain(iter::once(None))
             .collect::<Vec<_>>();
+
         let environment = details
             .environment
             .iter()
@@ -218,6 +225,17 @@ impl Executor {
             .iter()
             .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0]))
             .chain(iter::once(None))
+            .collect::<Vec<_>>();
+
+        let layers = layers
+            .into_iter()
+            .map(|p| CString::new(p.as_os_str().as_bytes()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let layers = layers
+            .iter()
+            .map(|cstr| &cstr.as_c_str().to_bytes_with_nul()[0])
             .collect::<Vec<_>>();
 
         // Do the clone.
@@ -259,6 +277,7 @@ impl Executor {
                     &program.as_c_str().to_bytes_with_nul()[0],
                     argv.as_slice(),
                     env.as_slice(),
+                    layers.as_slice(),
                     stdout_write_fd.into_raw_fd(),
                     stderr_write_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),

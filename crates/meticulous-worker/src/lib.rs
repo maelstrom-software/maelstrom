@@ -70,7 +70,7 @@ impl DispatcherDeps for DispatcherAdapter {
         &mut self,
         jid: JobId,
         details: &JobDetails,
-        _layers: Vec<PathBuf>,
+        layers: Vec<PathBuf>,
     ) -> JobErrorResult<Pid, String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
@@ -81,6 +81,7 @@ impl DispatcherDeps for DispatcherAdapter {
         let log2 = log.clone();
         let result = self.executor.start(
             details,
+            layers,
             self.inline_limit,
             move |result| {
                 debug!(log, "job stdout"; "result" => ?result);
