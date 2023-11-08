@@ -344,6 +344,7 @@ mod tests {
                     "-c".to_string(),
                     format!($($tokens),*),
                 ],
+                environment: vec![],
                 layers: vec![],
             }
         };
@@ -357,6 +358,7 @@ mod tests {
                     "-c".to_string(),
                     format!($($tokens),*),
                 ],
+                environment: vec![],
                 layers: vec![],
             }
         };
@@ -568,6 +570,7 @@ mod tests {
         let details = JobDetails {
             program: "a_program_that_does_not_exist".to_string(),
             arguments: vec![],
+            environment: vec![],
             layers: vec![],
         };
         assert_matches!(

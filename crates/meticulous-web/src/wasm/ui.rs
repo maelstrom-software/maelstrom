@@ -116,6 +116,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                 JobDetails {
                     program: command_parts.next().unwrap_or_default(),
                     arguments: command_parts.collect(),
+                    environment: vec![],
                     layers: vec![],
                 },
             ))?;

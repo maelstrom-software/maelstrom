@@ -31,6 +31,7 @@ macro_rules! details {
         meticulous_base::JobDetails {
             program: "test_1".to_string(),
             arguments: vec![],
+            environment: vec![],
             layers: vec![],
         }
     };
@@ -38,6 +39,7 @@ macro_rules! details {
         meticulous_base::JobDetails {
             program: "test_2".to_string(),
             arguments: vec!["arg_1".to_string()],
+            environment: vec![],
             layers: vec![],
         }
     };
@@ -45,6 +47,7 @@ macro_rules! details {
         meticulous_base::JobDetails {
             program: "test_3".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
+            environment: vec![],
             layers: vec![],
         }
     };
@@ -52,6 +55,7 @@ macro_rules! details {
         meticulous_base::JobDetails {
             program: "test_4".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
+            environment: vec![],
             layers: vec![],
         }
     };
@@ -59,15 +63,17 @@ macro_rules! details {
         meticulous_base::JobDetails {
             program: concat!("test_", stringify!($n)).to_string(),
             arguments: vec!["arg_1".to_string()],
+            environment: vec![],
             layers: vec![],
         }
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let meticulous_base::JobDetails { program, arguments, .. } = details![$n];
+            let meticulous_base::JobDetails { program, arguments, environment, .. } = details![$n];
             meticulous_base::JobDetails {
                 program,
                 arguments,
+                environment,
                 layers: vec![$(digest!($digest)),*],
             }
         }

@@ -143,6 +143,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                     JobDetails {
                         program: binary.clone(),
                         arguments: vec!["--exact".into(), "--nocapture".into(), case.clone()],
+                        environment: vec![],
                         layers: vec![],
                     },
                     Box::new(move |cjid, result| visitor.job_finished(cjid, result)),

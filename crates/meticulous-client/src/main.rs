@@ -119,6 +119,7 @@ fn main() -> Result<ExitCode> {
             JobDetails {
                 program: job.program,
                 arguments: job.arguments.unwrap_or(vec![]),
+                environment: vec![],
                 layers,
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),

@@ -58,6 +58,7 @@ pub struct JobId {
 pub struct JobDetails {
     pub program: String,
     pub arguments: Vec<String>,
+    pub environment: Vec<String>,
     pub layers: Vec<Sha256Digest>,
 }
 
