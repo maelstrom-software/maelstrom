@@ -195,7 +195,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                     signal::raise(signal).unwrap_or_else(|e| {
                         panic!("unexpected error raising signal {signal}: {e}")
                     });
-                    panic!("raised signal {signal} but failed to terminate");
+                    process::abort();
                 }
                 unknown_status => {
                     panic!("child terminated with unexpected status: {unknown_status:?}");
