@@ -255,7 +255,7 @@ impl Executor {
                 let mut options = "lowerdir=".to_string();
                 for (i, layer) in layers.iter().rev().enumerate() {
                     if i != 0 {
-                        options.push_str(":");
+                        options.push(':');
                     }
                     options.push_str(
                         layer
