@@ -98,6 +98,16 @@ impl<StdErr> JobQueuer<StdErr> {
     }
 }
 
+fn collect_environment_vars() -> Vec<String> {
+    let mut env = vec![];
+    for (key, value) in std::env::vars() {
+        if key.starts_with("RUST_") {
+            env.push(format!("{key}={value}"));
+        }
+    }
+    env
+}
+
 impl<StdErr: io::Write> JobQueuer<StdErr> {
     fn queue_job_from_case<ProgressIndicatorT>(
         &mut self,
@@ -124,7 +134,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             JobDetails {
                 program: binary.into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
-                environment: vec![],
+                environment: collect_environment_vars(),
                 layers: vec![],
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
