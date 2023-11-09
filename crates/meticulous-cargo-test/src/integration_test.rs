@@ -640,7 +640,7 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     loop {
         std::thread::sleep(Duration::from_millis(550));
         let new_contents = term.contents();
-        if new_contents.is_empty() {
+        if new_contents.is_empty() || new_contents.contains("building artifacts") {
             continue;
         }
         if new_contents == last_contents {
