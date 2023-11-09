@@ -1,7 +1,7 @@
 #![no_std]
 
 use core::{
-    ffi::c_int,
+    ffi::{c_int, CStr},
     fmt::{self, Write as _},
     mem, result, slice, str,
 };
@@ -195,13 +195,24 @@ unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Resul
     Ok(())
 }
 
+pub enum Layers<'a> {
+    None,
+    One {
+        path: &'a CStr,
+    },
+    Many {
+        overlayfs_options: &'a CStr,
+        mount_dir: &'a CStr,
+    },
+}
+
 /// The guts of the child code. This function can return a [`Result`].
 #[allow(clippy::too_many_arguments)]
 unsafe fn start_and_exec_in_child_inner(
     program: &u8,
     argv: &[Option<&u8>],
     env: &[Option<&u8>],
-    layers: &[&u8],
+    layers: Layers,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     parent_uid: uid_t,
@@ -225,43 +236,76 @@ unsafe fn start_and_exec_in_child_inner(
     nc::dup2(stdout_write_fd, 1).map_system_errno("dup2 to stdout")?;
     nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
-    if !layers.is_empty() {
-        let layer = layers[0] as *const u8;
-        const DOT: *const u8 = b".\0".as_ptr();
-        const MNT_DETACH: usize = 2;
+    const DOT: *const u8 = b".\0".as_ptr();
+    const MNT_DETACH: usize = 2;
+    match layers {
+        Layers::None => {}
+        Layers::One { path } => {
+            let path = &path.to_bytes_with_nul()[0] as *const u8;
 
-        // Bind mount the directory onto itself to ensure that it's a mount point.
-        nc::syscalls::syscall5(
-            nc::SYS_MOUNT,
-            layer as usize,
-            layer as usize,
-            0,
-            nc::MS_BIND,
-            0,
-        )
-        .map_system_errno("mount")?;
+            // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
+            // pivot_root to it later.
+            nc::syscalls::syscall5(
+                nc::SYS_MOUNT,
+                path as usize,
+                path as usize,
+                0,
+                nc::MS_BIND,
+                0,
+            )
+            .map_system_errno("bind mount")?;
 
-        // We want that mount to be read-only!
-        nc::syscalls::syscall5(
-            nc::SYS_MOUNT,
-            0,
-            layer as usize,
-            0,
-            nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
-            0,
-        )
-        .map_system_errno("remount")?;
+            // We want that mount to be read-only!
+            nc::syscalls::syscall5(
+                nc::SYS_MOUNT,
+                0,
+                path as usize,
+                0,
+                nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
+                0,
+            )
+            .map_system_errno("remount of bind mount")?;
 
-        // Chdir to what will be the new root.
-        nc::syscalls::syscall1(nc::SYS_CHDIR, layer as usize).map_system_errno("chdir")?;
+            // Chdir to what will be the new root.
+            nc::syscalls::syscall1(nc::SYS_CHDIR, path as usize).map_system_errno("chdir")?;
 
-        // Pivot root to be the new root. See man 2 pivot_root.
-        nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
-            .map_system_errno("pivot_root")?;
+            // Pivot root to be the new root. See man 2 pivot_root.
+            nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
+                .map_system_errno("pivot_root")?;
 
-        // Unmount the old root. See man 2 pivot_root.
-        nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
-            .map_system_errno("umount2")?;
+            // Unmount the old root. See man 2 pivot_root.
+            nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
+                .map_system_errno("umount2")?;
+        }
+        Layers::Many {
+            overlayfs_options,
+            mount_dir,
+        } => {
+            let overlayfs_options = &overlayfs_options.to_bytes_with_nul()[0] as *const u8;
+            let mount_dir = &mount_dir.to_bytes_with_nul()[0] as *const u8;
+            const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+
+            nc::syscalls::syscall5(
+                nc::SYS_MOUNT,
+                OVERLAY as usize,
+                mount_dir as usize,
+                OVERLAY as usize,
+                0,
+                overlayfs_options as usize,
+            )
+            .map_system_errno("mount")?;
+
+            // Chdir to what will be the new root.
+            nc::syscalls::syscall1(nc::SYS_CHDIR, mount_dir as usize).map_system_errno("chdir")?;
+
+            // Pivot root to be the new root. See man 2 pivot_root.
+            nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
+                .map_system_errno("pivot_root")?;
+
+            // Unmount the old root. See man 2 pivot_root.
+            nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
+                .map_system_errno("umount2")?;
+        }
     }
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
@@ -285,7 +329,7 @@ pub unsafe fn start_and_exec_in_child(
     program: &u8,
     argv: &[Option<&u8>],
     env: &[Option<&u8>],
-    layers: &[&u8],
+    layers: Layers,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     exec_result_write_fd: c_int,

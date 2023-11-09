@@ -9,7 +9,7 @@ mod reaper;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
-use config::{BrokerAddr, Config, InlineLimit};
+use config::{BrokerAddr, CacheRoot, Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use meticulous_base::{
@@ -24,7 +24,7 @@ use nix::{
 };
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{ops::ControlFlow, path::PathBuf, process, thread};
+use std::{fs, ops::ControlFlow, path::PathBuf, process, thread};
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -53,14 +53,16 @@ impl DispatcherAdapter {
         broker_addr: BrokerAddr,
         inline_limit: InlineLimit,
         log: Logger,
+        mount_dir: PathBuf,
     ) -> Result<Self> {
+        fs::create_dir_all(&mount_dir)?;
         Ok(DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
             broker_addr,
             inline_limit,
             log,
-            executor: Executor::new()?,
+            executor: Executor::new(mount_dir)?,
         })
     }
 }
@@ -130,9 +132,15 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
     log: Logger,
 ) {
+    let mut mount_dir = config.cache_root.inner().to_owned();
+    mount_dir.push("mount");
+
+    let mut cache_root = config.cache_root.inner().to_owned();
+    cache_root.push("artifacts");
+
     let cache = Cache::new(
         StdCacheFs,
-        config.cache_root,
+        CacheRoot::from(cache_root),
         config.cache_bytes_used_target,
         log.clone(),
     );
@@ -142,6 +150,7 @@ async fn dispatcher_main(
         config.broker,
         config.inline_limit,
         log.clone(),
+        mount_dir,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);

@@ -4,6 +4,7 @@ use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
 use meticulous_base::{JobDetails, JobError, JobErrorResult, JobOutputResult};
+use meticulous_worker_child::Layers;
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -40,10 +41,11 @@ use tuple::Map as _;
 pub struct Executor {
     uid: Uid,
     gid: Gid,
+    mount_dir: CString,
 }
 
 impl Executor {
-    pub fn new() -> Result<Self> {
+    pub fn new(mount_dir: PathBuf) -> Result<Self> {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
@@ -68,7 +70,13 @@ impl Executor {
         let uid = unistd::getuid();
         let gid = unistd::getgid();
 
-        Ok(Executor { uid, gid })
+        let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
+
+        Ok(Executor {
+            uid,
+            gid,
+            mount_dir,
+        })
     }
 }
 
@@ -227,16 +235,45 @@ impl Executor {
             .chain(iter::once(None))
             .collect::<Vec<_>>();
 
-        let layers = layers
-            .into_iter()
-            .map(|p| CString::new(p.as_os_str().as_bytes()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let layers = layers
-            .iter()
-            .map(|cstr| &cstr.as_c_str().to_bytes_with_nul()[0])
-            .collect::<Vec<_>>();
+        let layer0_path;
+        let overlayfs_options;
+        let child_layers: Layers;
+
+        match layers.len() {
+            0 => {
+                child_layers = Layers::None;
+            }
+            1 => {
+                layer0_path = CString::new(layers[0].as_os_str().as_bytes())
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?;
+                child_layers = Layers::One {
+                    path: layer0_path.as_c_str(),
+                };
+            }
+            _ => {
+                let mut options = "lowerdir=".to_string();
+                for (i, layer) in layers.iter().rev().enumerate() {
+                    if i != 0 {
+                        options.push_str(":");
+                    }
+                    options.push_str(
+                        layer
+                            .as_os_str()
+                            .to_str()
+                            .ok_or_else(|| anyhow!("could not convert path to string"))
+                            .map_err(JobError::System)?,
+                    );
+                }
+                overlayfs_options = CString::new(options)
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?;
+                child_layers = Layers::Many {
+                    overlayfs_options: overlayfs_options.as_c_str(),
+                    mount_dir: self.mount_dir.as_c_str(),
+                };
+            }
+        }
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
@@ -277,7 +314,7 @@ impl Executor {
                     &program.as_c_str().to_bytes_with_nul()[0],
                     argv.as_slice(),
                     env.as_slice(),
-                    layers.as_slice(),
+                    child_layers,
                     stdout_write_fd.into_raw_fd(),
                     stderr_write_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),

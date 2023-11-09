@@ -4,7 +4,7 @@ use std::{
     fmt::{self, Debug, Formatter},
     io,
     net::{SocketAddr, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 #[derive(Clone, Copy, Deserialize)]
@@ -95,6 +95,10 @@ impl Debug for Slots {
 pub struct CacheRoot(PathBuf);
 
 impl CacheRoot {
+    pub fn inner(&self) -> &Path {
+        &self.0
+    }
+
     pub fn into_inner(self) -> PathBuf {
         self.0
     }
