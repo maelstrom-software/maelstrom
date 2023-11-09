@@ -497,12 +497,15 @@ mod tests {
         let dummy_child_pid = reaper::clone_dummy_child().unwrap();
         let (stdout_tx, stdout_rx) = oneshot::channel();
         let (stderr_tx, stderr_rx) = oneshot::channel();
-        let start_result = Executor::new().unwrap().start(
-            &details,
-            InlineLimit::from(inline_limit),
-            |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
-            |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
-        );
+        let start_result = Executor::new(tempfile::tempdir().unwrap().into_path())
+            .unwrap()
+            .start(
+                &details,
+                vec![],
+                InlineLimit::from(inline_limit),
+                |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
+                |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
+            );
         assert_matches!(start_result, Ok(_));
         let Ok(pid) = start_result else {
             unreachable!();
@@ -666,12 +669,15 @@ mod tests {
             layers: vec![],
         };
         assert_matches!(
-            Executor::new().unwrap().start(
-                &details,
-                0.into(),
-                |_| unreachable!(),
-                |_| unreachable!()
-            ),
+            Executor::new(tempfile::tempdir().unwrap().into_path())
+                .unwrap()
+                .start(
+                    &details,
+                    vec![],
+                    0.into(),
+                    |_| unreachable!(),
+                    |_| unreachable!()
+                ),
             Err(JobError::Execution(_))
         );
     }
