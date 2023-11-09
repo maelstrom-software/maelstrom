@@ -6,6 +6,8 @@ use core::{
     mem, result, slice, str,
 };
 
+pub mod rtnetlink;
+
 // These might not work for all linux architectures. We can fix them as we add more architectures.
 #[allow(non_camel_case_types)]
 pub type uid_t = u32;
@@ -203,6 +205,9 @@ unsafe fn start_and_exec_in_child_inner(
     parent_uid: uid_t,
     parent_gid: gid_t,
 ) -> Result<()> {
+    // in a new network namespace we need to ifup loopback ourselves
+    rtnetlink::ifup_loopback()?;
+
     write_file::<5>(b"/proc/self/setgroups\0", format_args!("deny\n"))?;
     //            '0' ' '  {}  ' ' '1' '\n'
     write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
