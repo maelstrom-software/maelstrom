@@ -1,0 +1,46 @@
+# Example config for meticulous-broker.
+#
+# Save this as .cache/meticulous-broker.toml or wherever you specify the config
+# file using the --config-file or -c option.
+
+# The main port to listen on. This is the port used by all clients and workers.
+# It is also used for artifact transfers, both to and from the broker.
+#
+# Can also be specified via the `--port` or `-p` command-line options, or via
+# the METICULOUS_BROKER_PORT environment variable.
+#
+# If `port` is specified as 0, the OS will choose an unused port.
+#
+# Default: 0
+port = 1234
+
+# The port to use for the web UI.
+#
+# Can also be specified via the `--http-port` or `-H` command-line options, or
+# via the METICULOUS_BROKER_HTTP_PORT environment variable.
+#
+# If `http_port` is specified as 0, the OS will choose an unused port.
+#
+# Default: 0
+http_port = 8888
+
+# The directory used for the cache.
+#
+# Can also be specified via the `--cache-root` or `-r` command-line options, or
+# via the METICULOUS_BROKER_CACHE_ROOT environment variable.
+#
+# If this directory doesn't exist, the broker will attempt to create it when
+# starting.
+#
+# Default: ".cache/meticulous-broker"
+cache_root = ".cache/meticulous-broker"
+
+# The target amount of disk space to use for the cache, in bytes. This bound
+# won't be followed strictly, so it's best to be conservative
+#
+# Can also be specified via the `--cache-bytes-used-target` or `-B`
+# command-line options, or via the METICULOUS_BROKER_CACHE_BYTES_USED_TARGET
+# environment variable.
+#
+# Default: 1000000000
+cache_bytes_used_target = 1000000000

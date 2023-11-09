@@ -34,7 +34,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from("meticulous-broker.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-broker.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit
@@ -66,7 +66,7 @@ impl Default for CliOptions {
             print_config: false,
             port: Some(0),
             http_port: Some(0),
-            cache_root: Some("var/cache/meticulous-broker".into()),
+            cache_root: Some(".cache/meticulous-broker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
         }
     }

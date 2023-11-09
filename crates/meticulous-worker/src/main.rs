@@ -38,7 +38,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from("meticulous-worker.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-worker.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit
@@ -54,7 +54,7 @@ struct CliOptions {
     #[arg(short = 'n', long)]
     name: Option<String>,
 
-    /// The number of job slots available. Most program jobs will take one job slot
+    /// The number of job slots available. Most jobs will take one job slot
     #[arg(short = 's', long)]
     slots: Option<u16>,
 
@@ -80,7 +80,7 @@ impl Default for CliOptions {
             broker: None,
             name: Some(gethostname::gethostname().into_string().unwrap()),
             slots: Some(num_cpus::get().try_into().unwrap()),
-            cache_root: Some("var/cache/meticulous-worker".into()),
+            cache_root: Some(".cache/meticulous-worker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
             inline_limit: Some(1_000_000),
         }

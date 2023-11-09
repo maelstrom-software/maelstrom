@@ -1,5 +1,6 @@
 /target
-/run
 .*.swp
 .*.sw?
 rusty-tags.vi
+/.config
+/.cache
