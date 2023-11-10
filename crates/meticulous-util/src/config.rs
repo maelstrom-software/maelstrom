@@ -16,6 +16,10 @@ impl BrokerAddr {
     pub fn inner(&self) -> &SocketAddr {
         &self.0
     }
+
+    pub fn into_inner(self) -> SocketAddr {
+        self.0
+    }
 }
 
 impl TryFrom<String> for BrokerAddr {

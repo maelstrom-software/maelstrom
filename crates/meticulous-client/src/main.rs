@@ -1,38 +1,85 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
+use figment::{
+    error::Kind,
+    providers::{Env, Format, Serialized, Toml},
+    Figment,
+};
 use meticulous_base::{
     ClientJobId, JobDetails, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess,
 };
 use meticulous_client::Client;
-use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
-use serde::Deserialize;
+use meticulous_util::{
+    config::BrokerAddr,
+    process::{ExitCode, ExitCodeAccumulator},
+};
+use serde::{
+    ser::{SerializeMap, Serializer},
+    Deserialize, Serialize,
+};
 use serde_json::{self, Deserializer};
 use std::{
-    fs::File,
     io::{self, Read, Write as _},
-    net::{SocketAddr, ToSocketAddrs as _},
     path::{Path, PathBuf},
     sync::Arc,
 };
 
 /// The meticulous client. This process sends jobs to the broker to be executed.
 #[derive(Parser)]
+#[command(
+    after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
+
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the METICULOUS_WORKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
+
+All values except for 'broker' have reasonable defaults.
+"#
+)]
 #[command(version)]
 struct CliOptions {
+    /// Configuration file. Values set in the configuration file will be overridden by values set
+    /// through environment variables and values set on the command line.
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-client.toml").into_os_string())]
+    config_file: PathBuf,
+
+    /// Print configuration and exit
+    #[arg(short = 'P', long)]
+    print_config: bool,
+
     /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000"
     #[arg(short = 'b', long)]
-    broker: String,
-
-    /// File to read jobs from instead of stdin.
-    #[arg(short = 'f', long)]
-    file: Option<PathBuf>,
+    broker: Option<String>,
 }
 
-fn parse_socket_addr(value: String) -> Result<SocketAddr> {
-    let addrs: Vec<SocketAddr> = value.to_socket_addrs()?.collect();
-    // It's not clear how we could end up with an empty iterator. We'll assume that's
-    // impossible until proven wrong.
-    Ok(*addrs.get(0).unwrap())
+impl Default for CliOptions {
+    fn default() -> Self {
+        CliOptions {
+            config_file: "".into(),
+            print_config: false,
+            broker: None,
+        }
+    }
+}
+
+impl Serialize for CliOptions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        // Don't serialize 'config_file'.
+        // Don't serialize 'print_config'.
+        if let Some(broker) = &self.broker {
+            map.serialize_entry("broker", broker)?;
+        }
+        map.end()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    /// Socket address of broker.
+    pub broker: BrokerAddr,
 }
 
 #[derive(Deserialize, Debug)]
@@ -99,13 +146,29 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
 
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
+    let print_config = cli_options.print_config;
+    let config: Config = Figment::new()
+        .merge(Serialized::defaults(CliOptions::default()))
+        .merge(Toml::file(&cli_options.config_file))
+        .merge(Env::prefixed("METICULOUS_CLIENT_"))
+        .merge(Serialized::globals(cli_options))
+        .extract()
+        .map_err(|mut e| {
+            if let Kind::MissingField(field) = &e.kind {
+                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
+                e
+            } else {
+                e
+            }
+        })
+        .context("reading configuration")?;
+    if print_config {
+        println!("{config:#?}");
+        return Ok(ExitCode::SUCCESS);
+    }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(parse_socket_addr(cli_options.broker)?)?;
-    let reader: Box<dyn Read> = if let Some(file) = cli_options.file {
-        Box::new(File::open(file)?)
-    } else {
-        Box::new(io::stdin().lock())
-    };
+    let mut client = Client::new(config.broker.into_inner())?;
+    let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {
         let job = job?;

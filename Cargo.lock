@@ -2064,6 +2064,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "figment",
  "gethostname 0.4.3",
  "meticulous-base",
  "meticulous-util",
