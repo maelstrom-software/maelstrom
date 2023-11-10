@@ -1,31 +1,34 @@
-use anyhow::{anyhow, Result};
+mod cargo;
+mod progress;
+mod visitor;
+
+use anyhow::{anyhow, Context as _, Result};
 use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use clap::Parser;
 use console::Term;
 use indicatif::TermLike;
-use meticulous_base::{JobDetails, Sha256Digest};
+use meticulous_base::{JobDetails, JobMount, Sha256Digest};
 use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
+use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
-    io::{self},
+    fs,
+    io::{self, ErrorKind},
     net::{SocketAddr, ToSocketAddrs as _},
+    process::Command,
     str,
     sync::{Arc, Mutex},
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
-
-mod cargo;
-mod progress;
-mod visitor;
 
 fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
@@ -63,6 +66,9 @@ struct MetestCli {
     package: Option<String>,
     /// Only run tests whose names contain the given string
     filter: Option<String>,
+    /// Configuration file.
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/cargo-metest.toml").into_os_string())]
+    config_file: PathBuf,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -78,6 +84,7 @@ struct JobQueuer<StdErr> {
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: u64,
+    config: Config,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
@@ -87,6 +94,7 @@ impl<StdErr> JobQueuer<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
+        config: Config,
     ) -> Self {
         Self {
             cargo,
@@ -96,6 +104,7 @@ impl<StdErr> JobQueuer<StdErr> {
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: 0,
+            config,
         }
     }
 }
@@ -184,6 +193,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         case: &str,
         binary: &Path,
         layers: Vec<Sha256Digest>,
+        mounts: Vec<JobMount>,
     ) -> Result<()>
     where
         ProgressIndicatorT: ProgressIndicatorScope,
@@ -203,7 +213,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
                 layers,
-                mounts: vec![],
+                mounts,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
@@ -247,6 +257,20 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             self.jobs_queued += 1;
             cb(self.jobs_queued);
 
+            let mut layers = self
+                .config
+                .get_layers_for_test(package_name, &case)
+                .into_iter()
+                .map(|layer| {
+                    client
+                        .lock()
+                        .unwrap()
+                        .add_artifact(PathBuf::from(layer).as_path())
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            layers.push(deps_artifact.clone());
+            layers.push(binary_artifact.clone());
+
             self.queue_job_from_case(
                 client,
                 width,
@@ -255,7 +279,8 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 package_name,
                 &case,
                 &binary,
-                vec![deps_artifact.clone(), binary_artifact.clone()],
+                layers,
+                self.config.get_mounts_for_test(package_name, &case),
             )?;
         }
 
@@ -308,10 +333,11 @@ impl<StdErr> MainApp<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
+        config: Config,
     ) -> Self {
         Self {
             client,
-            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color),
+            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, config),
         }
     }
 }
@@ -353,10 +379,96 @@ impl<StdErr: io::Write> MainApp<StdErr> {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct TestGroup {
+    tests: Option<String>,
+    module: Option<String>,
+    layers: Option<Vec<String>>,
+    mounts: Option<Vec<JobMount>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    #[serde(default)]
+    groups: Vec<TestGroup>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Config {
+            groups: Vec::default(),
+        }
+    }
+}
+
+impl Config {
+    fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
+        self.groups
+            .iter()
+            .filter(|group| match &group.tests {
+                Some(group_tests) if !test.contains(group_tests.as_str()) => false,
+                _ => true,
+            })
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .filter(|group| match &group.module {
+                Some(group_module) if module != group_module.as_str() => false,
+                _ => true,
+            })
+            .map(|group| group.layers.iter().flatten())
+            .flatten()
+            .map(String::as_str)
+            .collect()
+    }
+
+    fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
+        self.groups
+            .iter()
+            .filter(|group| match &group.tests {
+                Some(group_tests) if !test.contains(group_tests.as_str()) => false,
+                _ => true,
+            })
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .filter(|group| match &group.module {
+                Some(group_module) if module != group_module.as_str() => false,
+                _ => true,
+            })
+            .map(|group| group.mounts.iter().flatten())
+            .flatten()
+            .cloned()
+            .collect()
+    }
+}
+
+#[derive(Deserialize)]
+struct Metadata {
+    workspace_root: String,
+}
+
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
     let cli_options = Cli::parse().subcommand();
+
+    let metadata_output = Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .output()
+        .context("getting cargo metadata")?;
+    let metadata: Metadata =
+        serde_json::from_slice(&metadata_output.stdout).context("parsing cargo metadata")?;
+
+    let mut test_metadata_file = PathBuf::from(metadata.workspace_root);
+    test_metadata_file.push("metest-metadata.toml");
+    let config = match fs::read_to_string(&test_metadata_file) {
+        Ok(contents) => toml::from_str(&contents).context("parsing {test_metadata_file}")?,
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            println!("nothing to do");
+            Config::default()
+        }
+        Err(err) => {
+            return Err(err).context("reading {test_metadata_file}");
+        }
+    };
+
     let client = Mutex::new(Client::new(cli_options.broker)?);
     let app = MainApp::new(
         client,
@@ -365,6 +477,7 @@ pub fn main() -> Result<ExitCode> {
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
+        config,
     );
 
     let stdout_tty = std::io::stdout().is_terminal();

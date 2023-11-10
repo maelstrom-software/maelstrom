@@ -15,8 +15,10 @@ meticulous-base = { workspace = true }
 meticulous-client = { workspace = true }
 meticulous-util = { workspace = true }
 regex = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 tar = { workspace = true }
+toml = { workspace = true }
 unicode-truncate = { workspace = true }
 unicode-width = { workspace = true }
 
@@ -26,8 +28,8 @@ bincode = { workspace = true }
 enum-map = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }
-meticulous-broker = { path = "../meticulous-broker" }
-meticulous-worker = { path = "../meticulous-worker" }
+meticulous-broker = { workspace = true }
+meticulous-worker = { workspace = true }
 
 [[bin]]
 name = "cargo-metest"

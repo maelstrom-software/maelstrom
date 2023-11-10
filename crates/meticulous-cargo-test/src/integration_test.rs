@@ -1,4 +1,4 @@
-use crate::MainApp;
+use crate::{Config, MainApp};
 use assert_matches::assert_matches;
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
@@ -245,7 +245,15 @@ fn run_app(
     let client = Mutex::new(Client::new(broker_address).unwrap());
 
     let mut stderr = vec![];
-    let app = MainApp::new(client, cargo, package, filter, &mut stderr, false);
+    let app = MainApp::new(
+        client,
+        cargo,
+        package,
+        filter,
+        &mut stderr,
+        false,
+        Config::default(),
+    );
     app.run(stdout_tty, quiet, term.clone())
         .unwrap_or_else(|e| {
             panic!(

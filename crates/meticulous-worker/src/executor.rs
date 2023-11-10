@@ -588,6 +588,7 @@ mod tests {
                 "print('a');",
                 "sys.stdout.flush();",
                 "print('b', file=sys.stderr);",
+                "sys.stderr.flush();",
                 "os.abort()",
             )),
             2,

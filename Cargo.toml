@@ -41,14 +41,15 @@ hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 indicatif = { version = "0.17", features = ["in_memory"] }
 itertools = "0.10.5"
 lddtree = "0.3"
-#libc = "0.2.149"
 maplit = "1"
 meticulous-base = { path = "crates/meticulous-base" }
+meticulous-broker = { path = "crates/meticulous-broker" }
 meticulous-client = { path = "crates/meticulous-client" }
 meticulous-container = { path = "crates/meticulous-container" }
 meticulous-plot = { path = "crates/meticulous-plot" }
 meticulous-test = { path = "crates/meticulous-test" }
 meticulous-util = { path = "crates/meticulous-util" }
+meticulous-worker = { path = "crates/meticulous-worker" }
 meticulous-worker-child = { path = "crates/meticulous-worker-child" }
 nc = { version = "0.8.18", default-features = false }
 netlink-packet-core = "0.7"
@@ -72,6 +73,7 @@ tar = "0.4.38"
 tempfile = "3.5.0"
 tokio = { version = "1.28", features = [ "rt", "rt-multi-thread", "macros", "fs", "io-util" ] }
 tokio-util = { version = "0.7.10", features = [ "compat" ] }
+toml = "0.8.8"
 tuple = "0.5.1"
 unicode-truncate = "0.2.0"
 unicode-width = "0.1.7"
