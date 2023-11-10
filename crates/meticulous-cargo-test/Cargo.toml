@@ -10,11 +10,13 @@ clap = { workspace = true }
 colored = { workspace = true }
 console = { workspace = true }
 indicatif = { workspace = true }
+lddtree = { workspace = true }
 meticulous-base = { workspace = true }
 meticulous-client = { workspace = true }
 meticulous-util = { workspace = true }
 regex = { workspace = true }
 serde_json = { workspace = true }
+tar = { workspace = true }
 unicode-truncate = { workspace = true }
 unicode-width = { workspace = true }
 

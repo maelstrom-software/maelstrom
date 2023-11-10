@@ -4,6 +4,7 @@ use cargo_metadata::{
 };
 use regex::Regex;
 use std::io;
+use std::path::Path;
 use std::{
     io::BufReader,
     process::{Child, ChildStdout, Command, Stdio},
@@ -75,7 +76,7 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-pub fn get_cases_from_binary(binary: &str, filter: &Option<String>) -> Result<Vec<String>> {
+pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
     let mut cmd = Command::new(binary);
     cmd.arg("--list").arg("--format").arg("terse");
     if let Some(filter) = filter {

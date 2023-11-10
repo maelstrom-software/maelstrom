@@ -13,7 +13,7 @@ use std::{
     fs::{self, File},
     io::{self, Read},
     net::{SocketAddr, TcpStream},
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
 };
@@ -161,7 +161,7 @@ impl Client {
         })
     }
 
-    pub fn add_artifact(&mut self, path: PathBuf) -> Result<Sha256Digest> {
+    pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
         let path = fs::canonicalize(path)?;
         if let Some(digest) = self.paths.get(&path) {
             return Ok(digest.clone());

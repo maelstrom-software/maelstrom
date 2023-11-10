@@ -113,7 +113,7 @@ fn main() -> Result<ExitCode> {
             .layers
             .unwrap_or(vec![])
             .iter()
-            .map(|layer| client.add_artifact(Path::new(layer).to_owned()))
+            .map(|layer| client.add_artifact(&Path::new(layer)))
             .collect::<Result<Vec<_>>>()?;
         let accum_clone = accum.clone();
         client.add_job(

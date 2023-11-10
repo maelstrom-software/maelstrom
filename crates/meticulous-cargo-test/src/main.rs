@@ -4,15 +4,17 @@ use cargo_metadata::Artifact as CargoArtifact;
 use clap::Parser;
 use console::Term;
 use indicatif::TermLike;
-use meticulous_base::JobDetails;
+use meticulous_base::{JobDetails, Sha256Digest};
 use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::fs::File;
 use std::io::IsTerminal as _;
+use std::path::{Path, PathBuf};
 use std::{
     io::{self},
     net::{SocketAddr, ToSocketAddrs as _},
@@ -108,6 +110,68 @@ fn collect_environment_vars() -> Vec<String> {
     env
 }
 
+fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
+    let mut binary = File::open(binary_path)?;
+    let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
+
+    let mut tar_path = PathBuf::from(binary_path);
+    assert!(tar_path.set_extension("tar"));
+
+    let tar_file = File::create(&tar_path)?;
+    let mut a = tar::Builder::new(tar_file);
+
+    a.append_file(binary_path_in_tar, &mut binary)?;
+    a.finish()?;
+
+    Ok(tar_path)
+}
+
+fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
+    let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
+    let deps = dep_tree.analyze(binary_path)?;
+
+    let mut tar_path = PathBuf::from(binary_path);
+    assert!(tar_path.set_extension("deps.tar"));
+
+    let mut paths = BTreeSet::new();
+    if let Some(p) = deps.interpreter {
+        if let Some(lib) = deps.libraries.get(&p) {
+            paths.insert(lib.path.clone());
+        }
+    }
+
+    fn walk_deps(
+        deps: &[String],
+        libraries: &HashMap<String, lddtree::Library>,
+        paths: &mut BTreeSet<PathBuf>,
+    ) {
+        for dep in deps {
+            if let Some(lib) = libraries.get(dep) {
+                paths.insert(lib.path.clone());
+            }
+            if let Some(lib) = libraries.get(dep) {
+                walk_deps(&lib.needed, libraries, paths);
+            }
+        }
+    }
+    walk_deps(&deps.needed, &deps.libraries, &mut paths);
+
+    fn remove_root(path: &Path) -> PathBuf {
+        path.components().skip(1).collect()
+    }
+
+    let tar_file = File::create(&tar_path)?;
+    let mut a = tar::Builder::new(tar_file);
+
+    for path in paths {
+        a.append_path_with_name(&path, &remove_root(&path))?;
+    }
+
+    a.finish()?;
+
+    Ok(tar_path)
+}
+
 impl<StdErr: io::Write> JobQueuer<StdErr> {
     fn queue_job_from_case<ProgressIndicatorT>(
         &mut self,
@@ -117,7 +181,8 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         ignored_cases: &HashSet<String>,
         package_name: &str,
         case: &str,
-        binary: &str,
+        binary: &Path,
+        layers: Vec<Sha256Digest>,
     ) -> Result<()>
     where
         ProgressIndicatorT: ProgressIndicatorScope,
@@ -130,12 +195,13 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             return Ok(());
         }
 
+        let binary_name = binary.file_name().unwrap().to_str().unwrap();
         client.lock().unwrap().add_job(
             JobDetails {
-                program: binary.into(),
+                program: format!("/{}", binary_name),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
-                layers: vec![],
+                layers,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
@@ -161,10 +227,19 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             }
         }
 
-        let binary = artifact.executable.unwrap().to_string();
+        let binary = PathBuf::from(artifact.executable.unwrap());
         let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
             .into_iter()
             .collect();
+
+        let binary_artifact = client
+            .lock()
+            .unwrap()
+            .add_artifact(&create_artifact_for_binary(&binary)?)?;
+        let deps_artifact = client
+            .lock()
+            .unwrap()
+            .add_artifact(&create_artifact_for_binary_deps(&binary)?)?;
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
             self.jobs_queued += 1;
@@ -178,6 +253,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 package_name,
                 &case,
                 &binary,
+                vec![deps_artifact.clone(), binary_artifact.clone()],
             )?;
         }
 

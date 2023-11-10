@@ -39,6 +39,7 @@ hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 indicatif = { version = "0.17", features = ["in_memory"] }
 itertools = "0.10.5"
+lddtree = "0.3"
 #libc = "0.2.149"
 maplit = "1"
 meticulous-base = { path = "crates/meticulous-base" }
