@@ -9,7 +9,11 @@
 # the METICULOUS_WORKER_BROKER environment variable.
 #
 # There is no default. This option must be specified.
-broker = localhost:1234
+#
+# Examples:
+# broker = "localhost:1234"
+# broker = "127.0.0.1:1234"
+broker = "[::1]:1234"
 
 # The number of job slots available. Most jobs will take one job slot.
 #
@@ -17,7 +21,8 @@ broker = localhost:1234
 # the METICULOUS_WORKER_SLOTS environment variable.
 #
 # Default: number of machine cores
-http_port = 8888
+# Examples:
+# slots = 10
 
 # The directory used for the cache.
 #
@@ -27,8 +32,8 @@ http_port = 8888
 # If this directory doesn't exist, the worker will attempt to create it when
 # starting.
 #
-# Default: ".cache/meticulous-worker"
-cache_root = ".cache/meticulous-worker"
+# Default:
+# cache_root = ".cache/meticulous-worker"
 
 # The target amount of disk space to use for the cache, in bytes. This bound
 # won't be followed strictly, so it's best to be conservative
@@ -37,8 +42,8 @@ cache_root = ".cache/meticulous-worker"
 # command-line options, or via the METICULOUS_WORKER_CACHE_BYTES_USED_TARGET
 # environment variable.
 #
-# Default: 1000000000
-cache_bytes_used_target = 1000000000
+# Default:
+# cache_bytes_used_target = 1000000000
 
 # The maximum amount of bytes to return inline for captured stdout and stderr.
 #
@@ -46,5 +51,15 @@ cache_bytes_used_target = 1000000000
 # command-line options, or via the METICULOUS_WORKER_INLINE_LIMIT environment
 # variable.
 #
-# Default: 1000000
-inline_limit = 1000000
+# Default:
+# inline_limit = 1000000
+
+# The minimum log level to output.
+#
+# Can also be specified via the `--log-level` or `-l` command-line options, or
+# via the METICULOUS_WORKER_LOG_LEVEL environment variable.
+#
+# Possibilities: "error", "warning", "info", "debug"
+#
+# Default:
+# log_level = "info"

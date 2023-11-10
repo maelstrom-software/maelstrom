@@ -60,8 +60,8 @@ pub fn connection_main(
     scheduler_sender: SchedulerSender,
     mut log: Logger,
 ) -> Result<()> {
-    debug!(log, "connection upgraded to artifact fetcher connection");
+    debug!(log, "artifact fetcher connected");
     let err = connection_loop(socket, &scheduler_sender, &mut log).unwrap_err();
-    debug!(log, "artifact fetcher connection ended"; "err" => %err);
+    debug!(log, "artifact fetcher disconnected"; "err" => %err);
     Err(err)
 }

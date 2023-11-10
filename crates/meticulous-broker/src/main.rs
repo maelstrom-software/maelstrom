@@ -5,12 +5,12 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_broker::config::Config;
+use meticulous_broker::config::{Config, LogLevel};
 use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
-use slog::{info, o, Drain, Logger};
+use slog::{info, o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{
@@ -57,6 +57,10 @@ struct CliOptions {
     /// strictly, so it's best to be conservative
     #[arg(short = 'B', long)]
     cache_bytes_used_target: Option<u64>,
+
+    /// Minimum log level to output.
+    #[arg(short = 'l', long, value_enum)]
+    log_level: Option<LogLevel>,
 }
 
 impl Default for CliOptions {
@@ -68,6 +72,7 @@ impl Default for CliOptions {
             http_port: Some(0),
             cache_root: Some(".cache/meticulous-broker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
+            log_level: Some(LogLevel::Info),
         }
     }
 }
@@ -91,6 +96,9 @@ impl Serialize for CliOptions {
         }
         if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
             map.serialize_entry("cache_bytes_used_target", cache_bytes_used_target)?;
+        }
+        if let Some(log_level) = &self.log_level {
+            map.serialize_entry("log_level", log_level)?;
         }
         map.end()
     }
@@ -121,6 +129,13 @@ fn main() -> Result<()> {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
+    let level = match config.log_level {
+        LogLevel::Error => Level::Error,
+        LogLevel::Warning => Level::Warning,
+        LogLevel::Info => Level::Info,
+        LogLevel::Debug => Level::Debug,
+    };
+    let drain = LevelFilter::new(drain, level).fuse();
     let log = Logger::root(drain, o!());
     Runtime::new()
         .context("starting tokio runtime")?

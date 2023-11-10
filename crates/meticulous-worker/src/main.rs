@@ -5,7 +5,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_worker::config::Config;
+use meticulous_worker::config::{Config, LogLevel};
 use nix::{
     errno::Errno,
     sys::{
@@ -18,7 +18,7 @@ use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,
 };
-use slog::{o, Drain, Logger};
+use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{fs, mem, path::PathBuf, process, slice};
@@ -49,11 +49,6 @@ struct CliOptions {
     #[arg(short = 'b', long)]
     broker: Option<String>,
 
-    /// Name of the worker provided to the broker. The broker will reject workers with duplicate
-    /// names.
-    #[arg(short = 'n', long)]
-    name: Option<String>,
-
     /// The number of job slots available. Most jobs will take one job slot
     #[arg(short = 's', long)]
     slots: Option<u16>,
@@ -70,6 +65,10 @@ struct CliOptions {
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
     #[arg(short = 'i', long)]
     inline_limit: Option<u64>,
+
+    /// Minimum log level to output.
+    #[arg(short = 'l', long, value_enum)]
+    log_level: Option<LogLevel>,
 }
 
 impl Default for CliOptions {
@@ -78,11 +77,11 @@ impl Default for CliOptions {
             config_file: "".into(),
             print_config: false,
             broker: None,
-            name: Some(gethostname::gethostname().into_string().unwrap()),
             slots: Some(num_cpus::get().try_into().unwrap()),
             cache_root: Some(".cache/meticulous-worker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
             inline_limit: Some(1_000_000),
+            log_level: Some(LogLevel::Info),
         }
     }
 }
@@ -98,9 +97,6 @@ impl Serialize for CliOptions {
         if let Some(broker) = &self.broker {
             map.serialize_entry("broker", broker)?;
         }
-        if let Some(name) = &self.name {
-            map.serialize_entry("name", name)?;
-        }
         if let Some(slots) = &self.slots {
             map.serialize_entry("slots", slots)?;
         }
@@ -112,6 +108,9 @@ impl Serialize for CliOptions {
         }
         if let Some(inline_limit) = &self.inline_limit {
             map.serialize_entry("inline_limit", inline_limit)?;
+        }
+        if let Some(log_level) = &self.log_level {
+            map.serialize_entry("log_level", log_level)?;
         }
         map.end()
     }
@@ -224,6 +223,13 @@ fn main() -> Result<()> {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
+    let level = match config.log_level {
+        LogLevel::Error => Level::Error,
+        LogLevel::Warning => Level::Warning,
+        LogLevel::Info => Level::Info,
+        LogLevel::Debug => Level::Debug,
+    };
+    let drain = LevelFilter::new(drain, level).fuse();
     let log = Logger::root(drain, o!());
     Runtime::new()
         .context("starting tokio runtime")?

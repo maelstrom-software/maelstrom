@@ -11,8 +11,8 @@
 #
 # If `port` is specified as 0, the OS will choose an unused port.
 #
-# Default: 0
-port = 1234
+# Default:
+# port = 0
 
 # The port to use for the web UI.
 #
@@ -21,8 +21,8 @@ port = 1234
 #
 # If `http_port` is specified as 0, the OS will choose an unused port.
 #
-# Default: 0
-http_port = 8888
+# Default:
+# http_port = 0
 
 # The directory used for the cache.
 #
@@ -32,8 +32,8 @@ http_port = 8888
 # If this directory doesn't exist, the broker will attempt to create it when
 # starting.
 #
-# Default: ".cache/meticulous-broker"
-cache_root = ".cache/meticulous-broker"
+# Default:
+# cache_root = ".cache/meticulous-broker"
 
 # The target amount of disk space to use for the cache, in bytes. This bound
 # won't be followed strictly, so it's best to be conservative
@@ -42,5 +42,15 @@ cache_root = ".cache/meticulous-broker"
 # command-line options, or via the METICULOUS_BROKER_CACHE_BYTES_USED_TARGET
 # environment variable.
 #
-# Default: 1000000000
-cache_bytes_used_target = 1000000000
+# Default:
+# cache_bytes_used_target = 1000000000
+
+# The minimum log level to output.
+#
+# Can also be specified via the `--log-level` or `-l` command-line options, or
+# via the METICULOUS_BROKER_LOG_LEVEL environment variable.
+#
+# Possibilities: "error", "warning", "info", "debug"
+#
+# Default:
+# log_level = "info"

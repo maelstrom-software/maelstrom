@@ -109,7 +109,7 @@ async fn unassigned_connection_main(
             let read_stream = BufReader::new(read_stream);
             let id: ClientId = id_vendor.vend();
             let log = log.new(o!("cid" => id.to_string()));
-            debug!(log, "connection upgraded to client connection");
+            debug!(log, "client connected");
             connection_main(
                 scheduler_sender,
                 id,
@@ -125,14 +125,14 @@ async fn unassigned_connection_main(
                 },
             )
             .await;
-            debug!(log, "received client disconnect");
+            debug!(log, "client disconnected");
         }
         Ok(Hello::Worker { slots }) => {
             let (read_stream, write_stream) = socket.into_split();
             let read_stream = BufReader::new(read_stream);
             let id: WorkerId = id_vendor.vend();
-            let log = log.new(o!("wid" => id.to_string()));
-            info!(log, "connection upgraded to worker connection"; "slots" => slots);
+            let log = log.new(o!("wid" => id.to_string(), "slots" => slots));
+            info!(log, "worker connected");
             let log_clone = log.clone();
             let log_clone2 = log.clone();
             connection_main(
@@ -153,7 +153,7 @@ async fn unassigned_connection_main(
                 },
             )
             .await;
-            info!(log, "received worker disconnect");
+            info!(log, "worker disconnected");
         }
         Ok(Hello::ArtifactFetcher) => {
             let log = log.clone();
@@ -191,7 +191,7 @@ pub async fn listener_main(
         match listener.accept().await {
             Ok((socket, peer_addr)) => {
                 let log = log.new(o!("peer_addr" => peer_addr));
-                debug!(log, "received connection");
+                debug!(log, "new connection");
                 task::spawn(unassigned_connection_main(
                     socket,
                     scheduler_sender.clone(),

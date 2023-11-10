@@ -1,5 +1,6 @@
 use bytesize::ByteSize;
-use serde::Deserialize;
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug, Formatter},
     io,
@@ -30,28 +31,6 @@ impl TryFrom<String> for BrokerAddr {
 
 impl Debug for BrokerAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(try_from = "String")]
-pub struct Name(String);
-
-impl TryFrom<String> for Name {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        if value.is_empty() {
-            Err("value must not be empty".to_string())
-        } else {
-            Ok(Name(value))
-        }
-    }
-}
-
-impl Debug for Name {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
@@ -160,14 +139,21 @@ impl Debug for InlineLimit {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, ValueEnum)]
+#[clap(rename_all = "kebab_case")]
+#[serde(rename_all = "kebab-case")]
+pub enum LogLevel {
+    Error,
+    Warning,
+    Info,
+    Debug,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Socket address of broker.
     pub broker: BrokerAddr,
-
-    /// Name of the worker provided to the broker.
-    pub name: Name,
 
     /// The number of job slots available.
     pub slots: Slots,
@@ -181,4 +167,7 @@ pub struct Config {
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
     pub inline_limit: InlineLimit,
+
+    /// Minimum log level to output.
+    pub log_level: LogLevel,
 }

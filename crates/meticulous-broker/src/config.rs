@@ -1,6 +1,7 @@
 use anyhow::Result;
 use bytesize::ByteSize;
-use serde::Deserialize;
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug, Formatter},
     path::PathBuf,
@@ -102,6 +103,16 @@ impl Debug for CacheBytesUsedTarget {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, ValueEnum)]
+#[clap(rename_all = "kebab_case")]
+#[serde(rename_all = "kebab-case")]
+pub enum LogLevel {
+    Error,
+    Warning,
+    Info,
+    Debug,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -117,4 +128,7 @@ pub struct Config {
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
     pub cache_bytes_used_target: CacheBytesUsedTarget,
+
+    /// Minimum log level to output.
+    pub log_level: LogLevel,
 }

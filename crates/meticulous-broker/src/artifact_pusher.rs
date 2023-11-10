@@ -57,8 +57,8 @@ pub fn connection_main(
     cache_tmp_path: PathBuf,
     mut log: Logger,
 ) -> Result<()> {
-    debug!(log, "connection upgraded to artifact pusher connection");
+    debug!(log, "artifact pusher connected");
     let err = connection_loop(socket, &scheduler_sender, &cache_tmp_path, &mut log).unwrap_err();
-    debug!(log, "artifact pusher connection ended"; "err" => %err);
+    debug!(log, "artifact pusher disconnected"; "err" => %err);
     Err(err)
 }
