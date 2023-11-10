@@ -51,16 +51,6 @@ struct CliOptions {
     broker: Option<String>,
 }
 
-impl Default for CliOptions {
-    fn default() -> Self {
-        CliOptions {
-            config_file: "".into(),
-            print_config: false,
-            broker: None,
-        }
-    }
-}
-
 impl Serialize for CliOptions {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -160,7 +150,6 @@ fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
     let config: Config = Figment::new()
-        .merge(Serialized::defaults(CliOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_CLIENT_"))
         .merge(Serialized::globals(cli_options))
