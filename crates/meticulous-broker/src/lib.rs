@@ -7,8 +7,8 @@ mod connection;
 mod http;
 mod scheduler_task;
 
-use config::{CacheBytesUsedTarget, CacheRoot};
 use meticulous_base::stats::BROKER_STATISTICS_INTERVAL;
+use meticulous_util::config::{CacheBytesUsedTarget, CacheRoot};
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, Logger};
 use std::sync::{

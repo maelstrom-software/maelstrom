@@ -9,14 +9,17 @@ mod reaper;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
-use config::{BrokerAddr, CacheRoot, Config, InlineLimit};
+use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobErrorResult, JobId, JobStatus, Sha256Digest,
 };
-use meticulous_util::{net, sync};
+use meticulous_util::{
+    config::{BrokerAddr, CacheRoot},
+    net, sync,
+};
 use nix::{
     errno::Errno,
     sys::signal::{self, Signal},

@@ -1,10 +1,12 @@
 mod cache;
 mod scheduler;
 
-use crate::config::{CacheBytesUsedTarget, CacheRoot};
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use meticulous_base::proto::{BrokerToClient, BrokerToWorker};
-use meticulous_util::sync;
+use meticulous_util::{
+    config::{CacheBytesUsedTarget, CacheRoot},
+    sync,
+};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{

@@ -2,6 +2,7 @@
 //! absolutely necessary for all of them. In the future, we may want to move some of this
 //! functionality up to [`meticulous_base`].
 
+pub mod config;
 pub mod ext;
 pub mod heap;
 pub mod io;

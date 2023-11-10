@@ -1,10 +1,10 @@
-use crate::config;
 use anyhow::{anyhow, Result};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
 use meticulous_util::{
+    config::BrokerAddr,
     io::{FixedSizeReader, Sha256Reader},
     net,
 };
@@ -25,7 +25,7 @@ fn read_to_end(mut input: impl Read) -> Result<()> {
 pub fn main(
     digest: &Sha256Digest,
     path: PathBuf,
-    broker_addr: config::BrokerAddr,
+    broker_addr: BrokerAddr,
     log: &mut Logger,
 ) -> Result<u64> {
     let mut writer = TcpStream::connect(broker_addr.inner())?;

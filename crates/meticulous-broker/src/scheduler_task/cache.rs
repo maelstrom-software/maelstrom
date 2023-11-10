@@ -1,7 +1,9 @@
-use crate::config;
 use bytesize::ByteSize;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
-use meticulous_util::heap::{Heap, HeapDeps, HeapIndex};
+use meticulous_util::{
+    config::{CacheBytesUsedTarget, CacheRoot},
+    heap::{Heap, HeapDeps, HeapIndex},
+};
 use slog::debug;
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -170,8 +172,8 @@ pub struct Cache<FsT> {
 impl<FsT: CacheFs> Cache<FsT> {
     pub fn new(
         mut fs: FsT,
-        root: config::CacheRoot,
-        bytes_used_target: config::CacheBytesUsedTarget,
+        root: CacheRoot,
+        bytes_used_target: CacheBytesUsedTarget,
         log: slog::Logger,
     ) -> Self {
         let root = root.into_inner();

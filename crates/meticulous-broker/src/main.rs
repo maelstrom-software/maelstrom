@@ -5,7 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_broker::config::{Config, LogLevel};
+use meticulous_broker::config::Config;
+use meticulous_util::config::LogLevel;
 use serde::{
     ser::{SerializeMap, Serializer},
     Serialize,

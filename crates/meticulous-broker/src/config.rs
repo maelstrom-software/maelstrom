@@ -1,11 +1,7 @@
 use anyhow::Result;
-use bytesize::ByteSize;
-use clap::ValueEnum;
-use serde::{Deserialize, Serialize};
-use std::{
-    fmt::{self, Debug, Formatter},
-    path::PathBuf,
-};
+use meticulous_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
+use serde::Deserialize;
+use std::fmt::{self, Debug, Formatter};
 
 #[derive(Deserialize)]
 #[serde(from = "u16")]
@@ -57,60 +53,6 @@ impl Debug for HttpPort {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         self.0.fmt(f)
     }
-}
-
-#[derive(Deserialize)]
-#[serde(from = "PathBuf")]
-pub struct CacheRoot(PathBuf);
-
-impl CacheRoot {
-    pub fn into_inner(self) -> PathBuf {
-        self.0
-    }
-}
-
-impl From<PathBuf> for CacheRoot {
-    fn from(value: PathBuf) -> Self {
-        CacheRoot(value)
-    }
-}
-
-impl Debug for CacheRoot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(from = "u64")]
-pub struct CacheBytesUsedTarget(u64);
-
-impl CacheBytesUsedTarget {
-    pub fn into_inner(self) -> u64 {
-        self.0
-    }
-}
-
-impl From<u64> for CacheBytesUsedTarget {
-    fn from(value: u64) -> Self {
-        CacheBytesUsedTarget(value)
-    }
-}
-
-impl Debug for CacheBytesUsedTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        ByteSize::b(self.0).fmt(f)
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, ValueEnum)]
-#[clap(rename_all = "kebab_case")]
-#[serde(rename_all = "kebab-case")]
-pub enum LogLevel {
-    Error,
-    Warning,
-    Info,
-    Debug,
 }
 
 #[derive(Debug, Deserialize)]

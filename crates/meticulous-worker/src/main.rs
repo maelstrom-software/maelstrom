@@ -5,7 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_worker::config::{Config, LogLevel};
+use meticulous_util::config::LogLevel;
+use meticulous_worker::config::Config;
 use nix::{
     errno::Errno,
     sys::{
