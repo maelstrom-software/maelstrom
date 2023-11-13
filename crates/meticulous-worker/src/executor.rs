@@ -4,7 +4,6 @@ use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
 use meticulous_base::{JobDetails, JobError, JobErrorResult, JobOutputResult};
-use meticulous_worker_child::Layers;
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -184,6 +183,8 @@ impl Executor {
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
+        use meticulous_worker_child::{self as child, Layers};
+
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
@@ -275,6 +276,13 @@ impl Executor {
             }
         }
 
+        let child_job_details = child::JobDetails {
+            program: program.as_c_str(),
+            arguments: argv.as_ref(),
+            environment: env.as_ref(),
+            layers: child_layers,
+        };
+
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
             flags: nc::CLONE_NEWCGROUP as u64
@@ -310,11 +318,8 @@ impl Executor {
             // execs.
 
             unsafe {
-                meticulous_worker_child::start_and_exec_in_child(
-                    &program.as_c_str().to_bytes_with_nul()[0],
-                    argv.as_slice(),
-                    env.as_slice(),
-                    child_layers,
+                child::start_and_exec_in_child(
+                    child_job_details,
                     stdout_write_fd.into_raw_fd(),
                     stderr_write_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),

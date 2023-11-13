@@ -8,6 +8,24 @@ use core::{
     mem, result, slice, str,
 };
 
+pub enum Layers<'a> {
+    None,
+    One {
+        path: &'a CStr,
+    },
+    Many {
+        overlayfs_options: &'a CStr,
+        mount_dir: &'a CStr,
+    },
+}
+
+pub struct JobDetails<'a> {
+    pub program: &'a CStr,
+    pub arguments: &'a [Option<&'a u8>],
+    pub environment: &'a [Option<&'a u8>],
+    pub layers: Layers<'a>,
+}
+
 // These might not work for all linux architectures. We can fix them as we add more architectures.
 #[allow(non_camel_case_types)]
 pub type uid_t = u32;
@@ -195,24 +213,9 @@ unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Resul
     Ok(())
 }
 
-pub enum Layers<'a> {
-    None,
-    One {
-        path: &'a CStr,
-    },
-    Many {
-        overlayfs_options: &'a CStr,
-        mount_dir: &'a CStr,
-    },
-}
-
 /// The guts of the child code. This function can return a [`Result`].
-#[allow(clippy::too_many_arguments)]
 unsafe fn start_and_exec_in_child_inner(
-    program: &u8,
-    argv: &[Option<&u8>],
-    env: &[Option<&u8>],
-    layers: Layers,
+    details: JobDetails,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     parent_uid: uid_t,
@@ -238,7 +241,7 @@ unsafe fn start_and_exec_in_child_inner(
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
     const DOT: *const u8 = b".\0".as_ptr();
     const MNT_DETACH: usize = 2;
-    match layers {
+    match details.layers {
         Layers::None => {}
         Layers::One { path } => {
             let path = &path.to_bytes_with_nul()[0] as *const u8;
@@ -309,9 +312,9 @@ unsafe fn start_and_exec_in_child_inner(
     }
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
-        program as *const u8 as usize,
-        argv.as_ptr() as usize,
-        env.as_ptr() as usize,
+        &details.program.to_bytes_with_nul()[0] as *const u8 as usize,
+        details.arguments.as_ptr() as usize,
+        details.environment.as_ptr() as usize,
     )
     .map_execution_errno("execve")?;
     unreachable!();
@@ -324,12 +327,8 @@ unsafe fn start_and_exec_in_child_inner(
 /// The provided `program` variable must be a NUL-terminated C-string. The `argv` and `env`
 /// variables must be NULL-terminated arrays of pointers to NUL-terminated C-strings. The provided
 /// file descriptors must be valid, open file descriptors.
-#[allow(clippy::too_many_arguments)]
 pub unsafe fn start_and_exec_in_child(
-    program: &u8,
-    argv: &[Option<&u8>],
-    env: &[Option<&u8>],
-    layers: Layers,
+    details: JobDetails,
     stdout_write_fd: c_int,
     stderr_write_fd: c_int,
     exec_result_write_fd: c_int,
@@ -341,10 +340,7 @@ pub unsafe fn start_and_exec_in_child(
     // We assume any error we encounter in the child is an execution error. While highly unlikely,
     // we could theoretically encounter a system error.
     let Err(err) = start_and_exec_in_child_inner(
-        program,
-        argv,
-        env,
-        layers,
+        details,
         stdout_write_fd,
         stderr_write_fd,
         parent_uid,
