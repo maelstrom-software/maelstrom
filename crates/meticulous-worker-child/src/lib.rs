@@ -19,11 +19,22 @@ pub enum Layers<'a> {
     },
 }
 
+pub enum JobMountFsType {
+    Proc,
+    Tmp,
+}
+
+pub struct JobMount<'a> {
+    pub fs_type: JobMountFsType,
+    pub mount_point: &'a CStr,
+}
+
 pub struct JobDetails<'a> {
     pub program: &'a CStr,
     pub arguments: &'a [Option<&'a u8>],
     pub environment: &'a [Option<&'a u8>],
     pub layers: Layers<'a>,
+    pub mounts: &'a [JobMount<'a>],
 }
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
@@ -240,9 +251,22 @@ unsafe fn start_and_exec_in_child_inner(
     nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
     const DOT: *const u8 = b".\0".as_ptr();
+    const SLASH: *const u8 = b"/\0".as_ptr();
+    const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+    const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
+    const PROC: *const u8 = b"proc\0".as_ptr();
     const MNT_DETACH: usize = 2;
-    match details.layers {
-        Layers::None => {}
+    nc::syscalls::syscall5(
+        nc::SYS_MOUNT,
+        0,
+        SLASH as usize,
+        0,
+        nc::MS_REC | nc::MS_PRIVATE,
+        0,
+    )
+    .map_system_errno("mount of / to set private and rec")?;
+    let pivot = match details.layers {
+        Layers::None => None,
         Layers::One { path } => {
             let path = &path.to_bytes_with_nul()[0] as *const u8;
 
@@ -269,16 +293,7 @@ unsafe fn start_and_exec_in_child_inner(
             )
             .map_system_errno("remount of bind mount")?;
 
-            // Chdir to what will be the new root.
-            nc::syscalls::syscall1(nc::SYS_CHDIR, path as usize).map_system_errno("chdir")?;
-
-            // Pivot root to be the new root. See man 2 pivot_root.
-            nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
-                .map_system_errno("pivot_root")?;
-
-            // Unmount the old root. See man 2 pivot_root.
-            nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
-                .map_system_errno("umount2")?;
+            Some(path)
         }
         Layers::Many {
             overlayfs_options,
@@ -286,7 +301,6 @@ unsafe fn start_and_exec_in_child_inner(
         } => {
             let overlayfs_options = &overlayfs_options.to_bytes_with_nul()[0] as *const u8;
             let mount_dir = &mount_dir.to_bytes_with_nul()[0] as *const u8;
-            const OVERLAY: *const u8 = b"overlay\0".as_ptr();
 
             nc::syscalls::syscall5(
                 nc::SYS_MOUNT,
@@ -298,18 +312,52 @@ unsafe fn start_and_exec_in_child_inner(
             )
             .map_system_errno("mount")?;
 
-            // Chdir to what will be the new root.
-            nc::syscalls::syscall1(nc::SYS_CHDIR, mount_dir as usize).map_system_errno("chdir")?;
+            Some(mount_dir)
+        }
+    };
 
-            // Pivot root to be the new root. See man 2 pivot_root.
-            nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
-                .map_system_errno("pivot_root")?;
+    if let Some(path) = pivot {
+        // Chdir to what will be the new root.
+        nc::syscalls::syscall1(nc::SYS_CHDIR, path as usize).map_system_errno("chdir")?;
 
-            // Unmount the old root. See man 2 pivot_root.
-            nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
-                .map_system_errno("umount2")?;
+        // Pivot root to be the new root. See man 2 pivot_root.
+        nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
+            .map_system_errno("pivot_root")?;
+    }
+
+    for mount in details.mounts {
+        match mount.fs_type {
+            JobMountFsType::Proc => {
+                nc::syscalls::syscall5(
+                    nc::SYS_MOUNT,
+                    PROC as usize,
+                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
+                    PROC as usize,
+                    nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV,
+                    0,
+                )
+                .map_system_errno("mount proc")?;
+            }
+            JobMountFsType::Tmp => {
+                nc::syscalls::syscall5(
+                    nc::SYS_MOUNT,
+                    TMPFS as usize,
+                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
+                    TMPFS as usize,
+                    0,
+                    0,
+                )
+                .map_system_errno("mount tmpfs")?;
+            }
         }
     }
+
+    if pivot.is_some() {
+        // Unmount the old root. See man 2 pivot_root.
+        nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
+            .map_system_errno("umount2")?;
+    }
+
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
         &details.program.to_bytes_with_nul()[0] as *const u8 as usize,

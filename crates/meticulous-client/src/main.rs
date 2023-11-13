@@ -6,7 +6,7 @@ use figment::{
     Figment,
 };
 use meticulous_base::{
-    ClientJobId, JobDetails, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess,
+    ClientJobId, JobDetails, JobError, JobMount, JobOutputResult, JobResult, JobStatus, JobSuccess,
     Sha256Digest,
 };
 use meticulous_client::Client;
@@ -79,6 +79,7 @@ struct JobDescription {
     arguments: Option<Vec<String>>,
     environment: Option<Vec<String>>,
     layers: Option<Vec<String>>,
+    mounts: Option<Vec<JobMount>>,
 }
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
@@ -185,7 +186,7 @@ fn main() -> Result<ExitCode> {
                 arguments: job.arguments.unwrap_or(vec![]),
                 environment: job.environment.unwrap_or(vec![]),
                 layers,
-                mounts: vec![],
+                mounts: job.mounts.unwrap_or(vec![]),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );

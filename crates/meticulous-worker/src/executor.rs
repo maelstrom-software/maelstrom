@@ -3,7 +3,7 @@
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
-use meticulous_base::{JobDetails, JobError, JobErrorResult, JobOutputResult};
+use meticulous_base::{JobDetails, JobError, JobErrorResult, JobMountFsType, JobOutputResult};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -276,11 +276,29 @@ impl Executor {
             }
         }
 
+        let child_mount_points = details
+            .mounts
+            .iter()
+            .map(|m| CString::new(m.mount_point.as_str()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let child_mounts = iter::zip(details.mounts.iter(), child_mount_points.iter())
+            .map(|(m, mp)| child::JobMount {
+                fs_type: match m.fs_type {
+                    JobMountFsType::Proc => child::JobMountFsType::Proc,
+                    JobMountFsType::Tmp => child::JobMountFsType::Tmp,
+                },
+                mount_point: mp.as_c_str(),
+            })
+            .collect::<Vec<_>>();
+
         let child_job_details = child::JobDetails {
             program: program.as_c_str(),
             arguments: argv.as_ref(),
             environment: env.as_ref(),
             layers: child_layers,
+            mounts: child_mounts.as_ref(),
         };
 
         // Do the clone.

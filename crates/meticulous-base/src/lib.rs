@@ -54,6 +54,7 @@ pub struct JobId {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum JobMountFsType {
     Proc,
     Tmp,
