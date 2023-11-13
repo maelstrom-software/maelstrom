@@ -70,7 +70,7 @@ fn encode_errno_error<const N: usize>(
     context: &'static str,
     buf: &mut Buf<N>,
 ) -> Result<()> {
-    buf.append([code; 1].as_slice())?;
+    buf.append(slice::from_ref(&code))?;
     buf.append(errno.to_ne_bytes().as_slice())?;
     buf.append((context.as_ptr() as usize).to_ne_bytes().as_slice())?;
     buf.append(context.len().to_ne_bytes().as_slice())?;
@@ -89,7 +89,7 @@ impl<const N: usize> TryFrom<Error> for Buf<N> {
                 encode_errno_error(1, errno, context, &mut buf)?;
             }
             Error::BufferTooSmall => {
-                buf.append([2u8; 1].as_slice())?;
+                buf.append(slice::from_ref(&2u8))?;
             }
         }
         Ok(buf)
