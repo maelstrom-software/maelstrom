@@ -1,12 +1,12 @@
 #![no_std]
 
+pub mod rtnetlink;
+
 use core::{
     ffi::{c_int, CStr},
     fmt::{self, Write as _},
     mem, result, slice, str,
 };
-
-pub mod rtnetlink;
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
 #[allow(non_camel_case_types)]
