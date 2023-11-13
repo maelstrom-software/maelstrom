@@ -33,6 +33,7 @@ macro_rules! details {
             arguments: vec![],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         }
     };
     [2] => {
@@ -41,6 +42,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         }
     };
     [3] => {
@@ -49,6 +51,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         }
     };
     [4] => {
@@ -57,6 +60,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         }
     };
     [$n:literal] => {
@@ -65,6 +69,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         }
     };
     [$n:literal, [$($digest:expr),*]] => {
@@ -75,6 +80,7 @@ macro_rules! details {
                 arguments,
                 environment,
                 layers: vec![$(digest!($digest)),*],
+                mounts: vec![],
             }
         }
     }

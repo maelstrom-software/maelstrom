@@ -53,6 +53,18 @@ pub struct JobId {
     pub cjid: ClientJobId,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum JobMountFsType {
+    Proc,
+    Tmp,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct JobMount {
+    pub fs_type: JobMountFsType,
+    pub mount_point: String,
+}
+
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobDetails {
@@ -60,6 +72,7 @@ pub struct JobDetails {
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub layers: Vec<Sha256Digest>,
+    pub mounts: Vec<JobMount>,
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a

@@ -438,6 +438,7 @@ mod tests {
                 ],
                 environment: vec![$($env.to_string()),*],
                 layers: vec![],
+                mounts: vec![],
             }
         };
     }
@@ -452,6 +453,7 @@ mod tests {
                 ],
                 environment: vec![],
                 layers: vec![],
+                mounts: vec![],
             }
         };
     }
@@ -667,6 +669,7 @@ mod tests {
             arguments: vec![],
             environment: vec![],
             layers: vec![],
+            mounts: vec![],
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())

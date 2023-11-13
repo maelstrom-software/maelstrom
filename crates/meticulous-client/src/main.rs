@@ -185,6 +185,7 @@ fn main() -> Result<ExitCode> {
                 arguments: job.arguments.unwrap_or(vec![]),
                 environment: job.environment.unwrap_or(vec![]),
                 layers,
+                mounts: vec![],
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );

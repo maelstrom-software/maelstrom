@@ -118,6 +118,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                     arguments: command_parts.collect(),
                     environment: vec![],
                     layers: vec![],
+                    mounts: vec![],
                 },
             ))?;
             self.next_job_id += 1;

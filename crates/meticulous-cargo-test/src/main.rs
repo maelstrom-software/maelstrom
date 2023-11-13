@@ -203,6 +203,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
                 layers,
+                mounts: vec![],
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
