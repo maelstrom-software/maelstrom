@@ -352,7 +352,7 @@ pub unsafe fn start_and_exec_in_child(
     ) else {
         unreachable!();
     };
-    let buf = Buf::<1024>::try_from(err).unwrap();
+    let buf = Buf::<21>::try_from(err).unwrap();
     buf.write_to_fd(exec_result_write_fd).unwrap();
     nc::exit(1);
 }
