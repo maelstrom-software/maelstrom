@@ -256,10 +256,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_cancel_job(&mut self, jid: JobId) {
-        let mut layers = vec![];
+        let mut layers = None;
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
-            layers = entry.layers.into_keys().collect();
+            layers = Some(entry.layers.into_keys().collect());
         } else if let Some(ExecutingJob { pid, layers, .. }) = self.executing.remove(&jid) {
             // The job was executing. We kill the job. We also start a new job if possible.
             // However, we wait to release the layers until the job has terminated. If we didn't it
@@ -271,18 +271,23 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             self.possibly_start_job();
         } else {
             // It may be the queue.
-            self.queued.retain_mut(|x| {
-                if x.0 != jid {
-                    true
-                } else {
-                    assert!(layers.is_empty());
-                    mem::swap(&mut x.1.layers, &mut layers);
-                    false
-                }
-            });
+            self.queued = mem::take(&mut self.queued)
+                .into_iter()
+                .filter_map(|x| {
+                    if x.0 != jid {
+                        Some(x)
+                    } else {
+                        assert!(layers.is_none());
+                        layers = Some(x.1.layers);
+                        None
+                    }
+                })
+                .collect();
         }
-        for digest in layers {
-            self.cache.decrement_ref_count(&digest);
+        if let Some(layers) = layers {
+            for digest in layers {
+                self.cache.decrement_ref_count(&digest);
+            }
         }
     }
 
