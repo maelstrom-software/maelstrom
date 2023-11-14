@@ -3,7 +3,7 @@
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
-use meticulous_base::{JobDetails, JobError, JobErrorResult, JobMountFsType, JobOutputResult};
+use meticulous_base::{JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -36,6 +36,15 @@ use tuple::Map as _;
  * |_|
  *  FIGLET: public
  */
+
+/// All necessary information for the worker to execute a job.
+pub struct JobDetails<'a> {
+    pub program: &'a str,
+    pub arguments: &'a [String],
+    pub environment: &'a [String],
+    pub layers: &'a [PathBuf],
+    pub mounts: &'a [JobMount],
+}
 
 pub struct Executor {
     uid: Uid,
@@ -102,12 +111,11 @@ impl Executor {
     pub fn start(
         &self,
         details: &JobDetails,
-        layers: Vec<PathBuf>,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        self.start_inner(details, layers, inline_limit, stdout_done, stderr_done)
+        self.start_inner(details, inline_limit, stdout_done, stderr_done)
     }
 }
 
@@ -178,7 +186,6 @@ impl Executor {
     fn start_inner(
         &self,
         details: &JobDetails,
-        layers: Vec<PathBuf>,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
@@ -202,7 +209,7 @@ impl Executor {
             .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
         // Set up the arguments to pass to the child process.
-        let program = CString::new(details.program.as_str())
+        let program = CString::new(details.program)
             .map_err(Error::from)
             .map_err(JobError::System)?;
         let arguments = details
@@ -240,12 +247,12 @@ impl Executor {
         let overlayfs_options;
         let child_layers: Layers;
 
-        match layers.len() {
+        match details.layers.len() {
             0 => {
                 child_layers = Layers::None;
             }
             1 => {
-                layer0_path = CString::new(layers[0].as_os_str().as_bytes())
+                layer0_path = CString::new(details.layers[0].as_os_str().as_bytes())
                     .map_err(Error::from)
                     .map_err(JobError::System)?;
                 child_layers = Layers::One {
@@ -254,7 +261,7 @@ impl Executor {
             }
             _ => {
                 let mut options = "lowerdir=".to_string();
-                for (i, layer) in layers.iter().rev().enumerate() {
+                for (i, layer) in details.layers.iter().rev().enumerate() {
                     if i != 0 {
                         options.push(':');
                     }
@@ -448,39 +455,6 @@ mod tests {
     use std::ops::ControlFlow;
     use tokio::sync::oneshot;
 
-    macro_rules! bash {
-        ($cmd:literal) => {
-            bash!($cmd,)
-        };
-        ($cmd:literal, $($env:literal),*) => {
-            JobDetails {
-                program: "/usr/bin/bash".to_string(),
-                arguments: vec![
-                    "-c".to_string(),
-                    $cmd.to_string(),
-                ],
-                environment: vec![$($env.to_string()),*],
-                layers: vec![],
-                mounts: vec![],
-            }
-        };
-    }
-
-    macro_rules! python {
-        ($($tokens:expr),*) => {
-            JobDetails {
-                program: "/usr/bin/python3".to_string(),
-                arguments: vec![
-                    "-c".to_string(),
-                    format!($($tokens),*),
-                ],
-                environment: vec![],
-                layers: vec![],
-                mounts: vec![],
-            }
-        };
-    }
-
     struct ReaperAdapter {
         pid: Pid,
         result: Option<JobStatus>,
@@ -512,8 +486,83 @@ mod tests {
         }
     }
 
-    async fn start_and_expect(
-        details: JobDetails,
+    async fn start_and_expect_bash(
+        command: &'static str,
+        expected_status: JobStatus,
+        expected_stdout: JobOutputResult,
+        expected_stderr: JobOutputResult,
+    ) {
+        start_and_expect_bash_full(
+            command,
+            vec![],
+            vec![],
+            1000,
+            expected_status,
+            expected_stdout,
+            expected_stderr,
+        )
+        .await;
+    }
+
+    async fn start_and_expect_bash_full(
+        command: &'static str,
+        environment: Vec<&'static str>,
+        mounts: Vec<JobMount>,
+        inline_limit: u64,
+        expected_status: JobStatus,
+        expected_stdout: JobOutputResult,
+        expected_stderr: JobOutputResult,
+    ) {
+        let program = "/usr/bin/bash";
+        let arguments = vec!["-c".to_string(), command.to_string()];
+        let environment = environment
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect::<Vec<_>>();
+        let details = JobDetails {
+            program,
+            arguments: arguments.as_slice(),
+            environment: environment.as_slice(),
+            layers: &[],
+            mounts: mounts.as_slice(),
+        };
+        start_and_expect(
+            details,
+            inline_limit,
+            expected_status,
+            expected_stdout,
+            expected_stderr,
+        )
+        .await;
+    }
+
+    async fn start_and_expect_python(
+        script: &'static str,
+        expected_status: JobStatus,
+        expected_stdout: JobOutputResult,
+        expected_stderr: JobOutputResult,
+    ) {
+        let program = "/usr/bin/python3";
+        let arguments = vec!["-c".to_string(), script.to_string()];
+        let details = JobDetails {
+            program,
+            arguments: arguments.as_slice(),
+            environment: &[],
+            layers: &[],
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            1000,
+            expected_status,
+            expected_stdout,
+            expected_stderr,
+        )
+        .await;
+    }
+
+    async fn start_and_expect<'a>(
+        details: JobDetails<'a>,
         inline_limit: u64,
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
@@ -526,7 +575,6 @@ mod tests {
             .unwrap()
             .start(
                 &details,
-                vec![],
                 InlineLimit::from(inline_limit),
                 |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                 |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
@@ -552,9 +600,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn exited_0() {
-        start_and_expect(
-            bash!("exit 0"),
-            0,
+        start_and_expect_bash(
+            "exit 0",
             JobStatus::Exited(0),
             JobOutputResult::None,
             JobOutputResult::None,
@@ -565,9 +612,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn exited_1() {
-        start_and_expect(
-            bash!("exit 1"),
-            0,
+        start_and_expect_bash(
+            "exit 1",
             JobStatus::Exited(1),
             JobOutputResult::None,
             JobOutputResult::None,
@@ -581,8 +627,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn signaled_11() {
-        start_and_expect(
-            python!(concat!(
+        start_and_expect_python(
+            concat!(
                 "import os;",
                 "import sys;",
                 "print('a');",
@@ -590,8 +636,7 @@ mod tests {
                 "print('b', file=sys.stderr);",
                 "sys.stderr.flush();",
                 "os.abort()",
-            )),
-            2,
+            ),
             JobStatus::Signaled(11),
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
             JobOutputResult::Inline(boxed_u8!(b"b\n")),
@@ -602,8 +647,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn stdout() {
-        start_and_expect(
-            bash!("echo a"),
+        start_and_expect_bash_full(
+            "echo a",
+            vec![],
+            vec![],
             0,
             JobStatus::Exited(0),
             JobOutputResult::Truncated {
@@ -613,8 +660,10 @@ mod tests {
             JobOutputResult::None,
         )
         .await;
-        start_and_expect(
-            bash!("echo a"),
+        start_and_expect_bash_full(
+            "echo a",
+            vec![],
+            vec![],
             1,
             JobStatus::Exited(0),
             JobOutputResult::Truncated {
@@ -624,16 +673,20 @@ mod tests {
             JobOutputResult::None,
         )
         .await;
-        start_and_expect(
-            bash!("echo a"),
+        start_and_expect_bash_full(
+            "echo a",
+            vec![],
+            vec![],
             2,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
             JobOutputResult::None,
         )
         .await;
-        start_and_expect(
-            bash!("echo a"),
+        start_and_expect_bash_full(
+            "echo a",
+            vec![],
+            vec![],
             3,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
@@ -645,8 +698,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn stderr() {
-        start_and_expect(
-            bash!("echo a >&2"),
+        start_and_expect_bash_full(
+            "echo a >&2",
+            vec![],
+            vec![],
             0,
             JobStatus::Exited(0),
             JobOutputResult::None,
@@ -656,8 +711,10 @@ mod tests {
             },
         )
         .await;
-        start_and_expect(
-            bash!("echo a >&2"),
+        start_and_expect_bash_full(
+            "echo a >&2",
+            vec![],
+            vec![],
             1,
             JobStatus::Exited(0),
             JobOutputResult::None,
@@ -667,16 +724,20 @@ mod tests {
             },
         )
         .await;
-        start_and_expect(
-            bash!("echo a >&2"),
+        start_and_expect_bash_full(
+            "echo a >&2",
+            vec![],
+            vec![],
             2,
             JobStatus::Exited(0),
             JobOutputResult::None,
             JobOutputResult::Inline(boxed_u8!(b"a\n")),
         )
         .await;
-        start_and_expect(
-            bash!("echo a >&2"),
+        start_and_expect_bash_full(
+            "echo a >&2",
+            vec![],
+            vec![],
             3,
             JobStatus::Exited(0),
             JobOutputResult::None,
@@ -689,22 +750,16 @@ mod tests {
     #[serial]
     fn execution_error() {
         let details = JobDetails {
-            program: "a_program_that_does_not_exist".to_string(),
-            arguments: vec![],
-            environment: vec![],
-            layers: vec![],
-            mounts: vec![],
+            program: "a_program_that_does_not_exist",
+            arguments: &[],
+            environment: &[],
+            layers: &[],
+            mounts: &[],
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
                 .unwrap()
-                .start(
-                    &details,
-                    vec![],
-                    0.into(),
-                    |_| unreachable!(),
-                    |_| unreachable!()
-                ),
+                .start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
             Err(JobError::Execution(_))
         );
     }
@@ -712,8 +767,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn environment() {
-        start_and_expect(
-            bash!("echo -n $FOO - $BAR", "FOO=3", "BAR=4"),
+        start_and_expect_bash_full(
+            "echo -n $FOO - $BAR",
+            vec!["FOO=3", "BAR=4"],
+            vec![],
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"3 - 4")),
@@ -725,9 +782,8 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn stdin_empty() {
-        start_and_expect(
-            bash!("cat"),
-            0,
+        start_and_expect_bash(
+            "cat",
             JobStatus::Exited(0),
             JobOutputResult::None,
             JobOutputResult::None,
@@ -742,15 +798,14 @@ mod tests {
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
         // We should have pgid 1, indicating that we're the group leader.
         // We should have sid 1, indicating that we're the session leader.
-        start_and_expect(
-            python!(concat!(
+        start_and_expect_python(
+            concat!(
                 "import os;",
                 "print('pid:', os.getpid());",
                 "print('ppid:', os.getppid());",
                 "print('pgid:', os.getpgid(0));",
                 "print('sid:', os.getsid(0));",
-            )),
-            100,
+            ),
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n")),
             JobOutputResult::None,

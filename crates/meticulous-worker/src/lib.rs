@@ -84,9 +84,15 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "details" => format!("{details:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
+        let details = executor::JobDetails {
+            program: details.program.as_str(),
+            arguments: details.arguments.as_slice(),
+            environment: details.environment.as_slice(),
+            layers: layers.as_slice(),
+            mounts: details.mounts.as_slice(),
+        };
         let result = self.executor.start(
-            details,
-            layers,
+            &details,
             self.inline_limit,
             move |result| {
                 debug!(log, "job stdout"; "result" => ?result);
