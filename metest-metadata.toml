@@ -1,7 +1,7 @@
 [[groups]]
 module = "meticulous-worker"
 tests = "executor::"
-layers = ["executor-test-deps.tar"]
+layers = ["proc-and-tmp.tar"]
 [[groups.mounts]]
 fs_type = "tmp"
 mount_point = "/tmp"

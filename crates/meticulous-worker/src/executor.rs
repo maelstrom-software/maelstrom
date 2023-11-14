@@ -452,7 +452,9 @@ mod tests {
     use meticulous_test::boxed_u8;
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
-    use std::ops::ControlFlow;
+    use std::{ops::ControlFlow, slice};
+    use tar::Archive;
+    use tempfile::TempDir;
     use tokio::sync::oneshot;
 
     struct ReaperAdapter {
@@ -484,6 +486,13 @@ mod tests {
                 ControlFlow::Continue(())
             }
         }
+    }
+
+    fn extract_dependencies() -> PathBuf {
+        let bytes = include_bytes!("executor-test-deps.tar");
+        let tempdir = TempDir::new().unwrap();
+        Archive::new(bytes.as_slice()).unpack(&tempdir).unwrap();
+        tempdir.into_path()
     }
 
     async fn start_and_expect_bash(
@@ -519,11 +528,12 @@ mod tests {
             .into_iter()
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
+        let layer = extract_dependencies();
         let details = JobDetails {
             program,
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
-            layers: &[],
+            layers: slice::from_ref(&layer),
             mounts: mounts.as_slice(),
         };
         start_and_expect(
@@ -544,11 +554,12 @@ mod tests {
     ) {
         let program = "/usr/bin/python3";
         let arguments = vec!["-c".to_string(), script.to_string()];
+        let layer = extract_dependencies();
         let details = JobDetails {
             program,
             arguments: arguments.as_slice(),
             environment: &[],
-            layers: &[],
+            layers: slice::from_ref(&layer),
             mounts: &[],
         };
         start_and_expect(
