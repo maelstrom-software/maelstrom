@@ -17,6 +17,7 @@ panic = "abort"
 [workspace.dependencies]
 anyhow = "1.0.71"
 assert_matches = "1.5.0"
+async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 bincode = "1.3.3"
 bytesize = "1.3.0"
 cargo_metadata = "0.18"
@@ -53,8 +54,10 @@ netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
 nix = { version = "0.26.2", features = ["signal"] }
 num_cpus = "1.15.0"
+oci-spec = "0.6"
 rand = "0.8.5"
 regex = "1.8.3"
+reqwest = { version = "0.11", features = [ "stream", "json" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.107" }
 serde_test = "1"
@@ -66,7 +69,8 @@ slog-term = "2.9.0"
 strum = { version = "0.25.0", features = ["derive"] }
 tar = "0.4.38"
 tempfile = "3.5.0"
-tokio = "1.28"
+tokio = { version = "1.28", features = [ "rt", "rt-multi-thread", "macros", "fs", "io-util" ] }
+tokio-util = { version = "0.7.10", features = [ "compat" ] }
 tuple = "0.5.1"
 unicode-truncate = "0.2.0"
 unicode-width = "0.1.7"
