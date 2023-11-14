@@ -148,10 +148,10 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
 fn add_artifact(client: &mut Client, layer: &str) -> Result<Vec<Sha256Digest>> {
     let mut digests = vec![];
     if layer.starts_with("docker:") {
-        let pkg = layer.split(":").skip(1).next().unwrap();
+        let pkg = layer.split(':').nth(1).unwrap();
         digests.extend(client.add_container(pkg, "latest")?);
     } else {
-        digests.push(client.add_artifact(&Path::new(layer))?);
+        digests.push(client.add_artifact(Path::new(layer))?);
     }
     Ok(digests)
 }

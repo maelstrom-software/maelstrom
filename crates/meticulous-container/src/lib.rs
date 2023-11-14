@@ -164,7 +164,7 @@ pub async fn download_image(
         let path = layer_dir.as_ref().join(format!("layer_{i}.tar"));
         let mut file = tokio::fs::File::create(&path).await?;
         download_layer(&client, &token, pkg, layer.digest(), &mut file).await?;
-        layers.push(path.into());
+        layers.push(path);
     }
 
     Ok(ContainerImage { config, layers })
@@ -176,5 +176,5 @@ pub async fn download_image_sync(
     version: &str,
     layer_dir: impl AsRef<Path>,
 ) -> Result<ContainerImage> {
-    Ok(download_image(pkg, version, layer_dir).await?)
+    download_image(pkg, version, layer_dir).await
 }

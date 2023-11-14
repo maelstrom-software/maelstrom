@@ -173,6 +173,7 @@ fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
 }
 
 impl<StdErr: io::Write> JobQueuer<StdErr> {
+    #[allow(clippy::too_many_arguments)]
     fn queue_job_from_case<ProgressIndicatorT>(
         &mut self,
         client: &Mutex<Client>,
