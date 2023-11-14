@@ -734,4 +734,27 @@ mod tests {
         )
         .await;
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn pid_ppid_pgid_and_sid() {
+        // We should be pid 1, that is, init for our namespace).
+        // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
+        // We should have pgid 1, indicating that we're the group leader.
+        // We should have sid 1, indicating that we're the session leader.
+        start_and_expect(
+            python!(concat!(
+                "import os;",
+                "print('pid:', os.getpid());",
+                "print('ppid:', os.getppid());",
+                "print('pgid:', os.getpgid(0));",
+                "print('sid:', os.getsid(0));",
+            )),
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
 }
