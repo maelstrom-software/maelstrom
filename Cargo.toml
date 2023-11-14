@@ -45,6 +45,7 @@ lddtree = "0.3"
 maplit = "1"
 meticulous-base = { path = "crates/meticulous-base" }
 meticulous-client = { path = "crates/meticulous-client" }
+meticulous-container = { path = "crates/meticulous-container" }
 meticulous-plot = { path = "crates/meticulous-plot" }
 meticulous-test = { path = "crates/meticulous-test" }
 meticulous-util = { path = "crates/meticulous-util" }

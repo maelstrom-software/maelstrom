@@ -2234,11 +2234,13 @@ dependencies = [
  "figment",
  "gethostname 0.4.3",
  "meticulous-base",
+ "meticulous-container",
  "meticulous-util",
  "regex",
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 

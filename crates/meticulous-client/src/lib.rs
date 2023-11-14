@@ -17,6 +17,7 @@ use std::{
     sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
 };
+use tempfile::TempDir;
 
 fn artifact_pusher_main(
     broker_addr: SocketAddr,
@@ -132,6 +133,7 @@ pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     dispatcher_handle: JoinHandle<Result<()>>,
     paths: HashMap<PathBuf, Sha256Digest>,
+    container_dir: TempDir,
 }
 
 impl Client {
@@ -158,6 +160,7 @@ impl Client {
             dispatcher_sender,
             dispatcher_handle,
             paths: HashMap::default(),
+            container_dir: tempfile::tempdir()?,
         })
     }
 
@@ -172,6 +175,17 @@ impl Client {
         let digest = receiver.recv()??;
         self.paths.insert(path, digest.clone()).assert_is_none();
         Ok(digest)
+    }
+
+    pub fn add_container(&mut self, pkg: &str, version: &str) -> Result<Vec<Sha256Digest>> {
+        let mut digests = vec![];
+        let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
+        std::fs::create_dir(&layer_dir)?;
+        let img = meticulous_container::download_image_sync(pkg, version, layer_dir)?;
+        for layer in img.layers {
+            digests.push(self.add_artifact(&layer)?);
+        }
+        Ok(digests)
     }
 
     pub fn add_job(&mut self, details: JobDetails, handler: JobResponseHandler) {

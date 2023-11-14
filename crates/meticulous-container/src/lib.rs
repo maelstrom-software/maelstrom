@@ -169,3 +169,12 @@ pub async fn download_image(
 
     Ok(ContainerImage { config, layers })
 }
+
+#[tokio::main]
+pub async fn download_image_sync(
+    pkg: &str,
+    version: &str,
+    layer_dir: impl AsRef<Path>,
+) -> Result<ContainerImage> {
+    Ok(download_image(pkg, version, layer_dir).await?)
+}
