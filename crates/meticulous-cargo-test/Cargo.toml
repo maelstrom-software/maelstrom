@@ -4,32 +4,32 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-anyhow = { workspace = true }
-cargo_metadata = { workspace = true }
-clap = { workspace = true }
-colored = { workspace = true }
-console = { workspace = true }
-indicatif = { workspace = true }
-lddtree = { workspace = true }
-meticulous-base = { workspace = true }
-meticulous-client = { workspace = true }
-meticulous-util = { workspace = true }
-regex = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tar = { workspace = true }
-toml = { workspace = true }
-unicode-truncate = { workspace = true }
-unicode-width = { workspace = true }
+anyhow.workspace = true
+cargo_metadata.workspace = true
+clap.workspace = true
+colored.workspace = true
+console.workspace = true
+indicatif.workspace = true
+lddtree.workspace = true
+meticulous-base.workspace = true
+meticulous-client.workspace = true
+meticulous-util.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tar.workspace = true
+toml.workspace = true
+unicode-truncate.workspace = true
+unicode-width.workspace = true
 
 [dev-dependencies]
-assert_matches = { workspace = true }
-bincode = { workspace = true }
-enum-map = { workspace = true }
-serde = { workspace = true }
-tempfile = { workspace = true }
-meticulous-broker = { workspace = true }
-meticulous-worker = { workspace = true }
+assert_matches.workspace = true
+bincode.workspace = true
+enum-map.workspace = true
+serde.workspace = true
+tempfile.workspace = true
+meticulous-broker.workspace = true
+meticulous-worker.workspace = true
 
 [[bin]]
 name = "cargo-metest"

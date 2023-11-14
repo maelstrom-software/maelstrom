@@ -4,4 +4,4 @@ version = "0.23.0"
 edition = "2021"
 
 [dependencies]
-egui = { workspace = true }
+egui.workspace = true

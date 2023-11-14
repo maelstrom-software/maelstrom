@@ -7,21 +7,21 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = { workspace = true }
-bincode = { workspace = true }
-console_error_panic_hook = { workspace = true }
-eframe = { workspace = true }
-egui = { workspace = true }
-egui_gauge = { workspace = true }
-egui-toast = { workspace = true }
-meticulous-plot = { workspace = true }
-futures = { workspace = true }
-gloo-net = { workspace = true }
-gloo-utils = { workspace = true }
-meticulous-base = { workspace = true }
-wasm-bindgen-futures = { workspace = true }
-wasm-bindgen = { workspace = true }
-wasm-logger = { workspace = true }
+anyhow.workspace = true
+bincode.workspace = true
+console_error_panic_hook.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui_gauge.workspace = true
+egui-toast.workspace = true
+meticulous-plot.workspace = true
+futures.workspace = true
+gloo-net.workspace = true
+gloo-utils.workspace = true
+meticulous-base.workspace = true
+wasm-bindgen-futures.workspace = true
+wasm-bindgen.workspace = true
+wasm-logger.workspace = true
 
 [dependencies.web-sys]
 version = "0.3"
