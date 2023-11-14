@@ -387,35 +387,19 @@ struct TestGroup {
     mounts: Option<Vec<JobMount>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct Config {
     #[serde(default)]
     groups: Vec<TestGroup>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Config {
-            groups: Vec::default(),
-        }
-    }
 }
 
 impl Config {
     fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
         self.groups
             .iter()
-            .filter(|group| match &group.tests {
-                Some(group_tests) if !test.contains(group_tests.as_str()) => false,
-                _ => true,
-            })
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
             .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .filter(|group| match &group.module {
-                Some(group_module) if module != group_module.as_str() => false,
-                _ => true,
-            })
-            .map(|group| group.layers.iter().flatten())
-            .flatten()
+            .flat_map(|group| group.layers.iter().flatten())
             .map(String::as_str)
             .collect()
     }
@@ -423,17 +407,9 @@ impl Config {
     fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
         self.groups
             .iter()
-            .filter(|group| match &group.tests {
-                Some(group_tests) if !test.contains(group_tests.as_str()) => false,
-                _ => true,
-            })
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
             .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .filter(|group| match &group.module {
-                Some(group_module) if module != group_module.as_str() => false,
-                _ => true,
-            })
-            .map(|group| group.mounts.iter().flatten())
-            .flatten()
+            .flat_map(|group| group.mounts.iter().flatten())
             .cloned()
             .collect()
     }
