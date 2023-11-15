@@ -32,7 +32,7 @@ macro_rules! details {
             program: "test_1".to_string(),
             arguments: vec![],
             environment: vec![],
-            layers: vec![],
+            layers: meticulous_base::nonempty![digest!(1)],
             mounts: vec![],
         }
     };
@@ -41,7 +41,7 @@ macro_rules! details {
             program: "test_2".to_string(),
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
-            layers: vec![],
+            layers: meticulous_base::nonempty![digest!(2)],
             mounts: vec![],
         }
     };
@@ -50,7 +50,7 @@ macro_rules! details {
             program: "test_3".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
             environment: vec![],
-            layers: vec![],
+            layers: meticulous_base::nonempty![digest!(3)],
             mounts: vec![],
         }
     };
@@ -59,7 +59,7 @@ macro_rules! details {
             program: "test_4".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
             environment: vec![],
-            layers: vec![],
+            layers: meticulous_base::nonempty![digest!(4)],
             mounts: vec![],
         }
     };
@@ -68,7 +68,7 @@ macro_rules! details {
             program: concat!("test_", stringify!($n)).to_string(),
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
-            layers: vec![],
+            layers: meticulous_base::nonempty![digest!($n)],
             mounts: vec![],
         }
     };
@@ -79,7 +79,7 @@ macro_rules! details {
                 program,
                 arguments,
                 environment,
-                layers: vec![$(digest!($digest)),*],
+                layers: meticulous_base::nonempty![$(digest!($digest)),*],
                 mounts: vec![],
             }
         }

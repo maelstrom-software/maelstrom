@@ -1,6 +1,11 @@
 //! Core structs used by the broker, worker, and clients. Everything in this crate must be usable
 //! from wasm.
 
+pub mod proto;
+pub mod ring_buffer;
+pub mod stats;
+
+pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
@@ -9,10 +14,6 @@ use std::{
     result::Result,
     str::FromStr,
 };
-
-pub mod proto;
-pub mod ring_buffer;
-pub mod stats;
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -72,7 +73,7 @@ pub struct JobDetails {
     pub program: String,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
-    pub layers: Vec<Sha256Digest>,
+    pub layers: NonEmpty<Sha256Digest>,
     pub mounts: Vec<JobMount>,
 }
 

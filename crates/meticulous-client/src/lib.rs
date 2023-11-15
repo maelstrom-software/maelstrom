@@ -4,7 +4,7 @@ use meticulous_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobDetails, JobResult, Sha256Digest,
+    ClientJobId, JobDetails, JobResult, NonEmpty, Sha256Digest,
 };
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
@@ -177,15 +177,13 @@ impl Client {
         Ok(digest)
     }
 
-    pub fn add_container(&mut self, pkg: &str, version: &str) -> Result<Vec<Sha256Digest>> {
-        let mut digests = vec![];
+    pub fn add_container(&mut self, pkg: &str, version: &str) -> Result<NonEmpty<Sha256Digest>> {
         let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
         std::fs::create_dir(&layer_dir)?;
         let img = meticulous_container::download_image_sync(pkg, version, layer_dir)?;
-        for layer in img.layers {
-            digests.push(self.add_artifact(&layer)?);
-        }
-        Ok(digests)
+        NonEmpty::<PathBuf>::try_from(img.layers)
+            .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?
+            .try_map(|layer| self.add_artifact(&layer))
     }
 
     pub fn add_job(&mut self, details: JobDetails, handler: JobResponseHandler) {

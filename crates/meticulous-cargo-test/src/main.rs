@@ -8,7 +8,7 @@ use cargo_metadata::Artifact as CargoArtifact;
 use clap::Parser;
 use console::Term;
 use indicatif::TermLike;
-use meticulous_base::{JobDetails, JobMount, Sha256Digest};
+use meticulous_base::{JobDetails, JobMount, NonEmpty, Sha256Digest};
 use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
 use progress::{
@@ -192,7 +192,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         package_name: &str,
         case: &str,
         binary: &Path,
-        layers: Vec<Sha256Digest>,
+        layers: NonEmpty<Sha256Digest>,
         mounts: Vec<JobMount>,
     ) -> Result<()>
     where
@@ -279,7 +279,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 package_name,
                 &case,
                 &binary,
-                layers,
+                NonEmpty::try_from(layers).unwrap(),
                 self.config.get_mounts_for_test(package_name, &case),
             )?;
         }

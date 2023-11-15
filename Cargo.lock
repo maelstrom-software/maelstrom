@@ -2165,6 +2165,7 @@ name = "meticulous-base"
 version = "0.1.0"
 dependencies = [
  "enum-map",
+ "nonempty",
  "serde",
  "serde_test",
  "strum",
@@ -2530,6 +2531,15 @@ checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "nonempty"
+version = "0.8.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aeaf4ad7403de93e699c191202f017118df734d3850b01e13a3a8b2e6953d3c9"
+dependencies = [
+ "serde",
 ]
 
 [[package]]

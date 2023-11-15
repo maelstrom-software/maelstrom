@@ -7,7 +7,7 @@ use figment::{
 };
 use meticulous_base::{
     ClientJobId, JobDetails, JobError, JobMount, JobOutputResult, JobResult, JobStatus, JobSuccess,
-    Sha256Digest,
+    NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
 use meticulous_util::{
@@ -78,7 +78,7 @@ struct JobDescription {
     program: String,
     arguments: Option<Vec<String>>,
     environment: Option<Vec<String>>,
-    layers: Option<Vec<String>>,
+    layers: NonEmpty<String>,
     mounts: Option<Vec<JobMount>>,
 }
 
@@ -136,15 +136,13 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
     Ok(())
 }
 
-fn add_artifact(client: &mut Client, layer: &str) -> Result<Vec<Sha256Digest>> {
-    let mut digests = vec![];
-    if layer.starts_with("docker:") {
+fn add_artifact(client: &mut Client, layer: &str) -> Result<NonEmpty<Sha256Digest>> {
+    Ok(if layer.starts_with("docker:") {
         let pkg = layer.split(':').nth(1).unwrap();
-        digests.extend(client.add_container(pkg, "latest")?);
+        client.add_container(pkg, "latest")?
     } else {
-        digests.push(client.add_artifact(Path::new(layer))?);
-    }
-    Ok(digests)
+        NonEmpty::singleton(client.add_artifact(Path::new(layer))?)
+    })
 }
 
 fn main() -> Result<ExitCode> {
@@ -175,10 +173,10 @@ fn main() -> Result<ExitCode> {
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {
         let job = job?;
-        let mut layers = vec![];
-        for layer in job.layers.unwrap_or(vec![]) {
-            layers.extend(add_artifact(&mut client, &layer)?);
-        }
+        let layers = NonEmpty::<Sha256Digest>::flatten(
+            job.layers
+                .try_map(|layer| add_artifact(&mut client, &layer))?,
+        );
         let accum_clone = accum.clone();
         client.add_job(
             JobDetails {

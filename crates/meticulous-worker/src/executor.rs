@@ -3,7 +3,9 @@
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use futures::ready;
-use meticulous_base::{JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult};
+use meticulous_base::{
+    JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult, NonEmpty,
+};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -42,7 +44,7 @@ pub struct JobDetails<'a> {
     pub program: &'a str,
     pub arguments: &'a [String],
     pub environment: &'a [String],
-    pub layers: &'a [PathBuf],
+    pub layers: &'a NonEmpty<PathBuf>,
     pub mounts: &'a [JobMount],
 }
 
@@ -452,7 +454,7 @@ mod tests {
     use meticulous_test::boxed_u8;
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
-    use std::{ops::ControlFlow, slice};
+    use std::ops::ControlFlow;
     use tar::Archive;
     use tempfile::TempDir;
     use tokio::sync::oneshot;
@@ -528,12 +530,12 @@ mod tests {
             .into_iter()
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
-        let layer = extract_dependencies();
+        let layers = &NonEmpty::new(extract_dependencies());
         let details = JobDetails {
             program,
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
-            layers: slice::from_ref(&layer),
+            layers,
             mounts: mounts.as_slice(),
         };
         start_and_expect(
@@ -554,12 +556,12 @@ mod tests {
     ) {
         let program = "/usr/bin/python3";
         let arguments = vec!["-c".to_string(), script.to_string()];
-        let layer = extract_dependencies();
+        let layers = &NonEmpty::new(extract_dependencies());
         let details = JobDetails {
             program,
             arguments: arguments.as_slice(),
             environment: &[],
-            layers: slice::from_ref(&layer),
+            layers,
             mounts: &[],
         };
         start_and_expect(
@@ -760,11 +762,12 @@ mod tests {
     #[test]
     #[serial]
     fn execution_error() {
+        let layers = &NonEmpty::new(extract_dependencies());
         let details = JobDetails {
             program: "a_program_that_does_not_exist",
             arguments: &[],
             environment: &[],
-            layers: &[],
+            layers,
             mounts: &[],
         };
         assert_matches!(

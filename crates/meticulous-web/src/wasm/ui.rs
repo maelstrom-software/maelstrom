@@ -100,6 +100,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         }
     }
 
+    /*
     fn submit_job(&mut self) -> Result<()> {
         if let Some(rpc) = self.rpc.as_mut() {
             let mut command_parts = self.command.split(" ").map(|p| p.to_string());
@@ -125,6 +126,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         }
         Ok(())
     }
+    */
 
     fn plot_graph<'a>(
         &self,
@@ -276,13 +278,14 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
     }
 
     fn update_failable(&mut self, ui: &mut Ui) -> Result<()> {
-        let mut res = Ok(());
-
         if let Some(stats) = &self.stats {
             self.draw_stats(ui, stats)
         } else {
             ui.label("loading..");
         }
+
+        /*
+        let mut res = Ok(());
 
         ui.collapsing("Submit a Job", |ui| {
             ui.horizontal(|ui| {
@@ -304,6 +307,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             });
         });
         res?;
+        */
 
         self.handle_rpcs()?;
         Ok(())

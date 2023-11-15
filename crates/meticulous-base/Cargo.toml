@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 enum-map.workspace = true
+nonempty.workspace = true
 serde.workspace = true
 strum.workspace = true
 
