@@ -613,7 +613,12 @@ fn failed_tests() {
     );
 }
 
-fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet: bool) -> String {
+fn run_in_progress_test(
+    fake_tests: FakeTests,
+    job_states: JobStateCounts,
+    quiet: bool,
+    expected_output: &str,
+) {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
@@ -643,18 +648,10 @@ fn run_in_progress_test(fake_tests: FakeTests, job_states: JobStateCounts, quiet
     let term_clone = term.clone();
     std::thread::spawn(move || run_app(term_clone, state, cargo, true, quiet, None, None));
 
-    // wait until contents settles
-    let mut last_contents = String::new();
-    loop {
+    // wait until we get the expected contents
+    while term.contents() != expected_output {
         std::thread::sleep(Duration::from_millis(550));
-        let new_contents = term.contents();
-        if new_contents.is_empty() || new_contents.contains("building artifacts") {
-            continue;
-        }
-        if new_contents == last_contents {
-            return new_contents;
-        }
-        last_contents = new_contents;
+        println!("waiting, current terminal output:\n{}", term.contents());
     }
 }
 
@@ -684,14 +681,16 @@ fn waiting_for_artifacts() {
         JobState::Running => 0,
         JobState::Complete => 0,
     };
-    assert_eq!(
-        run_in_progress_test(fake_tests, state, false),
+    run_in_progress_test(
+        fake_tests,
+        state,
+        false,
         "\
         ######################## 2/2 waiting for artifacts\n\
         ------------------------ 0/2 pending\n\
         ------------------------ 0/2 running\n\
         ------------------------ 0/2 complete\
-        "
+        ",
     );
 }
 
@@ -721,14 +720,16 @@ fn pending() {
         JobState::Running => 0,
         JobState::Complete => 0,
     };
-    assert_eq!(
-        run_in_progress_test(fake_tests, state, false),
+    run_in_progress_test(
+        fake_tests,
+        state,
+        false,
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
         ------------------------ 0/2 running\n\
         ------------------------ 0/2 complete\
-        "
+        ",
     );
 }
 
@@ -758,15 +759,17 @@ fn running() {
         JobState::Running => 2,
         JobState::Complete => 0,
     };
-    //assert_eq!(
-    run_in_progress_test(fake_tests, state, false);
-    /*    "\
+    run_in_progress_test(
+        fake_tests,
+        state,
+        false,
+        "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
         ######################## 2/2 running\n\
         ------------------------ 0/2 complete\
-        "
-    );*/
+        ",
+    );
 }
 
 #[test]
@@ -795,15 +798,17 @@ fn complete() {
         JobState::Running => 1,
         JobState::Complete => 1,
     };
-    assert_eq!(
-        run_in_progress_test(fake_tests, state, false),
+    run_in_progress_test(
+        fake_tests,
+        state,
+        false,
         "\
         foo test_it.....................................OK\n\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
         ######################## 2/2 running\n\
         #############----------- 1/2 complete\
-        "
+        ",
     );
 }
 
@@ -833,8 +838,10 @@ fn complete_quiet() {
         JobState::Running => 1,
         JobState::Complete => 1,
     };
-    assert_eq!(
-        run_in_progress_test(fake_tests, state, true),
-        "#####################-------------------- 1/2 jobs"
+    run_in_progress_test(
+        fake_tests,
+        state,
+        true,
+        "#####################-------------------- 1/2 jobs",
     );
 }
