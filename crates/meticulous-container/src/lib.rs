@@ -144,6 +144,16 @@ pub struct ContainerImage {
     pub layers: Vec<PathBuf>,
 }
 
+impl ContainerImage {
+    pub fn env(&self) -> Option<&Vec<String>> {
+        self.config
+            .config()
+            .as_ref()
+            .map(|c| c.env().as_ref())
+            .flatten()
+    }
+}
+
 pub async fn download_image(
     pkg: &str,
     version: &str,

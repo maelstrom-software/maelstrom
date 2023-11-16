@@ -9,7 +9,7 @@ use meticulous_base::{
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     fs::{self, File},
     io::{self, Read},
     net::{SocketAddr, TcpStream},
@@ -134,6 +134,7 @@ pub struct Client {
     dispatcher_handle: JoinHandle<Result<()>>,
     paths: HashMap<PathBuf, Sha256Digest>,
     container_dir: TempDir,
+    digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
 }
 
 impl Client {
@@ -161,6 +162,7 @@ impl Client {
             dispatcher_handle,
             paths: HashMap::default(),
             container_dir: tempfile::tempdir()?,
+            digest_to_container_env: HashMap::default(),
         })
     }
 
@@ -181,12 +183,29 @@ impl Client {
         let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
         std::fs::create_dir(&layer_dir)?;
         let img = meticulous_container::download_image_sync(pkg, version, layer_dir)?;
-        NonEmpty::<PathBuf>::try_from(img.layers)
+        let env = img.env().cloned();
+        let digests = NonEmpty::<PathBuf>::try_from(img.layers)
             .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?
-            .try_map(|layer| self.add_artifact(&layer))
+            .try_map(|layer| self.add_artifact(&layer))?;
+        if let Some(env) = env {
+            self.digest_to_container_env.insert(digests.clone(), env);
+        }
+        Ok(digests)
     }
 
-    pub fn add_job(&mut self, details: JobDetails, handler: JobResponseHandler) {
+    fn maybe_add_container_environment(&mut self, details: &mut JobDetails) {
+        for (digests, env) in &self.digest_to_container_env {
+            let container_digests: HashSet<_> = digests.iter().collect();
+            let job_digests: HashSet<_> = details.layers.iter().collect();
+            if job_digests.is_superset(&container_digests) {
+                details.environment.extend(env.iter().cloned());
+            }
+        }
+    }
+
+    pub fn add_job(&mut self, mut details: JobDetails, handler: JobResponseHandler) {
+        self.maybe_add_container_environment(&mut details);
+
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
