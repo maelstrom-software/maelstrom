@@ -149,8 +149,7 @@ impl ContainerImage {
         self.config
             .config()
             .as_ref()
-            .map(|c| c.env().as_ref())
-            .flatten()
+            .and_then(|c| c.env().as_ref())
     }
 }
 
