@@ -56,6 +56,7 @@ netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
 nix = { version = "0.26.2", features = ["signal"] }
 nonempty = { version = "0.8.1", features = ["serialize"] }
+num = "0.4.1"
 num_cpus = "1.15.0"
 oci-spec = "0.6"
 rand = "0.8.5"
