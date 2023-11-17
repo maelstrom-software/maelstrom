@@ -1,5 +1,5 @@
-use std::{collections::VecDeque, iter::Fuse};
 use num::integer::{Average, Integer};
+use std::{collections::VecDeque, iter::Fuse};
 
 #[derive(Default)]
 struct SimulationState {
@@ -70,7 +70,8 @@ where
             (n, remaining) => {
                 let extra = remaining - n;
                 self.n = n - 1;
-                self.iter.nth(self.simulation.choose_integer_unchecked(0, extra))
+                self.iter
+                    .nth(self.simulation.choose_integer_unchecked(0, extra))
             }
         }
     }
@@ -246,8 +247,7 @@ impl<'a> Simulation<'a> {
         }
     }
 
-    pub fn choose_unknown_size<T: IntoIterator>(&mut self, i: T) -> Option<T::Item>
-    {
+    pub fn choose_unknown_size<T: IntoIterator>(&mut self, i: T) -> Option<T::Item> {
         let mut iter = i.into_iter();
         let Some(mut a) = iter.next() else {
             return None;
@@ -429,10 +429,9 @@ mod tests {
     fn choose_bool() {
         assert_eq!(
             SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_bool())
-                    .collect::<Vec<_>>(),
-                vec![false, true],
+                .map(|mut sim| sim.choose_bool())
+                .collect::<Vec<_>>(),
+            vec![false, true],
         );
     }
 
@@ -638,96 +637,120 @@ mod tests {
 
     #[test]
     fn choose_integer_0() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 0)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(0, 0))
+                .collect::<Vec<_>>(),
             vec![0],
         );
     }
 
     #[test]
     fn choose_integer_max() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(usize::MAX, usize::MAX)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(usize::MAX, usize::MAX))
+                .collect::<Vec<_>>(),
             vec![usize::MAX],
         );
     }
 
     #[test]
     fn choose_integer_0_to_1() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 1)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(0, 1))
+                .collect::<Vec<_>>(),
             vec![0, 1],
         );
     }
 
     #[test]
     fn choose_integer_1_to_2() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 2)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(1, 2))
+                .collect::<Vec<_>>(),
             vec![1, 2],
         );
     }
 
     #[test]
     fn choose_integer_0_to_2() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 2)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(0, 2))
+                .collect::<Vec<_>>(),
             vec![0, 1, 2],
         );
     }
 
     #[test]
     fn choose_integer_1_to_3() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 3)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(1, 3))
+                .collect::<Vec<_>>(),
             vec![1, 2, 3],
         );
     }
 
     #[test]
     fn choose_integer_1_to_13() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 13)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(1, 13))
+                .collect::<Vec<_>>(),
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         );
     }
 
     #[test]
     fn choose_integer_neg_1_to_0() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-1, 0)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(-1, 0))
+                .collect::<Vec<_>>(),
             vec![-1, 0],
         );
     }
 
     #[test]
     fn choose_integer_neg_2_to_neg_1() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-2, -1)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(-2, -1))
+                .collect::<Vec<_>>(),
             vec![-2, -1],
         );
     }
 
     #[test]
     fn choose_integer_neg_2_to_0() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-2, 0)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(-2, 0))
+                .collect::<Vec<_>>(),
             vec![-2, -1, 0],
         );
     }
 
     #[test]
     fn choose_integer_neg_3_to_neg_1() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-3, -1)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(-3, -1))
+                .collect::<Vec<_>>(),
             vec![-3, -2, -1],
         );
     }
 
     #[test]
     fn choose_integer_neg_13_to_neg_1() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-13, -1)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(-13, -1))
+                .collect::<Vec<_>>(),
             vec![-13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1],
         );
     }
@@ -735,14 +758,17 @@ mod tests {
     #[test]
     fn choose_integer_min_to_max() {
         assert!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(i16::MIN, i16::MAX)).eq(i16::MIN..=i16::MAX));
+            .map(|mut sim| sim.choose_integer(i16::MIN, i16::MAX))
+            .eq(i16::MIN..=i16::MAX));
     }
 
     #[test]
     #[should_panic(expected = "min <= max")]
     fn choose_integer_1_to_0() {
-        assert_eq!(SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 0)).collect::<Vec<_>>(),
+        assert_eq!(
+            SimulationExplorer::default()
+                .map(|mut sim| sim.choose_integer(1, 0))
+                .collect::<Vec<_>>(),
             vec![1, 0],
         );
     }
