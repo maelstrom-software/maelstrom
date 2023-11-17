@@ -104,7 +104,7 @@ impl Executor {
     /// This function is designed to be callable in an async context, even though it temporarily
     /// blocks the calling thread while the child is starting up.
     ///
-    /// If this function returns [`StartResult::Ok`], then the child process obviously will be
+    /// If this function returns [`JobErrorResult::Ok`], then the child process obviously will be
     /// started and the caller will need to waitid(2) on the child eventually. However, if this
     /// function returns an error result, it's still possible that a child was spawned (and has now
     /// terminated). It is assumed that the caller will be reaping all children, not just those

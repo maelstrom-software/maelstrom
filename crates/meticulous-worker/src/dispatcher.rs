@@ -32,7 +32,7 @@ use std::{
 /// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
-    /// Start a new job. If this returns [`StartJobResult::Ok`], then the dispatcher is expecting
+    /// Start a new job. If this returns [`JobErrorResult::Ok`], then the dispatcher is expecting
     /// three separate messages to know when the job has completed: [`Message::PidStatus`],
     /// [`Message::JobStdout`], and [`Message::JobStderr`]. These messages don't have to come in
     /// any particular order, but the dispatcher won't proceed with the next job until all three
@@ -44,7 +44,7 @@ pub trait DispatcherDeps {
         layers: NonEmpty<PathBuf>,
     ) -> JobErrorResult<Pid, String>;
 
-    /// Kill a running job using the [`Pid`] obtained from [`StartJobResult::Ok`].
+    /// Kill a running job using the [`Pid`] obtained from [`JobErrorResult::Ok`].
     fn kill_job(&mut self, pid: Pid);
 
     /// Send a message to the broker.
