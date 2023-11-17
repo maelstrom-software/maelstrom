@@ -6,9 +6,10 @@ use serde::Deserialize;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWrite;
+use tokio::task;
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(transparent)]
 struct AuthToken(String);
 
@@ -146,11 +147,22 @@ pub struct ContainerImage {
 
 impl ContainerImage {
     pub fn env(&self) -> Option<&Vec<String>> {
-        self.config
-            .config()
-            .as_ref()
-            .and_then(|c| c.env().as_ref())
+        self.config.config().as_ref().and_then(|c| c.env().as_ref())
     }
+}
+
+fn download_layer_on_task(
+    client: reqwest::Client,
+    layer_digest: String,
+    pkg: String,
+    token: AuthToken,
+    path: PathBuf,
+) -> task::JoinHandle<Result<()>> {
+    task::spawn(async move {
+        let mut file = tokio::fs::File::create(&path).await?;
+        download_layer(&client, &token, &pkg, &layer_digest, &mut file).await?;
+        Ok(())
+    })
 }
 
 pub async fn download_image(
@@ -168,12 +180,23 @@ pub async fn download_image(
 
     let config = get_image_config(&client, &token, pkg, image.config().digest()).await?;
 
+    let mut task_handles = vec![];
     let mut layers = vec![];
     for (i, layer) in image.layers().iter().enumerate() {
         let path = layer_dir.as_ref().join(format!("layer_{i}.tar"));
-        let mut file = tokio::fs::File::create(&path).await?;
-        download_layer(&client, &token, pkg, layer.digest(), &mut file).await?;
+        let handle = download_layer_on_task(
+            client.clone(),
+            layer.digest().clone(),
+            pkg.to_owned(),
+            token.clone(),
+            path.clone(),
+        );
+        task_handles.push(handle);
         layers.push(path);
+    }
+
+    for handle in task_handles {
+        handle.await??;
     }
 
     Ok(ContainerImage { config, layers })
