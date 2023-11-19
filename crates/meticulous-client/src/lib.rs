@@ -180,15 +180,16 @@ impl Client {
         Ok(digest)
     }
 
-    pub fn add_container(&mut self, pkg: &str, version: &str) -> Result<NonEmpty<Sha256Digest>> {
+    pub fn add_container(
+        &mut self,
+        pkg: &str,
+        version: &str,
+        prog: Option<ProgressBar>,
+    ) -> Result<NonEmpty<Sha256Digest>> {
+        let prog = prog.unwrap_or_else(ProgressBar::hidden);
         let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
         std::fs::create_dir(&layer_dir)?;
-        let img = meticulous_container::download_image_sync(
-            pkg,
-            version,
-            layer_dir,
-            ProgressBar::hidden(),
-        )?;
+        let img = meticulous_container::download_image_sync(pkg, version, layer_dir, prog)?;
         let env = img.env().cloned();
         let digests = NonEmpty::<PathBuf>::try_from(img.layers)
             .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?

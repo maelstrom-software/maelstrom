@@ -139,7 +139,7 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
 fn add_artifact(client: &mut Client, layer: &str) -> Result<NonEmpty<Sha256Digest>> {
     Ok(if layer.starts_with("docker:") {
         let pkg = layer.split(':').nth(1).unwrap();
-        client.add_container(pkg, "latest")?
+        client.add_container(pkg, "latest", None)?
     } else {
         NonEmpty::singleton(client.add_artifact(Path::new(layer))?)
     })
