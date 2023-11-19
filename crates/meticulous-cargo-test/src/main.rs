@@ -257,18 +257,21 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             self.jobs_queued += 1;
             cb(self.jobs_queued);
 
-            let mut layers = self
-                .config
-                .get_layers_for_test(package_name, &case)
-                .into_iter()
-                .map(|layer| {
-                    client
-                        .lock()
-                        .unwrap()
-                        .add_artifact(PathBuf::from(layer).as_path())
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            layers.push(deps_artifact.clone());
+            let mut layers = vec![];
+            for layer in self.config.get_layers_for_test(package_name, &case) {
+                let mut client = client.lock().unwrap();
+                if layer.starts_with("docker:") {
+                    let pkg = layer.split(':').nth(1).unwrap();
+                    layers.extend(client.add_container(pkg, "latest", None)?);
+                } else {
+                    layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);
+                }
+            }
+
+            // If we haven't specified any layers, add our generated one
+            if layers.is_empty() {
+                layers.push(deps_artifact.clone());
+            }
             layers.push(binary_artifact.clone());
 
             self.queue_job_from_case(
