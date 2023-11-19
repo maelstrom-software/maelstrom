@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use indicatif::ProgressBar;
 use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
@@ -182,7 +183,12 @@ impl Client {
     pub fn add_container(&mut self, pkg: &str, version: &str) -> Result<NonEmpty<Sha256Digest>> {
         let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
         std::fs::create_dir(&layer_dir)?;
-        let img = meticulous_container::download_image_sync(pkg, version, layer_dir)?;
+        let img = meticulous_container::download_image_sync(
+            pkg,
+            version,
+            layer_dir,
+            ProgressBar::hidden(),
+        )?;
         let env = img.env().cloned();
         let digests = NonEmpty::<PathBuf>::try_from(img.layers)
             .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?

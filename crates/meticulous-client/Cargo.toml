@@ -8,6 +8,7 @@ anyhow.workspace = true
 clap.workspace = true
 figment.workspace = true
 gethostname.workspace = true
+indicatif.workspace = true
 meticulous-base.workspace = true
 meticulous-util.workspace = true
 meticulous-container.workspace = true

@@ -38,7 +38,7 @@ gloo-net = "0.4"
 gloo-utils = "0.2"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
-indicatif = { version = "0.17", features = ["in_memory"] }
+indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 itertools = "0.10.5"
 lddtree = "0.3"
 maplit = "1"

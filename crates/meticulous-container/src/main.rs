@@ -14,7 +14,8 @@ struct CliOptions {
 async fn main() -> Result<()> {
     let opt = CliOptions::parse();
 
-    let image = download_image(&opt.package_name, &opt.version, &opt.layer_dir).await?;
+    let ind = indicatif::ProgressBar::new(0);
+    let image = download_image(&opt.package_name, &opt.version, &opt.layer_dir, ind).await?;
     println!("{image:#?}");
 
     Ok(())

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
 use futures::stream::TryStreamExt as _;
+use indicatif::ProgressBar;
 use oci_spec::image::{Descriptor, ImageConfiguration, ImageIndex, ImageManifest, Platform};
 use serde::Deserialize;
 use std::fmt;
@@ -118,6 +119,7 @@ async fn download_layer(
     token: &AuthToken,
     pkg: &str,
     digest: &str,
+    prog: ProgressBar,
     mut out: impl AsyncWrite + Unpin,
 ) -> Result<()> {
     let tar_stream = client
@@ -128,13 +130,15 @@ async fn download_layer(
         .send()
         .await?
         .error_for_status()?;
-    let mut d = GzipDecoder::new(
-        tar_stream
-            .bytes_stream()
-            .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-            .into_async_read()
-            .compat(),
-    );
+    let mut d = GzipDecoder::new(tokio::io::BufReader::new(
+        prog.wrap_async_read(
+            tar_stream
+                .bytes_stream()
+                .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+                .into_async_read()
+                .compat(),
+        ),
+    ));
     tokio::io::copy(&mut d, &mut out).await?;
     Ok(())
 }
@@ -157,10 +161,11 @@ fn download_layer_on_task(
     pkg: String,
     token: AuthToken,
     path: PathBuf,
+    prog: ProgressBar,
 ) -> task::JoinHandle<Result<()>> {
     task::spawn(async move {
         let mut file = tokio::fs::File::create(&path).await?;
-        download_layer(&client, &token, &pkg, &layer_digest, &mut file).await?;
+        download_layer(&client, &token, &pkg, &layer_digest, prog, &mut file).await?;
         Ok(())
     })
 }
@@ -169,6 +174,7 @@ pub async fn download_image(
     pkg: &str,
     version: &str,
     layer_dir: impl AsRef<Path>,
+    prog: ProgressBar,
 ) -> Result<ContainerImage> {
     let client = reqwest::Client::new();
     let token = get_token(&client, pkg).await?;
@@ -180,6 +186,9 @@ pub async fn download_image(
 
     let config = get_image_config(&client, &token, pkg, image.config().digest()).await?;
 
+    let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
+    prog.set_length(total_size as u64);
+
     let mut task_handles = vec![];
     let mut layers = vec![];
     for (i, layer) in image.layers().iter().enumerate() {
@@ -190,6 +199,7 @@ pub async fn download_image(
             pkg.to_owned(),
             token.clone(),
             path.clone(),
+            prog.clone(),
         );
         task_handles.push(handle);
         layers.push(path);
@@ -207,6 +217,7 @@ pub async fn download_image_sync(
     pkg: &str,
     version: &str,
     layer_dir: impl AsRef<Path>,
+    prog: ProgressBar,
 ) -> Result<ContainerImage> {
-    download_image(pkg, version, layer_dir).await
+    download_image(pkg, version, layer_dir, prog).await
 }

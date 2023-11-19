@@ -1930,6 +1930,7 @@ dependencies = [
  "instant",
  "number_prefix",
  "portable-atomic",
+ "tokio",
  "unicode-width",
  "vt100",
 ]
@@ -2235,6 +2236,7 @@ dependencies = [
  "clap",
  "figment",
  "gethostname 0.4.3",
+ "indicatif",
  "meticulous-base",
  "meticulous-container",
  "meticulous-util",
@@ -2254,6 +2256,7 @@ dependencies = [
  "async-compression",
  "clap",
  "futures",
+ "indicatif",
  "oci-spec",
  "reqwest",
  "serde",
