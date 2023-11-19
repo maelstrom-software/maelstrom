@@ -136,6 +136,7 @@ pub struct Client {
     paths: HashMap<PathBuf, Sha256Digest>,
     container_dir: TempDir,
     digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
+    added_container_images: HashMap<String, NonEmpty<Sha256Digest>>,
 }
 
 impl Client {
@@ -164,6 +165,7 @@ impl Client {
             paths: HashMap::default(),
             container_dir: tempfile::tempdir()?,
             digest_to_container_env: HashMap::default(),
+            added_container_images: HashMap::default(),
         })
     }
 
@@ -187,7 +189,11 @@ impl Client {
         prog: Option<ProgressBar>,
     ) -> Result<NonEmpty<Sha256Digest>> {
         let prog = prog.unwrap_or_else(ProgressBar::hidden);
-        let layer_dir = self.container_dir.path().join(format!("{pkg}-{version}"));
+        let container_image_id = format!("{pkg}-{version}");
+        if let Some(digests) = self.added_container_images.get(&container_image_id) {
+            return Ok(digests.clone());
+        }
+        let layer_dir = self.container_dir.path().join(&container_image_id);
         std::fs::create_dir(&layer_dir)?;
         let img = meticulous_container::download_image_sync(pkg, version, layer_dir, prog)?;
         let env = img.env().cloned();
@@ -197,6 +203,8 @@ impl Client {
         if let Some(env) = env {
             self.digest_to_container_env.insert(digests.clone(), env);
         }
+        self.added_container_images
+            .insert(container_image_id, digests.clone());
         Ok(digests)
     }
 
