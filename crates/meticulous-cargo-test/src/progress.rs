@@ -30,6 +30,11 @@ pub trait ProgressIndicatorScope: Clone + Send + Sync + 'static {
 
     /// Update the number of pending jobs indicated
     fn update_length(&self, new_length: u64);
+
+    /// Add a new progress bar which is meant to represent a container being downloaded
+    fn new_container_progress(&self) -> Option<ProgressBar> {
+        None
+    }
 }
 
 pub trait ProgressIndicator {
@@ -47,10 +52,20 @@ pub trait ProgressIndicator {
 //                      waiting for artifacts, pending, running, complete
 const COLORS: [&str; 4] = ["red", "yellow", "blue", "green"];
 
-fn make_progress_bar(color: &str, message: impl Into<String>, msg_len: usize) -> ProgressBar {
+fn make_progress_bar(
+    color: &str,
+    message: impl Into<String>,
+    msg_len: usize,
+    bytes: bool,
+) -> ProgressBar {
+    let prog_line = if bytes {
+        "{bytes}/{total_bytes}"
+    } else {
+        "{pos}/{len}"
+    };
     ProgressBar::new(0).with_message(message.into()).with_style(
         ProgressStyle::with_template(&format!(
-            "{{wide_bar:.{color}}} {{pos}}/{{len}} {{msg:{msg_len}}}"
+            "{{wide_bar:.{color}}} {prog_line} {{msg:{msg_len}}}"
         ))
         .unwrap()
         .progress_chars("##-"),
@@ -73,11 +88,11 @@ impl MultipleProgressBars {
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
-            let bar = multi_bar.add(make_progress_bar(color, state.to_string(), 21));
+            let bar = multi_bar.add(make_progress_bar(color, state.to_string(), 21, false));
             bars.insert(state, bar);
         }
         Self {
-            scope: ProgressBarsScope { bars },
+            scope: ProgressBarsScope { multi_bar, bars },
             build_spinner,
             done_queuing_jobs: AtomicBool::new(false),
         }
@@ -112,6 +127,7 @@ impl MultipleProgressBars {
 
 #[derive(Clone)]
 pub struct ProgressBarsScope {
+    multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
 }
 
@@ -130,6 +146,13 @@ impl ProgressIndicatorScope for ProgressBarsScope {
         for bar in self.bars.values() {
             bar.set_length(new_length);
         }
+    }
+
+    fn new_container_progress(&self) -> Option<ProgressBar> {
+        Some(
+            self.multi_bar
+                .insert(1, make_progress_bar("white", "downloading image", 21, true)),
+        )
     }
 }
 
@@ -165,7 +188,7 @@ pub struct QuietProgressBar {
 
 impl QuietProgressBar {
     pub fn new(term: impl TermLike + 'static) -> Self {
-        let bar = make_progress_bar("white", "jobs", 4);
+        let bar = make_progress_bar("white", "jobs", 4, false);
         bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
         Self { bar }
     }

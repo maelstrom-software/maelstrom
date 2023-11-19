@@ -262,7 +262,8 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 let mut client = client.lock().unwrap();
                 if layer.starts_with("docker:") {
                     let pkg = layer.split(':').nth(1).unwrap();
-                    layers.extend(client.add_container(pkg, "latest", None)?);
+                    let prog = ind.new_container_progress();
+                    layers.extend(client.add_container(pkg, "latest", prog)?);
                 } else {
                     layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);
                 }
