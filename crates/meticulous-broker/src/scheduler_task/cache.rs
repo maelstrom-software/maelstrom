@@ -1,3 +1,11 @@
+//! Manage the contents of the broker's artifact cache.
+//!
+//! All artifacts for a job need to be in cache before the job can be scheduled on the worker. The
+//! worker may query the broker to fill in holes in its own cache. The broker's cache is filled, on
+//! request, by the client.
+
+#![deny(missing_docs)]
+
 use bytesize::ByteSize;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::{
@@ -13,13 +21,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
+/// [`Cache`]'s dependencies on the host's file system.
 pub trait CacheFs {
     /// Rename `source` to `destination`. Panic on file system error. Assume that all intermediate
     /// directories exist for `destination`, and that `source` and `destination` are on the same
     /// file system.
     fn rename(&mut self, source: &Path, destination: &Path);
 
-    fn remove(&mut self, path: &Path);
+    /// Remove file at `path`. Panic on file system error, including if `path` points to a
+    /// directory, `path` doesn't exist, or the user doesn't have permissions to remove the file.
+    fn remove_file(&mut self, path: &Path);
 
     /// Ensure `path` exists and is a directory. If it doesn't exist, recusively ensure its parent exists,
     /// then create it. Panic on file system error or if `path` or any of its ancestors aren't
@@ -30,9 +41,12 @@ pub trait CacheFs {
     /// system error or if `path` doesn't exist or isn't a directory.
     fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>>;
 
+    /// Return the size, in bytes, of the file (or directory) at `path`. Panic on file system error
+    /// or if `path` doesn't exist.
     fn file_size(&mut self, path: &Path) -> u64;
 }
 
+/// Implement [`CacheFs`] using `std::fs`.
 pub struct StdCacheFs(meticulous_util::fs::Fs);
 
 impl StdCacheFs {
@@ -46,7 +60,7 @@ impl CacheFs for StdCacheFs {
         self.0.rename(source, destination).unwrap()
     }
 
-    fn remove(&mut self, path: &Path) {
+    fn remove_file(&mut self, path: &Path) {
         self.0.remove_file(path).unwrap()
     }
 
@@ -59,29 +73,43 @@ impl CacheFs for StdCacheFs {
     }
 
     fn file_size(&mut self, path: &Path) -> u64 {
-        let metadata = self.0.metadata(path).unwrap();
-        metadata.len()
+        self.0.metadata(path).unwrap().len()
     }
 }
 
+/// Return value for [`Cache::get_artifact`].
 #[derive(Debug, PartialEq)]
 pub enum GetArtifact {
+    /// The artifact was in the cache, and was successfully gotten. The caller now has a reference
+    /// on the artifact that will eventually need to be dropped with [`Cache::decrement_refcount`].
+    /// The caller is free to use the artifact until they call [`Cache::decrement_refcount`].
     Success,
+
+    /// The artifact was not in the cache, but the requesting client has already been asked to push
+    /// the artifact. The caller will know the artifact has been gotten when
+    /// [`Cache::got_artifact`] returns the `JobId`. The caller has no reference count at this
+    /// time.
     Wait,
+
+    /// The artifact was not in the cache, and the caller must initiate a transfer (push) from the
+    /// client. The caller will know the artifact has been gotten when [`Cache::got_artifact`]
+    /// returns the `JobId`. The caller has no reference count at this
+    /// time.
     Get,
 }
 
-/// An error indicating that [`Cache::get_artifact_for_worker`] was called illegally. That function
-/// should only be called when the artifact in question is in the cache and has a non-zero
-/// reference count. This is because the broker gets a reference count and holds it for all
-/// artifacts that are currently in the queue or being processed by workers. So, the worker should
-/// only request an artifact when it's been assigned a job, which means the broker should have a
-/// reference on the artifact.
+/// An error indicating that [`Cache::get_artifact_for_worker`] was called illegally.
+///
+/// That method should only be called when the artifact in question is in the cache and has a
+/// non-zero reference count. This is because the broker gets a reference count and holds it for
+/// all artifacts that are currently in the queue or being processed by workers. So, the worker
+/// should only request an artifact when it's been assigned a job, which means the broker should
+/// have a reference on the artifact.
 ///
 /// However, this can go wrong for a few reasons. Most obviously, the worker could be malicious. We
-/// don't want to provide a way for malicious workers to crash the brokers. Less obvious are
-/// various race conditions that can occur in error conditions. The job could be canceled, for
-/// example. So, we return this error instead of panicking.
+/// don't want to provide a way for malicious workers to crash the broker. Less obvious are various
+/// race conditions that can occur in error conditions. The job could be canceled, for example. So,
+/// we return this error instead of panicking.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GetArtifactForWorkerError;
 
@@ -93,12 +121,12 @@ impl Display for GetArtifactForWorkerError {
 
 impl Error for GetArtifactForWorkerError {}
 
-/// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
-/// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
+/// An entry for a specific [`Sha256Digest`] in the [`Cache`]'s hash table. There is one of these for
+/// every subdirectory in the `sha256` subdirectory of the [`Cache`]'s root directory.
 enum CacheEntry {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
-    /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
-    /// on where the extraction process is.
+    /// possibly a subdirectory for this [`Sha256Digest`], depending on where the extraction
+    /// process is.
     Waiting(Vec<JobId>, HashSet<ClientId>),
 
     /// The artifact has been successfully downloaded and extracted, and the subdirectory is
@@ -109,9 +137,9 @@ enum CacheEntry {
         refcount: NonZeroU32,
     },
 
-    /// The artifact has been successfully downloaded and extracted, but no jobs are
-    /// currently using it. The `priority` is provided by [Cache] and is used by the [Heap] to
-    /// determine which entry should be removed first when freeing up space.
+    /// The artifact has been successfully downloaded and extracted, but no jobs are currently
+    /// using it. [`Cache`] hands out `priority` values in a monotonically increasing way. This are
+    /// used by the [`Heap`] to implement an LRU cache.
     InHeap {
         bytes_used: u64,
         priority: u64,
@@ -119,7 +147,11 @@ enum CacheEntry {
     },
 }
 
-/// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
+/// An implementation of the "newtype" pattern used to implement [`HeapDeps`] on
+/// [`HashMap<Sha256Digest, CacheEntry>`].
+///
+/// This implementation compares two [`Sha256Digest`]s based on their priority, which is a measure
+/// of how recently an entry has been used.
 #[derive(Default)]
 struct CacheMap(HashMap<Sha256Digest, CacheEntry>);
 
@@ -160,6 +192,10 @@ impl HeapDeps for CacheMap {
     }
 }
 
+/// The actual cache.
+///
+/// Two caches shouldn't use the same working directory simultaneously. However, one cache can use
+/// a previous cache's directory. In other words, the directory persists across cache lifetimes.
 pub struct Cache<FsT> {
     fs: FsT,
     root: PathBuf,
@@ -172,6 +208,12 @@ pub struct Cache<FsT> {
 }
 
 impl<FsT: CacheFs> Cache<FsT> {
+    /// Make a new cache rooted at `root`, with a target size of `bytes_used_target`.
+    ///
+    /// This function will attempt to create all of the directories it needs, panicking if it
+    /// cannot. If there are existing entries in the cache, this function will scan them and
+    /// incorporate them into the new cache. If there are garbage files in the directories, likely
+    /// from incomplete downloads in the previous instance, this function will remove them.
     pub fn new(
         mut fs: FsT,
         root: CacheRoot,
@@ -184,7 +226,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         path.push("tmp");
         fs.mkdir_recursively(&path);
         for child in fs.read_dir(&path) {
-            fs.remove(&child);
+            fs.remove_file(&child);
         }
         path.pop();
 
@@ -223,7 +265,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                     }
                 }
             }
-            result.fs.remove(&child);
+            result.fs.remove_file(&child);
         }
         result.possibly_remove_some();
 
@@ -235,6 +277,9 @@ impl<FsT: CacheFs> Cache<FsT> {
         result
     }
 
+    /// Attempt to get an artifact from the cache.
+    ///
+    /// See [`GetArtifact`] for details on what the return values mean.
     pub fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
         let entry = self
             .entries
@@ -270,6 +315,20 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
     }
 
+    /// Tell the cache that a artifact has been successfully retrieved and should be incorporated
+    /// into the cache.
+    ///
+    /// It is assumed that the caller has validated the checksum of the file.
+    ///
+    /// `path` must be a file in the temporary directory provided by [`Self::tmp_path`]. This
+    /// function will move the file from the temporary directory into its correct place in the
+    /// cache. For this reason, the file must be on the same file system as the cache directory.
+    /// [`Self::tmp_path`] ensures this.
+    ///
+    /// The return value is a vector of `JobId` that are now no longer blocked by this artifact.
+    /// These were `JobId`s provided by previous calls to [`Self::get_artifact`]. Each entry in
+    /// this vec has its own refcount, and thus, [`Self::decrement_refcount`] must be called
+    /// appropriately.
     pub fn got_artifact(
         &mut self,
         digest: Sha256Digest,
@@ -300,7 +359,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                         };
                     }
                     CacheEntry::InUse { .. } | CacheEntry::InHeap { .. } => {
-                        self.fs.remove(path);
+                        self.fs.remove_file(path);
                         return vec![];
                     }
                 }
@@ -319,6 +378,11 @@ impl<FsT: CacheFs> Cache<FsT> {
         result
     }
 
+    /// Decrement the refcount for a digest. Once the refcount for an artifact reaches zero, the
+    /// cache is free to remove that artifact as it attempts to keep the cache below the target
+    /// size. On the other hand, as long as the refcount is non-zero, the holder of a refcount can
+    /// be assured that the artifact won't go away, not matter how large the cache is, and how much
+    /// larger it is than the target size.
     pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
         let entry = self.entries.get_mut(&digest).unwrap();
         let CacheEntry::InUse {
@@ -343,6 +407,14 @@ impl<FsT: CacheFs> Cache<FsT> {
         }
     }
 
+    /// Notify the cache that a client disconnected.
+    ///
+    /// This will clear out any `JobId`s from `cid` for any waiting cache entries, guaranteeing
+    /// that `got_artifact` will never return a `JobId` with `cid` in it.
+    ///
+    /// This fuction does nothing about refcounts held on behalf of the given client. The Cache
+    /// doesn't track which client holds which refcounts. When a client disconnects, its the
+    /// caller's responsibility to also call `decrement_refcount` appropriately.
     pub fn client_disconnected(&mut self, cid: ClientId) {
         self.entries.retain(|_, e| {
             let CacheEntry::Waiting(jids, clients) = e else {
@@ -354,6 +426,11 @@ impl<FsT: CacheFs> Cache<FsT> {
         })
     }
 
+    /// Get an artifact for a worker.
+    ///
+    /// On success, this will give the caller a refcount as well as the path to the artifact and
+    /// the size of the file in bytes.
+    ///
     /// See the comment for [`GetArtifactForWorkerError`].
     pub fn get_artifact_for_worker(
         &mut self,
@@ -371,12 +448,15 @@ impl<FsT: CacheFs> Cache<FsT> {
         Ok((self.cache_path(digest), bytes_used))
     }
 
+    /// Return a [`PathBuf`] that contains the temporary directory for the cache. This is where
+    /// inbound artifacts should go before [`Self::got_artifact`] is called.
     pub fn tmp_path(&self) -> PathBuf {
         let mut path = self.root.clone();
         path.push("tmp");
         path
     }
 
+    /// Return the path of a cached artifact.
     fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.clone();
         path.push("sha256");
@@ -384,6 +464,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         path
     }
 
+    /// Try to ensure that the size of the cache is smaller than or equal to `byte_used_target`.
     fn possibly_remove_some(&mut self) {
         while self.bytes_used > self.bytes_used_target {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
@@ -392,7 +473,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            self.fs.remove(&self.cache_path(&digest));
+            self.fs.remove_file(&self.cache_path(&digest));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "digest" => %digest,
@@ -435,7 +516,7 @@ mod tests {
                 .push(Rename(source.to_owned(), destination.to_owned()));
         }
 
-        fn remove(&mut self, target: &Path) {
+        fn remove_file(&mut self, target: &Path) {
             self.borrow_mut().messages.push(Remove(target.to_owned()));
         }
 
@@ -560,7 +641,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_empty_fs() {
+    fn new_with_empty_fs() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.expect_fs_operations(vec![
             MkdirRecursively(path_buf!("/z/tmp")),
@@ -571,7 +652,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_garbage_in_tmp() {
+    fn new_with_garbage_in_tmp() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/tmp"),
@@ -591,7 +672,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_garbage_and_treasure_in_sha256() {
+    fn new_with_garbage_and_treasure_in_sha256() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -625,7 +706,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_with_too_much_in_sha256() {
+    fn new_with_too_much_in_sha256() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -658,27 +739,27 @@ mod tests {
     }
 
     #[test]
-    fn test_get_artifact_once() {
+    fn get_artifact_once() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
-    fn test_get_artifact_again_from_same_client() {
+    fn get_artifact_again_from_same_client() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact(jid!(1, 1002), digest!(1), GetArtifact::Wait, vec![]);
     }
 
     #[test]
-    fn test_get_artifact_again_from_different_client() {
+    fn get_artifact_again_from_different_client() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Get, vec![]);
     }
 
     #[test]
-    fn test_get_artifact_in_use() {
+    fn get_artifact_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
@@ -690,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_artifact_in_heap_removes_from_heap() {
+    fn get_artifact_in_heap_removes_from_heap() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -739,7 +820,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_artifact_in_heap_sets_refcount() {
+    fn get_artifact_in_heap_sets_refcount() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -758,7 +839,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_no_entry() {
+    fn got_artifact_no_entry() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.got_artifact(
             digest!(1),
@@ -774,7 +855,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_no_entry_pushes_out_old() {
+    fn got_artifact_no_entry_pushes_out_old() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -801,7 +882,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_no_entry_goes_into_heap() {
+    fn got_artifact_no_entry_goes_into_heap() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 1..=10 {
             fixture.got_artifact(
@@ -833,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_with_waiters() {
+    fn got_artifact_with_waiters() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact_ign(jid!(2, 1001), digest!(1));
@@ -858,7 +939,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_with_waiter_pushes_out_old() {
+    fn got_artifact_with_waiter_pushes_out_old() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -886,7 +967,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_already_in_use() {
+    fn got_artifact_already_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 10);
@@ -904,7 +985,7 @@ mod tests {
     }
 
     #[test]
-    fn test_got_artifact_already_in_cache() {
+    fn got_artifact_already_in_cache() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
@@ -924,7 +1005,7 @@ mod tests {
     }
 
     #[test]
-    fn test_decrement_refcount_sets_priority_properly() {
+    fn decrement_refcount_sets_priority_properly() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 0..10 {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
@@ -952,14 +1033,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_decrement_refcount_not_in_cache_panics() {
+    fn decrement_refcount_not_in_cache_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
         fixture.decrement_refcount_ign(digest!(1));
     }
 
     #[test]
     #[should_panic]
-    fn test_decrement_refcount_waiting_panics() {
+    fn decrement_refcount_waiting_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.decrement_refcount_ign(digest!(1));
@@ -967,14 +1048,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_decrement_refcount_in_heap_panics() {
+    fn decrement_refcount_in_heap_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
         fixture.decrement_refcount_ign(digest!(1));
     }
 
     #[test]
-    fn test_client_disconnected_one_client_one_jid() {
+    fn client_disconnected_one_client_one_jid() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
@@ -994,7 +1075,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_disconnected_one_client_three_jids() {
+    fn client_disconnected_one_client_three_jids() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
@@ -1016,7 +1097,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_disconnected_many_clients() {
+    fn client_disconnected_many_clients() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
@@ -1040,27 +1121,27 @@ mod tests {
     }
 
     #[test]
-    fn test_get_artifact_for_worker_no_entry() {
+    fn get_artifact_for_worker_no_entry() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
-    fn test_get_artifact_for_worker_waiting() {
+    fn get_artifact_for_worker_waiting() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
-    fn test_get_artifact_for_worker_in_cache() {
+    fn get_artifact_for_worker_in_cache() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 1);
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
         fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
     #[test]
-    fn test_get_artifact_for_worker_in_use() {
+    fn get_artifact_for_worker_in_use() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 42);
@@ -1069,5 +1150,11 @@ mod tests {
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
         fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+    }
+
+    #[test]
+    fn tmp_path() {
+        let fixture = Fixture::new(TestCacheFs::default(), 0);
+        assert_eq!(fixture.cache.tmp_path(), PathBuf::from("/z/tmp"));
     }
 }
