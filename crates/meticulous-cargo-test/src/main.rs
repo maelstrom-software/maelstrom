@@ -22,6 +22,7 @@ use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
     fs,
+    iter,
     io::{self, ErrorKind},
     net::{SocketAddr, ToSocketAddrs as _},
     process::Command,
@@ -269,8 +270,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 }
             }
 
-            // If we haven't specified any layers, add our generated one
-            if layers.is_empty() {
+            if self.config.include_shared_libraries_for_test(package_name, &case) {
                 layers.push(deps_artifact.clone());
             }
             layers.push(binary_artifact.clone());
@@ -387,6 +387,8 @@ impl<StdErr: io::Write> MainApp<StdErr> {
 struct TestGroup {
     tests: Option<String>,
     module: Option<String>,
+    #[serde(default)]
+    include_shared_libraries: bool,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
 }
@@ -398,6 +400,16 @@ struct Config {
 }
 
 impl Config {
+    fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
+        self.groups
+            .iter()
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .map(|group| group.include_shared_libraries)
+            .chain(iter::once(true))
+            .next().unwrap()
+    }
+
     fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
         self.groups
             .iter()
