@@ -1,6 +1,6 @@
 //! Provide a mechanism for exhaustively exploring all possible simulations in a simulation space.
 //!
-//! The user is given a [`Simluation`] object, from which they can retrieve values (choices). On
+//! The user is given a [`Simulation`] object, from which they can retrieve values (choices). On
 //! later simulations, different values will be retrieved. The [`SimulationExplorer`] will keep
 //! yielding simulations until all possible values have been returned.
 #![deny(missing_docs)]
