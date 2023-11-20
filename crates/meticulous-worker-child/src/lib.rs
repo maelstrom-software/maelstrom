@@ -22,6 +22,7 @@ pub enum Layers<'a> {
 pub enum JobMountFsType {
     Proc,
     Tmp,
+    Sys,
 }
 
 pub struct JobMount<'a> {
@@ -253,6 +254,7 @@ unsafe fn start_and_exec_in_child_inner(
     const DOT: *const u8 = b".\0".as_ptr();
     const SLASH: *const u8 = b"/\0".as_ptr();
     const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+    const SYSFS: *const u8 = b"sysfs\0".as_ptr();
     const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
     const PROC: *const u8 = b"proc\0".as_ptr();
     const MNT_DETACH: usize = 2;
@@ -348,6 +350,17 @@ unsafe fn start_and_exec_in_child_inner(
                     0,
                 )
                 .map_system_errno("mount tmpfs")?;
+            }
+            JobMountFsType::Sys => {
+                nc::syscalls::syscall5(
+                    nc::SYS_MOUNT,
+                    SYSFS as usize,
+                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
+                    SYSFS as usize,
+                    0,
+                    0,
+                )
+                .map_system_errno("mount sysfs")?;
             }
         }
     }

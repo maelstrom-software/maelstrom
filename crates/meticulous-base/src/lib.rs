@@ -59,6 +59,7 @@ pub struct JobId {
 pub enum JobMountFsType {
     Proc,
     Tmp,
+    Sys,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

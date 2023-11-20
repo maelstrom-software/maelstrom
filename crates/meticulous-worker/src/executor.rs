@@ -297,6 +297,7 @@ impl Executor {
                 fs_type: match m.fs_type {
                     JobMountFsType::Proc => child::JobMountFsType::Proc,
                     JobMountFsType::Tmp => child::JobMountFsType::Tmp,
+                    JobMountFsType::Sys => child::JobMountFsType::Sys,
                 },
                 mount_point: mp.as_c_str(),
             })

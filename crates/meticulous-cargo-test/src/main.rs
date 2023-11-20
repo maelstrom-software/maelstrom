@@ -22,8 +22,8 @@ use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
     fs,
-    iter,
     io::{self, ErrorKind},
+    iter,
     net::{SocketAddr, ToSocketAddrs as _},
     process::Command,
     str,
@@ -270,7 +270,10 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 }
             }
 
-            if self.config.include_shared_libraries_for_test(package_name, &case) {
+            if self
+                .config
+                .include_shared_libraries_for_test(package_name, &case)
+            {
                 layers.push(deps_artifact.clone());
             }
             layers.push(binary_artifact.clone());
