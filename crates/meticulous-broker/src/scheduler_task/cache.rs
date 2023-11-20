@@ -4,8 +4,6 @@
 //! worker may query the broker to fill in holes in its own cache. The broker's cache is filled, on
 //! request, by the client.
 
-#![deny(missing_docs)]
-
 use bytesize::ByteSize;
 use meticulous_base::{ClientId, JobId, Sha256Digest};
 use meticulous_util::{

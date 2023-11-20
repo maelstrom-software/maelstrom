@@ -29,8 +29,8 @@ use std::{
  *  FIGLET: public
  */
 
-/// The external dependencies for [Scheduler]. All of these methods must be asynchronous: they
-/// must not block the current task or thread.
+/// The external dependencies for [`Scheduler`]. All of these methods must be asynchronous: they
+/// must not block the current thread.
 pub trait SchedulerDeps {
     type ClientSender;
     type WorkerSender;
@@ -44,18 +44,28 @@ pub trait SchedulerDeps {
     );
 }
 
-/// The required interface for the cache that is provided to the [Scheduler]. This mirrors the API
-/// for [super::cache::Cache]. We just keep them separate so that we can test the [Scheduler] more
+/// The required interface for the cache that is provided to the [`Scheduler`]. This mirrors the API
+/// for [`super::cache::Cache`]. We keep them separate so that we can test the [`Scheduler`] more
 /// easily.
 ///
-/// Unlike with [SchedulerDeps], all of these functions are immediate. The [super::cache::Cache] is
-/// owned by the [Scheduler] and the two live on the same task. So these methods sometimes return
-/// actual values which can be handled immediately, unlike [SchedulerDeps].
+/// Unlike with [`SchedulerDeps`], all of these functions are immediate. In production, the
+/// [`super::cache::Cache`] is owned by the [`Scheduler`] and the two live on the same task. So
+/// these methods sometimes return actual values which can be handled immediately, unlike
+/// [`SchedulerDeps`].
 pub trait SchedulerCache {
+    /// See [`super::cache::Cache::get_artifact`].
     fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact;
+
+    /// See [`super::cache::Cache::got_artifact`].
     fn got_artifact(&mut self, digest: Sha256Digest, path: &Path, bytes_used: u64) -> Vec<JobId>;
+
+    /// See [`super::cache::Cache::decrement_refcount`].
     fn decrement_refcount(&mut self, digest: Sha256Digest);
+
+    /// See [`super::cache::Cache::client_disconnected`].
     fn client_disconnected(&mut self, cid: ClientId);
+
+    /// See [`super::cache::Cache::get_artifact_for_worker`].
     fn get_artifact_for_worker(
         &mut self,
         digest: &Sha256Digest,
@@ -87,16 +97,43 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
     }
 }
 
+/// The incoming messages, or events, for [`Scheduler`].
+///
+/// If [`Scheduler`] weren't implement as an async state machine, these would be its methods.
 pub enum Message<DepsT: SchedulerDeps> {
+    /// The given client connected, and messages can be sent to it on the given sender.
     ClientConnected(ClientId, DepsT::ClientSender),
+
+    /// The given client disconnected.
     ClientDisconnected(ClientId),
+
+    /// The given client has sent us the given message.
     FromClient(ClientId, ClientToBroker),
+
+    /// The given worker connected. It has the given number of slots and messages can be sent to it
+    /// on the given sender.
     WorkerConnected(WorkerId, usize, DepsT::WorkerSender),
+
+    /// The given worker disconnected.
     WorkerDisconnected(WorkerId),
+
+    /// The given worker has sent us the given message.
     FromWorker(WorkerId, WorkerToBroker),
+
+    /// An artifact has been pushed to us. The artifact is described by the given digest. It is
+    /// temporarily stored at the given path, and it is of the given size.
     GotArtifact(Sha256Digest, PathBuf, u64),
+
+    /// A worker has requested the given artifact be sent to it over the given sender. After the
+    /// contents are sent to the worker, the refcount needs to be decremented with a
+    /// [`Message::DecrementRefcount`] message.
     GetArtifactForWorker(Sha256Digest, DepsT::WorkerArtifactFetcherSender),
+
+    /// A worker has been sent an artifact, and we can now release the refcount that was keeping
+    /// the artifact from being removed while being transferred.
     DecrementRefcount(Sha256Digest),
+
+    /// The stats heartbeat task has decided it's time to take another statistics sample.
     StatisticsHeartbeat,
 }
 
@@ -141,6 +178,8 @@ impl<DepsT: SchedulerDeps> Debug for Message<DepsT> {
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
+    /// Create a new scheduler with the given [`SchedulerCache`]. Note that [`SchedulerDeps`] are
+    /// passed in to `Self::receive_message`.
     pub fn new(cache: CacheT) -> Self {
         Scheduler {
             cache,
@@ -152,6 +191,8 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
     }
 
+    /// Process an individual [`Message`]. This function doesn't block as the scheduler is
+    /// implemented as an async state machine.
     pub fn receive_message(&mut self, deps: &mut DepsT, msg: Message<DepsT>) {
         match msg {
             Message::ClientConnected(id, sender) => self.receive_client_connected(id, sender),
