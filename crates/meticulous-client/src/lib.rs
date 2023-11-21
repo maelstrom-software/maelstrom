@@ -7,6 +7,7 @@ use meticulous_base::{
     stats::JobStateCounts,
     ClientJobId, JobDetails, JobResult, NonEmpty, Sha256Digest,
 };
+use meticulous_container::ContainerImageDepot;
 use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -18,7 +19,6 @@ use std::{
     sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
 };
-use tempfile::TempDir;
 
 fn artifact_pusher_main(
     broker_addr: SocketAddr,
@@ -134,9 +134,8 @@ pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     dispatcher_handle: JoinHandle<Result<()>>,
     paths: HashMap<PathBuf, Sha256Digest>,
-    container_dir: TempDir,
+    container_image_depot: ContainerImageDepot,
     digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
-    added_container_images: HashMap<String, NonEmpty<Sha256Digest>>,
 }
 
 impl Client {
@@ -163,9 +162,8 @@ impl Client {
             dispatcher_sender,
             dispatcher_handle,
             paths: HashMap::default(),
-            container_dir: tempfile::tempdir()?,
+            container_image_depot: ContainerImageDepot::new()?,
             digest_to_container_env: HashMap::default(),
-            added_container_images: HashMap::default(),
         })
     }
 
@@ -189,13 +187,9 @@ impl Client {
         prog: Option<ProgressBar>,
     ) -> Result<NonEmpty<Sha256Digest>> {
         let prog = prog.unwrap_or_else(ProgressBar::hidden);
-        let container_image_id = format!("{pkg}-{version}");
-        if let Some(digests) = self.added_container_images.get(&container_image_id) {
-            return Ok(digests.clone());
-        }
-        let layer_dir = self.container_dir.path().join(&container_image_id);
-        std::fs::create_dir(&layer_dir)?;
-        let img = meticulous_container::download_image_sync(pkg, version, layer_dir, prog)?;
+        let img = self
+            .container_image_depot
+            .get_container_image(pkg, version, prog)?;
         let env = img.env().cloned();
         let digests = NonEmpty::<PathBuf>::try_from(img.layers)
             .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?
@@ -203,8 +197,6 @@ impl Client {
         if let Some(env) = env {
             self.digest_to_container_env.insert(digests.clone(), env);
         }
-        self.added_container_images
-            .insert(container_image_id, digests.clone());
         Ok(digests)
     }
 

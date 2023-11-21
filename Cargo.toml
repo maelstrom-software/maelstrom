@@ -26,6 +26,7 @@ colored = "2.0.4"
 concat-idents = "1.1.5"
 console = "0.15"
 console_error_panic_hook = "0.1.7"
+directories = "5"
 eframe = "0.23"
 egui = "0.23"
 egui_gauge = "0.1"
@@ -64,6 +65,7 @@ regex = "1.8.3"
 reqwest = { version = "0.11", features = [ "stream", "json" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.107" }
+serde_repr = "0.1"
 serde_test = "1"
 serial_test = "2.0.0"
 sha2 = "0.10.6"
