@@ -314,8 +314,8 @@ impl ContainerImageDepot {
             std::fs::create_dir_all(cache_dir)?;
         }
 
-        let locked_tags = LockedContainerImageTags::from_path(cache_dir.join("versions.lock"))
-            .unwrap_or_default();
+        let locked_tags =
+            LockedContainerImageTags::from_path(cache_dir.join("tags.lock")).unwrap_or_default();
         let mut cached_images = HashMap::new();
         for d in std::fs::read_dir(cache_dir)? {
             let d = d?;
@@ -370,7 +370,7 @@ impl ContainerImageDepot {
         self.locked_tags
             .add(name.into(), tag.into(), img.digest.clone());
         std::fs::write(
-            self.cache_dir.join("versions.lock"),
+            self.cache_dir.join("tags.lock"),
             toml::to_string_pretty(&self.locked_tags)
                 .unwrap()
                 .as_bytes(),
@@ -429,7 +429,7 @@ fn container_image_depot_download_dir_structure() {
 
     assert_eq!(
         sorted_dir_listing(temp_dir.path()),
-        vec!["sha256:abcdef", "versions.lock"]
+        vec!["sha256:abcdef", "tags.lock"]
     );
 }
 
@@ -476,7 +476,7 @@ fn container_image_depot_redownload_corrupt() {
 
     assert_eq!(
         sorted_dir_listing(temp_dir.path()),
-        vec!["sha256:abcdef", "versions.lock"]
+        vec!["sha256:abcdef", "tags.lock"]
     );
 }
 
