@@ -191,9 +191,9 @@ fn download_layer_on_task(
 }
 
 pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
-    let token = get_token(&client, name).await?;
+    let token = get_token(client, name).await?;
 
-    let index = get_image_index(&client, &token, name, tag).await?;
+    let index = get_image_index(client, &token, name, tag).await?;
     let manifest = find_manifest_for_platform(index.manifests().iter());
     Ok(manifest.digest().clone())
 }
@@ -205,19 +205,19 @@ pub async fn download_image(
     layer_dir: impl AsRef<Path>,
     prog: ProgressBar,
 ) -> Result<ContainerImage> {
-    let token = get_token(&client, name).await?;
+    let token = get_token(client, name).await?;
 
     let manifest_digest: String = if !tag_or_digest.starts_with("sha256:") {
-        let index = get_image_index(&client, &token, name, tag_or_digest).await?;
+        let index = get_image_index(client, &token, name, tag_or_digest).await?;
         let manifest = find_manifest_for_platform(index.manifests().iter());
         manifest.digest().into()
     } else {
         tag_or_digest.into()
     };
 
-    let image = get_image_manifest(&client, &token, name, &manifest_digest).await?;
+    let image = get_image_manifest(client, &token, name, &manifest_digest).await?;
 
-    let config = get_image_config(&client, &token, name, image.config().digest()).await?;
+    let config = get_image_config(client, &token, name, image.config().digest()).await?;
 
     let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
     prog.set_length(total_size as u64);
