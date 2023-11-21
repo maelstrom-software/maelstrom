@@ -20,3 +20,11 @@ mount_point = "/proc"
 #[[groups.mounts]]
 #fs_type = "proc"
 #mount_point = "/proc"
+
+[[groups]]
+module = "meticulous-container"
+layers = ["proc-and-tmp.tar"]
+include_shared_libraries = true
+[[groups.mounts]]
+fs_type = "tmp"
+mount_point = "/tmp"
