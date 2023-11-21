@@ -167,7 +167,7 @@ impl ContainerImage {
     }
 
     fn from_dir(path: impl AsRef<Path>) -> Option<Self> {
-        Some(ContainerImage::from_path(path.as_ref().join("config.json")).ok()?)
+        ContainerImage::from_path(path.as_ref().join("config.json")).ok()
     }
 
     pub fn env(&self) -> Option<&Vec<String>> {
@@ -346,7 +346,7 @@ impl ContainerImageDepot {
             tag.into()
         };
 
-        let output_dir = self.cache_dir.join(&format!("{name}-{tag}.in-progress"));
+        let output_dir = self.cache_dir.join(format!("{name}-{tag}.in-progress"));
         if output_dir.exists() {
             std::fs::remove_dir_all(&output_dir)?;
         }
@@ -357,7 +357,7 @@ impl ContainerImageDepot {
         img.layers = img
             .layers
             .into_iter()
-            .map(|l| new_path.join(l.file_name().unwrap().to_owned()))
+            .map(|l| new_path.join(l.file_name().unwrap()))
             .collect();
         std::fs::write(
             output_dir.join("config.json"),
@@ -371,7 +371,7 @@ impl ContainerImageDepot {
             .add(name.into(), tag.into(), img.digest.clone());
         std::fs::write(
             self.cache_dir.join("versions.lock"),
-            &toml::to_string_pretty(&self.locked_tags)
+            toml::to_string_pretty(&self.locked_tags)
                 .unwrap()
                 .as_bytes(),
         )?;
