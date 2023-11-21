@@ -44,10 +44,6 @@ fn put_script(path: &Path, contents: &str) {
     f.set_permissions(perms).unwrap();
 }
 
-// XXX remi: This is a total hack to get around isolation issues
-const PATH: &'static str = env!("PATH");
-const HOME: &'static str = env!("HOME");
-
 fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
     let workspace_dir = tmp_dir.path().join("workspace");
     std::fs::create_dir(&workspace_dir).unwrap();
@@ -57,8 +53,6 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
         &format!(
             "\
             cd {workspace_dir:?}\n\
-            export HOME={HOME}
-            export PATH={PATH}
             cargo $@ | sort\n\
             "
         ),

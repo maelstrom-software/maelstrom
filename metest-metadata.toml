@@ -10,16 +10,19 @@ mount_point = "/tmp"
 fs_type = "proc"
 mount_point = "/proc"
 
-#[[groups]]
-#module = "meticulous-cargo-test"
-#tests = "integration_test::"
-#layers = ["rust/layer1.tar", "rust/layer2.tar", "rust/layer3.tar", "rust/layer4.tar", "rust/layer5.tar"]
-#[[groups.mounts]]
-#fs_type = "tmp"
-#mount_point = "/tmp"
-#[[groups.mounts]]
-#fs_type = "proc"
-#mount_point = "/proc"
+[[groups]]
+module = "meticulous-cargo-test"
+tests = "integration_test::"
+layers = ["docker:rust", "dev-null.tar"]
+[[groups.mounts]]
+fs_type = "tmp"
+mount_point = "/tmp"
+[[groups.mounts]]
+fs_type = "tmp"
+mount_point = "/root"
+[[groups.mounts]]
+fs_type = "proc"
+mount_point = "/proc"
 
 [[groups]]
 module = "meticulous-container"
