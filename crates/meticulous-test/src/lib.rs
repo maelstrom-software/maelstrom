@@ -33,6 +33,7 @@ macro_rules! details {
             arguments: vec![],
             environment: vec![],
             layers: meticulous_base::nonempty![digest!(1)],
+            devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
         }
     };
@@ -42,6 +43,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
             layers: meticulous_base::nonempty![digest!(2)],
+            devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
         }
     };
@@ -51,6 +53,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
             environment: vec![],
             layers: meticulous_base::nonempty![digest!(3)],
+            devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
         }
     };
@@ -60,6 +63,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
             environment: vec![],
             layers: meticulous_base::nonempty![digest!(4)],
+            devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
         }
     };
@@ -69,6 +73,7 @@ macro_rules! details {
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
             layers: meticulous_base::nonempty![digest!($n)],
+            devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
         }
     };
@@ -80,6 +85,7 @@ macro_rules! details {
                 arguments,
                 environment,
                 layers: meticulous_base::nonempty![$(digest!($digest)),*],
+                devices: meticulous_base::EnumSet::EMPTY,
                 mounts: vec![],
             }
         }

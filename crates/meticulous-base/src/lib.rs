@@ -5,6 +5,8 @@ pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
 
+pub use enumset::EnumSet;
+use enumset::EnumSetType;
 pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -54,6 +56,43 @@ pub struct JobId {
     pub cjid: ClientJobId,
 }
 
+#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[enumset(serialize_deny_unknown)]
+pub enum JobDevice {
+    Full,
+    Null,
+    Random,
+    Tty,
+    Urandom,
+    Zero,
+}
+
+#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[enumset(serialize_deny_unknown)]
+#[enumset(serialize_repr = "list")]
+pub enum JobDeviceListDeserialize {
+    Full,
+    Null,
+    Random,
+    Tty,
+    Urandom,
+    Zero,
+}
+
+impl From<JobDeviceListDeserialize> for JobDevice {
+    fn from(value: JobDeviceListDeserialize) -> JobDevice {
+        match value {
+            JobDeviceListDeserialize::Full => JobDevice::Full,
+            JobDeviceListDeserialize::Null => JobDevice::Null,
+            JobDeviceListDeserialize::Random => JobDevice::Random,
+            JobDeviceListDeserialize::Tty => JobDevice::Tty,
+            JobDeviceListDeserialize::Urandom => JobDevice::Urandom,
+            JobDeviceListDeserialize::Zero => JobDevice::Zero,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobMountFsType {
@@ -75,6 +114,7 @@ pub struct JobDetails {
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub layers: NonEmpty<Sha256Digest>,
+    pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
 }
 

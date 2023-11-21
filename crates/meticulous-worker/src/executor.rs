@@ -2,9 +2,11 @@
 
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
+use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
-    JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult, NonEmpty,
+    EnumSet, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult,
+    NonEmpty,
 };
 use nix::{
     errno::Errno,
@@ -44,6 +46,7 @@ pub struct JobDetails<'a> {
     pub program: &'a str,
     pub arguments: &'a [String],
     pub environment: &'a [String],
+    pub devices: &'a EnumSet<JobDevice>,
     pub layers: &'a NonEmpty<PathBuf>,
     pub mounts: &'a [JobMount],
 }
@@ -303,10 +306,24 @@ impl Executor {
             })
             .collect::<Vec<_>>();
 
+        let child_devices = details
+            .devices
+            .iter()
+            .map(|d| match d {
+                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),
+                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null")),
+                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random")),
+                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty")),
+                JobDevice::Urandom => (c_str!("/dev/urandom"), c_str!("./dev/urandom")),
+                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero")),
+            })
+            .collect::<Vec<_>>();
+
         let child_job_details = child::JobDetails {
             program: program.as_c_str(),
             arguments: argv.as_ref(),
             environment: env.as_ref(),
+            devices: child_devices.as_ref(),
             layers: child_layers,
             mounts: child_mounts.as_ref(),
         };
@@ -537,6 +554,7 @@ mod tests {
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
             layers,
+            devices: &EnumSet::EMPTY,
             mounts: mounts.as_slice(),
         };
         start_and_expect(
@@ -563,6 +581,7 @@ mod tests {
             arguments: arguments.as_slice(),
             environment: &[],
             layers,
+            devices: &EnumSet::EMPTY,
             mounts: &[],
         };
         start_and_expect(
@@ -769,6 +788,7 @@ mod tests {
             arguments: &[],
             environment: &[],
             layers,
+            devices: &EnumSet::EMPTY,
             mounts: &[],
         };
         assert_matches!(

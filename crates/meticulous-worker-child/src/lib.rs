@@ -34,6 +34,7 @@ pub struct JobDetails<'a> {
     pub program: &'a CStr,
     pub arguments: &'a [Option<&'a u8>],
     pub environment: &'a [Option<&'a u8>],
+    pub devices: &'a [(&'a CStr, &'a CStr)],
     pub layers: Layers<'a>,
     pub mounts: &'a [JobMount<'a>],
 }
@@ -321,6 +322,18 @@ unsafe fn start_and_exec_in_child_inner(
     if let Some(path) = pivot {
         // Chdir to what will be the new root.
         nc::syscalls::syscall1(nc::SYS_CHDIR, path as usize).map_system_errno("chdir")?;
+
+        for mount in details.devices {
+            nc::syscalls::syscall5(
+                nc::SYS_MOUNT,
+                &mount.0.to_bytes_with_nul()[0] as *const u8 as usize,
+                &mount.1.to_bytes_with_nul()[0] as *const u8 as usize,
+                0,
+                nc::MS_BIND,
+                0,
+            )
+            .map_system_errno("bind mount of device")?;
+        }
 
         // Pivot root to be the new root. See man 2 pivot_root.
         nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)

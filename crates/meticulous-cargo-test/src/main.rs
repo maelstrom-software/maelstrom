@@ -8,7 +8,9 @@ use cargo_metadata::Artifact as CargoArtifact;
 use clap::Parser;
 use console::Term;
 use indicatif::TermLike;
-use meticulous_base::{JobDetails, JobMount, NonEmpty, Sha256Digest};
+use meticulous_base::{
+    EnumSet, JobDetails, JobDevice, JobDeviceListDeserialize, JobMount, NonEmpty, Sha256Digest,
+};
 use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
 use progress::{
@@ -194,6 +196,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         case: &str,
         binary: &Path,
         layers: NonEmpty<Sha256Digest>,
+        devices: EnumSet<JobDevice>,
         mounts: Vec<JobMount>,
     ) -> Result<()>
     where
@@ -214,6 +217,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
                 layers,
+                devices,
                 mounts,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
@@ -287,6 +291,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 &case,
                 &binary,
                 NonEmpty::try_from(layers).unwrap(),
+                self.config.get_devices_for_test(package_name, &case),
                 self.config.get_mounts_for_test(package_name, &case),
             )?;
         }
@@ -392,6 +397,7 @@ struct TestGroup {
     module: Option<String>,
     #[serde(default)]
     include_shared_libraries: bool,
+    devices: Option<EnumSet<JobDeviceListDeserialize>>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
 }
@@ -418,7 +424,8 @@ impl Config {
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
             .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.layers.iter().flatten())
+            .flat_map(|group| group.layers.iter())
+            .flatten()
             .map(String::as_str)
             .collect()
     }
@@ -428,8 +435,20 @@ impl Config {
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
             .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.mounts.iter().flatten())
+            .flat_map(|group| group.mounts.iter())
+            .flatten()
             .cloned()
+            .collect()
+    }
+
+    fn get_devices_for_test(&self, module: &str, test: &str) -> EnumSet<JobDevice> {
+        self.groups
+            .iter()
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .flat_map(|group| group.devices)
+            .flatten()
+            .map(JobDevice::from)
             .collect()
     }
 }

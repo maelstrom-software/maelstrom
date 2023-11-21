@@ -20,6 +20,7 @@ assert_matches = "1.5.0"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 bincode = "1.3.3"
 bytesize = "1.3.0"
+c_str_macro = "1.0.3"
 cargo_metadata = "0.18"
 clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 colored = "2.0.4"
@@ -32,6 +33,7 @@ egui = "0.23"
 egui_gauge = "0.1"
 egui-toast = "0.9"
 enum-map = { version = "2.7.0", features = ["serde"] }
+enumset = { version = "1.1.3", features = ["serde"] }
 figment = { version = "0.10.10", features = ["env", "toml"] }
 futures = "0.3"
 gethostname = "0.4.2"

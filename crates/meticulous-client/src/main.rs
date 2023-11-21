@@ -6,8 +6,8 @@ use figment::{
     Figment,
 };
 use meticulous_base::{
-    ClientJobId, JobDetails, JobError, JobMount, JobOutputResult, JobResult, JobStatus, JobSuccess,
-    NonEmpty, Sha256Digest,
+    ClientJobId, EnumSet, JobDetails, JobDevice, JobDeviceListDeserialize, JobError, JobMount,
+    JobOutputResult, JobResult, JobStatus, JobSuccess, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
 use meticulous_util::{
@@ -79,6 +79,7 @@ struct JobDescription {
     arguments: Option<Vec<String>>,
     environment: Option<Vec<String>>,
     layers: NonEmpty<String>,
+    devices: Option<EnumSet<JobDeviceListDeserialize>>,
     mounts: Option<Vec<JobMount>>,
 }
 
@@ -184,6 +185,12 @@ fn main() -> Result<ExitCode> {
                 arguments: job.arguments.unwrap_or(vec![]),
                 environment: job.environment.unwrap_or(vec![]),
                 layers,
+                devices: job
+                    .devices
+                    .unwrap_or(EnumSet::EMPTY)
+                    .into_iter()
+                    .map(JobDevice::from)
+                    .collect(),
                 mounts: job.mounts.unwrap_or(vec![]),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),

@@ -88,6 +88,7 @@ impl DispatcherDeps for DispatcherAdapter {
             program: details.program.as_str(),
             arguments: details.arguments.as_slice(),
             environment: details.environment.as_slice(),
+            devices: &details.devices,
             layers: &layers,
             mounts: details.mounts.as_slice(),
         };
