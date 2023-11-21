@@ -190,13 +190,21 @@ fn download_layer_on_task(
     })
 }
 
+pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
+    let token = get_token(&client, name).await?;
+
+    let index = get_image_index(&client, &token, name, tag).await?;
+    let manifest = find_manifest_for_platform(index.manifests().iter());
+    Ok(manifest.digest().clone())
+}
+
 pub async fn download_image(
+    client: &reqwest::Client,
     name: &str,
     tag_or_digest: &str,
     layer_dir: impl AsRef<Path>,
     prog: ProgressBar,
 ) -> Result<ContainerImage> {
-    let client = reqwest::Client::new();
     let token = get_token(&client, name).await?;
 
     let manifest_digest: String = if !tag_or_digest.starts_with("sha256:") {
@@ -273,24 +281,53 @@ impl LockedContainerImageTags {
     }
 }
 
-trait DownloadImageFn:
-    Fn(&str, &str, &Path, ProgressBar) -> Result<ContainerImage> + Send + Sync
-{
+pub trait ContainerImageDepotOps {
+    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String>;
+    fn download_image(
+        &self,
+        name: &str,
+        digest: &str,
+        layer_dir: &Path,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage>;
 }
 
-impl<T> DownloadImageFn for T where
-    T: Fn(&str, &str, &Path, ProgressBar) -> Result<ContainerImage> + Send + Sync
-{
+pub struct DefaultContainerImageDepotOps {
+    client: reqwest::Client,
 }
 
-pub struct ContainerImageDepot {
+impl DefaultContainerImageDepotOps {
+    fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
+    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
+        resolve_tag_sync(&self.client, name, tag)
+    }
+
+    fn download_image(
+        &self,
+        name: &str,
+        digest: &str,
+        layer_dir: &Path,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        download_image_sync(&self.client, name, digest, layer_dir, prog)
+    }
+}
+
+pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDepotOps> {
     locked_tags: LockedContainerImageTags,
     cached_images: HashMap<String, ContainerImage>,
     cache_dir: PathBuf,
-    download_image_fn: Box<dyn DownloadImageFn>,
+    ops: ContainerImageDepotOpsT,
 }
 
-impl ContainerImageDepot {
+impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     pub fn new() -> Result<Self> {
         Self::new_with(
             directories::BaseDirs::new()
@@ -298,16 +335,13 @@ impl ContainerImageDepot {
                 .cache_dir()
                 .join("meticulous")
                 .join("containers"),
-            Box::new(|pkg, tag_or_digest, path, prog| {
-                download_image_sync(pkg, tag_or_digest, path, prog)
-            }),
+            DefaultContainerImageDepotOps::new(),
         )
     }
+}
 
-    fn new_with(
-        cache_dir: impl AsRef<Path>,
-        download_image_fn: Box<dyn DownloadImageFn>,
-    ) -> Result<Self> {
+impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<ContainerImageDepotOpsT> {
+    fn new_with(cache_dir: impl AsRef<Path>, ops: ContainerImageDepotOpsT) -> Result<Self> {
         let cache_dir = cache_dir.as_ref();
 
         if !cache_dir.exists() {
@@ -327,7 +361,7 @@ impl ContainerImageDepot {
             locked_tags,
             cached_images,
             cache_dir: cache_dir.to_owned(),
-            download_image_fn,
+            ops,
         })
     }
 
@@ -337,35 +371,26 @@ impl ContainerImageDepot {
         tag: &str,
         prog: ProgressBar,
     ) -> Result<ContainerImage> {
-        let tag_or_digest: String = if let Some(digest) = self.locked_tags.get(name, tag) {
-            if let Some(img) = self.cached_images.get(digest) {
-                return Ok(img.clone());
-            }
+        let digest = if let Some(digest) = self.locked_tags.get(name, tag) {
             digest.into()
         } else {
-            tag.into()
+            self.ops.resolve_tag(name, tag)?
         };
+        if let Some(img) = self.cached_images.get(&digest) {
+            return Ok(img.clone());
+        }
 
-        let output_dir = self.cache_dir.join(format!("{name}-{tag}.in-progress"));
+        let output_dir = self.cache_dir.join(&digest);
         if output_dir.exists() {
             std::fs::remove_dir_all(&output_dir)?;
         }
         std::fs::create_dir(&output_dir)?;
 
-        let mut img = (self.download_image_fn)(name, &tag_or_digest, &output_dir, prog)?;
-        let new_path = self.cache_dir.join(&img.digest);
-        img.layers = img
-            .layers
-            .into_iter()
-            .map(|l| new_path.join(l.file_name().unwrap()))
-            .collect();
+        let img = self.ops.download_image(name, &digest, &output_dir, prog)?;
         std::fs::write(
             output_dir.join("config.json"),
             serde_json::to_vec(&img).unwrap(),
         )?;
-
-        std::fs::remove_dir_all(&new_path).ok();
-        std::fs::rename(output_dir, new_path)?;
 
         self.locked_tags
             .add(name.into(), tag.into(), img.digest.clone());
@@ -381,21 +406,49 @@ impl ContainerImageDepot {
 }
 
 #[cfg(test)]
-fn fake_container_download(
-    name: &str,
-    tag_or_digest: &str,
-    _dir: &Path,
-    _prog: ProgressBar,
-) -> Result<ContainerImage> {
-    assert_eq!(name, "foo");
-    assert!(tag_or_digest == "latest" || tag_or_digest == "sha256:abcdef");
-    Ok(ContainerImage {
-        version: ContainerImageVersion::V0,
-        name: "foo".into(),
-        digest: "sha256:abcdef".into(),
-        config: ImageConfiguration::default(),
-        layers: vec![],
-    })
+struct PanicContainerImageDepotOps;
+
+#[cfg(test)]
+impl ContainerImageDepotOps for PanicContainerImageDepotOps {
+    fn resolve_tag(&self, _name: &str, _tag: &str) -> Result<String> {
+        panic!()
+    }
+
+    fn download_image(
+        &self,
+        _name: &str,
+        _digest: &str,
+        _layer_dir: &Path,
+        _prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        panic!()
+    }
+}
+
+#[cfg(test)]
+struct FakeContainerImageDepotOps(HashMap<String, String>);
+
+#[cfg(test)]
+impl ContainerImageDepotOps for FakeContainerImageDepotOps {
+    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
+        Ok(self.0.get(&format!("{name}-{tag}")).unwrap().clone())
+    }
+
+    fn download_image(
+        &self,
+        name: &str,
+        digest: &str,
+        _layer_dir: &Path,
+        _prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        Ok(ContainerImage {
+            version: ContainerImageVersion::V0,
+            name: name.into(),
+            digest: digest.into(),
+            config: ImageConfiguration::default(),
+            layers: vec![],
+        })
+    }
 }
 
 #[cfg(test)]
@@ -419,10 +472,14 @@ fn sorted_dir_listing(path: impl AsRef<Path>) -> Vec<String> {
 #[test]
 fn container_image_depot_download_dir_structure() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fake_container_download_fn = Box::new(fake_container_download);
 
-    let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), fake_container_download_fn).unwrap();
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:abcdef".into(),
+        }),
+    )
+    .unwrap();
     depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
@@ -436,18 +493,21 @@ fn container_image_depot_download_dir_structure() {
 #[test]
 fn container_image_depot_download_then_reload() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fake_container_download_fn = Box::new(fake_container_download);
 
-    let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), fake_container_download_fn).unwrap();
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:abcdef".into(),
+        }),
+    )
+    .unwrap();
     let img1 = depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
     drop(depot);
 
-    let panic_container_download_fn = Box::new(|_: &str, _: &str, _: &Path, _| panic!());
     let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), panic_container_download_fn).unwrap();
+        ContainerImageDepot::new_with(temp_dir.path(), PanicContainerImageDepotOps).unwrap();
     let img2 = depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
@@ -458,18 +518,27 @@ fn container_image_depot_download_then_reload() {
 #[test]
 fn container_image_depot_redownload_corrupt() {
     let temp_dir = tempfile::tempdir().unwrap();
-    let fake_container_download_fn = Box::new(fake_container_download);
 
-    let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), fake_container_download_fn.clone()).unwrap();
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:abcdef".into(),
+        }),
+    )
+    .unwrap();
     depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
     drop(depot);
     std::fs::remove_file(temp_dir.path().join("sha256:abcdef").join("config.json")).unwrap();
 
-    let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), fake_container_download_fn).unwrap();
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:abcdef".into(),
+        }),
+    )
+    .unwrap();
     depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
@@ -480,12 +549,72 @@ fn container_image_depot_redownload_corrupt() {
     );
 }
 
+#[test]
+fn container_image_depot_update_image() {
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:abcdef".into(),
+            "bar-latest".into() => "sha256:ghijk".into(),
+        }),
+    )
+    .unwrap();
+    depot
+        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .unwrap();
+    depot
+        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .unwrap();
+    drop(depot);
+    std::fs::remove_file(temp_dir.path().join("tags.lock")).unwrap();
+    let bar_meta_before = std::fs::metadata(temp_dir.path().join("sha256:ghijk")).unwrap();
+
+    let mut depot = ContainerImageDepot::new_with(
+        temp_dir.path(),
+        FakeContainerImageDepotOps(maplit::hashmap! {
+            "foo-latest".into() => "sha256:lmnop".into(),
+            "bar-latest".into() => "sha256:ghijk".into(),
+        }),
+    )
+    .unwrap();
+    let foo = depot
+        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .unwrap();
+    depot
+        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .unwrap();
+
+    // ensure we get new foo
+    assert_eq!(foo.digest, "sha256:lmnop");
+
+    let bar_meta_after = std::fs::metadata(temp_dir.path().join("sha256:ghijk")).unwrap();
+
+    // ensure we didn't re-download bar
+    assert_eq!(
+        bar_meta_before.modified().unwrap(),
+        bar_meta_after.modified().unwrap()
+    );
+
+    assert_eq!(
+        sorted_dir_listing(temp_dir.path()),
+        vec!["sha256:abcdef", "sha256:ghijk", "sha256:lmnop", "tags.lock"]
+    );
+}
+
+#[tokio::main]
+pub async fn resolve_tag_sync(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
+    resolve_tag(client, name, tag).await
+}
+
 #[tokio::main]
 pub async fn download_image_sync(
-    pkg: &str,
+    client: &reqwest::Client,
+    name: &str,
     tag_or_digest: &str,
     layer_dir: impl AsRef<Path>,
     prog: ProgressBar,
 ) -> Result<ContainerImage> {
-    download_image(pkg, tag_or_digest, layer_dir, prog).await
+    download_image(client, name, tag_or_digest, layer_dir, prog).await
 }
