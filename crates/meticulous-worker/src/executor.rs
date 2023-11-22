@@ -841,4 +841,28 @@ mod tests {
         )
         .await;
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn old_mounts_are_unmounted() {
+        let details = JobDetails {
+            program: "/bin/wc",
+            arguments: &["-l".to_string(), "/proc/self/mounts".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            20,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
 }
