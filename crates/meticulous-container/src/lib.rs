@@ -5,7 +5,7 @@ use indicatif::ProgressBar;
 use oci_spec::image::{Descriptor, ImageConfiguration, ImageIndex, ImageManifest, Platform};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWrite;
@@ -262,7 +262,7 @@ pub enum LockedContainerImageTagsVersion {
 struct LockedContainerImageTags {
     version: LockedContainerImageTagsVersion,
     #[serde(flatten)]
-    map: HashMap<String, HashMap<String, String>>,
+    map: BTreeMap<String, HashMap<String, String>>,
 }
 
 impl LockedContainerImageTags {
@@ -394,7 +394,10 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         let digest = if let Some(digest) = self.locked_tags.get(name, tag) {
             digest.into()
         } else {
-            self.ops.resolve_tag(name, tag)?
+            let digest = self.ops.resolve_tag(name, tag)?;
+            self.locked_tags
+                .add(name.into(), tag.into(), digest.clone());
+            digest
         };
         if let Some(img) = self.cached_images.get(&digest) {
             self.write_lock_file()?;
@@ -413,8 +416,6 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             serde_json::to_vec(&img).unwrap(),
         )?;
 
-        self.locked_tags
-            .add(name.into(), tag.into(), img.digest.clone());
         self.write_lock_file()?;
         self.cached_images.insert(img.digest.clone(), img.clone());
         Ok(img)
@@ -503,7 +504,15 @@ fn container_image_depot_download_dir_structure() {
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
 
-    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
+    assert_eq!(
+        std::fs::read_to_string(project_dir.path().join(TAG_FILE_NAME)).unwrap(),
+        "\
+            version = 0\n\
+            \n\
+            [foo]\n\
+            latest = \"sha256:abcdef\"\n\
+        "
+    );
     assert_eq!(sorted_dir_listing(image_dir.path()), vec!["sha256:abcdef"]);
 }
 
@@ -660,7 +669,18 @@ fn container_image_depot_update_image_but_nothing_to_do() {
         .get_container_image("bar", "latest", ProgressBar::hidden())
         .unwrap();
 
-    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
+    assert_eq!(
+        std::fs::read_to_string(project_dir.path().join(TAG_FILE_NAME)).unwrap(),
+        "\
+            version = 0\n\
+            \n\
+            [bar]\n\
+            latest = \"sha256:ghijk\"\n\
+            \n\
+            [foo]\n\
+            latest = \"sha256:abcdef\"\n\
+        "
+    );
     assert_eq!(
         sorted_dir_listing(image_dir.path()),
         vec!["sha256:abcdef", "sha256:ghijk"]
