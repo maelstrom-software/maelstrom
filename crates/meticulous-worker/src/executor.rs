@@ -195,7 +195,7 @@ impl Executor {
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        use meticulous_worker_child::{self as child, Layers};
+        use meticulous_worker_child::{self as child, Layers, Syscall};
 
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
@@ -321,6 +321,12 @@ impl Executor {
             layers: child_layers,
             mounts: child_mounts.as_ref(),
         };
+        let mut syscalls = Vec::default();
+
+        // Unmount the old root. See man 2 pivot_root.
+        const DOT: *const u8 = b".\0".as_ptr();
+        const MNT_DETACH: usize = 2;
+        syscalls.push(Syscall::Two(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH));
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
@@ -364,6 +370,7 @@ impl Executor {
                     exec_result_write_fd.into_raw_fd(),
                     self.uid.as_raw(),
                     self.gid.as_raw(),
+                    syscalls.as_slice(),
                 )
             };
         }

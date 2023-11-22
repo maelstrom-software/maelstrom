@@ -7,6 +7,25 @@ use core::{
     fmt::{self, Write as _},
     mem, result, slice, str,
 };
+use nc::syscalls::{self, Errno, Sysno};
+
+pub enum Syscall {
+    One(Sysno, usize),
+    Two(Sysno, usize, usize),
+    Three(Sysno, usize, usize, usize),
+    Five(Sysno, usize, usize, usize, usize, usize),
+}
+
+impl Syscall {
+    unsafe fn call(&self) -> result::Result<usize, Errno> {
+        match self {
+            Syscall::One(n, a1) => syscalls::syscall1(*n, *a1),
+            Syscall::Two(n, a1, a2) => syscalls::syscall2(*n, *a1, *a2),
+            Syscall::Three(n, a1, a2, a3) => syscalls::syscall3(*n, *a1, *a2, *a3),
+            Syscall::Five(n, a1, a2, a3, a4, a5) => syscalls::syscall5(*n, *a1, *a2, *a3, *a4, *a5),
+        }
+    }
+}
 
 pub enum Layers<'a> {
     One {
@@ -232,6 +251,7 @@ unsafe fn start_and_exec_in_child_inner(
     stderr_write_fd: c_int,
     parent_uid: uid_t,
     parent_gid: gid_t,
+    syscalls: &[Syscall],
 ) -> Result<()> {
     // in a new network namespace we need to ifup loopback ourselves
     rtnetlink::ifup_loopback()?;
@@ -257,7 +277,6 @@ unsafe fn start_and_exec_in_child_inner(
     const SYSFS: *const u8 = b"sysfs\0".as_ptr();
     const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
     const PROC: *const u8 = b"proc\0".as_ptr();
-    const MNT_DETACH: usize = 2;
     nc::syscalls::syscall5(
         nc::SYS_MOUNT,
         0,
@@ -374,9 +393,9 @@ unsafe fn start_and_exec_in_child_inner(
         }
     }
 
-    // Unmount the old root. See man 2 pivot_root.
-    nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
-        .map_system_errno("umount2")?;
+    for syscall in syscalls {
+        unsafe { syscall.call() }.map_system_errno("unknown")?;
+    }
 
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
@@ -385,7 +404,8 @@ unsafe fn start_and_exec_in_child_inner(
         details.environment.as_ptr() as usize,
     )
     .map_execution_errno("execve")?;
-    unreachable!();
+
+    panic!("should not reach here");
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
@@ -402,6 +422,7 @@ pub unsafe fn start_and_exec_in_child(
     exec_result_write_fd: c_int,
     parent_uid: uid_t,
     parent_gid: gid_t,
+    syscalls: &[Syscall],
 ) -> ! {
     // TODO: https://github.com/meticulous-software/meticulous/issues/47
     //
@@ -413,6 +434,7 @@ pub unsafe fn start_and_exec_in_child(
         stderr_write_fd,
         parent_uid,
         parent_gid,
+        syscalls,
     ) else {
         unreachable!();
     };
