@@ -324,12 +324,14 @@ pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDe
     locked_tags: LockedContainerImageTags,
     cached_images: HashMap<String, ContainerImage>,
     cache_dir: PathBuf,
+    project_dir: PathBuf,
     ops: ContainerImageDepotOpsT,
 }
 
 impl ContainerImageDepot<DefaultContainerImageDepotOps> {
-    pub fn new() -> Result<Self> {
+    pub fn new(project_dir: impl AsRef<Path>) -> Result<Self> {
         Self::new_with(
+            project_dir,
             directories::BaseDirs::new()
                 .expect("failed to find cache dir")
                 .cache_dir()
@@ -340,16 +342,23 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     }
 }
 
+const TAG_FILE_NAME: &'static str = "meticulous-container-tags.lock";
+
 impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<ContainerImageDepotOpsT> {
-    fn new_with(cache_dir: impl AsRef<Path>, ops: ContainerImageDepotOpsT) -> Result<Self> {
+    fn new_with(
+        project_dir: impl AsRef<Path>,
+        cache_dir: impl AsRef<Path>,
+        ops: ContainerImageDepotOpsT,
+    ) -> Result<Self> {
+        let project_dir = project_dir.as_ref();
         let cache_dir = cache_dir.as_ref();
 
         if !cache_dir.exists() {
             std::fs::create_dir_all(cache_dir)?;
         }
 
-        let locked_tags =
-            LockedContainerImageTags::from_path(cache_dir.join("tags.lock")).unwrap_or_default();
+        let locked_tags = LockedContainerImageTags::from_path(project_dir.join(TAG_FILE_NAME))
+            .unwrap_or_default();
         let mut cached_images = HashMap::new();
         for d in std::fs::read_dir(cache_dir)? {
             let d = d?;
@@ -360,9 +369,20 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         Ok(Self {
             locked_tags,
             cached_images,
+            project_dir: project_dir.to_owned(),
             cache_dir: cache_dir.to_owned(),
             ops,
         })
+    }
+
+    fn write_lock_file(&self) -> Result<()> {
+        std::fs::write(
+            self.project_dir.join(TAG_FILE_NAME),
+            toml::to_string_pretty(&self.locked_tags)
+                .unwrap()
+                .as_bytes(),
+        )?;
+        Ok(())
     }
 
     pub fn get_container_image(
@@ -377,6 +397,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             self.ops.resolve_tag(name, tag)?
         };
         if let Some(img) = self.cached_images.get(&digest) {
+            self.write_lock_file()?;
             return Ok(img.clone());
         }
 
@@ -394,12 +415,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
 
         self.locked_tags
             .add(name.into(), tag.into(), img.digest.clone());
-        std::fs::write(
-            self.cache_dir.join("tags.lock"),
-            toml::to_string_pretty(&self.locked_tags)
-                .unwrap()
-                .as_bytes(),
-        )?;
+        self.write_lock_file()?;
         self.cached_images.insert(img.digest.clone(), img.clone());
         Ok(img)
     }
@@ -426,6 +442,7 @@ impl ContainerImageDepotOps for PanicContainerImageDepotOps {
 }
 
 #[cfg(test)]
+#[derive(Clone)]
 struct FakeContainerImageDepotOps(HashMap<String, String>);
 
 #[cfg(test)]
@@ -471,10 +488,12 @@ fn sorted_dir_listing(path: impl AsRef<Path>) -> Vec<String> {
 
 #[test]
 fn container_image_depot_download_dir_structure() {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let project_dir = tempfile::tempdir().unwrap();
+    let image_dir = tempfile::tempdir().unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:abcdef".into(),
         }),
@@ -484,18 +503,18 @@ fn container_image_depot_download_dir_structure() {
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
 
-    assert_eq!(
-        sorted_dir_listing(temp_dir.path()),
-        vec!["sha256:abcdef", "tags.lock"]
-    );
+    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
+    assert_eq!(sorted_dir_listing(image_dir.path()), vec!["sha256:abcdef"]);
 }
 
 #[test]
 fn container_image_depot_download_then_reload() {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let project_dir = tempfile::tempdir().unwrap();
+    let image_dir = tempfile::tempdir().unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:abcdef".into(),
         }),
@@ -506,8 +525,12 @@ fn container_image_depot_download_then_reload() {
         .unwrap();
     drop(depot);
 
-    let mut depot =
-        ContainerImageDepot::new_with(temp_dir.path(), PanicContainerImageDepotOps).unwrap();
+    let mut depot = ContainerImageDepot::new_with(
+        project_dir.path(),
+        image_dir.path(),
+        PanicContainerImageDepotOps,
+    )
+    .unwrap();
     let img2 = depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
@@ -517,10 +540,12 @@ fn container_image_depot_download_then_reload() {
 
 #[test]
 fn container_image_depot_redownload_corrupt() {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let project_dir = tempfile::tempdir().unwrap();
+    let image_dir = tempfile::tempdir().unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:abcdef".into(),
         }),
@@ -530,10 +555,11 @@ fn container_image_depot_redownload_corrupt() {
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
     drop(depot);
-    std::fs::remove_file(temp_dir.path().join("sha256:abcdef").join("config.json")).unwrap();
+    std::fs::remove_file(image_dir.path().join("sha256:abcdef").join("config.json")).unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:abcdef".into(),
         }),
@@ -543,18 +569,18 @@ fn container_image_depot_redownload_corrupt() {
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
 
-    assert_eq!(
-        sorted_dir_listing(temp_dir.path()),
-        vec!["sha256:abcdef", "tags.lock"]
-    );
+    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
+    assert_eq!(sorted_dir_listing(image_dir.path()), vec!["sha256:abcdef"]);
 }
 
 #[test]
 fn container_image_depot_update_image() {
-    let temp_dir = tempfile::tempdir().unwrap();
+    let project_dir = tempfile::tempdir().unwrap();
+    let image_dir = tempfile::tempdir().unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:abcdef".into(),
             "bar-latest".into() => "sha256:ghijk".into(),
@@ -568,11 +594,12 @@ fn container_image_depot_update_image() {
         .get_container_image("bar", "latest", ProgressBar::hidden())
         .unwrap();
     drop(depot);
-    std::fs::remove_file(temp_dir.path().join("tags.lock")).unwrap();
-    let bar_meta_before = std::fs::metadata(temp_dir.path().join("sha256:ghijk")).unwrap();
+    std::fs::remove_file(project_dir.path().join(TAG_FILE_NAME)).unwrap();
+    let bar_meta_before = std::fs::metadata(image_dir.path().join("sha256:ghijk")).unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
-        temp_dir.path(),
+        project_dir.path(),
+        image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
             "foo-latest".into() => "sha256:lmnop".into(),
             "bar-latest".into() => "sha256:ghijk".into(),
@@ -589,7 +616,7 @@ fn container_image_depot_update_image() {
     // ensure we get new foo
     assert_eq!(foo.digest, "sha256:lmnop");
 
-    let bar_meta_after = std::fs::metadata(temp_dir.path().join("sha256:ghijk")).unwrap();
+    let bar_meta_after = std::fs::metadata(image_dir.path().join("sha256:ghijk")).unwrap();
 
     // ensure we didn't re-download bar
     assert_eq!(
@@ -597,9 +624,46 @@ fn container_image_depot_update_image() {
         bar_meta_after.modified().unwrap()
     );
 
+    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
     assert_eq!(
-        sorted_dir_listing(temp_dir.path()),
-        vec!["sha256:abcdef", "sha256:ghijk", "sha256:lmnop", "tags.lock"]
+        sorted_dir_listing(image_dir.path()),
+        vec!["sha256:abcdef", "sha256:ghijk", "sha256:lmnop",]
+    );
+}
+
+#[test]
+fn container_image_depot_update_image_but_nothing_to_do() {
+    let project_dir = tempfile::tempdir().unwrap();
+    let image_dir = tempfile::tempdir().unwrap();
+
+    let ops = FakeContainerImageDepotOps(maplit::hashmap! {
+        "foo-latest".into() => "sha256:abcdef".into(),
+        "bar-latest".into() => "sha256:ghijk".into(),
+    });
+    let mut depot =
+        ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops.clone()).unwrap();
+    depot
+        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .unwrap();
+    depot
+        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .unwrap();
+    drop(depot);
+    std::fs::remove_file(project_dir.path().join(TAG_FILE_NAME)).unwrap();
+
+    let mut depot =
+        ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
+    depot
+        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .unwrap();
+    depot
+        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .unwrap();
+
+    assert_eq!(sorted_dir_listing(project_dir.path()), vec![TAG_FILE_NAME]);
+    assert_eq!(
+        sorted_dir_listing(image_dir.path()),
+        vec!["sha256:abcdef", "sha256:ghijk"]
     );
 }
 

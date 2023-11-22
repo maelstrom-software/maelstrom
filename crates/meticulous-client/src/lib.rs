@@ -139,7 +139,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(broker_addr: SocketAddr) -> Result<Self> {
+    pub fn new(broker_addr: SocketAddr, project_dir: impl AsRef<Path>) -> Result<Self> {
         let mut stream = TcpStream::connect(broker_addr)?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
@@ -162,7 +162,7 @@ impl Client {
             dispatcher_sender,
             dispatcher_handle,
             paths: HashMap::default(),
-            container_image_depot: ContainerImageDepot::new()?,
+            container_image_depot: ContainerImageDepot::new(project_dir)?,
             digest_to_container_env: HashMap::default(),
         })
     }

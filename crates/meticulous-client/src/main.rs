@@ -169,7 +169,7 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(config.broker.into_inner())?;
+    let mut client = Client::new(config.broker.into_inner(), ".")?;
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {

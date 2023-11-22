@@ -470,7 +470,7 @@ pub fn main() -> Result<ExitCode> {
     let metadata: Metadata =
         serde_json::from_slice(&metadata_output.stdout).context("parsing cargo metadata")?;
 
-    let mut test_metadata_file = PathBuf::from(metadata.workspace_root);
+    let mut test_metadata_file = PathBuf::from(&metadata.workspace_root);
     test_metadata_file.push("metest-metadata.toml");
     let config = match fs::read_to_string(&test_metadata_file) {
         Ok(contents) => toml::from_str(&contents).context("parsing {test_metadata_file}")?,
@@ -483,7 +483,7 @@ pub fn main() -> Result<ExitCode> {
         }
     };
 
-    let client = Mutex::new(Client::new(cli_options.broker)?);
+    let client = Mutex::new(Client::new(cli_options.broker, metadata.workspace_root)?);
     let app = MainApp::new(
         client,
         "cargo".into(),

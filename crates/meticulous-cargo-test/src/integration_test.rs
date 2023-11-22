@@ -235,8 +235,9 @@ fn run_app(
     package: Option<String>,
     filter: Option<String>,
 ) {
+    let tmp_dir = tempdir().unwrap();
     let broker_address = fake_broker(state);
-    let client = Mutex::new(Client::new(broker_address).unwrap());
+    let client = Mutex::new(Client::new(broker_address, tmp_dir.path()).unwrap());
 
     let mut stderr = vec![];
     let app = MainApp::new(
