@@ -342,7 +342,7 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     }
 }
 
-const TAG_FILE_NAME: &'static str = "meticulous-container-tags.lock";
+const TAG_FILE_NAME: &'str = "meticulous-container-tags.lock";
 
 impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<ContainerImageDepotOpsT> {
     fn new_with(
