@@ -252,40 +252,34 @@ impl Executor {
         let overlayfs_options;
         let child_layers: Layers;
 
-        match details.layers.len() {
-            0 => {
-                child_layers = Layers::None;
-            }
-            1 => {
-                layer0_path = CString::new(details.layers[0].as_os_str().as_bytes())
-                    .map_err(Error::from)
-                    .map_err(JobError::System)?;
-                child_layers = Layers::One {
-                    path: layer0_path.as_c_str(),
-                };
-            }
-            _ => {
-                let mut options = "lowerdir=".to_string();
-                for (i, layer) in details.layers.iter().rev().enumerate() {
-                    if i != 0 {
-                        options.push(':');
-                    }
-                    options.push_str(
-                        layer
-                            .as_os_str()
-                            .to_str()
-                            .ok_or_else(|| anyhow!("could not convert path to string"))
-                            .map_err(JobError::System)?,
-                    );
+        if details.layers.tail.is_empty() {
+            layer0_path = CString::new(details.layers[0].as_os_str().as_bytes())
+                .map_err(Error::from)
+                .map_err(JobError::System)?;
+            child_layers = Layers::One {
+                path: layer0_path.as_c_str(),
+            };
+        } else {
+            let mut options = "lowerdir=".to_string();
+            for (i, layer) in details.layers.iter().rev().enumerate() {
+                if i != 0 {
+                    options.push(':');
                 }
-                overlayfs_options = CString::new(options)
-                    .map_err(Error::from)
-                    .map_err(JobError::System)?;
-                child_layers = Layers::Many {
-                    overlayfs_options: overlayfs_options.as_c_str(),
-                    mount_dir: self.mount_dir.as_c_str(),
-                };
+                options.push_str(
+                    layer
+                        .as_os_str()
+                        .to_str()
+                        .ok_or_else(|| anyhow!("could not convert path to string"))
+                        .map_err(JobError::System)?,
+                );
             }
+            overlayfs_options = CString::new(options)
+                .map_err(Error::from)
+                .map_err(JobError::System)?;
+            child_layers = Layers::Many {
+                overlayfs_options: overlayfs_options.as_c_str(),
+                mount_dir: self.mount_dir.as_c_str(),
+            };
         }
 
         let child_mount_points = details

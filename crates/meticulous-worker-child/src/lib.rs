@@ -9,7 +9,6 @@ use core::{
 };
 
 pub enum Layers<'a> {
-    None,
     One {
         path: &'a CStr,
     },
@@ -268,8 +267,7 @@ unsafe fn start_and_exec_in_child_inner(
         0,
     )
     .map_system_errno("mount of / to set private and rec")?;
-    let pivot = match details.layers {
-        Layers::None => None,
+    let new_root_path = match details.layers {
         Layers::One { path } => {
             let path = &path.to_bytes_with_nul()[0] as *const u8;
 
@@ -296,7 +294,7 @@ unsafe fn start_and_exec_in_child_inner(
             )
             .map_system_errno("remount of bind mount")?;
 
-            Some(path)
+            path
         }
         Layers::Many {
             overlayfs_options,
@@ -315,30 +313,28 @@ unsafe fn start_and_exec_in_child_inner(
             )
             .map_system_errno("mount")?;
 
-            Some(mount_dir)
+            mount_dir
         }
     };
 
-    if let Some(path) = pivot {
-        // Chdir to what will be the new root.
-        nc::syscalls::syscall1(nc::SYS_CHDIR, path as usize).map_system_errno("chdir")?;
+    // Chdir to what will be the new root.
+    nc::syscalls::syscall1(nc::SYS_CHDIR, new_root_path as usize).map_system_errno("chdir")?;
 
-        for mount in details.devices {
-            nc::syscalls::syscall5(
-                nc::SYS_MOUNT,
-                &mount.0.to_bytes_with_nul()[0] as *const u8 as usize,
-                &mount.1.to_bytes_with_nul()[0] as *const u8 as usize,
-                0,
-                nc::MS_BIND,
-                0,
-            )
-            .map_system_errno("bind mount of device")?;
-        }
-
-        // Pivot root to be the new root. See man 2 pivot_root.
-        nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
-            .map_system_errno("pivot_root")?;
+    for mount in details.devices {
+        nc::syscalls::syscall5(
+            nc::SYS_MOUNT,
+            &mount.0.to_bytes_with_nul()[0] as *const u8 as usize,
+            &mount.1.to_bytes_with_nul()[0] as *const u8 as usize,
+            0,
+            nc::MS_BIND,
+            0,
+        )
+        .map_system_errno("bind mount of device")?;
     }
+
+    // Pivot root to be the new root. See man 2 pivot_root.
+    nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
+        .map_system_errno("pivot_root")?;
 
     for mount in details.mounts {
         match mount.fs_type {
@@ -378,11 +374,9 @@ unsafe fn start_and_exec_in_child_inner(
         }
     }
 
-    if pivot.is_some() {
-        // Unmount the old root. See man 2 pivot_root.
-        nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
-            .map_system_errno("umount2")?;
-    }
+    // Unmount the old root. See man 2 pivot_root.
+    nc::syscalls::syscall2(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH)
+        .map_system_errno("umount2")?;
 
     nc::syscalls::syscall3(
         nc::SYS_EXECVE,
