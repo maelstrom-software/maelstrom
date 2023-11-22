@@ -9,6 +9,9 @@ mount_point = "/tmp"
 [[groups.mounts]]
 fs_type = "proc"
 mount_point = "/proc"
+[[groups.mounts]]
+fs_type = "sys"
+mount_point = "/sys"
 
 [[groups]]
 module = "meticulous-cargo-test"
