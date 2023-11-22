@@ -282,24 +282,6 @@ impl Executor {
             };
         }
 
-        let child_mount_points = details
-            .mounts
-            .iter()
-            .map(|m| CString::new(m.mount_point.as_str()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let child_mounts = iter::zip(details.mounts.iter(), child_mount_points.iter())
-            .map(|(m, mp)| child::JobMount {
-                fs_type: match m.fs_type {
-                    JobMountFsType::Proc => child::JobMountFsType::Proc,
-                    JobMountFsType::Tmp => child::JobMountFsType::Tmp,
-                    JobMountFsType::Sys => child::JobMountFsType::Sys,
-                },
-                mount_point: mp.as_c_str(),
-            })
-            .collect::<Vec<_>>();
-
         let child_devices = details
             .devices
             .iter()
@@ -313,20 +295,53 @@ impl Executor {
             })
             .collect::<Vec<_>>();
 
+        const DOT: *const u8 = b".\0".as_ptr();
+        const MNT_DETACH: usize = 2;
+        const SYSFS: *const u8 = b"sysfs\0".as_ptr();
+        const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
+        const PROC: *const u8 = b"proc\0".as_ptr();
+
+        let mut syscalls = Vec::default();
+
+        // Set up the mounts after we've called pivot_root so the absolute paths specified stay
+        // within the container.
+        //
+        // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
+        // unless they are already mounted. So we have to do this before we unmount the old root.
+        // If we do the unmount first, then we'll get permission errors mounting those fs types.
+        let child_mount_points = details
+            .mounts
+            .iter()
+            .map(|m| CString::new(m.mount_point.as_str()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        for (mount, mount_point) in iter::zip(details.mounts.iter(), child_mount_points.iter()) {
+            let (fs_type, flags) = match mount.fs_type {
+                JobMountFsType::Proc => (PROC, nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV),
+                JobMountFsType::Tmp => (TMPFS, 0),
+                JobMountFsType::Sys => (SYSFS, 0),
+            };
+            syscalls.push(Syscall::Five(
+                nc::SYS_MOUNT,
+                fs_type as usize,
+                mount_point.to_bytes_with_nul().as_ptr() as usize,
+                fs_type as usize,
+                flags,
+                0,
+            ));
+        }
+
+        // Unmount the old root. See man 2 pivot_root.
+        syscalls.push(Syscall::Two(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH));
+
         let child_job_details = child::JobDetails {
             program: program.as_c_str(),
             arguments: argv.as_ref(),
             environment: env.as_ref(),
             devices: child_devices.as_ref(),
             layers: child_layers,
-            mounts: child_mounts.as_ref(),
         };
-        let mut syscalls = Vec::default();
-
-        // Unmount the old root. See man 2 pivot_root.
-        const DOT: *const u8 = b".\0".as_ptr();
-        const MNT_DETACH: usize = 2;
-        syscalls.push(Syscall::Two(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH));
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {

@@ -37,24 +37,12 @@ pub enum Layers<'a> {
     },
 }
 
-pub enum JobMountFsType {
-    Proc,
-    Tmp,
-    Sys,
-}
-
-pub struct JobMount<'a> {
-    pub fs_type: JobMountFsType,
-    pub mount_point: &'a CStr,
-}
-
 pub struct JobDetails<'a> {
     pub program: &'a CStr,
     pub arguments: &'a [Option<&'a u8>],
     pub environment: &'a [Option<&'a u8>],
     pub devices: &'a [(&'a CStr, &'a CStr)],
     pub layers: Layers<'a>,
-    pub mounts: &'a [JobMount<'a>],
 }
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
@@ -274,9 +262,6 @@ unsafe fn start_and_exec_in_child_inner(
     const DOT: *const u8 = b".\0".as_ptr();
     const SLASH: *const u8 = b"/\0".as_ptr();
     const OVERLAY: *const u8 = b"overlay\0".as_ptr();
-    const SYSFS: *const u8 = b"sysfs\0".as_ptr();
-    const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
-    const PROC: *const u8 = b"proc\0".as_ptr();
     nc::syscalls::syscall5(
         nc::SYS_MOUNT,
         0,
@@ -354,44 +339,6 @@ unsafe fn start_and_exec_in_child_inner(
     // Pivot root to be the new root. See man 2 pivot_root.
     nc::syscalls::syscall2(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize)
         .map_system_errno("pivot_root")?;
-
-    for mount in details.mounts {
-        match mount.fs_type {
-            JobMountFsType::Proc => {
-                nc::syscalls::syscall5(
-                    nc::SYS_MOUNT,
-                    PROC as usize,
-                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
-                    PROC as usize,
-                    nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV,
-                    0,
-                )
-                .map_system_errno("mount proc")?;
-            }
-            JobMountFsType::Tmp => {
-                nc::syscalls::syscall5(
-                    nc::SYS_MOUNT,
-                    TMPFS as usize,
-                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
-                    TMPFS as usize,
-                    0,
-                    0,
-                )
-                .map_system_errno("mount tmpfs")?;
-            }
-            JobMountFsType::Sys => {
-                nc::syscalls::syscall5(
-                    nc::SYS_MOUNT,
-                    SYSFS as usize,
-                    &mount.mount_point.to_bytes_with_nul()[0] as *const u8 as usize,
-                    SYSFS as usize,
-                    0,
-                    0,
-                )
-                .map_system_errno("mount sysfs")?;
-            }
-        }
-    }
 
     for syscall in syscalls {
         unsafe { syscall.call() }.map_system_errno("unknown")?;
