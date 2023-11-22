@@ -851,6 +851,167 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn no_tmpfs() {
+        let details = JobDetails {
+            program: "/bin/grep",
+            arguments: &["^tmpfs /tmp".to_string(), "/proc/self/mounts".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(1),
+            JobOutputResult::None,
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn tmpfs() {
+        let details = JobDetails {
+            program: "/bin/awk",
+            arguments: &[
+                r#"/^tmpfs \/tmp/ { print $1, $2, $3 }"#.to_string(),
+                "/proc/self/mounts".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".to_string(),
+                },
+            ],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"tmpfs /tmp tmpfs\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_sysfs() {
+        let details = JobDetails {
+            program: "/bin/grep",
+            arguments: &["^sysfs /sys".to_string(), "/proc/self/mounts".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(1),
+            JobOutputResult::None,
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn sysfs() {
+        let details = JobDetails {
+            program: "/bin/awk",
+            arguments: &[
+                r#"/^sysfs \/sys/ { print $1, $2, $3 }"#.to_string(),
+                "/proc/self/mounts".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                },
+            ],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"sysfs /sys sysfs\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_procfs() {
+        let details = JobDetails {
+            program: "/bin/ls",
+            arguments: &["/proc".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            0,
+            JobStatus::Exited(0),
+            JobOutputResult::None,
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn procfs() {
+        let details = JobDetails {
+            program: "/bin/grep",
+            arguments: &["^proc".to_string(), "/proc/self/mounts".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(
+                b"proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
+            )),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn old_mounts_are_unmounted() {
         let details = JobDetails {
             program: "/bin/wc",
