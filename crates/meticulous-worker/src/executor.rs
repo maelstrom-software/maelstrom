@@ -544,7 +544,7 @@ mod tests {
     use super::*;
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
-    use meticulous_base::JobStatus;
+    use meticulous_base::{nonempty, JobStatus};
     use meticulous_test::boxed_u8;
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
@@ -584,11 +584,14 @@ mod tests {
         }
     }
 
-    fn extract_dependencies() -> PathBuf {
-        let bytes = include_bytes!("executor-test-deps.tar");
+    fn extract_layer_tar(bytes: &'static [u8]) -> PathBuf {
         let tempdir = TempDir::new().unwrap();
-        Archive::new(bytes.as_slice()).unpack(&tempdir).unwrap();
+        Archive::new(bytes).unpack(&tempdir).unwrap();
         tempdir.into_path()
+    }
+
+    fn extract_dependencies() -> PathBuf {
+        extract_layer_tar(include_bytes!("executor-test-deps.tar").as_slice())
     }
 
     async fn start_and_expect_bash(
@@ -920,6 +923,81 @@ mod tests {
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n")),
             JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn one_layer_is_read_only() {
+        let details = JobDetails {
+            program: "/bin/touch",
+            arguments: &["/foo".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(1),
+            JobOutputResult::None,
+            JobOutputResult::Inline(boxed_u8!(b"touch: /foo: Read-only file system\n")),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multiple_layers_in_correct_order() {
+        let details = JobDetails {
+            program: "/bin/cat",
+            arguments: &[
+                "/root/file".to_string(),
+                "/root/bottom-file".to_string(),
+                "/root/top-file".to_string(),
+            ],
+            environment: &[],
+            layers: &nonempty![
+                extract_dependencies(),
+                extract_layer_tar(include_bytes!("bottom-layer.tar")),
+                extract_layer_tar(include_bytes!("top-layer.tar"))
+            ],
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"top\nbottom file\ntop file\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multiple_layers_read_only() {
+        let details = JobDetails {
+            program: "/bin/touch",
+            arguments: &["/foo".to_string()],
+            environment: &[],
+            layers: &nonempty![
+                extract_dependencies(),
+                extract_layer_tar(include_bytes!("bottom-layer.tar")),
+                extract_layer_tar(include_bytes!("top-layer.tar"))
+            ],
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(1),
+            JobOutputResult::None,
+            JobOutputResult::Inline(boxed_u8!(b"touch: /foo: Read-only file system\n")),
         )
         .await;
     }
