@@ -195,7 +195,7 @@ impl Executor {
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        use meticulous_worker_child::{self as child, Layers, Syscall};
+        use meticulous_worker_child::{self as child, Syscall};
 
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
@@ -248,18 +248,47 @@ impl Executor {
             .chain(iter::once(None))
             .collect::<Vec<_>>();
 
+        const DOT: *const u8 = b".\0".as_ptr();
+        const MNT_DETACH: usize = 2;
+        const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+        const SYSFS: *const u8 = b"sysfs\0".as_ptr();
+        const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
+        const PROC: *const u8 = b"proc\0".as_ptr();
+
+        let mut syscalls = Vec::default();
+
+        let new_root_path;
         let layer0_path;
         let overlayfs_options;
-        let child_layers: Layers;
 
         if details.layers.tail.is_empty() {
             layer0_path = CString::new(details.layers[0].as_os_str().as_bytes())
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
-            child_layers = Layers::One {
-                path: layer0_path.as_c_str(),
-            };
+            new_root_path = layer0_path.as_c_str();
+
+            // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
+            // pivot_root to it later.
+            syscalls.push(Syscall::Five(
+                nc::SYS_MOUNT,
+                new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                0,
+                nc::MS_BIND,
+                0,
+            ));
+
+            // We want that mount to be read-only!
+            syscalls.push(Syscall::Five(
+                nc::SYS_MOUNT,
+                0,
+                new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                0,
+                nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
+                0,
+            ));
         } else {
+            new_root_path = self.mount_dir.as_c_str();
             let mut options = "lowerdir=".to_string();
             for (i, layer) in details.layers.iter().rev().enumerate() {
                 if i != 0 {
@@ -276,24 +305,15 @@ impl Executor {
             overlayfs_options = CString::new(options)
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
-            child_layers = Layers::Many {
-                overlayfs_options: overlayfs_options.as_c_str(),
-                mount_dir: self.mount_dir.as_c_str(),
-            };
+            syscalls.push(Syscall::Five(
+                nc::SYS_MOUNT,
+                OVERLAY as usize,
+                new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                OVERLAY as usize,
+                0,
+                overlayfs_options.as_c_str().to_bytes_with_nul().as_ptr() as usize,
+            ));
         }
-
-        const DOT: *const u8 = b".\0".as_ptr();
-        const MNT_DETACH: usize = 2;
-        const SYSFS: *const u8 = b"sysfs\0".as_ptr();
-        const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
-        const PROC: *const u8 = b"proc\0".as_ptr();
-
-        let mut syscalls = Vec::default();
-
-        let new_root_path = match child_layers {
-            Layers::One { path } => path,
-            Layers::Many { mount_dir, .. } => mount_dir,
-        };
 
         // Chdir to what will be the new root.
         syscalls.push(Syscall::One(
@@ -362,7 +382,6 @@ impl Executor {
             program: program.as_c_str(),
             arguments: argv.as_ref(),
             environment: env.as_ref(),
-            layers: child_layers,
         };
 
         // Do the clone.

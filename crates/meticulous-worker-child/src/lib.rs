@@ -27,21 +27,10 @@ impl Syscall {
     }
 }
 
-pub enum Layers<'a> {
-    One {
-        path: &'a CStr,
-    },
-    Many {
-        overlayfs_options: &'a CStr,
-        mount_dir: &'a CStr,
-    },
-}
-
 pub struct JobDetails<'a> {
     pub program: &'a CStr,
     pub arguments: &'a [Option<&'a u8>],
     pub environment: &'a [Option<&'a u8>],
-    pub layers: Layers<'a>,
 }
 
 // These might not work for all linux architectures. We can fix them as we add more architectures.
@@ -259,7 +248,6 @@ unsafe fn start_and_exec_in_child_inner(
     nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
     const SLASH: *const u8 = b"/\0".as_ptr();
-    const OVERLAY: *const u8 = b"overlay\0".as_ptr();
     nc::syscalls::syscall5(
         nc::SYS_MOUNT,
         0,
@@ -269,51 +257,6 @@ unsafe fn start_and_exec_in_child_inner(
         0,
     )
     .map_system_errno("mount of / to set private and rec")?;
-    match details.layers {
-        Layers::One { path } => {
-            let path = &path.to_bytes_with_nul()[0] as *const u8;
-
-            // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
-            // pivot_root to it later.
-            nc::syscalls::syscall5(
-                nc::SYS_MOUNT,
-                path as usize,
-                path as usize,
-                0,
-                nc::MS_BIND,
-                0,
-            )
-            .map_system_errno("bind mount")?;
-
-            // We want that mount to be read-only!
-            nc::syscalls::syscall5(
-                nc::SYS_MOUNT,
-                0,
-                path as usize,
-                0,
-                nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
-                0,
-            )
-            .map_system_errno("remount of bind mount")?;
-        }
-        Layers::Many {
-            overlayfs_options,
-            mount_dir,
-        } => {
-            let overlayfs_options = &overlayfs_options.to_bytes_with_nul()[0] as *const u8;
-            let mount_dir = &mount_dir.to_bytes_with_nul()[0] as *const u8;
-
-            nc::syscalls::syscall5(
-                nc::SYS_MOUNT,
-                OVERLAY as usize,
-                mount_dir as usize,
-                OVERLAY as usize,
-                0,
-                overlayfs_options as usize,
-            )
-            .map_system_errno("mount")?;
-        }
-    }
 
     for syscall in syscalls {
         unsafe { syscall.call() }.map_system_errno("unknown")?;
