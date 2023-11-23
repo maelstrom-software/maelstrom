@@ -290,6 +290,20 @@ impl Executor {
 
         let mut syscalls = Vec::default();
 
+        let new_root_path = match child_layers {
+            Layers::One { path } => path,
+            Layers::Many { mount_dir, .. } => mount_dir,
+        };
+
+        // Chdir to what will be the new root.
+        syscalls.push(Syscall::One(
+            nc::SYS_CHDIR,
+            new_root_path.to_bytes_with_nul().as_ptr() as usize,
+        ));
+
+        // Create all of the supported devices by bind mounting them from the host's /dev
+        // directory. We don't assume we're running as root, and as such, we can't create device
+        // files. However, we can bind mount them.
         for device in details.devices.iter() {
             let (source, target) = match device {
                 JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),

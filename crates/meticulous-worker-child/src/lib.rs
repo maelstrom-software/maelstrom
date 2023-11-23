@@ -269,7 +269,7 @@ unsafe fn start_and_exec_in_child_inner(
         0,
     )
     .map_system_errno("mount of / to set private and rec")?;
-    let new_root_path = match details.layers {
+    match details.layers {
         Layers::One { path } => {
             let path = &path.to_bytes_with_nul()[0] as *const u8;
 
@@ -295,8 +295,6 @@ unsafe fn start_and_exec_in_child_inner(
                 0,
             )
             .map_system_errno("remount of bind mount")?;
-
-            path
         }
         Layers::Many {
             overlayfs_options,
@@ -314,13 +312,8 @@ unsafe fn start_and_exec_in_child_inner(
                 overlayfs_options as usize,
             )
             .map_system_errno("mount")?;
-
-            mount_dir
         }
-    };
-
-    // Chdir to what will be the new root.
-    nc::syscalls::syscall1(nc::SYS_CHDIR, new_root_path as usize).map_system_errno("chdir")?;
+    }
 
     for syscall in syscalls {
         unsafe { syscall.call() }.map_system_errno("unknown")?;
