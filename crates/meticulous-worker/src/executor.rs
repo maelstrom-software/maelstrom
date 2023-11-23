@@ -303,6 +303,9 @@ impl Executor {
 
         let mut syscalls = Vec::default();
 
+        // Pivot root to be the new root. See man 2 pivot_root.
+        syscalls.push(Syscall::Two(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize));
+
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
         // within the container.
         //
