@@ -282,19 +282,6 @@ impl Executor {
             };
         }
 
-        let child_devices = details
-            .devices
-            .iter()
-            .map(|d| match d {
-                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),
-                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null")),
-                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random")),
-                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty")),
-                JobDevice::Urandom => (c_str!("/dev/urandom"), c_str!("./dev/urandom")),
-                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero")),
-            })
-            .collect::<Vec<_>>();
-
         const DOT: *const u8 = b".\0".as_ptr();
         const MNT_DETACH: usize = 2;
         const SYSFS: *const u8 = b"sysfs\0".as_ptr();
@@ -302,6 +289,25 @@ impl Executor {
         const PROC: *const u8 = b"proc\0".as_ptr();
 
         let mut syscalls = Vec::default();
+
+        for device in details.devices.iter() {
+            let (source, target) = match device {
+                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),
+                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null")),
+                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random")),
+                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty")),
+                JobDevice::Urandom => (c_str!("/dev/urandom"), c_str!("./dev/urandom")),
+                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero")),
+            };
+            syscalls.push(Syscall::Five(
+                nc::SYS_MOUNT,
+                source.to_bytes_with_nul().as_ptr() as usize,
+                target.to_bytes_with_nul().as_ptr() as usize,
+                0,
+                nc::MS_BIND,
+                0,
+            ));
+        }
 
         // Pivot root to be the new root. See man 2 pivot_root.
         syscalls.push(Syscall::Two(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize));
@@ -342,7 +348,6 @@ impl Executor {
             program: program.as_c_str(),
             arguments: argv.as_ref(),
             environment: env.as_ref(),
-            devices: child_devices.as_ref(),
             layers: child_layers,
         };
 
