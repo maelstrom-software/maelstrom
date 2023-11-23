@@ -258,8 +258,23 @@ impl Executor {
 
         let mut syscalls = Vec::default();
 
+        // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
+        syscalls.push(Syscall::Three(
+            nc::SYS_CLOSE_RANGE,
+            3,
+            !0_usize,
+            nc::CLOSE_RANGE_CLOEXEC as usize,
+        ));
+
         // Turn off propagation. May not be necessary.
-        syscalls.push(Syscall::Five(nc::SYS_MOUNT, 0, SLASH as usize, 0, nc::MS_REC | nc::MS_PRIVATE, 0));
+        syscalls.push(Syscall::Five(
+            nc::SYS_MOUNT,
+            0,
+            SLASH as usize,
+            0,
+            nc::MS_REC | nc::MS_PRIVATE,
+            0,
+        ));
 
         let new_root_path;
         let layer0_path;
