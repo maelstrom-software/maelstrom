@@ -251,11 +251,15 @@ impl Executor {
         const DOT: *const u8 = b".\0".as_ptr();
         const MNT_DETACH: usize = 2;
         const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+        const SLASH: *const u8 = b"/\0".as_ptr();
         const SYSFS: *const u8 = b"sysfs\0".as_ptr();
         const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
         const PROC: *const u8 = b"proc\0".as_ptr();
 
         let mut syscalls = Vec::default();
+
+        // Turn off propagation. May not be necessary.
+        syscalls.push(Syscall::Five(nc::SYS_MOUNT, 0, SLASH as usize, 0, nc::MS_REC | nc::MS_PRIVATE, 0));
 
         let new_root_path;
         let layer0_path;

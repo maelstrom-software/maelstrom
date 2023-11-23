@@ -247,16 +247,6 @@ unsafe fn start_and_exec_in_child_inner(
     nc::dup2(stdout_write_fd, 1).map_system_errno("dup2 to stdout")?;
     nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
     nc::close_range(3, !0u32, nc::CLOSE_RANGE_CLOEXEC).map_system_errno("close_range")?;
-    const SLASH: *const u8 = b"/\0".as_ptr();
-    nc::syscalls::syscall5(
-        nc::SYS_MOUNT,
-        0,
-        SLASH as usize,
-        0,
-        nc::MS_REC | nc::MS_PRIVATE,
-        0,
-    )
-    .map_system_errno("mount of / to set private and rec")?;
 
     for syscall in syscalls {
         unsafe { syscall.call() }.map_system_errno("unknown")?;
