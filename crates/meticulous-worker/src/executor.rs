@@ -869,6 +869,294 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn no_dev_full() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/full | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_full() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/full | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Full),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1, 7\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_dev_null() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/null | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_null() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/null | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Null),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1, 3\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_dev_random() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/random | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_random() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/random | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Random),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1, 8\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_dev_tty() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/tty | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_tty() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/tty | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Tty),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"5, 0\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_dev_urandom() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/urandom | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_urandom() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/urandom | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Urandom),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1, 9\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn no_dev_zero() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/zero | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn dev_zero() {
+        let details = JobDetails {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "/bin/ls -l /dev/zero | awk '{print $5, $6}'".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Zero),
+            mounts: &[],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1, 5\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn no_tmpfs() {
         let details = JobDetails {
             program: "/bin/grep",

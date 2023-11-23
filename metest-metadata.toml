@@ -2,6 +2,7 @@
 module = "meticulous-worker"
 tests = "executor::"
 layers = ["proc-and-tmp.tar"]
+devices = ["full", "null", "random", "tty", "urandom", "zero"]
 include_shared_libraries = true
 [[groups.mounts]]
 fs_type = "tmp"
