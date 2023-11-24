@@ -33,31 +33,33 @@ pub trait CacheFs {
     fn file_size(&mut self, path: &Path) -> u64;
 }
 
-pub struct StdCacheFs;
+pub struct StdCacheFs(meticulous_util::fs::Fs);
+
+impl StdCacheFs {
+    pub fn new() -> Self {
+        Self(meticulous_util::fs::Fs::new())
+    }
+}
 
 impl CacheFs for StdCacheFs {
     fn rename(&mut self, source: &Path, destination: &Path) {
-        std::fs::rename(source, destination).unwrap()
+        self.0.rename(source, destination).unwrap()
     }
 
     fn remove(&mut self, path: &Path) {
-        std::fs::remove_file(path).unwrap()
+        self.0.remove_file(path).unwrap()
     }
 
     fn mkdir_recursively(&mut self, path: &Path) {
-        std::fs::create_dir_all(path).unwrap();
+        self.0.create_dir_all(path).unwrap();
     }
 
     fn read_dir(&mut self, path: &Path) -> Box<dyn Iterator<Item = PathBuf>> {
-        Box::new(
-            std::fs::read_dir(path)
-                .unwrap()
-                .map(|de| de.unwrap().path()),
-        )
+        Box::new(self.0.read_dir(path).unwrap().map(|de| de.unwrap().path()))
     }
 
     fn file_size(&mut self, path: &Path) -> u64 {
-        let metadata = std::fs::metadata(path).unwrap();
+        let metadata = self.0.metadata(path).unwrap();
         metadata.len()
     }
 }

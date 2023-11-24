@@ -12,6 +12,7 @@ use meticulous_base::{
     EnumSet, JobDetails, JobDevice, JobDeviceListDeserialize, JobMount, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
+use meticulous_util::fs::Fs;
 use meticulous_util::process::ExitCode;
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
@@ -19,7 +20,6 @@ use progress::{
 };
 use serde::Deserialize;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fs::File;
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
@@ -123,22 +123,24 @@ fn collect_environment_vars() -> Vec<String> {
 }
 
 fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
-    let mut binary = File::open(binary_path)?;
+    let fs = Fs::new();
+    let binary = fs.open_file(binary_path)?;
     let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
 
     let mut tar_path = PathBuf::from(binary_path);
     assert!(tar_path.set_extension("tar"));
 
-    let tar_file = File::create(&tar_path)?;
+    let tar_file = fs.create_file(&tar_path)?;
     let mut a = tar::Builder::new(tar_file);
 
-    a.append_file(binary_path_in_tar, &mut binary)?;
+    a.append_file(binary_path_in_tar, &mut binary.into_inner())?;
     a.finish()?;
 
     Ok(tar_path)
 }
 
 fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
+    let fs = Fs::new();
     let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
     let deps = dep_tree.analyze(binary_path)?;
 
@@ -172,7 +174,7 @@ fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
         path.components().skip(1).collect()
     }
 
-    let tar_file = File::create(&tar_path)?;
+    let tar_file = fs.create_file(&tar_path)?;
     let mut a = tar::Builder::new(tar_file);
 
     for path in paths {

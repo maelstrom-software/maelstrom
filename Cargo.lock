@@ -2343,6 +2343,7 @@ dependencies = [
  "futures",
  "indicatif",
  "maplit",
+ "meticulous-util",
  "oci-spec",
  "reqwest",
  "serde",

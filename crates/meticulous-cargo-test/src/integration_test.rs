@@ -8,10 +8,10 @@ use meticulous_base::{
     JobDetails, JobOutputResult, JobResult, JobStatus, JobSuccess,
 };
 use meticulous_client::Client;
+use meticulous_util::fs::Fs;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
@@ -20,13 +20,13 @@ use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::{tempdir, TempDir};
 
-fn put_file(path: &Path, contents: &str) {
-    let mut f = File::create(path).unwrap();
+fn put_file(fs: &Fs, path: &Path, contents: &str) {
+    let mut f = fs.create_file(path).unwrap();
     f.write_all(contents.as_bytes()).unwrap();
 }
 
-fn put_script(path: &Path, contents: &str) {
-    let mut f = File::create(path).unwrap();
+fn put_script(fs: &Fs, path: &Path, contents: &str) {
+    let mut f = fs.create_file(path).unwrap();
     f.write_all(
         format!(
             "#!/bin/bash
@@ -45,10 +45,12 @@ fn put_script(path: &Path, contents: &str) {
 }
 
 fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
+    let fs = Fs::new();
     let workspace_dir = tmp_dir.path().join("workspace");
-    std::fs::create_dir(&workspace_dir).unwrap();
+    fs.create_dir(&workspace_dir).unwrap();
     let cargo_path = workspace_dir.join("cargo");
     put_script(
+        &fs,
         &cargo_path,
         &format!(
             "\
@@ -58,6 +60,7 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
         ),
     );
     put_file(
+        &fs,
         &workspace_dir.join("Cargo.toml"),
         "\
         [workspace]\n\
@@ -65,12 +68,13 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
         ",
     );
     let crates_dir = workspace_dir.join("crates");
-    std::fs::create_dir(&crates_dir).unwrap();
+    fs.create_dir(&crates_dir).unwrap();
     for binary in &fake_tests.test_binaries {
         let crate_name = &binary.name;
         let project_dir = crates_dir.join(&crate_name);
-        std::fs::create_dir(&project_dir).unwrap();
+        fs.create_dir(&project_dir).unwrap();
         put_file(
+            &fs,
             &project_dir.join("Cargo.toml"),
             &format!(
                 "\
@@ -82,7 +86,7 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
             ),
         );
         let src_dir = project_dir.join("src");
-        std::fs::create_dir(&src_dir).unwrap();
+        fs.create_dir(&src_dir).unwrap();
         let mut test_src = String::new();
         for test_case in &binary.tests {
             let test_name = &test_case.name;
@@ -95,7 +99,7 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
                 ",
             );
         }
-        put_file(&src_dir.join("lib.rs"), &test_src);
+        put_file(&fs, &src_dir.join("lib.rs"), &test_src);
     }
 
     cargo_path.display().to_string()
