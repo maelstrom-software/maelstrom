@@ -934,6 +934,22 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn uid_and_gid() {
+        start_and_expect_python(
+            concat!(
+                "import os;",
+                "print('uid:', os.getuid());",
+                "print('gid:', os.getgid());",
+            ),
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn close_range() {
         let details = JobDetails {
             program: "/bin/ls",
