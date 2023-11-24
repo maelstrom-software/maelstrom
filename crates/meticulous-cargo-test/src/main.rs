@@ -198,8 +198,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         layers: NonEmpty<Sha256Digest>,
         devices: EnumSet<JobDevice>,
         mounts: Vec<JobMount>,
-    ) -> Result<()>
-    where
+    ) where
         ProgressIndicatorT: ProgressIndicatorScope,
     {
         let case_str = format!("{package_name} {case}");
@@ -207,7 +206,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
 
         if ignored_cases.contains(case) {
             visitor.job_ignored();
-            return Ok(());
+            return;
         }
 
         let binary_name = binary.file_name().unwrap().to_str().unwrap();
@@ -222,8 +221,6 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
-
-        Ok(())
     }
 
     fn queue_jobs_from_artifact<ProgressIndicatorT>(
@@ -259,9 +256,6 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             .add_artifact(&create_artifact_for_binary_deps(&binary)?)?;
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
-            self.jobs_queued += 1;
-            cb(self.jobs_queued);
-
             let mut layers = vec![];
             for layer in self.config.get_layers_for_test(package_name, &case) {
                 let mut client = client.lock().unwrap();
@@ -282,6 +276,9 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             }
             layers.push(binary_artifact.clone());
 
+            self.jobs_queued += 1;
+            cb(self.jobs_queued);
+
             self.queue_job_from_case(
                 client,
                 width,
@@ -299,7 +296,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         Ok(true)
     }
 
-    fn queue_jobs_and_wait<ProgressIndicatorT>(
+    fn queue_jobs<ProgressIndicatorT>(
         mut self,
         client: &Mutex<Client>,
         width: usize,
@@ -370,8 +367,7 @@ impl<StdErr: io::Write> MainApp<StdErr> {
 
         prog.run(self.client, |client, bar_scope| {
             let cb = |num_jobs| bar_scope.update_length(num_jobs);
-            self.queuer
-                .queue_jobs_and_wait(client, width, bar_scope.clone(), cb)
+            self.queuer.queue_jobs(client, width, bar_scope.clone(), cb)
         })?;
 
         tracker.print_summary(width, term)?;
