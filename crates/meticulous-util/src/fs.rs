@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 pub struct Fs;
 
 impl Fs {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self
     }
@@ -100,6 +101,7 @@ impl Metadata {
         self.inner.is_symlink()
     }
 
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u64 {
         self.inner.len()
     }
@@ -169,7 +171,7 @@ impl Fs {
         })
     }
 
-    pub fn open_file<'fs, P: AsRef<Path>>(&'fs self, path: P) -> Result<File<'fs>> {
+    pub fn open_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
         let path = path.as_ref();
         Ok(File {
             inner: std::fs::File::open(path)
@@ -179,7 +181,7 @@ impl Fs {
         })
     }
 
-    pub fn create_file<'fs, P: AsRef<Path>>(&'fs self, path: P) -> Result<File<'fs>> {
+    pub fn create_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
         let path = path.as_ref();
         Ok(File {
             inner: std::fs::File::create(path)
