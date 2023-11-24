@@ -10,6 +10,7 @@ use core::{
 use nc::syscalls::{self, Errno, Sysno};
 
 pub enum Syscall {
+    Zero(Sysno),
     One(Sysno, usize),
     Two(Sysno, usize, usize),
     Three(Sysno, usize, usize, usize),
@@ -19,6 +20,7 @@ pub enum Syscall {
 impl Syscall {
     unsafe fn call(&self) -> result::Result<usize, Errno> {
         match self {
+            Syscall::Zero(n) => syscalls::syscall0(*n),
             Syscall::One(n, a1) => syscalls::syscall1(*n, *a1),
             Syscall::Two(n, a1, a2) => syscalls::syscall2(*n, *a1, *a2),
             Syscall::Three(n, a1, a2, a3) => syscalls::syscall3(*n, *a1, *a2, *a3),
@@ -223,8 +225,6 @@ unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Resul
 /// The guts of the child code. This function can return a [`Result`].
 unsafe fn start_and_exec_in_child_inner(
     details: JobDetails,
-    stdout_write_fd: c_int,
-    stderr_write_fd: c_int,
     parent_uid: uid_t,
     parent_gid: gid_t,
     syscalls: &[Syscall],
@@ -243,9 +243,6 @@ unsafe fn start_and_exec_in_child_inner(
         b"/proc/self/gid_map\0",
         format_args!("0 {} 1\n", parent_gid),
     )?;
-    nc::setsid().map_system_errno("setsid")?;
-    nc::dup2(stdout_write_fd, 1).map_system_errno("dup2 to stdout")?;
-    nc::dup2(stderr_write_fd, 2).map_system_errno("dup2 to stderr")?;
 
     for syscall in syscalls {
         unsafe { syscall.call() }.map_system_errno("unknown")?;
@@ -271,8 +268,6 @@ unsafe fn start_and_exec_in_child_inner(
 /// file descriptors must be valid, open file descriptors.
 pub unsafe fn start_and_exec_in_child(
     details: JobDetails,
-    stdout_write_fd: c_int,
-    stderr_write_fd: c_int,
     exec_result_write_fd: c_int,
     parent_uid: uid_t,
     parent_gid: gid_t,
@@ -282,14 +277,7 @@ pub unsafe fn start_and_exec_in_child(
     //
     // We assume any error we encounter in the child is an execution error. While highly unlikely,
     // we could theoretically encounter a system error.
-    let Err(err) = start_and_exec_in_child_inner(
-        details,
-        stdout_write_fd,
-        stderr_write_fd,
-        parent_uid,
-        parent_gid,
-        syscalls,
-    ) else {
+    let Err(err) = start_and_exec_in_child_inner(details, parent_uid, parent_gid, syscalls) else {
         unreachable!();
     };
     let buf = Buf::<21>::try_from(err).unwrap();

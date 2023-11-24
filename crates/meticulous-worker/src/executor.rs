@@ -257,6 +257,24 @@ impl Executor {
 
         let mut syscalls = Vec::default();
 
+        // Make the child process the leader of a new session and process group. If we didn't do
+        // this, then the process would be a member of a process group and session headed by a
+        // process outside of the pid namespace, which would be confusing.
+        syscalls.push(Syscall::Zero(nc::SYS_SETSID));
+
+        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
+        // and stderr, and the close_range will close the open pipes.
+        syscalls.push(Syscall::Two(
+            nc::SYS_DUP2,
+            stdout_write_fd.as_raw_fd() as usize,
+            1,
+        ));
+        syscalls.push(Syscall::Two(
+            nc::SYS_DUP2,
+            stderr_write_fd.as_raw_fd() as usize,
+            2,
+        ));
+
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
         syscalls.push(Syscall::Three(
             nc::SYS_CLOSE_RANGE,
@@ -429,8 +447,6 @@ impl Executor {
             unsafe {
                 child::start_and_exec_in_child(
                     child_job_details,
-                    stdout_write_fd.into_raw_fd(),
-                    stderr_write_fd.into_raw_fd(),
                     exec_result_write_fd.into_raw_fd(),
                     self.uid.as_raw(),
                     self.gid.as_raw(),
