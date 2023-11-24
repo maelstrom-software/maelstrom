@@ -29,7 +29,7 @@ impl TryFrom<String> for BrokerAddr {
         let addrs: Vec<SocketAddr> = value.to_socket_addrs()?.collect();
         // It's not clear how we could end up with an empty iterator. We'll assume that's
         // impossible until proven wrong.
-        Ok(BrokerAddr(*addrs.get(0).unwrap()))
+        Ok(BrokerAddr(*addrs.first().unwrap()))
     }
 }
 

@@ -37,7 +37,7 @@ fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
     let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
     // It's not clear how we could end up with an empty iterator. We'll assume
     // that's impossible until proven wrong.
-    Ok(*addrs.get(0).unwrap())
+    Ok(*addrs.first().unwrap())
 }
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
@@ -290,7 +290,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 NonEmpty::try_from(layers).unwrap(),
                 self.config.get_devices_for_test(package_name, &case),
                 self.config.get_mounts_for_test(package_name, &case),
-            )?;
+            );
         }
 
         Ok(true)

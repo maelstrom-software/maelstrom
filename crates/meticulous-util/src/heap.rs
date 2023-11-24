@@ -67,7 +67,7 @@ impl<DepsT: HeapDeps> Heap<DepsT> {
     /// if the heap is empty. Note that multiple elements in the heap may have the smallest value.
     /// In this case, an arbitrary element will be returned. O(1).
     pub fn peek(&self) -> Option<&DepsT::Element> {
-        self.0.get(0)
+        self.0.first()
     }
 
     /// Remove the element with the smallest value in the heap, or [`None`] if the heap is empty.
