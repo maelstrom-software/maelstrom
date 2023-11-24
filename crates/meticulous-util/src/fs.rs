@@ -14,14 +14,14 @@ impl Fs {
 macro_rules! fs_trampoline {
     ($f:ident, $p:ident) => {{
         let path = $p.as_ref();
-        std::fs::$f(path).with_context(|| format!("{}({})", stringify!($f), path.display()))
+        std::fs::$f(path).with_context(|| format!("{}(\"{}\")", stringify!($f), path.display()))
     }};
     ($f:ident, $p1:ident, $p2:ident) => {{
         let path1 = $p1.as_ref();
         let path2 = $p2.as_ref();
         std::fs::$f(path1, path2).with_context(|| {
             format!(
-                "{}({}, {})",
+                "{}(\"{}\", \"{}\")",
                 stringify!($f),
                 path1.display(),
                 path2.display()
@@ -35,7 +35,7 @@ macro_rules! fs_inner_trampoline {
         $self
             .inner
             .$f($($args),*)
-            .with_context(|| format!("{}({})", stringify!($f), $self.path.display()))
+            .with_context(|| format!("{}(\"{}\")", stringify!($f), $self.path.display()))
     }};
     ($self:expr, $f:ident) => {
         fs_inner_trampoline!($self, $f, )
@@ -54,7 +54,7 @@ impl Iterator for ReadDir {
         self.inner.next().map(|entry| {
             entry
                 .map(|inner| DirEntry { inner })
-                .with_context(|| format!("read_dir({})", self.path.display()))
+                .with_context(|| format!("read_dir(\"{}\")", self.path.display()))
         })
     }
 }
@@ -75,7 +75,7 @@ impl DirEntry {
                 inner,
                 path: self.path(),
             })
-            .with_context(|| format!("metadata({})", self.path().display()))
+            .with_context(|| format!("metadata(\"{}\")", self.path().display()))
     }
 }
 
@@ -157,7 +157,7 @@ impl Fs {
 
     pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(&self, path: P, contents: C) -> Result<()> {
         let path = path.as_ref();
-        std::fs::write(path, contents).with_context(|| format!("write({})", path.display()))
+        std::fs::write(path, contents).with_context(|| format!("write(\"{}\")", path.display()))
     }
 
     pub fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
@@ -175,7 +175,7 @@ impl Fs {
         let path = path.as_ref();
         Ok(File {
             inner: std::fs::File::open(path)
-                .with_context(|| format!("open({})", path.display()))?,
+                .with_context(|| format!("open(\"{}\")", path.display()))?,
             path: path.into(),
             fs: self,
         })
@@ -185,7 +185,7 @@ impl Fs {
         let path = path.as_ref();
         Ok(File {
             inner: std::fs::File::create(path)
-                .with_context(|| format!("create({})", path.display()))?,
+                .with_context(|| format!("create(\"{}\")", path.display()))?,
             path: path.into(),
             fs: self,
         })
