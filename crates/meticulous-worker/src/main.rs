@@ -5,7 +5,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_util::config::LogLevel;
+use meticulous_util::{config::LogLevel, fs::Fs};
 use meticulous_worker::config::Config;
 use nix::{
     errno::Errno,
@@ -22,7 +22,7 @@ use serde::{
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
-use std::{fs, mem, path::PathBuf, process, slice};
+use std::{mem, path::PathBuf, process, slice};
 use tokio::runtime::Runtime;
 
 /// The meticulous worker. This process executes jobs as directed by the broker.
@@ -163,9 +163,10 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             unsafe { nc::close(parent_pidfd) }.map_err(Errno::from_i32)?;
 
             // Map uid and guid.
-            fs::write("/proc/self/setgroups", "deny\n")?;
-            fs::write("/proc/self/uid_map", format!("0 {parent_uid} 1\n"))?;
-            fs::write("/proc/self/gid_map", format!("0 {parent_gid} 1\n"))?;
+            let fs = Fs::new();
+            fs.write("/proc/self/setgroups", "deny\n")?;
+            fs.write("/proc/self/uid_map", format!("0 {parent_uid} 1\n"))?;
+            fs.write("/proc/self/gid_map", format!("0 {parent_gid} 1\n"))?;
 
             Ok(())
         }

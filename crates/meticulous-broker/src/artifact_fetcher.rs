@@ -4,11 +4,16 @@ use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
 };
+use meticulous_util::fs::{File, Fs};
 use meticulous_util::net;
 use slog::{debug, Logger};
-use std::{fs::File, io, net::TcpStream, sync::mpsc};
+use std::{io, net::TcpStream, sync::mpsc};
 
-fn get_file(digest: &Sha256Digest, scheduler_sender: &SchedulerSender) -> Result<(File, u64)> {
+fn get_file<'fs>(
+    fs: &'fs Fs,
+    digest: &Sha256Digest,
+    scheduler_sender: &SchedulerSender,
+) -> Result<(File<'fs>, u64)> {
     let (channel_sender, channel_receiver) = mpsc::channel();
     scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
         digest.clone(),
@@ -16,7 +21,7 @@ fn get_file(digest: &Sha256Digest, scheduler_sender: &SchedulerSender) -> Result
     ))?;
 
     let (path, size) = channel_receiver.recv()??;
-    let f = File::open(path)?;
+    let f = fs.open_file(path)?;
     Ok((f, size))
 }
 
@@ -28,7 +33,8 @@ fn handle_one_message(
 ) -> Result<()> {
     debug!(log, "received artifact fetcher message"; "msg" => ?msg);
     let ArtifactFetcherToBroker(digest) = msg;
-    let result = get_file(&digest, scheduler_sender);
+    let fs = Fs::new();
+    let result = get_file(&fs, &digest, scheduler_sender);
     let msg = BrokerToArtifactFetcher(
         result
             .as_ref()

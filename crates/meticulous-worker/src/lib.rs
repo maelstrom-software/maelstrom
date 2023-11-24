@@ -16,6 +16,7 @@ use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobDetails, JobErrorResult, JobId, JobStatus, NonEmpty, Sha256Digest,
 };
+use meticulous_util::fs::Fs;
 use meticulous_util::{
     config::{BrokerAddr, CacheRoot},
     net, sync,
@@ -27,7 +28,7 @@ use nix::{
 };
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{fs, ops::ControlFlow, path::PathBuf, process, thread};
+use std::{ops::ControlFlow, path::PathBuf, process, thread};
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -58,7 +59,8 @@ impl DispatcherAdapter {
         log: Logger,
         mount_dir: PathBuf,
     ) -> Result<Self> {
-        fs::create_dir_all(&mount_dir)?;
+        let fs = Fs::new();
+        fs.create_dir_all(&mount_dir)?;
         Ok(DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
