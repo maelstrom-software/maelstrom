@@ -190,6 +190,10 @@ impl Fs {
             fs: self,
         })
     }
+
+    pub fn canonicalize<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
+        fs_trampoline!(canonicalize, path)
+    }
 }
 
 pub struct File<'fs> {

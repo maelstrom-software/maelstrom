@@ -8,11 +8,10 @@ use meticulous_base::{
     ClientJobId, JobDetails, JobResult, NonEmpty, Sha256Digest,
 };
 use meticulous_container::ContainerImageDepot;
-use meticulous_util::{ext::OptionExt as _, io::FixedSizeReader, net};
+use meticulous_util::{ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    fs::{self, File},
     io::{self, Read},
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
@@ -25,8 +24,9 @@ fn artifact_pusher_main(
     path: PathBuf,
     digest: Sha256Digest,
 ) -> Result<()> {
+    let fs = Fs::new();
     let mut stream = TcpStream::connect(broker_addr)?;
-    let file = File::open(path)?;
+    let file = fs.open_file(path)?;
     let size = file.metadata()?.len();
     let mut file = FixedSizeReader::new(file, size);
     net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
@@ -41,6 +41,7 @@ fn add_artifact(
     artifacts: &mut HashMap<Sha256Digest, PathBuf>,
     path: PathBuf,
 ) -> Result<Sha256Digest> {
+    let fs = Fs::new();
     let mut hasher = Sha256::new();
     match path.extension() {
         Some(ext) if ext == "tar" => {}
@@ -51,7 +52,7 @@ fn add_artifact(
             ));
         }
     }
-    let mut f = File::open(&path)?;
+    let mut f = fs.open_file(&path)?;
     let mut buf = [0u8; 8192];
     loop {
         let n = f.read(&mut buf)?;
@@ -168,7 +169,8 @@ impl Client {
     }
 
     pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
-        let path = fs::canonicalize(path)?;
+        let fs = Fs::new();
+        let path = fs.canonicalize(path)?;
         if let Some(digest) = self.paths.get(&path) {
             return Ok(digest.clone());
         }
