@@ -918,6 +918,30 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn close_range() {
+        let details = JobDetails {
+            program: "/bin/ls",
+            arguments: &["/proc/self/fd".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn one_layer_is_read_only() {
         let details = JobDetails {
             program: "/bin/touch",
