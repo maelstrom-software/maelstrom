@@ -4,7 +4,7 @@ pub mod rtnetlink;
 
 use core::{
     ffi::{c_int, CStr},
-    fmt::{self, Write as _},
+    fmt::{self},
     mem, result, slice, str,
 };
 use nc::syscalls::{self, Errno, Sysno};
@@ -12,18 +12,29 @@ use nc::syscalls::{self, Errno, Sysno};
 pub enum Syscall {
     Zero(Sysno),
     One(Sysno, usize),
+    OneFromSaved(Sysno),
     Two(Sysno, usize, usize),
     Three(Sysno, usize, usize, usize),
+    ThreeAndSave(Sysno, usize, usize, usize),
+    ThreeFromSaved(Sysno, usize, usize),
     Five(Sysno, usize, usize, usize, usize, usize),
 }
 
 impl Syscall {
-    unsafe fn call(&self) -> result::Result<usize, Errno> {
+    unsafe fn call(&self, saved: &mut usize) -> result::Result<usize, Errno> {
         match self {
             Syscall::Zero(n) => syscalls::syscall0(*n),
             Syscall::One(n, a1) => syscalls::syscall1(*n, *a1),
+            Syscall::OneFromSaved(n) => syscalls::syscall1(*n, *saved),
             Syscall::Two(n, a1, a2) => syscalls::syscall2(*n, *a1, *a2),
             Syscall::Three(n, a1, a2, a3) => syscalls::syscall3(*n, *a1, *a2, *a3),
+            Syscall::ThreeAndSave(n, a1, a2, a3) => {
+                syscalls::syscall3(*n, *a1, *a2, *a3).map(|v| {
+                    *saved = v;
+                    v
+                })
+            }
+            Syscall::ThreeFromSaved(n, a2, a3) => syscalls::syscall3(*n, *saved, *a2, *a3),
             Syscall::Five(n, a1, a2, a3, a4, a5) => syscalls::syscall5(*n, *a1, *a2, *a3, *a4, *a5),
         }
     }
@@ -203,49 +214,14 @@ impl<T> ErrnoExt<T> for result::Result<T, nc::Errno> {
     }
 }
 
-// path must be NUL-terminated
-unsafe fn open(path: &[u8], flags: i32, mode: nc::mode_t) -> result::Result<i32, nc::Errno> {
-    assert!(!path.is_empty() && path[path.len() - 1] == 0u8);
-    let path = path.as_ptr() as usize;
-    let flags = flags as usize;
-    let mode = mode as usize;
-    nc::syscalls::syscall3(nc::SYS_OPEN, path, flags, mode).map(|ret| ret as i32)
-}
-
-// path must be NUL-terminated
-unsafe fn write_file<const N: usize>(path: &[u8], args: fmt::Arguments) -> Result<()> {
-    let fd = open(path, nc::O_WRONLY | nc::O_TRUNC, 0).map_system_errno("opening file to write")?;
-    let mut buf: Buf<N> = Buf::default();
-    buf.write_fmt(args)?;
-    buf.write_to_fd(fd)?;
-    nc::close(fd).map_system_errno("closing file file descriptor")?;
-    Ok(())
-}
-
 /// The guts of the child code. This function can return a [`Result`].
-unsafe fn start_and_exec_in_child_inner(
-    details: JobDetails,
-    parent_uid: uid_t,
-    parent_gid: gid_t,
-    syscalls: &[Syscall],
-) -> Result<()> {
+unsafe fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> Result<()> {
     // in a new network namespace we need to ifup loopback ourselves
     rtnetlink::ifup_loopback()?;
 
-    write_file::<5>(b"/proc/self/setgroups\0", format_args!("deny\n"))?;
-    //            '0' ' '  {}  ' ' '1' '\n'
-    write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
-        b"/proc/self/uid_map\0",
-        format_args!("0 {} 1\n", parent_uid),
-    )?;
-    //            '0' ' '  {}  ' ' '1' '\n'
-    write_file::<{ 1 + 1 + 10 + 1 + 1 + 1 }>(
-        b"/proc/self/gid_map\0",
-        format_args!("0 {} 1\n", parent_gid),
-    )?;
-
+    let mut saved = 0;
     for syscall in syscalls {
-        unsafe { syscall.call() }.map_system_errno("unknown")?;
+        unsafe { syscall.call(&mut saved) }.map_system_errno("unknown")?;
     }
 
     nc::syscalls::syscall3(
@@ -269,15 +245,13 @@ unsafe fn start_and_exec_in_child_inner(
 pub unsafe fn start_and_exec_in_child(
     details: JobDetails,
     exec_result_write_fd: c_int,
-    parent_uid: uid_t,
-    parent_gid: gid_t,
     syscalls: &[Syscall],
 ) -> ! {
     // TODO: https://github.com/meticulous-software/meticulous/issues/47
     //
     // We assume any error we encounter in the child is an execution error. While highly unlikely,
     // we could theoretically encounter a system error.
-    let Err(err) = start_and_exec_in_child_inner(details, parent_uid, parent_gid, syscalls) else {
+    let Err(err) = start_and_exec_in_child_inner(details, syscalls) else {
         unreachable!();
     };
     let buf = Buf::<21>::try_from(err).unwrap();

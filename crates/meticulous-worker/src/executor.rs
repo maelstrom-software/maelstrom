@@ -11,7 +11,7 @@ use meticulous_base::{
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
-    unistd::{self, Gid, Pid, Uid},
+    unistd::{self, Pid},
 };
 use std::{
     ffi::CString,
@@ -52,8 +52,9 @@ pub struct JobDetails<'a> {
 }
 
 pub struct Executor {
-    uid: Uid,
-    gid: Gid,
+    setgroups_contents: String,
+    uid_map_contents: String,
+    gid_map_contents: String,
     mount_dir: CString,
 }
 
@@ -80,14 +81,15 @@ impl Executor {
             unsafe { nc::dup2(stdin_read_fd.as_raw_fd(), 0) }.map_err(Errno::from_i32)?;
         }
 
-        let uid = unistd::getuid();
-        let gid = unistd::getgid();
-
+        let setgroups_contents = "deny\n".to_string();
+        let uid_map_contents = format!("0 {} 1\n", unistd::getuid().as_raw());
+        let gid_map_contents = format!("0 {} 1\n", unistd::getgid().as_raw());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
 
         Ok(Executor {
-            uid,
-            gid,
+            setgroups_contents,
+            uid_map_contents,
+            gid_map_contents,
             mount_dir,
         })
     }
@@ -256,6 +258,45 @@ impl Executor {
         const PROC: *const u8 = b"proc\0".as_ptr();
 
         let mut syscalls = Vec::default();
+
+        syscalls.push(Syscall::ThreeAndSave(
+            nc::SYS_OPEN,
+            b"/proc/self/uid_map\0".as_ptr() as usize,
+            (nc::O_WRONLY | nc::O_TRUNC) as usize,
+            0,
+        ));
+        syscalls.push(Syscall::ThreeFromSaved(
+            nc::SYS_WRITE,
+            self.uid_map_contents.as_bytes().as_ptr() as usize,
+            self.uid_map_contents.as_bytes().len(),
+        ));
+        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
+
+        syscalls.push(Syscall::ThreeAndSave(
+            nc::SYS_OPEN,
+            b"/proc/self/setgroups\0".as_ptr() as usize,
+            (nc::O_WRONLY | nc::O_TRUNC) as usize,
+            0,
+        ));
+        syscalls.push(Syscall::ThreeFromSaved(
+            nc::SYS_WRITE,
+            self.setgroups_contents.as_bytes().as_ptr() as usize,
+            self.setgroups_contents.as_bytes().len(),
+        ));
+        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
+
+        syscalls.push(Syscall::ThreeAndSave(
+            nc::SYS_OPEN,
+            b"/proc/self/gid_map\0".as_ptr() as usize,
+            (nc::O_WRONLY | nc::O_TRUNC) as usize,
+            0,
+        ));
+        syscalls.push(Syscall::ThreeFromSaved(
+            nc::SYS_WRITE,
+            self.gid_map_contents.as_bytes().as_ptr() as usize,
+            self.gid_map_contents.as_bytes().len(),
+        ));
+        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
 
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
@@ -448,8 +489,6 @@ impl Executor {
                 child::start_and_exec_in_child(
                     child_job_details,
                     exec_result_write_fd.into_raw_fd(),
-                    self.uid.as_raw(),
-                    self.gid.as_raw(),
                     syscalls.as_slice(),
                 )
             };
