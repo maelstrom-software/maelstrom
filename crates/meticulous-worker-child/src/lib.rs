@@ -242,7 +242,7 @@ fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> R
             nc::SYS_BIND,
             socket_fd,
             &addr as *const sockaddr_nl_t as usize,
-            mem::size_of::<sockaddr_nl_t>() as usize,
+            mem::size_of::<sockaddr_nl_t>(),
         )
     }
     .map_system_errno("failed to bind netlink socket")?;
@@ -260,7 +260,6 @@ fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> R
     let mut buffer = [0; 1024];
     req.serialize(&mut buffer);
 
-    let mut addr = nc::sockaddr_in_t::default();
     unsafe {
         nc::syscalls::syscall6(
             nc::SYS_SENDTO,
@@ -268,13 +267,12 @@ fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> R
             buffer.as_ptr() as usize,
             req.buffer_len(),
             0,
-            &addr as *const nc::sockaddr_in_t as usize,
+            0,
             0,
         )
     }
     .map_system_errno("sendto on netlink socket failed")?;
 
-    let mut addr_len = 0u32;
     unsafe {
         nc::syscalls::syscall6(
             nc::SYS_RECVFROM,
@@ -282,8 +280,8 @@ fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> R
             buffer.as_mut_ptr() as usize,
             buffer.len(),
             0,
-            &mut addr as *mut nc::sockaddr_in_t as usize,
-            &mut addr_len as *mut nc::socklen_t as usize,
+            0,
+            0,
         )
     }
     .map_system_errno("recvfrom on netlink socket failed")?;
