@@ -1,16 +1,11 @@
 #![no_std]
 
-pub mod rtnetlink;
-
 use core::{
     ffi::{c_int, CStr},
     fmt::{self},
     mem, result, slice, str,
 };
 use nc::syscalls::{self, Errno, Sysno};
-use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
-use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
-use rtnetlink::sockaddr_nl_t;
 
 pub enum Syscall {
     Zero(Sysno),
@@ -21,6 +16,7 @@ pub enum Syscall {
     ThreeAndSave(Sysno, usize, usize, usize),
     ThreeFromSaved(Sysno, usize, usize),
     Five(Sysno, usize, usize, usize, usize, usize),
+    SixFromSaved(Sysno, usize, usize, usize, usize, usize),
 }
 
 impl Syscall {
@@ -39,6 +35,9 @@ impl Syscall {
             }
             Syscall::ThreeFromSaved(n, a2, a3) => syscalls::syscall3(*n, *saved, *a2, *a3),
             Syscall::Five(n, a1, a2, a3, a4, a5) => syscalls::syscall5(*n, *a1, *a2, *a3, *a4, *a5),
+            Syscall::SixFromSaved(n, a2, a3, a4, a5, a6) => {
+                syscalls::syscall6(*n, *saved, *a2, *a3, *a4, *a5, *a6)
+            }
         }
     }
 }
@@ -217,77 +216,8 @@ impl<T> ErrnoExt<T> for result::Result<T, nc::Errno> {
     }
 }
 
-const NETLINK_ROUTE: usize = 0;
-
 /// The guts of the child code. This function can return a [`Result`].
 fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> Result<()> {
-    // in a new network namespace we need to ifup loopback ourselves
-    let socket_fd = unsafe {
-        nc::syscalls::syscall3(
-            nc::SYS_SOCKET,
-            nc::AF_NETLINK as usize,
-            (nc::SOCK_RAW | nc::SOCK_CLOEXEC) as usize,
-            NETLINK_ROUTE,
-        )
-    }
-    .map_system_errno("failed to create netlink socket")?;
-    let addr = sockaddr_nl_t {
-        sin_family: nc::AF_NETLINK as nc::sa_family_t,
-        nl_pad: 0,
-        nl_pid: 0, // the kernel
-        nl_groups: 0,
-    };
-    unsafe {
-        nc::syscalls::syscall3(
-            nc::SYS_BIND,
-            socket_fd,
-            &addr as *const sockaddr_nl_t as usize,
-            mem::size_of::<sockaddr_nl_t>(),
-        )
-    }
-    .map_system_errno("failed to bind netlink socket")?;
-
-    let mut message = LinkMessage::default();
-    message.header.index = 1;
-    message.header.flags |= IFF_UP;
-    message.header.change_mask |= IFF_UP;
-
-    let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
-    req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
-    req.header.length = req.buffer_len() as u32;
-    req.header.message_type = RTM_SETLINK;
-
-    let mut buffer = [0; 1024];
-    req.serialize(&mut buffer);
-
-    unsafe {
-        nc::syscalls::syscall6(
-            nc::SYS_SENDTO,
-            socket_fd,
-            buffer.as_ptr() as usize,
-            req.buffer_len(),
-            0,
-            0,
-            0,
-        )
-    }
-    .map_system_errno("sendto on netlink socket failed")?;
-
-    unsafe {
-        nc::syscalls::syscall6(
-            nc::SYS_RECVFROM,
-            socket_fd,
-            buffer.as_mut_ptr() as usize,
-            buffer.len(),
-            0,
-            0,
-            0,
-        )
-    }
-    .map_system_errno("recvfrom on netlink socket failed")?;
-
-    // we can't deserialize since that allocates memory, so we just hope that it worked
-
     let mut saved = 0;
     for syscall in syscalls {
         unsafe { syscall.call(&mut saved) }.map_system_errno("unknown")?;

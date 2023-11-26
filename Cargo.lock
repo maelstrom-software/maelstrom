@@ -2429,6 +2429,8 @@ dependencies = [
  "meticulous-util",
  "meticulous-worker-child",
  "nc",
+ "netlink-packet-core",
+ "netlink-packet-route",
  "nix 0.26.4",
  "num_cpus",
  "rand",
@@ -2449,9 +2451,6 @@ name = "meticulous-worker-child"
 version = "0.1.0"
 dependencies = [
  "nc",
- "netlink-packet-core",
- "netlink-packet-route",
- "tuple",
 ]
 
 [[package]]

@@ -31,6 +31,16 @@ use tokio::{
     task,
 };
 use tuple::Map as _;
+use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
+use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
+
+#[repr(C)]
+struct sockaddr_nl_t {
+    sin_family: nc::sa_family_t,
+    nl_pad: u16,
+    nl_pid: u32,
+    nl_groups: u32,
+}
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -258,6 +268,56 @@ impl Executor {
         const PROC: *const u8 = b"proc\0".as_ptr();
 
         let mut syscalls = Vec::default();
+
+        const NETLINK_ROUTE: usize = 0;
+        syscalls.push(Syscall::ThreeAndSave(
+            nc::SYS_SOCKET,
+            nc::AF_NETLINK as usize,
+            (nc::SOCK_RAW | nc::SOCK_CLOEXEC) as usize,
+            NETLINK_ROUTE,
+        ));
+        let addr = sockaddr_nl_t {
+            sin_family: nc::AF_NETLINK as nc::sa_family_t,
+            nl_pad: 0,
+            nl_pid: 0, // the kernel
+            nl_groups: 0,
+        };
+        syscalls.push(Syscall::ThreeFromSaved(
+                nc::SYS_BIND,
+                &addr as *const sockaddr_nl_t as usize,
+                mem::size_of::<sockaddr_nl_t>(),
+            ));
+
+    let mut message = LinkMessage::default();
+    message.header.index = 1;
+    message.header.flags |= IFF_UP;
+    message.header.change_mask |= IFF_UP;
+
+    let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
+    req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
+    req.header.length = req.buffer_len() as u32;
+    req.header.message_type = RTM_SETLINK;
+
+    let mut buffer = [0; 1024];
+    req.serialize(&mut buffer);
+
+        syscalls.push(Syscall::SixFromSaved(
+            nc::SYS_SENDTO,
+            buffer.as_ptr() as usize,
+            req.buffer_len(),
+            0,
+            0,
+            0,
+        ));
+
+        syscalls.push(Syscall::SixFromSaved(
+            nc::SYS_RECVFROM,
+            buffer.as_mut_ptr() as usize,
+            buffer.len(),
+            0,
+            0,
+            0,
+        ));
 
         syscalls.push(Syscall::ThreeAndSave(
             nc::SYS_OPEN,
