@@ -19,7 +19,7 @@ anyhow = "1.0.71"
 assert_matches = "1.5.0"
 async-compression = { version = "0.4", features = ["tokio", "gzip"] }
 bincode = "1.3.3"
-bumpalo = "3.14.0"
+bumpalo = { version = "3.14.0", features = ["collections"] }
 bytesize = "1.3.0"
 c_str_macro = "1.0.3"
 cargo_metadata = "0.18"

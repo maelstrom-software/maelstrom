@@ -2,7 +2,7 @@
 
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
-use bumpalo::Bump;
+use bumpalo::{collections::Vec as BumpVec, Bump};
 use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
@@ -201,13 +201,19 @@ async fn output_reader_task_main(
     done(output_reader(inline_limit, stream).await);
 }
 
-#[derive(Default)]
 struct ScriptBuilder<'a> {
-    syscalls: Vec<Syscall>,
-    error_transformers: Vec<&'a dyn Fn(&'static str) -> JobError<Error>>,
+    syscalls: BumpVec<'a, Syscall>,
+    error_transformers: BumpVec<'a, &'a dyn Fn(&'static str) -> JobError<Error>>,
 }
 
 impl<'a> ScriptBuilder<'a> {
+    fn new(bump: &'a Bump) -> Self {
+        ScriptBuilder {
+            syscalls: BumpVec::new_in(bump),
+            error_transformers: BumpVec::new_in(bump),
+        }
+    }
+
     fn push(
         &mut self,
         syscall: Syscall,
@@ -242,56 +248,35 @@ impl Executor {
             .map_err(JobError::System)?
             .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
-        // Set up the arguments to pass to the child process.
-        let program = CString::new(details.program)
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let arguments = details
-            .arguments
-            .iter()
-            .map(String::as_str)
-            .map(CString::new)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let argv = iter::once(Some(&program.as_c_str().to_bytes_with_nul()[0]))
-            .chain(
-                arguments
-                    .iter()
-                    .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0])),
-            )
-            .chain(iter::once(None))
-            .collect::<Vec<_>>();
-
-        let environment = details
-            .environment
-            .iter()
-            .map(String::as_str)
-            .map(CString::new)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let env = environment
-            .iter()
-            .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0]))
-            .chain(iter::once(None))
-            .collect::<Vec<_>>();
-
-        // TODO: https://github.com/meticulous-software/meticulous/issues/47
-        //
-        // We assume any error we encounter in the child is an execution error. While highly
-        // unlikely, we could theoretically encounter a system error.
-
         const DOT: *const u8 = b".\0".as_ptr();
         const MNT_DETACH: usize = 2;
+        const NETLINK_ROUTE: usize = 0;
         const OVERLAY: *const u8 = b"overlay\0".as_ptr();
+        const PROC: *const u8 = b"proc\0".as_ptr();
         const SYSFS: *const u8 = b"sysfs\0".as_ptr();
         const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
-        const PROC: *const u8 = b"proc\0".as_ptr();
-        const NETLINK_ROUTE: usize = 0;
 
-        let mut builder = ScriptBuilder::default();
+        // Now we set up the script. This will be run in the child where we have to follow some
+        // very stringent rules to avoid deadlocking. This comes about because we're going to clone
+        // in a multi-threaded program. The child program will only have one thread: this one. The
+        // other threads will just not exist in the child process. If any of those threads held a
+        // lock at the time of the clone, those locks will be locked forever in the child. Any
+        // attempt to acquire those locks in the child would deadlock.
+        //
+        // The most burdensome result of this is that we can't allocate memory using the global
+        // allocator in the child.
+        //
+        // Instead, we create a script of things we're going to execute in the child, but we do
+        // that before the clone. After the clone, the child will just run through the script
+        // directly. If it encounters an error, it will write the script index back to the parent
+        // via the exec_result pipe. The parent will then map that to a closure for generating the
+        // error.
 
+        let bump = Bump::new();
+        let mut builder = ScriptBuilder::new(&bump);
+
+        // In order to have a loopback network interface, we need to create a netlink socket and
+        // configure things with the kernel. This creates the socket.
         builder.push(
             Syscall::ThreeAndSave(
                 nc::SYS_SOCKET,
@@ -301,7 +286,7 @@ impl Executor {
             ),
             &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
         );
-
+        // This binds the socket.
         let addr = sockaddr_nl_t {
             sin_family: nc::AF_NETLINK as nc::sa_family_t,
             nl_pad: 0,
@@ -316,20 +301,17 @@ impl Executor {
             ),
             &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
         );
-
         let mut message = LinkMessage::default();
         message.header.index = 1;
         message.header.flags |= IFF_UP;
         message.header.change_mask |= IFF_UP;
-
         let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
         req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
         req.header.length = req.buffer_len() as u32;
         req.header.message_type = RTM_SETLINK;
-
         let mut buffer = [0; 1024];
         req.serialize(&mut buffer);
-
+        // This sends the message to the kernel.
         builder.push(
             Syscall::SixFromSaved(
                 nc::SYS_SENDTO,
@@ -341,7 +323,8 @@ impl Executor {
             ),
             &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
         );
-
+        // This receives the reply from the kernel.
+        // TODO: actually parse the reply to validate that we set up the loopback interface.
         builder.push(
             Syscall::SixFromSaved(
                 nc::SYS_RECVFROM,
@@ -354,6 +337,8 @@ impl Executor {
             &|err| JobError::System(anyhow!("receiving rtnetlink message: {err}")),
         );
 
+        // We now need to set up the new user namespace. This first set of syscalls sets up the
+        // uid mapping.
         builder.push(
             Syscall::ThreeAndSave(
                 nc::SYS_OPEN,
@@ -375,6 +360,8 @@ impl Executor {
             JobError::System(anyhow!("closing /proc/self/uid_map: {err}"))
         });
 
+        // This set of syscalls disables setgroups, which is required for setting up the gid
+        // mapping.
         builder.push(
             Syscall::ThreeAndSave(
                 nc::SYS_OPEN,
@@ -396,6 +383,7 @@ impl Executor {
             JobError::Execution(anyhow!("closing /proc/self/setgropus: {err}"))
         });
 
+        // Finally, we set up the gid mapping.
         builder.push(
             Syscall::ThreeAndSave(
                 nc::SYS_OPEN,
@@ -450,6 +438,8 @@ impl Executor {
             },
         );
 
+        // We can't use overlayfs with only a single layer. So we have to diverge based on how many
+        // layers there are.
         let new_root_path;
         let layer0_path;
         let overlayfs_options;
@@ -495,6 +485,7 @@ impl Executor {
                 },
             );
         } else {
+            // Use overlayfs.
             new_root_path = self.mount_dir.as_c_str();
             let mut options = "lowerdir=".to_string();
             for (i, layer) in details.layers.iter().rev().enumerate() {
@@ -537,7 +528,6 @@ impl Executor {
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
-        let bump = Bump::new();
         for device in details.devices.iter() {
             let (source, target, device_name) = match device {
                 JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
@@ -619,16 +609,46 @@ impl Executor {
         );
 
         // Finally, do the exec.
-        let error_transformer =
-            |err| JobError::Execution(anyhow!("execvc of {}: {err}", details.program));
+        let program = CString::new(details.program)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let arguments = details
+            .arguments
+            .iter()
+            .map(String::as_str)
+            .map(CString::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let arguments = iter::once(Some(&program.as_c_str().to_bytes_with_nul()[0]))
+            .chain(
+                arguments
+                    .iter()
+                    .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0])),
+            )
+            .chain(iter::once(None))
+            .collect::<Vec<_>>();
+        let environment = details
+            .environment
+            .iter()
+            .map(String::as_str)
+            .map(CString::new)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        let environment = environment
+            .iter()
+            .map(|cstr| Some(&cstr.as_c_str().to_bytes_with_nul()[0]))
+            .chain(iter::once(None))
+            .collect::<Vec<_>>();
         builder.push(
             Syscall::Three(
                 nc::SYS_EXECVE,
                 program.to_bytes_with_nul().as_ptr() as usize,
-                argv.as_ptr() as usize,
-                env.as_ptr() as usize,
+                arguments.as_ptr() as usize,
+                environment.as_ptr() as usize,
             ),
-            &error_transformer,
+            &|err| JobError::Execution(anyhow!("execvc: {err}")),
         );
 
         // Do the clone.
@@ -651,19 +671,6 @@ impl Executor {
             };
         if child_pid == 0 {
             // This is the child process.
-
-            // WARNING: We have to be extremely careful to not call any library functions that may
-            // block on another thread, like allocating memory. When a multi-threaded process is
-            // cloned, only the calling process is cloned into the child. From the child's point of
-            // view, it's like those other threads just disappeared. If those threads held any
-            // locks at the point when the process was cloned, thos locks effectively become dead
-            // in the child. This means that the child has to assume that every lock is dead, and
-            // must not try to acquire them. This is why the function we're calling lives in a
-            // separate, no_std, crate.
-
-            // N.B. We don't close any file descriptors here, like stdout_read_fd, stderr_read_fd,
-            // and exec_result_read_fd, because they will automatically be closed when the child
-            // execs.
             meticulous_worker_child::start_and_exec_in_child(
                 exec_result_write_fd.into_raw_fd(),
                 builder.syscalls.as_slice(),
