@@ -2,6 +2,7 @@
 
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
+use bumpalo::Bump;
 use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
@@ -536,15 +537,19 @@ impl Executor {
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
-        let error_transformer = |err| JobError::System(anyhow!("bind mount of device: {err}"));
+        let bump = Bump::new();
         for device in details.devices.iter() {
-            let (source, target) = match device {
-                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),
-                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null")),
-                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random")),
-                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty")),
-                JobDevice::Urandom => (c_str!("/dev/urandom"), c_str!("./dev/urandom")),
-                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero")),
+            let (source, target, device_name) = match device {
+                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
+                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null"), "/dev/null"),
+                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random"), "/dev/random"),
+                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty"), "/dev/tty"),
+                JobDevice::Urandom => (
+                    c_str!("/dev/urandom"),
+                    c_str!("./dev/urandom"),
+                    "/dev/urandom",
+                ),
+                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero"), "/dev/zero"),
             };
             builder.push(
                 Syscall::Five(
@@ -555,7 +560,9 @@ impl Executor {
                     nc::MS_BIND,
                     0,
                 ),
-                &error_transformer,
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!("bind mount of device {device_name}: {err}",))
+                }),
             );
         }
 
@@ -578,23 +585,30 @@ impl Executor {
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::from)
             .map_err(JobError::System)?;
-        let error_transformer = |err| JobError::Execution(anyhow!("mount of file system: {err}"));
-        for (mount, mount_point) in iter::zip(details.mounts.iter(), child_mount_points.iter()) {
-            let (fs_type, flags) = match mount.fs_type {
-                JobMountFsType::Proc => (PROC, nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV),
-                JobMountFsType::Tmp => (TMPFS, 0),
-                JobMountFsType::Sys => (SYSFS, 0),
+        for (mount, mount_point_cstr) in iter::zip(details.mounts.iter(), child_mount_points.iter())
+        {
+            let (fs_type, flags, type_name) = match mount.fs_type {
+                JobMountFsType::Proc => {
+                    (PROC, nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV, "proc")
+                }
+                JobMountFsType::Tmp => (TMPFS, 0, "tmpfs"),
+                JobMountFsType::Sys => (SYSFS, 0, "sysfs"),
             };
+            let mount_point = mount.mount_point.as_str();
             builder.push(
                 Syscall::Five(
                     nc::SYS_MOUNT,
                     fs_type as usize,
-                    mount_point.to_bytes_with_nul().as_ptr() as usize,
+                    mount_point_cstr.to_bytes_with_nul().as_ptr() as usize,
                     fs_type as usize,
                     flags,
                     0,
                 ),
-                &error_transformer,
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "mount of file system of type {type_name} to {mount_point}: {err}",
+                    ))
+                }),
             );
         }
 

@@ -2417,6 +2417,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "bumpalo",
  "bytesize",
  "c_str_macro",
  "clap",
