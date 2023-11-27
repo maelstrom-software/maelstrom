@@ -1,10 +1,6 @@
 #![no_std]
 
-use core::{
-    ffi::{c_int, CStr},
-    fmt::{self},
-    mem, result, slice, str,
-};
+use core::{ffi::c_int, result};
 use nc::syscalls::{self, Errno, Sysno};
 
 pub enum Syscall {
@@ -42,220 +38,31 @@ impl Syscall {
     }
 }
 
-pub struct JobDetails<'a> {
-    pub program: &'a CStr,
-    pub arguments: &'a [Option<&'a u8>],
-    pub environment: &'a [Option<&'a u8>],
-}
-
-// These might not work for all linux architectures. We can fix them as we add more architectures.
-#[allow(non_camel_case_types)]
-pub type uid_t = u32;
-#[allow(non_camel_case_types)]
-pub type gid_t = u32;
-
-struct Buf<const N: usize> {
-    buf: [u8; N],
-    used: usize,
-}
-
-impl<const N: usize> Default for Buf<N> {
-    fn default() -> Self {
-        Buf {
-            buf: [0u8; N],
-            used: 0,
-        }
-    }
-}
-
-impl<const N: usize> Buf<N> {
-    unsafe fn write_to_fd(&self, fd: i32) -> Result<()> {
-        nc::write(fd, self.buf.as_ptr() as usize, self.used).map_system_errno("write")?;
-        Ok(())
-    }
-
-    fn append(&mut self, bytes: &[u8]) -> Result<()> {
-        if self.used + bytes.len() > N {
-            Err(Error::BufferTooSmall)
-        } else {
-            self.buf[self.used..self.used + bytes.len()].copy_from_slice(bytes);
-            self.used += bytes.len();
-            Ok(())
-        }
-    }
-}
-
-impl<const N: usize> fmt::Write for Buf<N> {
-    fn write_str(&mut self, s: &str) -> fmt::Result {
-        self.append(s.as_bytes()).map_err(|_| fmt::Error)
-    }
-}
-
-#[derive(Debug)]
-pub enum Error {
-    ExecutionErrno(i32, &'static str),
-    SystemErrno(i32, &'static str),
-    BufferTooSmall,
-}
-
-impl From<fmt::Error> for Error {
-    fn from(_: fmt::Error) -> Self {
-        Error::BufferTooSmall
-    }
-}
-
-fn encode_errno_error<const N: usize>(
-    code: u8,
-    errno: i32,
-    context: &'static str,
-    buf: &mut Buf<N>,
-) -> Result<()> {
-    buf.append(slice::from_ref(&code))?;
-    buf.append(errno.to_ne_bytes().as_slice())?;
-    buf.append((context.as_ptr() as usize).to_ne_bytes().as_slice())?;
-    buf.append(context.len().to_ne_bytes().as_slice())?;
-    Ok(())
-}
-
-impl<const N: usize> TryFrom<Error> for Buf<N> {
-    type Error = Error;
-    fn try_from(err: Error) -> Result<Buf<N>> {
-        let mut buf = Buf::<N>::default();
-        match err {
-            Error::ExecutionErrno(errno, context) => {
-                encode_errno_error(0, errno, context, &mut buf)?;
-            }
-            Error::SystemErrno(errno, context) => {
-                encode_errno_error(1, errno, context, &mut buf)?;
-            }
-            Error::BufferTooSmall => {
-                buf.append(slice::from_ref(&2u8))?;
-            }
-        }
-        Ok(buf)
-    }
-}
-
-fn decode_errno_error(
-    constructor: impl Fn(i32, &'static str) -> Error,
-    buf: &[u8],
-    cursor: &mut usize,
-) -> result::Result<Error, &'static str> {
-    if *cursor + 4 > buf.len() {
-        return Err("not enough bytes for errno");
-    }
-    let errno = i32::from_ne_bytes(buf[*cursor..*cursor + 4].try_into().unwrap());
-    *cursor += 4;
-
-    let usize_size = mem::size_of::<usize>();
-    if *cursor + usize_size > buf.len() {
-        return Err("not enough bytes for context pointer");
-    }
-    let context_ptr =
-        usize::from_ne_bytes(buf[*cursor..*cursor + usize_size].try_into().unwrap()) as *const u8;
-    *cursor += usize_size;
-
-    if *cursor + usize_size > buf.len() {
-        return Err("not enough bytes for context length");
-    }
-    let context_len = usize::from_ne_bytes(buf[*cursor..*cursor + usize_size].try_into().unwrap());
-    *cursor += usize_size;
-
-    let context = unsafe {
-        str::from_utf8_unchecked(slice::from_raw_parts::<'static>(context_ptr, context_len))
-    };
-
-    Ok(constructor(errno, context))
-}
-
-impl TryFrom<&[u8]> for Error {
-    type Error = &'static str;
-    fn try_from(buf: &[u8]) -> result::Result<Error, &'static str> {
-        let mut cursor = 0;
-        if cursor == buf.len() {
-            return Err("no type byte");
-        }
-        let t = buf[cursor];
-        cursor += 1;
-        let error = match t {
-            0 => decode_errno_error(Error::ExecutionErrno, buf, &mut cursor)?,
-            1 => decode_errno_error(Error::SystemErrno, buf, &mut cursor)?,
-            2 => Error::BufferTooSmall,
-            _ => {
-                return Err("bad type byte");
-            }
-        };
-        if cursor != buf.len() {
-            Err("unexpected trailing bytes")
-        } else {
-            Ok(error)
-        }
-    }
-}
-
-type Result<T> = result::Result<T, Error>;
-
-trait ErrnoExt<T> {
-    fn map_execution_errno(self, context: &'static str) -> Result<T>;
-    fn map_system_errno(self, context: &'static str) -> Result<T>;
-}
-
-impl<T> ErrnoExt<T> for result::Result<T, nc::Errno> {
-    fn map_execution_errno(self, context: &'static str) -> Result<T> {
-        match self {
-            Ok(val) => Ok(val),
-            Err(errno) => Err(Error::ExecutionErrno(errno, context)),
-        }
-    }
-
-    fn map_system_errno(self, context: &'static str) -> Result<T> {
-        match self {
-            Ok(val) => Ok(val),
-            Err(errno) => Err(Error::SystemErrno(errno, context)),
-        }
-    }
-}
-
-/// The guts of the child code. This function can return a [`Result`].
-fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> Result<()> {
+/// The guts of the child code. This function shouldn't return on success, because in that case,
+/// the last syscall should be an execve. If this function returns, than an error was encountered.
+/// In that case, the script item index and the errno will be returned.
+fn start_and_exec_in_child_inner(syscalls: &[Syscall]) -> (usize, nc::Errno) {
     let mut saved = 0;
-    for syscall in syscalls {
-        unsafe { syscall.call(&mut saved) }.map_system_errno("unknown")?;
+    for (index, syscall) in syscalls.iter().enumerate() {
+        if let Err(errno) = unsafe { syscall.call(&mut saved) } {
+            return (index, errno);
+        }
     }
-
-    unsafe {
-        nc::syscalls::syscall3(
-            nc::SYS_EXECVE,
-            &details.program.to_bytes_with_nul()[0] as *const u8 as usize,
-            details.arguments.as_ptr() as usize,
-            details.environment.as_ptr() as usize,
-        )
-    }
-    .map_execution_errno("execve")?;
-
     panic!("should not reach here");
 }
 
 /// Try to exec the job and write the error message to the pipe on failure.
-///
-/// # Safety
-///
-/// The provided `program` variable must be a NUL-terminated C-string. The `argv` and `env`
-/// variables must be NULL-terminated arrays of pointers to NUL-terminated C-strings. The provided
-/// file descriptors must be valid, open file descriptors.
-pub unsafe fn start_and_exec_in_child(
-    details: JobDetails,
-    exec_result_write_fd: c_int,
-    syscalls: &[Syscall],
-) -> ! {
-    // TODO: https://github.com/meticulous-software/meticulous/issues/47
-    //
-    // We assume any error we encounter in the child is an execution error. While highly unlikely,
-    // we could theoretically encounter a system error.
-    let Err(err) = start_and_exec_in_child_inner(details, syscalls) else {
-        unreachable!();
+pub fn start_and_exec_in_child(exec_result_write_fd: c_int, syscalls: &[Syscall]) -> ! {
+    let (index, errno) = start_and_exec_in_child_inner(syscalls);
+    let result = (index as u64) << 32 | (errno as u64);
+    // There's not really much to do if this write fails. Therefore, we just ignore the result.
+    // However, it's hard to imagine any case where this could fail and we'd actually care.
+    let _ = unsafe {
+        nc::write(
+            exec_result_write_fd,
+            result.to_le_bytes().as_ptr() as usize,
+            8,
+        )
     };
-    let buf = Buf::<21>::try_from(err).unwrap();
-    buf.write_to_fd(exec_result_write_fd).unwrap();
-    nc::exit(1);
+    unsafe { nc::exit(1) };
 }

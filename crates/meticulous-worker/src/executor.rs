@@ -8,6 +8,9 @@ use meticulous_base::{
     EnumSet, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult,
     NonEmpty,
 };
+use meticulous_worker_child::Syscall;
+use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
+use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use nix::{
     errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
@@ -31,8 +34,6 @@ use tokio::{
     task,
 };
 use tuple::Map as _;
-use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
-use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 
 #[repr(C)]
 struct sockaddr_nl_t {
@@ -199,6 +200,23 @@ async fn output_reader_task_main(
     done(output_reader(inline_limit, stream).await);
 }
 
+#[derive(Default)]
+struct ScriptBuilder<'a> {
+    syscalls: Vec<Syscall>,
+    error_transformers: Vec<&'a dyn Fn(&'static str) -> JobError<Error>>,
+}
+
+impl<'a> ScriptBuilder<'a> {
+    fn push(
+        &mut self,
+        syscall: Syscall,
+        error_transformer: &'a dyn Fn(&'static str) -> JobError<Error>,
+    ) {
+        self.syscalls.push(syscall);
+        self.error_transformers.push(error_transformer);
+    }
+}
+
 impl Executor {
     fn start_inner(
         &self,
@@ -207,8 +225,6 @@ impl Executor {
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        use meticulous_worker_child::{self as child, Syscall};
-
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
@@ -260,129 +276,178 @@ impl Executor {
             .chain(iter::once(None))
             .collect::<Vec<_>>();
 
+        // TODO: https://github.com/meticulous-software/meticulous/issues/47
+        //
+        // We assume any error we encounter in the child is an execution error. While highly
+        // unlikely, we could theoretically encounter a system error.
+
         const DOT: *const u8 = b".\0".as_ptr();
         const MNT_DETACH: usize = 2;
         const OVERLAY: *const u8 = b"overlay\0".as_ptr();
         const SYSFS: *const u8 = b"sysfs\0".as_ptr();
         const TMPFS: *const u8 = b"tmpfs\0".as_ptr();
         const PROC: *const u8 = b"proc\0".as_ptr();
-
-        let mut syscalls = Vec::default();
-
         const NETLINK_ROUTE: usize = 0;
-        syscalls.push(Syscall::ThreeAndSave(
-            nc::SYS_SOCKET,
-            nc::AF_NETLINK as usize,
-            (nc::SOCK_RAW | nc::SOCK_CLOEXEC) as usize,
-            NETLINK_ROUTE,
-        ));
+
+        let mut builder = ScriptBuilder::default();
+
+        builder.push(
+            Syscall::ThreeAndSave(
+                nc::SYS_SOCKET,
+                nc::AF_NETLINK as usize,
+                (nc::SOCK_RAW | nc::SOCK_CLOEXEC) as usize,
+                NETLINK_ROUTE,
+            ),
+            &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
+        );
+
         let addr = sockaddr_nl_t {
             sin_family: nc::AF_NETLINK as nc::sa_family_t,
             nl_pad: 0,
             nl_pid: 0, // the kernel
             nl_groups: 0,
         };
-        syscalls.push(Syscall::ThreeFromSaved(
+        builder.push(
+            Syscall::ThreeFromSaved(
                 nc::SYS_BIND,
                 &addr as *const sockaddr_nl_t as usize,
                 mem::size_of::<sockaddr_nl_t>(),
-            ));
+            ),
+            &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
+        );
 
-    let mut message = LinkMessage::default();
-    message.header.index = 1;
-    message.header.flags |= IFF_UP;
-    message.header.change_mask |= IFF_UP;
+        let mut message = LinkMessage::default();
+        message.header.index = 1;
+        message.header.flags |= IFF_UP;
+        message.header.change_mask |= IFF_UP;
 
-    let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
-    req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
-    req.header.length = req.buffer_len() as u32;
-    req.header.message_type = RTM_SETLINK;
+        let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
+        req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
+        req.header.length = req.buffer_len() as u32;
+        req.header.message_type = RTM_SETLINK;
 
-    let mut buffer = [0; 1024];
-    req.serialize(&mut buffer);
+        let mut buffer = [0; 1024];
+        req.serialize(&mut buffer);
 
-        syscalls.push(Syscall::SixFromSaved(
-            nc::SYS_SENDTO,
-            buffer.as_ptr() as usize,
-            req.buffer_len(),
-            0,
-            0,
-            0,
-        ));
+        builder.push(
+            Syscall::SixFromSaved(
+                nc::SYS_SENDTO,
+                buffer.as_ptr() as usize,
+                req.buffer_len(),
+                0,
+                0,
+                0,
+            ),
+            &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
+        );
 
-        syscalls.push(Syscall::SixFromSaved(
-            nc::SYS_RECVFROM,
-            buffer.as_mut_ptr() as usize,
-            buffer.len(),
-            0,
-            0,
-            0,
-        ));
+        builder.push(
+            Syscall::SixFromSaved(
+                nc::SYS_RECVFROM,
+                buffer.as_mut_ptr() as usize,
+                buffer.len(),
+                0,
+                0,
+                0,
+            ),
+            &|err| JobError::System(anyhow!("receiving rtnetlink message: {err}")),
+        );
 
-        syscalls.push(Syscall::ThreeAndSave(
-            nc::SYS_OPEN,
-            b"/proc/self/uid_map\0".as_ptr() as usize,
-            (nc::O_WRONLY | nc::O_TRUNC) as usize,
-            0,
-        ));
-        syscalls.push(Syscall::ThreeFromSaved(
-            nc::SYS_WRITE,
-            self.uid_map_contents.as_bytes().as_ptr() as usize,
-            self.uid_map_contents.as_bytes().len(),
-        ));
-        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
+        builder.push(
+            Syscall::ThreeAndSave(
+                nc::SYS_OPEN,
+                b"/proc/self/uid_map\0".as_ptr() as usize,
+                (nc::O_WRONLY | nc::O_TRUNC) as usize,
+                0,
+            ),
+            &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
+        );
+        builder.push(
+            Syscall::ThreeFromSaved(
+                nc::SYS_WRITE,
+                self.uid_map_contents.as_bytes().as_ptr() as usize,
+                self.uid_map_contents.as_bytes().len(),
+            ),
+            &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
+        );
+        builder.push(Syscall::OneFromSaved(nc::SYS_CLOSE), &|err| {
+            JobError::System(anyhow!("closing /proc/self/uid_map: {err}"))
+        });
 
-        syscalls.push(Syscall::ThreeAndSave(
-            nc::SYS_OPEN,
-            b"/proc/self/setgroups\0".as_ptr() as usize,
-            (nc::O_WRONLY | nc::O_TRUNC) as usize,
-            0,
-        ));
-        syscalls.push(Syscall::ThreeFromSaved(
-            nc::SYS_WRITE,
-            self.setgroups_contents.as_bytes().as_ptr() as usize,
-            self.setgroups_contents.as_bytes().len(),
-        ));
-        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
+        builder.push(
+            Syscall::ThreeAndSave(
+                nc::SYS_OPEN,
+                b"/proc/self/setgroups\0".as_ptr() as usize,
+                (nc::O_WRONLY | nc::O_TRUNC) as usize,
+                0,
+            ),
+            &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
+        );
+        builder.push(
+            Syscall::ThreeFromSaved(
+                nc::SYS_WRITE,
+                self.setgroups_contents.as_bytes().as_ptr() as usize,
+                self.setgroups_contents.as_bytes().len(),
+            ),
+            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
+        );
+        builder.push(Syscall::OneFromSaved(nc::SYS_CLOSE), &|err| {
+            JobError::Execution(anyhow!("closing /proc/self/setgropus: {err}"))
+        });
 
-        syscalls.push(Syscall::ThreeAndSave(
-            nc::SYS_OPEN,
-            b"/proc/self/gid_map\0".as_ptr() as usize,
-            (nc::O_WRONLY | nc::O_TRUNC) as usize,
-            0,
-        ));
-        syscalls.push(Syscall::ThreeFromSaved(
-            nc::SYS_WRITE,
-            self.gid_map_contents.as_bytes().as_ptr() as usize,
-            self.gid_map_contents.as_bytes().len(),
-        ));
-        syscalls.push(Syscall::OneFromSaved(nc::SYS_CLOSE));
+        builder.push(
+            Syscall::ThreeAndSave(
+                nc::SYS_OPEN,
+                b"/proc/self/gid_map\0".as_ptr() as usize,
+                (nc::O_WRONLY | nc::O_TRUNC) as usize,
+                0,
+            ),
+            &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
+        );
+        builder.push(
+            Syscall::ThreeFromSaved(
+                nc::SYS_WRITE,
+                self.gid_map_contents.as_bytes().as_ptr() as usize,
+                self.gid_map_contents.as_bytes().len(),
+            ),
+            &|err| JobError::System(anyhow!("writing to /proc/self/gid_map: {err}")),
+        );
+        builder.push(Syscall::OneFromSaved(nc::SYS_CLOSE), &|err| {
+            JobError::System(anyhow!("closing /proc/self/gid_map: {err}"))
+        });
 
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
         // process outside of the pid namespace, which would be confusing.
-        syscalls.push(Syscall::Zero(nc::SYS_SETSID));
+        builder.push(Syscall::Zero(nc::SYS_SETSID), &|err| {
+            JobError::System(anyhow!("setsid: {err}"))
+        });
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
-        syscalls.push(Syscall::Two(
-            nc::SYS_DUP2,
-            stdout_write_fd.as_raw_fd() as usize,
-            1,
-        ));
-        syscalls.push(Syscall::Two(
-            nc::SYS_DUP2,
-            stderr_write_fd.as_raw_fd() as usize,
-            2,
-        ));
+        builder.push(
+            Syscall::Two(nc::SYS_DUP2, stdout_write_fd.as_raw_fd() as usize, 1),
+            &|err| JobError::System(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Two(nc::SYS_DUP2, stderr_write_fd.as_raw_fd() as usize, 2),
+            &|err| JobError::System(anyhow!("dup2-ing to stderr: {err}")),
+        );
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
-        syscalls.push(Syscall::Three(
-            nc::SYS_CLOSE_RANGE,
-            3,
-            !0_usize,
-            nc::CLOSE_RANGE_CLOEXEC as usize,
-        ));
+        builder.push(
+            Syscall::Three(
+                nc::SYS_CLOSE_RANGE,
+                3,
+                !0_usize,
+                nc::CLOSE_RANGE_CLOEXEC as usize,
+            ),
+            &|err| {
+                JobError::System(anyhow!(
+                    "setting CLOEXEC on range of open file descriptors: {err}"
+                ))
+            },
+        );
 
         let new_root_path;
         let layer0_path;
@@ -396,24 +461,38 @@ impl Executor {
 
             // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
             // pivot_root to it later.
-            syscalls.push(Syscall::Five(
-                nc::SYS_MOUNT,
-                new_root_path.to_bytes_with_nul().as_ptr() as usize,
-                new_root_path.to_bytes_with_nul().as_ptr() as usize,
-                0,
-                nc::MS_BIND,
-                0,
-            ));
+            builder.push(
+                Syscall::Five(
+                    nc::SYS_MOUNT,
+                    new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                    new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                    0,
+                    nc::MS_BIND,
+                    0,
+                ),
+                &|err| {
+                    JobError::System(anyhow!(
+                        "bind mounting target root directory onto itself: {err}"
+                    ))
+                },
+            );
 
             // We want that mount to be read-only!
-            syscalls.push(Syscall::Five(
-                nc::SYS_MOUNT,
-                0,
-                new_root_path.to_bytes_with_nul().as_ptr() as usize,
-                0,
-                nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
-                0,
-            ));
+            builder.push(
+                Syscall::Five(
+                    nc::SYS_MOUNT,
+                    0,
+                    new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                    0,
+                    nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
+                    0,
+                ),
+                &|err| {
+                    JobError::System(anyhow!(
+                        "remounting target root directory as read-only: {err}"
+                    ))
+                },
+            );
         } else {
             new_root_path = self.mount_dir.as_c_str();
             let mut options = "lowerdir=".to_string();
@@ -432,25 +511,32 @@ impl Executor {
             overlayfs_options = CString::new(options)
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
-            syscalls.push(Syscall::Five(
-                nc::SYS_MOUNT,
-                OVERLAY as usize,
-                new_root_path.to_bytes_with_nul().as_ptr() as usize,
-                OVERLAY as usize,
-                0,
-                overlayfs_options.as_c_str().to_bytes_with_nul().as_ptr() as usize,
-            ));
+            builder.push(
+                Syscall::Five(
+                    nc::SYS_MOUNT,
+                    OVERLAY as usize,
+                    new_root_path.to_bytes_with_nul().as_ptr() as usize,
+                    OVERLAY as usize,
+                    0,
+                    overlayfs_options.as_c_str().to_bytes_with_nul().as_ptr() as usize,
+                ),
+                &|err| JobError::System(anyhow!("mounting overlayfs: {err}")),
+            );
         }
 
         // Chdir to what will be the new root.
-        syscalls.push(Syscall::One(
-            nc::SYS_CHDIR,
-            new_root_path.to_bytes_with_nul().as_ptr() as usize,
-        ));
+        builder.push(
+            Syscall::One(
+                nc::SYS_CHDIR,
+                new_root_path.to_bytes_with_nul().as_ptr() as usize,
+            ),
+            &|err| JobError::System(anyhow!("chdir to target root directory: {err}")),
+        );
 
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
+        let error_transformer = |err| JobError::System(anyhow!("bind mount of device: {err}"));
         for device in details.devices.iter() {
             let (source, target) = match device {
                 JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full")),
@@ -460,18 +546,24 @@ impl Executor {
                 JobDevice::Urandom => (c_str!("/dev/urandom"), c_str!("./dev/urandom")),
                 JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero")),
             };
-            syscalls.push(Syscall::Five(
-                nc::SYS_MOUNT,
-                source.to_bytes_with_nul().as_ptr() as usize,
-                target.to_bytes_with_nul().as_ptr() as usize,
-                0,
-                nc::MS_BIND,
-                0,
-            ));
+            builder.push(
+                Syscall::Five(
+                    nc::SYS_MOUNT,
+                    source.to_bytes_with_nul().as_ptr() as usize,
+                    target.to_bytes_with_nul().as_ptr() as usize,
+                    0,
+                    nc::MS_BIND,
+                    0,
+                ),
+                &error_transformer,
+            );
         }
 
         // Pivot root to be the new root. See man 2 pivot_root.
-        syscalls.push(Syscall::Two(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize));
+        builder.push(
+            Syscall::Two(nc::SYS_PIVOT_ROOT, DOT as usize, DOT as usize),
+            &|err| JobError::System(anyhow!("pivot_root: {err}")),
+        );
 
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
         // within the container.
@@ -486,30 +578,44 @@ impl Executor {
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::from)
             .map_err(JobError::System)?;
+        let error_transformer = |err| JobError::Execution(anyhow!("mount of file system: {err}"));
         for (mount, mount_point) in iter::zip(details.mounts.iter(), child_mount_points.iter()) {
             let (fs_type, flags) = match mount.fs_type {
                 JobMountFsType::Proc => (PROC, nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV),
                 JobMountFsType::Tmp => (TMPFS, 0),
                 JobMountFsType::Sys => (SYSFS, 0),
             };
-            syscalls.push(Syscall::Five(
-                nc::SYS_MOUNT,
-                fs_type as usize,
-                mount_point.to_bytes_with_nul().as_ptr() as usize,
-                fs_type as usize,
-                flags,
-                0,
-            ));
+            builder.push(
+                Syscall::Five(
+                    nc::SYS_MOUNT,
+                    fs_type as usize,
+                    mount_point.to_bytes_with_nul().as_ptr() as usize,
+                    fs_type as usize,
+                    flags,
+                    0,
+                ),
+                &error_transformer,
+            );
         }
 
         // Unmount the old root. See man 2 pivot_root.
-        syscalls.push(Syscall::Two(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH));
+        builder.push(
+            Syscall::Two(nc::SYS_UMOUNT2, DOT as usize, MNT_DETACH),
+            &|err| JobError::System(anyhow!("umount of old root: {err}")),
+        );
 
-        let child_job_details = child::JobDetails {
-            program: program.as_c_str(),
-            arguments: argv.as_ref(),
-            environment: env.as_ref(),
-        };
+        // Finally, do the exec.
+        let error_transformer =
+            |err| JobError::Execution(anyhow!("execvc of {}: {err}", details.program));
+        builder.push(
+            Syscall::Three(
+                nc::SYS_EXECVE,
+                program.to_bytes_with_nul().as_ptr() as usize,
+                argv.as_ptr() as usize,
+                env.as_ptr() as usize,
+            ),
+            &error_transformer,
+        );
 
         // Do the clone.
         let mut clone_args = nc::clone_args_t {
@@ -544,14 +650,10 @@ impl Executor {
             // N.B. We don't close any file descriptors here, like stdout_read_fd, stderr_read_fd,
             // and exec_result_read_fd, because they will automatically be closed when the child
             // execs.
-
-            unsafe {
-                child::start_and_exec_in_child(
-                    child_job_details,
-                    exec_result_write_fd.into_raw_fd(),
-                    syscalls.as_slice(),
-                )
-            };
+            meticulous_worker_child::start_and_exec_in_child(
+                exec_result_write_fd.into_raw_fd(),
+                builder.syscalls.as_slice(),
+            );
         }
 
         // At this point, it's still okay to return early in the parent. The child will continue to
@@ -574,26 +676,17 @@ impl Executor {
             .map_err(Error::from)
             .map_err(JobError::System)?;
         if !exec_result_buf.is_empty() {
-            return match meticulous_worker_child::Error::try_from(exec_result_buf.as_slice()) {
-                Err(err) => Err(JobError::System(anyhow!(
-                    "parsing exec result pipe's contents: {err}"
-                ))),
-                Ok(meticulous_worker_child::Error::ExecutionErrno(errno, context)) => {
-                    Err(JobError::Execution(anyhow!(
-                        "executing job's process: {context}: {}",
-                        Errno::from_i32(errno).desc()
-                    )))
-                }
-                Ok(meticulous_worker_child::Error::SystemErrno(errno, context)) => {
-                    Err(JobError::System(anyhow!(
-                        "executing job's process: {context}: {}",
-                        Errno::from_i32(errno).desc()
-                    )))
-                }
-                Ok(meticulous_worker_child::Error::BufferTooSmall) => Err(JobError::System(
-                    anyhow!("executing job's process: buffer too small"),
-                )),
-            };
+            if exec_result_buf.len() != 8 {
+                return Err(JobError::System(anyhow!(
+                    "couldn't parse exec result pipe's contents: {exec_result_buf:?}"
+                )));
+            }
+            let result = u64::from_le_bytes(exec_result_buf.try_into().unwrap());
+            let index = (result >> 32) as usize;
+            let errno = (result & 0xffffffff) as i32;
+            return Err(builder.error_transformers[index](
+                nix::Error::from_i32(errno).desc(),
+            ));
         }
 
         // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
