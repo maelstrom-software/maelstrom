@@ -821,6 +821,7 @@ mod tests {
         start_and_expect_bash_full(
             command,
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             1000,
             expected_status,
@@ -833,6 +834,7 @@ mod tests {
     async fn start_and_expect_bash_full(
         command: &'static str,
         environment: Vec<&'static str>,
+        devices: &EnumSet<JobDevice>,
         mounts: Vec<JobMount>,
         inline_limit: u64,
         expected_status: JobStatus,
@@ -851,7 +853,7 @@ mod tests {
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
             layers,
-            devices: &EnumSet::EMPTY,
+            devices,
             mounts: mounts.as_slice(),
         };
         start_and_expect(
@@ -980,6 +982,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             0,
             JobStatus::Exited(0),
@@ -993,6 +996,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             1,
             JobStatus::Exited(0),
@@ -1006,6 +1010,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             2,
             JobStatus::Exited(0),
@@ -1016,6 +1021,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             3,
             JobStatus::Exited(0),
@@ -1031,6 +1037,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a >&2",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             0,
             JobStatus::Exited(0),
@@ -1044,6 +1051,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a >&2",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             1,
             JobStatus::Exited(0),
@@ -1057,6 +1065,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a >&2",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             2,
             JobStatus::Exited(0),
@@ -1067,6 +1076,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo a >&2",
             vec![],
+            &EnumSet::EMPTY,
             vec![],
             3,
             JobStatus::Exited(0),
@@ -1102,6 +1112,7 @@ mod tests {
         start_and_expect_bash_full(
             "echo -n $FOO - $BAR",
             vec!["FOO=3", "BAR=4"],
+            &EnumSet::EMPTY,
             vec![],
             100,
             JobStatus::Exited(0),
@@ -1140,6 +1151,30 @@ mod tests {
             ),
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn loopback() {
+        let details = JobDetails {
+            program: "/bin/cat",
+            arguments: &["/sys/class/net/lo/carrier".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Sys,
+                mount_point: "/sys".to_string(),
+            }],
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"1\n")),
             JobOutputResult::None,
         )
         .await;
