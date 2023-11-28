@@ -473,7 +473,7 @@ impl Executor {
                 .map_err(JobError::System)?;
             builder.push(
                 Syscall::Mount(
-                    Some(c_str!("overlay")),
+                    None,
                     new_root_path,
                     Some(c_str!("overlay")),
                     0,
@@ -543,7 +543,7 @@ impl Executor {
             };
             let mount_point = mount.mount_point.as_str();
             builder.push(
-                Syscall::Mount(Some(fs_type), mount_point_cstr, Some(fs_type), flags, None),
+                Syscall::Mount(None, mount_point_cstr, Some(fs_type), flags, None),
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!(
                         "mount of file system of type {type_name} to {mount_point}: {err}",
@@ -1529,7 +1529,7 @@ mod tests {
         let details = JobDetails {
             program: "/bin/awk",
             arguments: &[
-                r#"/^tmpfs \/tmp/ { print $1, $2, $3 }"#.to_string(),
+                r#"/^none \/tmp/ { print $1, $2, $3 }"#.to_string(),
                 "/proc/self/mounts".to_string(),
             ],
             environment: &[],
@@ -1550,7 +1550,7 @@ mod tests {
             details,
             100,
             JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"tmpfs /tmp tmpfs\n")),
+            JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")),
             JobOutputResult::None,
         )
         .await;
@@ -1586,7 +1586,7 @@ mod tests {
         let details = JobDetails {
             program: "/bin/awk",
             arguments: &[
-                r#"/^sysfs \/sys/ { print $1, $2, $3 }"#.to_string(),
+                r#"/^none \/sys/ { print $1, $2, $3 }"#.to_string(),
                 "/proc/self/mounts".to_string(),
             ],
             environment: &[],
@@ -1607,7 +1607,7 @@ mod tests {
             details,
             100,
             JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"sysfs /sys sysfs\n")),
+            JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")),
             JobOutputResult::None,
         )
         .await;
@@ -1639,7 +1639,7 @@ mod tests {
     async fn procfs() {
         let details = JobDetails {
             program: "/bin/grep",
-            arguments: &["^proc".to_string(), "/proc/self/mounts".to_string()],
+            arguments: &["proc".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
@@ -1653,7 +1653,7 @@ mod tests {
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(
-                b"proc /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
+                b"none /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
             )),
             JobOutputResult::None,
         )
