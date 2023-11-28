@@ -8,6 +8,9 @@ use core::{
     mem, result, slice, str,
 };
 use nc::syscalls::{self, Errno, Sysno};
+use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
+use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
+use rtnetlink::sockaddr_nl_t;
 
 pub enum Syscall {
     Zero(Sysno),
@@ -214,22 +217,92 @@ impl<T> ErrnoExt<T> for result::Result<T, nc::Errno> {
     }
 }
 
+const NETLINK_ROUTE: usize = 0;
+
 /// The guts of the child code. This function can return a [`Result`].
-unsafe fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> Result<()> {
+fn start_and_exec_in_child_inner(details: JobDetails, syscalls: &[Syscall]) -> Result<()> {
     // in a new network namespace we need to ifup loopback ourselves
-    rtnetlink::ifup_loopback()?;
+    let socket_fd = unsafe {
+        nc::syscalls::syscall3(
+            nc::SYS_SOCKET,
+            nc::AF_NETLINK as usize,
+            (nc::SOCK_RAW | nc::SOCK_CLOEXEC) as usize,
+            NETLINK_ROUTE,
+        )
+    }
+    .map_system_errno("failed to create netlink socket")?;
+    let addr = sockaddr_nl_t {
+        sin_family: nc::AF_NETLINK as nc::sa_family_t,
+        nl_pad: 0,
+        nl_pid: 0, // the kernel
+        nl_groups: 0,
+    };
+    unsafe {
+        nc::syscalls::syscall3(
+            nc::SYS_BIND,
+            socket_fd,
+            &addr as *const sockaddr_nl_t as usize,
+            mem::size_of::<sockaddr_nl_t>() as usize,
+        )
+    }
+    .map_system_errno("failed to bind netlink socket")?;
+
+    let mut message = LinkMessage::default();
+    message.header.index = 1;
+    message.header.flags |= IFF_UP;
+    message.header.change_mask |= IFF_UP;
+
+    let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
+    req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
+    req.header.length = req.buffer_len() as u32;
+    req.header.message_type = RTM_SETLINK;
+
+    let mut buffer = [0; 1024];
+    req.serialize(&mut buffer);
+
+    let mut addr = nc::sockaddr_in_t::default();
+    unsafe {
+        nc::syscalls::syscall6(
+            nc::SYS_SENDTO,
+            socket_fd,
+            buffer.as_ptr() as usize,
+            req.buffer_len(),
+            0,
+            &addr as *const nc::sockaddr_in_t as usize,
+            0,
+        )
+    }
+    .map_system_errno("sendto on netlink socket failed")?;
+
+    let mut addr_len = 0u32;
+    unsafe {
+        nc::syscalls::syscall6(
+            nc::SYS_RECVFROM,
+            socket_fd,
+            buffer.as_mut_ptr() as usize,
+            buffer.len(),
+            0,
+            &mut addr as *mut nc::sockaddr_in_t as usize,
+            &mut addr_len as *mut nc::socklen_t as usize,
+        )
+    }
+    .map_system_errno("recvfrom on netlink socket failed")?;
+
+    // we can't deserialize since that allocates memory, so we just hope that it worked
 
     let mut saved = 0;
     for syscall in syscalls {
         unsafe { syscall.call(&mut saved) }.map_system_errno("unknown")?;
     }
 
-    nc::syscalls::syscall3(
-        nc::SYS_EXECVE,
-        &details.program.to_bytes_with_nul()[0] as *const u8 as usize,
-        details.arguments.as_ptr() as usize,
-        details.environment.as_ptr() as usize,
-    )
+    unsafe {
+        nc::syscalls::syscall3(
+            nc::SYS_EXECVE,
+            &details.program.to_bytes_with_nul()[0] as *const u8 as usize,
+            details.arguments.as_ptr() as usize,
+            details.environment.as_ptr() as usize,
+        )
+    }
     .map_execution_errno("execve")?;
 
     panic!("should not reach here");

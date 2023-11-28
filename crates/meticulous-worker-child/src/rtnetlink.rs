@@ -6,8 +6,8 @@ use netlink_packet_core::{
 };
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 
-struct NetlinkRoute {
-    socket_fd: c_int,
+pub struct NetlinkRoute {
+    pub socket_fd: c_int,
 }
 
 #[repr(C)]
@@ -21,7 +21,7 @@ pub struct sockaddr_nl_t {
 const NETLINK_ROUTE: i32 = 0;
 
 impl NetlinkRoute {
-    fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let socket_fd = unsafe {
             nc::socket(
                 nc::AF_NETLINK,
@@ -48,7 +48,7 @@ impl NetlinkRoute {
         Ok(Self { socket_fd })
     }
 
-    fn request<I>(&mut self, req: &NetlinkMessage<I>) -> Result<()>
+    pub fn request<I>(&mut self, req: &NetlinkMessage<I>) -> Result<()>
     where
         I: NetlinkSerializable,
     {
