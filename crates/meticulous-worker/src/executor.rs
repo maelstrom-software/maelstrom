@@ -68,6 +68,8 @@ pub struct Executor {
     uid_map_contents: String,
     gid_map_contents: String,
     mount_dir: CString,
+    netlink_socket_addr: sockaddr_nl_t,
+    netlink_message: Box<[u8]>,
 }
 
 impl Executor {
@@ -97,12 +99,30 @@ impl Executor {
         let uid_map_contents = format!("0 {} 1\n", unistd::getuid().as_raw());
         let gid_map_contents = format!("0 {} 1\n", unistd::getgid().as_raw());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
+        let netlink_socket_addr = sockaddr_nl_t {
+            sin_family: nc::AF_NETLINK as nc::sa_family_t,
+            nl_pad: 0,
+            nl_pid: 0, // the kernel
+            nl_groups: 0,
+        };
+        let mut netlink_message = LinkMessage::default();
+        netlink_message.header.index = 1;
+        netlink_message.header.flags |= IFF_UP;
+        netlink_message.header.change_mask |= IFF_UP;
+        let mut netlink_message = NetlinkMessage::from(RtnlMessage::SetLink(netlink_message));
+        netlink_message.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
+        netlink_message.header.length = netlink_message.buffer_len() as u32;
+        netlink_message.header.message_type = RTM_SETLINK;
+        let mut buffer = vec![0; netlink_message.buffer_len()].into_boxed_slice();
+        netlink_message.serialize(&mut buffer[..]);
 
         Ok(Executor {
             setgroups_contents,
             uid_map_contents,
             gid_map_contents,
             mount_dir,
+            netlink_socket_addr,
+            netlink_message: buffer,
         })
     }
 }
@@ -287,36 +307,20 @@ impl Executor {
             &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
         );
         // This binds the socket.
-        let addr = sockaddr_nl_t {
-            sin_family: nc::AF_NETLINK as nc::sa_family_t,
-            nl_pad: 0,
-            nl_pid: 0, // the kernel
-            nl_groups: 0,
-        };
         builder.push(
             Syscall::ThreeFromSaved(
                 nc::SYS_BIND,
-                &addr as *const sockaddr_nl_t as usize,
+                &self.netlink_socket_addr as *const sockaddr_nl_t as usize,
                 mem::size_of::<sockaddr_nl_t>(),
             ),
             &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
         );
-        let mut message = LinkMessage::default();
-        message.header.index = 1;
-        message.header.flags |= IFF_UP;
-        message.header.change_mask |= IFF_UP;
-        let mut req = NetlinkMessage::from(RtnlMessage::SetLink(message));
-        req.header.flags = NLM_F_REQUEST | NLM_F_ACK | NLM_F_EXCL | NLM_F_CREATE;
-        req.header.length = req.buffer_len() as u32;
-        req.header.message_type = RTM_SETLINK;
-        let mut buffer = [0; 1024];
-        req.serialize(&mut buffer);
         // This sends the message to the kernel.
         builder.push(
             Syscall::SixFromSaved(
                 nc::SYS_SENDTO,
-                buffer.as_ptr() as usize,
-                req.buffer_len(),
+                self.netlink_message.as_ptr() as usize,
+                self.netlink_message.len(),
                 0,
                 0,
                 0,
@@ -325,6 +329,7 @@ impl Executor {
         );
         // This receives the reply from the kernel.
         // TODO: actually parse the reply to validate that we set up the loopback interface.
+        let mut buffer = [0; 1024];
         builder.push(
             Syscall::SixFromSaved(
                 nc::SYS_RECVFROM,
