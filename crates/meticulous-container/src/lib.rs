@@ -446,13 +446,13 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         self.with_locked_tags(|locked_tags| {
             let digest = self.get_image_digest(locked_tags, name, tag)?;
 
-            Ok(self.with_cache_lock(&digest, || {
+            self.with_cache_lock(&digest, || {
                 Ok(if let Some(img) = self.get_cached_image(&digest) {
                     img
                 } else {
                     self.download_image(name, &digest, prog)?
                 })
-            })?)
+            })
         })
     }
 }
