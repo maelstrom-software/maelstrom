@@ -15,7 +15,7 @@ fs_type = "sys"
 mount_point = "/sys"
 
 [[groups]]
-module = "meticulous-cargo-test"
+module = "cargo-metest"
 tests = "integration_test::"
 layers = ["docker:rust", "dev-null.tar"]
 [[groups.mounts]]
