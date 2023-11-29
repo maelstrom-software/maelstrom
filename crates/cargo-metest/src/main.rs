@@ -9,7 +9,7 @@ use clap::Parser;
 use console::Term;
 use indicatif::TermLike;
 use meticulous_base::{
-    EnumSet, JobDetails, JobDevice, JobDeviceListDeserialize, JobMount, NonEmpty, Sha256Digest,
+    EnumSet, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
 use meticulous_util::fs::Fs;
@@ -213,7 +213,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
 
         let binary_name = binary.file_name().unwrap().to_str().unwrap();
         client.lock().unwrap().add_job(
-            JobDetails {
+            JobSpec {
                 program: format!("/{}", binary_name),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),

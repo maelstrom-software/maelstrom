@@ -7,7 +7,7 @@ use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
-    ClientJobId, JobDetails, JobResult,
+    ClientJobId, JobResult, JobSpec,
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use std::collections::{BTreeMap, BTreeSet};
@@ -114,7 +114,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             );
             rpc.send(ClientToBroker::JobRequest(
                 job_id,
-                JobDetails {
+                JobSpec {
                     program: command_parts.next().unwrap_or_default(),
                     arguments: command_parts.collect(),
                     environment: vec![],

@@ -46,7 +46,7 @@ use tuple::Map as _;
  */
 
 /// All necessary information for the worker to execute a job.
-pub struct JobDetails<'a> {
+pub struct JobSpec<'a> {
     pub program: &'a str,
     pub arguments: &'a [String],
     pub environment: &'a [String],
@@ -141,7 +141,7 @@ impl Executor {
     /// values of this function should be adjusted to return optional pids in error cases.
     pub fn start(
         &self,
-        details: &JobDetails,
+        details: &JobSpec,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
@@ -239,7 +239,7 @@ impl<'a> ScriptBuilder<'a> {
 impl Executor {
     fn start_inner(
         &self,
-        details: &JobDetails,
+        details: &JobSpec,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
@@ -764,7 +764,7 @@ mod tests {
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobDetails {
+        let details = JobSpec {
             program,
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
@@ -791,7 +791,7 @@ mod tests {
         let program = "/usr/bin/python3";
         let arguments = vec!["-c".to_string(), script.to_string()];
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobDetails {
+        let details = JobSpec {
             program,
             arguments: arguments.as_slice(),
             environment: &[],
@@ -810,7 +810,7 @@ mod tests {
     }
 
     async fn start_and_expect<'a>(
-        details: JobDetails<'a>,
+        details: JobSpec<'a>,
         inline_limit: u64,
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
@@ -1006,7 +1006,7 @@ mod tests {
     #[serial]
     fn execution_error() {
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobDetails {
+        let details = JobSpec {
             program: "a_program_that_does_not_exist",
             arguments: &[],
             environment: &[],
@@ -1075,7 +1075,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn loopback() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/cat",
             arguments: &["/sys/class/net/lo/carrier".to_string()],
             environment: &[],
@@ -1115,7 +1115,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn close_range() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/ls",
             arguments: &["/proc/self/fd".to_string()],
             environment: &[],
@@ -1139,7 +1139,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn one_layer_is_read_only() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/touch",
             arguments: &["/foo".to_string()],
             environment: &[],
@@ -1160,7 +1160,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_in_correct_order() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/cat",
             arguments: &[
                 "/root/file".to_string(),
@@ -1189,7 +1189,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_read_only() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/touch",
             arguments: &["/foo".to_string()],
             environment: &[],
@@ -1214,7 +1214,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_full() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1238,7 +1238,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_full() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1262,7 +1262,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_null() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1286,7 +1286,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_null() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1310,7 +1310,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_random() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1334,7 +1334,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_random() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1358,7 +1358,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_tty() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1382,7 +1382,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_tty() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1406,7 +1406,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_urandom() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1430,7 +1430,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_urandom() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1454,7 +1454,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_zero() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1478,7 +1478,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_zero() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1502,7 +1502,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_tmpfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/grep",
             arguments: &["^tmpfs /tmp".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1526,7 +1526,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn tmpfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/awk",
             arguments: &[
                 r#"/^none \/tmp/ { print $1, $2, $3 }"#.to_string(),
@@ -1559,7 +1559,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_sysfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/grep",
             arguments: &["^sysfs /sys".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1583,7 +1583,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn sysfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/awk",
             arguments: &[
                 r#"/^none \/sys/ { print $1, $2, $3 }"#.to_string(),
@@ -1616,7 +1616,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_procfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/ls",
             arguments: &["/proc".to_string()],
             environment: &[],
@@ -1637,7 +1637,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn procfs() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/grep",
             arguments: &["proc".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1663,7 +1663,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn old_mounts_are_unmounted() {
-        let details = JobDetails {
+        let details = JobSpec {
             program: "/bin/wc",
             arguments: &["-l".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],

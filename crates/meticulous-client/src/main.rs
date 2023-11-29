@@ -6,8 +6,8 @@ use figment::{
     Figment,
 };
 use meticulous_base::{
-    ClientJobId, EnumSet, JobDetails, JobDevice, JobDeviceListDeserialize, JobError, JobMount,
-    JobOutputResult, JobResult, JobStatus, JobSuccess, NonEmpty, Sha256Digest,
+    ClientJobId, EnumSet, JobDevice, JobDeviceListDeserialize, JobError, JobMount, JobOutputResult,
+    JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
 use meticulous_util::{
@@ -180,7 +180,7 @@ fn main() -> Result<ExitCode> {
         );
         let accum_clone = accum.clone();
         client.add_job(
-            JobDetails {
+            JobSpec {
                 program: job.program,
                 arguments: job.arguments.unwrap_or(vec![]),
                 environment: job.environment.unwrap_or(vec![]),

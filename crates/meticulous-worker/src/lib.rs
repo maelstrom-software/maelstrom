@@ -14,7 +14,7 @@ use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
-    JobDetails, JobErrorResult, JobId, JobStatus, NonEmpty, Sha256Digest,
+    JobErrorResult, JobId, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
 use meticulous_util::fs::Fs;
 use meticulous_util::{
@@ -76,7 +76,7 @@ impl DispatcherDeps for DispatcherAdapter {
     fn start_job(
         &mut self,
         jid: JobId,
-        details: &JobDetails,
+        details: &JobSpec,
         layers: NonEmpty<PathBuf>,
     ) -> JobErrorResult<Pid, String> {
         let sender = self.dispatcher_sender.clone();
@@ -86,7 +86,7 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "details" => format!("{details:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let details = executor::JobDetails {
+        let details = executor::JobSpec {
             program: details.program.as_str(),
             arguments: details.arguments.as_slice(),
             environment: details.environment.as_slice(),

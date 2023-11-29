@@ -109,7 +109,7 @@ pub struct JobMount {
 
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct JobDetails {
+pub struct JobSpec {
     pub program: String,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,

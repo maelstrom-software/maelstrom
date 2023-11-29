@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{Error, Result};
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    JobDetails, JobError, JobErrorResult, JobId, JobOutputResult, JobStatus, JobSuccess, NonEmpty,
+    JobError, JobErrorResult, JobId, JobOutputResult, JobSpec, JobStatus, JobSuccess, NonEmpty,
     Sha256Digest,
 };
 use meticulous_util::ext::OptionExt as _;
@@ -40,7 +40,7 @@ pub trait DispatcherDeps {
     fn start_job(
         &mut self,
         jid: JobId,
-        details: &JobDetails,
+        details: &JobSpec,
         layers: NonEmpty<PathBuf>,
     ) -> JobErrorResult<Pid, String>;
 
@@ -148,12 +148,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
  */
 
 struct AwaitingLayersEntry {
-    details: JobDetails,
+    details: JobSpec,
     layers: HashMap<Sha256Digest, PathBuf>,
 }
 
 impl AwaitingLayersEntry {
-    fn new(details: JobDetails) -> Self {
+    fn new(details: JobSpec) -> Self {
         AwaitingLayersEntry {
             details,
             layers: HashMap::default(),
@@ -199,7 +199,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
-    queued: VecDeque<(JobId, JobDetails, NonEmpty<PathBuf>)>,
+    queued: VecDeque<(JobId, JobSpec, NonEmpty<PathBuf>)>,
     executing: HashMap<JobId, ExecutingJob>,
     executing_pids: HashMap<Pid, JobId>,
     canceled: HashMap<Pid, NonEmpty<Sha256Digest>>,
@@ -239,7 +239,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         self.possibly_start_job();
     }
 
-    fn receive_enqueue_job(&mut self, jid: JobId, details: JobDetails) {
+    fn receive_enqueue_job(&mut self, jid: JobId, details: JobSpec) {
         let mut entry = AwaitingLayersEntry::new(details);
         for digest in &entry.details.layers {
             match self.cache.get_artifact(digest.clone(), jid) {
@@ -420,7 +420,7 @@ mod tests {
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
-        StartJob(JobId, JobDetails, Vec<PathBuf>),
+        StartJob(JobId, JobSpec, Vec<PathBuf>),
         SendMessageToBroker(WorkerToBroker),
         StartArtifactFetch(Sha256Digest, PathBuf),
         CacheGetArtifact(Sha256Digest, JobId),
@@ -444,7 +444,7 @@ mod tests {
         fn start_job(
             &mut self,
             jid: JobId,
-            details: &JobDetails,
+            details: &JobSpec,
             layers: NonEmpty<PathBuf>,
         ) -> JobErrorResult<Pid, String> {
             let mut mut_ref = self.borrow_mut();

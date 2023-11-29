@@ -5,7 +5,7 @@ use meticulous_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobDetails, JobResult, NonEmpty, Sha256Digest,
+    ClientJobId, JobResult, JobSpec, NonEmpty, Sha256Digest,
 };
 use meticulous_container::ContainerImageDepot;
 use meticulous_util::{ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
@@ -69,7 +69,7 @@ fn add_artifact(
 enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, SyncSender<Result<Sha256Digest>>),
-    AddJob(JobDetails, JobResponseHandler),
+    AddJob(JobSpec, JobResponseHandler),
     GetJobStateCounts(SyncSender<JobStateCounts>),
     Stop,
 }
@@ -202,7 +202,7 @@ impl Client {
         Ok(digests)
     }
 
-    fn maybe_add_container_environment(&mut self, details: &mut JobDetails) {
+    fn maybe_add_container_environment(&mut self, details: &mut JobSpec) {
         for (digests, env) in &self.digest_to_container_env {
             let container_digests: HashSet<_> = digests.iter().collect();
             let job_digests: HashSet<_> = details.layers.iter().collect();
@@ -212,7 +212,7 @@ impl Client {
         }
     }
 
-    pub fn add_job(&mut self, mut details: JobDetails, handler: JobResponseHandler) {
+    pub fn add_job(&mut self, mut details: JobSpec, handler: JobResponseHandler) {
         self.maybe_add_container_environment(&mut details);
 
         // We will only get an error if the dispatcher has closed its receiver, which will only

@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ClientJobId, JobDetails, JobId, JobResult, Sha256Digest,
+    ClientJobId, JobId, JobResult, JobSpec, Sha256Digest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -20,7 +20,7 @@ pub enum Hello {
 /// a [`Hello`] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToWorker {
-    EnqueueJob(JobId, JobDetails),
+    EnqueueJob(JobId, JobSpec),
     CancelJob(JobId),
 }
 
@@ -44,7 +44,7 @@ pub enum BrokerToClient {
 /// send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
-    JobRequest(ClientJobId, JobDetails),
+    JobRequest(ClientJobId, JobSpec),
     StatisticsRequest,
     JobStateCountsRequest,
 }

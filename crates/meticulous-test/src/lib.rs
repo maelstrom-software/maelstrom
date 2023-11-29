@@ -28,7 +28,7 @@ macro_rules! jid {
 #[macro_export]
 macro_rules! details {
     [1] => {
-        meticulous_base::JobDetails {
+        meticulous_base::JobSpec {
             program: "test_1".to_string(),
             arguments: vec![],
             environment: vec![],
@@ -38,7 +38,7 @@ macro_rules! details {
         }
     };
     [2] => {
-        meticulous_base::JobDetails {
+        meticulous_base::JobSpec {
             program: "test_2".to_string(),
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
@@ -48,7 +48,7 @@ macro_rules! details {
         }
     };
     [3] => {
-        meticulous_base::JobDetails {
+        meticulous_base::JobSpec {
             program: "test_3".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
             environment: vec![],
@@ -58,7 +58,7 @@ macro_rules! details {
         }
     };
     [4] => {
-        meticulous_base::JobDetails {
+        meticulous_base::JobSpec {
             program: "test_4".to_string(),
             arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
             environment: vec![],
@@ -68,7 +68,7 @@ macro_rules! details {
         }
     };
     [$n:literal] => {
-        meticulous_base::JobDetails {
+        meticulous_base::JobSpec {
             program: concat!("test_", stringify!($n)).to_string(),
             arguments: vec!["arg_1".to_string()],
             environment: vec![],
@@ -79,8 +79,8 @@ macro_rules! details {
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let meticulous_base::JobDetails { program, arguments, environment, .. } = details![$n];
-            meticulous_base::JobDetails {
+            let meticulous_base::JobSpec { program, arguments, environment, .. } = details![$n];
+            meticulous_base::JobSpec {
                 program,
                 arguments,
                 environment,

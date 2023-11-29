@@ -8,7 +8,7 @@ use meticulous_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ClientId, ClientJobId, JobDetails, JobId, JobResult, Sha256Digest, WorkerId,
+    ClientId, ClientJobId, JobId, JobResult, JobSpec, Sha256Digest, WorkerId,
 };
 use meticulous_util::{
     ext::{BoolExt as _, OptionExt as _},
@@ -235,13 +235,13 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  */
 
 struct Job {
-    details: JobDetails,
+    details: JobSpec,
     acquired_artifacts: HashSet<Sha256Digest>,
     missing_artifacts: HashSet<Sha256Digest>,
 }
 
 impl Job {
-    fn new(details: JobDetails) -> Self {
+    fn new(details: JobSpec) -> Self {
         Job {
             details,
             acquired_artifacts: HashSet::default(),
@@ -378,7 +378,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         deps: &mut DepsT,
         cid: ClientId,
         cjid: ClientJobId,
-        details: JobDetails,
+        details: JobSpec,
     ) {
         let client = self.clients.get_mut(&cid).unwrap();
         let mut job = Job::new(details);

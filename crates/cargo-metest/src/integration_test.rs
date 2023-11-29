@@ -5,7 +5,7 @@ use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
-    JobDetails, JobOutputResult, JobResult, JobStatus, JobSuccess,
+    JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
 use meticulous_client::Client;
 use meticulous_util::fs::Fs;
@@ -125,7 +125,7 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
     stream.write_all(&buf[..]).unwrap();
 }
 
-fn test_path(details: &JobDetails) -> TestPath {
+fn test_path(details: &JobSpec) -> TestPath {
     let binary = details
         .program
         .split("/")
