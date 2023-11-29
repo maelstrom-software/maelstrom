@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-cargo-test"
+name = "cargo-metest"
 version = "0.1.0"
 edition = "2021"
 
@@ -30,7 +30,3 @@ serde.workspace = true
 tempfile.workspace = true
 meticulous-broker.workspace = true
 meticulous-worker.workspace = true
-
-[[bin]]
-name = "cargo-metest"
-path = "src/main.rs"
