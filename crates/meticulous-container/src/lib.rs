@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
+use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWrite;
 use tokio::task;
@@ -267,9 +268,8 @@ struct LockedContainerImageTags {
 }
 
 impl LockedContainerImageTags {
-    fn from_path(fs: &Fs, path: impl AsRef<Path>) -> Result<Self> {
-        let c = fs.read_to_string(path)?;
-        Ok(toml::from_str(&c)?)
+    fn from_str(s: &str) -> Result<Self> {
+        Ok(toml::from_str(s)?)
     }
 
     fn get(&self, name: &str, tag: &str) -> Option<&String> {
@@ -364,19 +364,6 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         })
     }
 
-    fn write_lock_file(&self, locked_tags: &LockedContainerImageTags) -> Result<()> {
-        self.fs.write(
-            self.project_dir.join(TAG_FILE_NAME),
-            toml::to_string_pretty(locked_tags).unwrap().as_bytes(),
-        )?;
-        Ok(())
-    }
-
-    fn load_locked_tags(&self) -> LockedContainerImageTags {
-        LockedContainerImageTags::from_path(&self.fs, self.project_dir.join(TAG_FILE_NAME))
-            .unwrap_or_default()
-    }
-
     fn get_image_digest(
         &self,
         locked_tags: &mut LockedContainerImageTags,
@@ -428,26 +415,45 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         body()
     }
 
+    fn with_locked_tags<Ret>(
+        &self,
+        body: impl FnOnce(&mut LockedContainerImageTags) -> Result<Ret>,
+    ) -> Result<Ret> {
+        let mut lock_file = self
+            .fs
+            .open_or_create_file(self.project_dir.join(TAG_FILE_NAME))?;
+        lock_file.lock_exclusive()?;
+
+        let mut contents = String::new();
+        lock_file.read_to_string(&mut contents)?;
+        let mut locked_tags = LockedContainerImageTags::from_str(&contents).unwrap_or_default();
+
+        let ret = body(&mut locked_tags);
+
+        lock_file.seek(SeekFrom::Start(0))?;
+        lock_file.set_len(0)?;
+        lock_file.write_all(toml::to_string_pretty(&locked_tags).unwrap().as_bytes())?;
+
+        ret
+    }
+
     pub fn get_container_image(
         &self,
         name: &str,
         tag: &str,
         prog: ProgressBar,
     ) -> Result<ContainerImage> {
-        let mut locked_tags = self.load_locked_tags();
+        self.with_locked_tags(|locked_tags| {
+            let digest = self.get_image_digest(locked_tags, name, tag)?;
 
-        let digest = self.get_image_digest(&mut locked_tags, name, tag)?;
-
-        let img = self.with_cache_lock(&digest, || {
-            Ok(if let Some(img) = self.get_cached_image(&digest) {
-                img
-            } else {
-                self.download_image(name, &digest, prog)?
-            })
-        })?;
-
-        self.write_lock_file(&locked_tags)?;
-        Ok(img)
+            Ok(self.with_cache_lock(&digest, || {
+                Ok(if let Some(img) = self.get_cached_image(&digest) {
+                    img
+                } else {
+                    self.download_image(name, &digest, prog)?
+                })
+            })?)
+        })
     }
 }
 

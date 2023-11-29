@@ -182,6 +182,20 @@ impl Fs {
         })
     }
 
+    pub fn open_or_create_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+        let path = path.as_ref();
+        Ok(File {
+            inner: std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .open(path)
+                .with_context(|| format!("open_or_create(\"{}\")", path.display()))?,
+            path: path.into(),
+            fs: self,
+        })
+    }
+
     pub fn create_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
         let path = path.as_ref();
         Ok(File {
