@@ -322,8 +322,7 @@ impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
 }
 
 pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDepotOps> {
-    locked_tags: LockedContainerImageTags,
-    cached_images: HashMap<String, ContainerImage>,
+    fs: Fs,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     ops: ContainerImageDepotOpsT,
@@ -357,69 +356,85 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
 
         fs.create_dir_all(cache_dir)?;
 
-        let locked_tags = LockedContainerImageTags::from_path(&fs, project_dir.join(TAG_FILE_NAME))
-            .unwrap_or_default();
-        let mut cached_images = HashMap::new();
-        for d in fs.read_dir(cache_dir)? {
-            let d = d?;
-            if let Some(container_image) = ContainerImage::from_dir(&fs, d.path()) {
-                cached_images.insert(container_image.digest.clone(), container_image);
-            }
-        }
         Ok(Self {
-            locked_tags,
-            cached_images,
+            fs,
             project_dir: project_dir.to_owned(),
             cache_dir: cache_dir.to_owned(),
             ops,
         })
     }
 
-    fn write_lock_file(&self) -> Result<()> {
-        let fs = Fs::new();
-        fs.write(
+    fn write_lock_file(&self, locked_tags: &LockedContainerImageTags) -> Result<()> {
+        self.fs.write(
             self.project_dir.join(TAG_FILE_NAME),
-            toml::to_string_pretty(&self.locked_tags)
-                .unwrap()
-                .as_bytes(),
+            toml::to_string_pretty(locked_tags).unwrap().as_bytes(),
         )?;
         Ok(())
     }
 
-    pub fn get_container_image(
-        &mut self,
+    fn load_locked_tags(&self) -> LockedContainerImageTags {
+        LockedContainerImageTags::from_path(&self.fs, self.project_dir.join(TAG_FILE_NAME))
+            .unwrap_or_default()
+    }
+
+    fn get_image_digest(
+        &self,
+        locked_tags: &mut LockedContainerImageTags,
         name: &str,
         tag: &str,
-        prog: ProgressBar,
-    ) -> Result<ContainerImage> {
-        let fs = Fs::new();
-        let digest = if let Some(digest) = self.locked_tags.get(name, tag) {
+    ) -> Result<String> {
+        Ok(if let Some(digest) = locked_tags.get(name, tag) {
             digest.into()
         } else {
             let digest = self.ops.resolve_tag(name, tag)?;
-            self.locked_tags
-                .add(name.into(), tag.into(), digest.clone());
+            locked_tags.add(name.into(), tag.into(), digest.clone());
             digest
-        };
-        if let Some(img) = self.cached_images.get(&digest) {
-            self.write_lock_file()?;
-            return Ok(img.clone());
-        }
+        })
+    }
 
-        let output_dir = self.cache_dir.join(&digest);
+    fn get_cached_image(&self, digest: &str) -> Option<ContainerImage> {
+        ContainerImage::from_dir(&self.fs, self.cache_dir.join(digest))
+    }
+
+    fn download_image(
+        &self,
+        name: &str,
+        digest: &str,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        let output_dir = self.cache_dir.join(digest);
         if output_dir.exists() {
-            fs.remove_dir_all(&output_dir)?;
+            self.fs.remove_dir_all(&output_dir)?;
         }
-        fs.create_dir(&output_dir)?;
+        self.fs.create_dir(&output_dir)?;
 
-        let img = self.ops.download_image(name, &digest, &output_dir, prog)?;
-        fs.write(
+        let img = self.ops.download_image(name, digest, &output_dir, prog)?;
+        self.fs.write(
             output_dir.join("config.json"),
             serde_json::to_vec(&img).unwrap(),
         )?;
 
-        self.write_lock_file()?;
-        self.cached_images.insert(img.digest.clone(), img.clone());
+        Ok(img)
+    }
+
+    pub fn get_container_image(
+        &self,
+        name: &str,
+        tag: &str,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        let mut locked_tags = self.load_locked_tags();
+
+        let digest = self.get_image_digest(&mut locked_tags, name, tag)?;
+
+        if let Some(img) = self.get_cached_image(&digest) {
+            self.write_lock_file(&locked_tags)?;
+            return Ok(img);
+        }
+
+        let img = self.download_image(name, &digest, prog)?;
+
+        self.write_lock_file(&locked_tags)?;
         Ok(img)
     }
 }
@@ -496,7 +511,7 @@ fn container_image_depot_download_dir_structure() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -529,7 +544,7 @@ fn container_image_depot_download_then_reload() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -542,7 +557,7 @@ fn container_image_depot_download_then_reload() {
         .unwrap();
     drop(depot);
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         PanicContainerImageDepotOps,
@@ -561,7 +576,7 @@ fn container_image_depot_redownload_corrupt() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -576,7 +591,7 @@ fn container_image_depot_redownload_corrupt() {
     fs.remove_file(image_dir.path().join("sha256:abcdef").join("config.json"))
         .unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -604,7 +619,7 @@ fn container_image_depot_update_image() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -624,7 +639,7 @@ fn container_image_depot_update_image() {
         .unwrap();
     let bar_meta_before = fs.metadata(image_dir.path().join("sha256:ghijk")).unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -672,7 +687,7 @@ fn container_image_depot_update_image_but_nothing_to_do() {
         "foo-latest".into() => "sha256:abcdef".into(),
         "bar-latest".into() => "sha256:ghijk".into(),
     });
-    let mut depot =
+    let depot =
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops.clone()).unwrap();
     depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
@@ -684,8 +699,7 @@ fn container_image_depot_update_image_but_nothing_to_do() {
     fs.remove_file(project_dir.path().join(TAG_FILE_NAME))
         .unwrap();
 
-    let mut depot =
-        ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
+    let depot = ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
     depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();
