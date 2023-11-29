@@ -355,9 +355,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         let project_dir = project_dir.as_ref();
         let cache_dir = cache_dir.as_ref();
 
-        if !cache_dir.exists() {
-            fs.create_dir_all(cache_dir)?;
-        }
+        fs.create_dir_all(cache_dir)?;
 
         let locked_tags = LockedContainerImageTags::from_path(&fs, project_dir.join(TAG_FILE_NAME))
             .unwrap_or_default();
