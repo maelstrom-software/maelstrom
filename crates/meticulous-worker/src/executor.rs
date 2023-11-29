@@ -53,6 +53,7 @@ pub struct JobSpec<'a> {
     pub devices: &'a EnumSet<JobDevice>,
     pub layers: &'a NonEmpty<PathBuf>,
     pub mounts: &'a [JobMount],
+    pub loopback: &'a bool,
 }
 
 pub struct Executor {
@@ -321,33 +322,35 @@ impl Executor {
 
         let mut builder = ScriptBuilder::new(&bump);
 
-        // In order to have a loopback network interface, we need to create a netlink socket and
-        // configure things with the kernel. This creates the socket.
-        builder.push(
-            Syscall::SocketAndSave(
-                nc::AF_NETLINK,
-                nc::SOCK_RAW | nc::SOCK_CLOEXEC,
-                NETLINK_ROUTE,
-            ),
-            &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
-        );
-        // This binds the socket.
-        builder.push(Syscall::BindSaved(&self.netlink_socket_addr), &|err| {
-            JobError::System(anyhow!("binding rtnetlink socket: {err}"))
-        });
-        // This sends the message to the kernel.
-        builder.push(
-            Syscall::SendToSaved(self.netlink_message.as_ref()),
-            &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
-        );
-        // This receives the reply from the kernel.
-        // TODO: actually parse the reply to validate that we set up the loopback interface.
-        builder.push(
-            Syscall::RecvFromSaved(rtnetlink_response.as_mut_slice()),
-            &|err| JobError::System(anyhow!("receiving rtnetlink message: {err}")),
-        );
-        // We don't need to close the socket because that will happen automatically for us when we
-        // exec.
+        if *details.loopback {
+            // In order to have a loopback network interface, we need to create a netlink socket and
+            // configure things with the kernel. This creates the socket.
+            builder.push(
+                Syscall::SocketAndSave(
+                    nc::AF_NETLINK,
+                    nc::SOCK_RAW | nc::SOCK_CLOEXEC,
+                    NETLINK_ROUTE,
+                ),
+                &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
+            );
+            // This binds the socket.
+            builder.push(Syscall::BindSaved(&self.netlink_socket_addr), &|err| {
+                JobError::System(anyhow!("binding rtnetlink socket: {err}"))
+            });
+            // This sends the message to the kernel.
+            builder.push(
+                Syscall::SendToSaved(self.netlink_message.as_ref()),
+                &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
+            );
+            // This receives the reply from the kernel.
+            // TODO: actually parse the reply to validate that we set up the loopback interface.
+            builder.push(
+                Syscall::RecvFromSaved(rtnetlink_response.as_mut_slice()),
+                &|err| JobError::System(anyhow!("receiving rtnetlink message: {err}")),
+            );
+            // We don't need to close the socket because that will happen automatically for us when we
+            // exec.
+        }
 
         // We now need to set up the new user namespace. This first set of syscalls sets up the
         // uid mapping.
@@ -771,6 +774,7 @@ mod tests {
             layers,
             devices,
             mounts: mounts.as_slice(),
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -798,6 +802,7 @@ mod tests {
             layers,
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1013,6 +1018,7 @@ mod tests {
             layers,
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
@@ -1074,6 +1080,31 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn no_loopback() {
+        let details = JobSpec {
+            program: "/bin/cat",
+            arguments: &["/sys/class/net/lo/carrier".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[JobMount {
+                fs_type: JobMountFsType::Sys,
+                mount_point: "/sys".to_string(),
+            }],
+            loopback: &false,
+        };
+        start_and_expect(
+            details,
+            100,
+            JobStatus::Exited(1),
+            JobOutputResult::None,
+            JobOutputResult::Inline(boxed_u8!(b"cat: read error: Invalid argument\n")),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn loopback() {
         let details = JobSpec {
             program: "/bin/cat",
@@ -1085,6 +1116,7 @@ mod tests {
                 fs_type: JobMountFsType::Sys,
                 mount_point: "/sys".to_string(),
             }],
+            loopback: &true,
         };
         start_and_expect(
             details,
@@ -1125,6 +1157,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1146,6 +1179,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1175,6 +1209,7 @@ mod tests {
             ],
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1200,6 +1235,7 @@ mod tests {
             ],
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1224,6 +1260,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1248,6 +1285,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Full),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1272,6 +1310,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1296,6 +1335,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Null),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1320,6 +1360,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1344,6 +1385,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Random),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1368,6 +1410,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1392,6 +1435,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Tty),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1416,6 +1460,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1440,6 +1485,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Urandom),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1464,6 +1510,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1488,6 +1535,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Zero),
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1512,6 +1560,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1545,6 +1594,7 @@ mod tests {
                     mount_point: "/tmp".to_string(),
                 },
             ],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1569,6 +1619,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1602,6 +1653,7 @@ mod tests {
                     mount_point: "/sys".to_string(),
                 },
             ],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1623,6 +1675,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1647,6 +1700,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
+            loopback: &false,
         };
         start_and_expect(
             details,
@@ -1673,6 +1727,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
+            loopback: &false,
         };
         start_and_expect(
             details,

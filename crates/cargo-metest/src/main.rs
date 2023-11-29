@@ -200,6 +200,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         layers: NonEmpty<Sha256Digest>,
         devices: EnumSet<JobDevice>,
         mounts: Vec<JobMount>,
+        loopback: bool,
     ) where
         ProgressIndicatorT: ProgressIndicatorScope,
     {
@@ -220,6 +221,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 layers,
                 devices,
                 mounts,
+                loopback,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
@@ -292,6 +294,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 NonEmpty::try_from(layers).unwrap(),
                 self.config.get_devices_for_test(package_name, &case),
                 self.config.get_mounts_for_test(package_name, &case),
+                self.config.get_loopback_for_test(package_name, &case),
             );
         }
 
@@ -398,6 +401,7 @@ struct TestGroup {
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
+    loopback: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -448,6 +452,17 @@ impl Config {
             .flatten()
             .map(JobDevice::from)
             .collect()
+    }
+
+    fn get_loopback_for_test(&self, module: &str, test: &str) -> bool {
+        self.groups
+            .iter()
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .flat_map(|group| group.loopback.iter())
+            .cloned()
+            .next()
+            .unwrap_or(false)
     }
 }
 
