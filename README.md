@@ -37,3 +37,17 @@ with workers. Clients can be of many different types. We are releasing with a
 Rust test runner and a general-purpose command-line client. However, more
 special-case test runners are on their way, and you could always build your own
 client (it's easy!).
+
+## Getting Started
+
+Currently, Meticulous must be built from source. The easiest way is to clone
+this repository and use `cargo install`:
+
+```console
+$ git clone git@github.com:meticulous-software/meticulous.git
+$ cd meticulous
+$ cargo install --path crates/meticulous-broker
+$ cargo install --path crates/meticulous-client
+$ cargo install --path crates/meticulous-worker
+$ cargo install --path crates/meticulous-cargo-test
+```
