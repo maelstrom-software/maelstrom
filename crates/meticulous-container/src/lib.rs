@@ -417,6 +417,17 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         Ok(img)
     }
 
+    fn with_cache_lock<Ret>(
+        &self,
+        digest: &str,
+        body: impl FnOnce() -> Result<Ret>,
+    ) -> Result<Ret> {
+        let lock_file_path = self.cache_dir.join(format!(".{digest}.flock"));
+        let lock_file = self.fs.create_file(lock_file_path)?;
+        lock_file.lock_exclusive()?;
+        body()
+    }
+
     pub fn get_container_image(
         &self,
         name: &str,
@@ -427,12 +438,13 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
 
         let digest = self.get_image_digest(&mut locked_tags, name, tag)?;
 
-        if let Some(img) = self.get_cached_image(&digest) {
-            self.write_lock_file(&locked_tags)?;
-            return Ok(img);
-        }
-
-        let img = self.download_image(name, &digest, prog)?;
+        let img = self.with_cache_lock(&digest, || {
+            Ok(if let Some(img) = self.get_cached_image(&digest) {
+                img
+            } else {
+                self.download_image(name, &digest, prog)?
+            })
+        })?;
 
         self.write_lock_file(&locked_tags)?;
         Ok(img)
@@ -500,6 +512,7 @@ fn sorted_dir_listing(fs: &Fs, path: impl AsRef<Path>) -> Vec<String> {
                 .unwrap()
                 .into()
         })
+        .filter(|n: &String| !n.starts_with("."))
         .collect();
     listing.sort();
     listing
