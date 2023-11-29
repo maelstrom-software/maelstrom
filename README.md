@@ -47,6 +47,6 @@ Something like this should work:
 
 ```sh
 for i in broker worker client cargo-test; do
-    cargo install --git https://github.com/meticulous-software/meticulous/tree/main/crates/meticulous-$i
+    cargo install --git https://github.com/meticulous-software/meticulous.git meticulous-$i
 done
 ```
