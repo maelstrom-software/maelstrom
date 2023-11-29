@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use fs2::FileExt as _;
 use std::io::{self};
 use std::path::{Path, PathBuf};
 
@@ -221,6 +222,26 @@ impl<'fs> File<'fs> {
 
     pub fn set_permissions(&self, perm: std::fs::Permissions) -> Result<()> {
         fs_inner_trampoline!(self, set_permissions, perm)
+    }
+
+    pub fn lock_shared(&self) -> Result<()> {
+        fs_inner_trampoline!(self, lock_shared)
+    }
+
+    pub fn lock_exclusive(&self) -> Result<()> {
+        fs_inner_trampoline!(self, lock_exclusive)
+    }
+
+    pub fn try_lock_shared(&self) -> Result<()> {
+        fs_inner_trampoline!(self, try_lock_shared)
+    }
+
+    pub fn try_lock_exclusive(&self) -> Result<()> {
+        fs_inner_trampoline!(self, try_lock_exclusive)
+    }
+
+    pub fn unlock(&self) -> Result<()> {
+        fs_inner_trampoline!(self, unlock)
     }
 }
 
