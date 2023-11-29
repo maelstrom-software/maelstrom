@@ -41,13 +41,12 @@ client (it's easy!).
 ## Getting Started
 
 Currently, Meticulous must be built from source. The easiest way is to clone
-this repository and use `cargo install`:
+this repository and use `cargo install`.
 
-```console
-$ git clone git@github.com:meticulous-software/meticulous.git
-$ cd meticulous
-$ cargo install --path crates/meticulous-broker
-$ cargo install --path crates/meticulous-client
-$ cargo install --path crates/meticulous-worker
-$ cargo install --path crates/meticulous-cargo-test
+Something like this should work:
+
+```sh
+for i in broker worker client cargo-test; do
+    cargo install --git https://github.com/meticulous-software/meticulous/tree/main/crates/meticulous-$i
+done
 ```
