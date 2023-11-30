@@ -26,7 +26,7 @@ macro_rules! jid {
 }
 
 #[macro_export]
-macro_rules! details {
+macro_rules! spec {
     [1] => {
         meticulous_base::JobSpec {
             program: "test_1".to_string(),
@@ -84,7 +84,7 @@ macro_rules! details {
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let meticulous_base::JobSpec { program, arguments, environment, .. } = details![$n];
+            let meticulous_base::JobSpec { program, arguments, environment, .. } = spec![$n];
             meticulous_base::JobSpec {
                 program,
                 arguments,

@@ -142,12 +142,12 @@ impl Executor {
     /// values of this function should be adjusted to return optional pids in error cases.
     pub fn start(
         &self,
-        details: &JobSpec,
+        spec: &JobSpec,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobErrorResult<Pid, Error> {
-        self.start_inner(details, inline_limit, stdout_done, stderr_done)
+        self.start_inner(spec, inline_limit, stdout_done, stderr_done)
     }
 }
 
@@ -240,7 +240,7 @@ impl<'a> ScriptBuilder<'a> {
 impl Executor {
     fn start_inner(
         &self,
-        details: &JobSpec,
+        spec: &JobSpec,
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
@@ -287,10 +287,10 @@ impl Executor {
         let layer0_path;
         let overlayfs_options;
         let child_mount_points;
-        let program = CString::new(details.program)
+        let program = CString::new(spec.program)
             .map_err(Error::from)
             .map_err(JobError::System)?;
-        let arguments = details
+        let arguments = spec
             .arguments
             .iter()
             .map(String::as_str)
@@ -306,7 +306,7 @@ impl Executor {
             )
             .chain(iter::once(None))
             .collect::<Vec<_>>();
-        let environment = details
+        let environment = spec
             .environment
             .iter()
             .map(String::as_str)
@@ -322,7 +322,7 @@ impl Executor {
 
         let mut builder = ScriptBuilder::new(&bump);
 
-        if *details.loopback {
+        if *spec.loopback {
             // In order to have a loopback network interface, we need to create a netlink socket and
             // configure things with the kernel. This creates the socket.
             builder.push(
@@ -423,8 +423,8 @@ impl Executor {
         // We can't use overlayfs with only a single layer. So we have to diverge based on how many
         // layers there are.
 
-        if details.layers.tail.is_empty() {
-            layer0_path = CString::new(details.layers[0].as_os_str().as_bytes())
+        if spec.layers.tail.is_empty() {
+            layer0_path = CString::new(spec.layers[0].as_os_str().as_bytes())
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
             new_root_path = layer0_path.as_c_str();
@@ -459,7 +459,7 @@ impl Executor {
             // Use overlayfs.
             new_root_path = self.mount_dir.as_c_str();
             let mut options = "lowerdir=".to_string();
-            for (i, layer) in details.layers.iter().rev().enumerate() {
+            for (i, layer) in spec.layers.iter().rev().enumerate() {
                 if i != 0 {
                     options.push(':');
                 }
@@ -494,7 +494,7 @@ impl Executor {
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
-        for device in details.devices.iter() {
+        for device in spec.devices.iter() {
             let (source, target, device_name) = match device {
                 JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
                 JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null"), "/dev/null"),
@@ -526,15 +526,14 @@ impl Executor {
         // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
         // unless they are already mounted. So we have to do this before we unmount the old root.
         // If we do the unmount first, then we'll get permission errors mounting those fs types.
-        child_mount_points = details
+        child_mount_points = spec
             .mounts
             .iter()
             .map(|m| CString::new(m.mount_point.as_str()))
             .collect::<Result<Vec<_>, _>>()
             .map_err(Error::from)
             .map_err(JobError::System)?;
-        for (mount, mount_point_cstr) in iter::zip(details.mounts.iter(), child_mount_points.iter())
-        {
+        for (mount, mount_point_cstr) in iter::zip(spec.mounts.iter(), child_mount_points.iter()) {
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
                     c_str!("proc"),
@@ -767,7 +766,7 @@ mod tests {
             .map(|s| s.to_string())
             .collect::<Vec<_>>();
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobSpec {
+        let spec = JobSpec {
             program,
             arguments: arguments.as_slice(),
             environment: environment.as_slice(),
@@ -777,7 +776,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             inline_limit,
             expected_status,
             expected_stdout,
@@ -795,7 +794,7 @@ mod tests {
         let program = "/usr/bin/python3";
         let arguments = vec!["-c".to_string(), script.to_string()];
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobSpec {
+        let spec = JobSpec {
             program,
             arguments: arguments.as_slice(),
             environment: &[],
@@ -805,7 +804,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             1000,
             expected_status,
             expected_stdout,
@@ -815,7 +814,7 @@ mod tests {
     }
 
     async fn start_and_expect<'a>(
-        details: JobSpec<'a>,
+        spec: JobSpec<'a>,
         inline_limit: u64,
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
@@ -827,7 +826,7 @@ mod tests {
         let start_result = Executor::new(tempfile::tempdir().unwrap().into_path())
             .unwrap()
             .start(
-                &details,
+                &spec,
                 InlineLimit::from(inline_limit),
                 |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                 |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
@@ -1011,7 +1010,7 @@ mod tests {
     #[serial]
     fn execution_error() {
         let layers = &NonEmpty::new(extract_dependencies());
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "a_program_that_does_not_exist",
             arguments: &[],
             environment: &[],
@@ -1023,7 +1022,7 @@ mod tests {
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
                 .unwrap()
-                .start(&details, 0.into(), |_| unreachable!(), |_| unreachable!()),
+                .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
             Err(JobError::Execution(_))
         );
     }
@@ -1081,7 +1080,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_loopback() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/cat",
             arguments: &["/sys/class/net/lo/carrier".to_string()],
             environment: &[],
@@ -1094,7 +1093,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(1),
             JobOutputResult::None,
@@ -1106,7 +1105,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn loopback() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/cat",
             arguments: &["/sys/class/net/lo/carrier".to_string()],
             environment: &[],
@@ -1119,7 +1118,7 @@ mod tests {
             loopback: &true,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1\n")),
@@ -1147,7 +1146,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn close_range() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/ls",
             arguments: &["/proc/self/fd".to_string()],
             environment: &[],
@@ -1160,7 +1159,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")),
@@ -1172,7 +1171,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn one_layer_is_read_only() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/touch",
             arguments: &["/foo".to_string()],
             environment: &[],
@@ -1182,7 +1181,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(1),
             JobOutputResult::None,
@@ -1194,7 +1193,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_in_correct_order() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/cat",
             arguments: &[
                 "/root/file".to_string(),
@@ -1212,7 +1211,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"top\nbottom file\ntop file\n")),
@@ -1224,7 +1223,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_read_only() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/touch",
             arguments: &["/foo".to_string()],
             environment: &[],
@@ -1238,7 +1237,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(1),
             JobOutputResult::None,
@@ -1250,7 +1249,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_full() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1263,7 +1262,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1275,7 +1274,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_full() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1288,7 +1287,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1, 7\n")),
@@ -1300,7 +1299,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_null() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1313,7 +1312,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1325,7 +1324,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_null() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1338,7 +1337,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1, 3\n")),
@@ -1375,7 +1374,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_random() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1388,7 +1387,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1400,7 +1399,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_random() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1413,7 +1412,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1, 8\n")),
@@ -1425,7 +1424,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_tty() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1438,7 +1437,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1450,7 +1449,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_tty() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1463,7 +1462,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"5, 0\n")),
@@ -1475,7 +1474,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_urandom() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1488,7 +1487,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1500,7 +1499,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_urandom() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1513,7 +1512,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1, 9\n")),
@@ -1525,7 +1524,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_dev_zero() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1538,7 +1537,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
@@ -1550,7 +1549,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn dev_zero() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/usr/bin/bash",
             arguments: &[
                 "-c".to_string(),
@@ -1563,7 +1562,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"1, 5\n")),
@@ -1575,7 +1574,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_tmpfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/grep",
             arguments: &["^tmpfs /tmp".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1588,7 +1587,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(1),
             JobOutputResult::None,
@@ -1600,7 +1599,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn tmpfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/awk",
             arguments: &[
                 r#"/^none \/tmp/ { print $1, $2, $3 }"#.to_string(),
@@ -1622,7 +1621,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")),
@@ -1634,7 +1633,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_sysfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/grep",
             arguments: &["^sysfs /sys".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1647,7 +1646,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(1),
             JobOutputResult::None,
@@ -1659,7 +1658,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn sysfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/awk",
             arguments: &[
                 r#"/^none \/sys/ { print $1, $2, $3 }"#.to_string(),
@@ -1681,7 +1680,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")),
@@ -1693,7 +1692,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn no_procfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/ls",
             arguments: &["/proc".to_string()],
             environment: &[],
@@ -1703,7 +1702,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             0,
             JobStatus::Exited(0),
             JobOutputResult::None,
@@ -1715,7 +1714,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn procfs() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/grep",
             arguments: &["proc".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1728,7 +1727,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             100,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(
@@ -1742,7 +1741,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn old_mounts_are_unmounted() {
-        let details = JobSpec {
+        let spec = JobSpec {
             program: "/bin/wc",
             arguments: &["-l".to_string(), "/proc/self/mounts".to_string()],
             environment: &[],
@@ -1755,7 +1754,7 @@ mod tests {
             loopback: &false,
         };
         start_and_expect(
-            details,
+            spec,
             20,
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")),

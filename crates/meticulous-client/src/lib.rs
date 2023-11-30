@@ -99,14 +99,11 @@ fn dispatcher_main(
             DispatcherMessage::AddArtifact(path, digest) => {
                 artifacts.insert(digest, path);
             }
-            DispatcherMessage::AddJob(details, handler) => {
+            DispatcherMessage::AddJob(spec, handler) => {
                 let cjid = next_client_job_id.into();
                 handlers.insert(cjid, handler).assert_is_none();
                 next_client_job_id = next_client_job_id.checked_add(1).unwrap();
-                net::write_message_to_socket(
-                    &mut stream,
-                    ClientToBroker::JobRequest(cjid, details),
-                )?;
+                net::write_message_to_socket(&mut stream, ClientToBroker::JobRequest(cjid, spec))?;
             }
             DispatcherMessage::Stop => {
                 if handlers.is_empty() {
@@ -324,25 +321,25 @@ impl Client {
         Ok(digests)
     }
 
-    fn maybe_add_container_environment(&mut self, details: &mut JobSpec) {
+    fn maybe_add_container_environment(&mut self, spec: &mut JobSpec) {
         for (digests, env) in &self.digest_to_container_env {
             let container_digests: HashSet<_> = digests.iter().collect();
-            let job_digests: HashSet<_> = details.layers.iter().collect();
+            let job_digests: HashSet<_> = spec.layers.iter().collect();
             if job_digests.is_superset(&container_digests) {
-                details.environment.extend(env.iter().cloned());
+                spec.environment.extend(env.iter().cloned());
             }
         }
     }
 
-    pub fn add_job(&mut self, mut details: JobSpec, handler: JobResponseHandler) {
-        self.maybe_add_container_environment(&mut details);
+    pub fn add_job(&mut self, mut spec: JobSpec, handler: JobResponseHandler) {
+        self.maybe_add_container_environment(&mut spec);
 
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
         let _ = self
             .dispatcher_sender
-            .send(DispatcherMessage::AddJob(details, handler));
+            .send(DispatcherMessage::AddJob(spec, handler));
     }
 
     pub fn wait_for_outstanding_jobs(self) -> Result<()> {

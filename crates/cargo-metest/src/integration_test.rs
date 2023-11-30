@@ -125,8 +125,8 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
     stream.write_all(&buf[..]).unwrap();
 }
 
-fn test_path(details: &JobSpec) -> TestPath {
-    let binary = details
+fn test_path(spec: &JobSpec) -> TestPath {
+    let binary = spec
         .program
         .split("/")
         .last()
@@ -135,7 +135,7 @@ fn test_path(details: &JobSpec) -> TestPath {
         .next()
         .unwrap()
         .into();
-    let test_name = details
+    let test_name = spec
         .arguments
         .iter()
         .filter(|a| !a.starts_with("-"))
@@ -154,8 +154,8 @@ fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
 
     while let Ok(msg) = messages.next::<ClientToBroker>() {
         match msg {
-            ClientToBroker::JobRequest(id, details) => {
-                let test_path = test_path(&details);
+            ClientToBroker::JobRequest(id, spec) => {
+                let test_path = test_path(&spec);
                 match state.job_responses.remove(&test_path).unwrap() {
                     JobAction::Respond(res) => {
                         send_message(&stream, &BrokerToClient::JobResponse(id, res))

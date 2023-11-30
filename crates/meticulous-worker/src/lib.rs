@@ -76,27 +76,27 @@ impl DispatcherDeps for DispatcherAdapter {
     fn start_job(
         &mut self,
         jid: JobId,
-        details: &JobSpec,
+        spec: &JobSpec,
         layers: NonEmpty<PathBuf>,
     ) -> JobErrorResult<Pid, String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self
             .log
-            .new(o!("jid" => format!("{jid:?}"), "details" => format!("{details:?}")));
+            .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let details = executor::JobSpec {
-            program: details.program.as_str(),
-            arguments: details.arguments.as_slice(),
-            environment: details.environment.as_slice(),
-            devices: &details.devices,
+        let spec = executor::JobSpec {
+            program: spec.program.as_str(),
+            arguments: spec.arguments.as_slice(),
+            environment: spec.environment.as_slice(),
+            devices: &spec.devices,
             layers: &layers,
-            mounts: details.mounts.as_slice(),
-            loopback: &details.loopback,
+            mounts: spec.mounts.as_slice(),
+            loopback: &spec.loopback,
         };
         let result = self.executor.start(
-            &details,
+            &spec,
             self.inline_limit,
             move |result| {
                 debug!(log, "job stdout"; "result" => ?result);
