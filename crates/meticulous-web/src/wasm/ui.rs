@@ -7,10 +7,9 @@ use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
-    ClientJobId, JobResult, JobSpec,
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 const REFRESH_INTERVAL: Duration = BROKER_STATISTICS_INTERVAL;
@@ -22,18 +21,10 @@ fn merge_job_state_counts(mut a: JobStateCounts, b: &JobStateCounts) -> JobState
     a
 }
 
-struct JobInfo {
-    command: String,
-    result: Option<JobResult>,
-}
-
 pub struct UiHandler<RpcConnectionT> {
     rpc: Option<RpcConnectionT>,
     stats: Option<BrokerStatistics>,
-    next_job_id: u32,
-    command: String,
     freshness: f64,
-    jobs: BTreeMap<ClientJobId, JobInfo>,
 }
 
 struct LineStacker {
@@ -93,40 +84,9 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         Self {
             rpc: Some(rpc),
             stats: None,
-            next_job_id: 0,
-            command: String::new(),
             freshness: 0.0,
-            jobs: BTreeMap::new(),
         }
     }
-
-    /*
-    fn submit_job(&mut self) -> Result<()> {
-        if let Some(rpc) = self.rpc.as_mut() {
-            let mut command_parts = self.command.split(" ").map(|p| p.to_string());
-            let job_id = ClientJobId::from(self.next_job_id);
-            self.jobs.insert(
-                job_id.clone(),
-                JobInfo {
-                    command: self.command.clone(),
-                    result: None,
-                },
-            );
-            rpc.send(ClientToBroker::JobRequest(
-                job_id,
-                JobSpec {
-                    program: command_parts.next().unwrap_or_default(),
-                    arguments: command_parts.collect(),
-                    environment: vec![],
-                    layers: vec![],
-                    mounts: vec![],
-                },
-            ))?;
-            self.next_job_id += 1;
-        }
-        Ok(())
-    }
-    */
 
     fn plot_graph<'a>(
         &self,
@@ -266,9 +226,6 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             if let Some(msg) = rpc.try_recv()? {
                 match msg {
                     BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
-                    BrokerToClient::JobResponse(job_id, result) => {
-                        self.jobs.get_mut(&job_id).unwrap().result = Some(result);
-                    }
                     r => return Err(anyhow!("unexpected response: {r:?}")),
                 }
             }
@@ -283,31 +240,6 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         } else {
             ui.label("loading..");
         }
-
-        /*
-        let mut res = Ok(());
-
-        ui.collapsing("Submit a Job", |ui| {
-            ui.horizontal(|ui| {
-                ui.label("command");
-                ui.add(egui::TextEdit::singleline(&mut self.command));
-                if ui.button("submit").clicked() {
-                    res = self.submit_job();
-                }
-            });
-            ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
-                for (id, job) in &self.jobs {
-                    let result = if let Some(res) = &job.result {
-                        format!("{res:?}")
-                    } else {
-                        "pending".into()
-                    };
-                    ui.label(&format!("{} {}: {}", id, &job.command, result));
-                }
-            });
-        });
-        res?;
-        */
 
         self.handle_rpcs()?;
         Ok(())
