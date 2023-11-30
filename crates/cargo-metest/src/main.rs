@@ -23,7 +23,6 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
-    fs,
     io::{self, ErrorKind},
     iter,
     net::{SocketAddr, ToSocketAddrs as _},
@@ -471,6 +470,24 @@ struct Metadata {
     workspace_root: String,
 }
 
+fn is_not_found_err(err: &anyhow::Error) -> bool {
+    let std_err = err.root_cause().downcast_ref::<std::io::Error>();
+    matches!(std_err, Some(e) if e.kind() == ErrorKind::NotFound)
+}
+
+fn load_config(workspace_root: PathBuf) -> Result<Config> {
+    let fs = Fs::new();
+    let path = workspace_root.join("metest-metadata.toml");
+
+    match fs.read_to_string(&path) {
+        Ok(contents) => {
+            Ok(toml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
+        }
+        Err(err) if is_not_found_err(&err) => Ok(Config::default()),
+        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
+    }
+}
+
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -483,18 +500,7 @@ pub fn main() -> Result<ExitCode> {
     let metadata: Metadata =
         serde_json::from_slice(&metadata_output.stdout).context("parsing cargo metadata")?;
 
-    let mut test_metadata_file = PathBuf::from(&metadata.workspace_root);
-    test_metadata_file.push("metest-metadata.toml");
-    let config = match fs::read_to_string(&test_metadata_file) {
-        Ok(contents) => toml::from_str(&contents).context("parsing {test_metadata_file}")?,
-        Err(err) if err.kind() == ErrorKind::NotFound => {
-            println!("nothing to do");
-            Config::default()
-        }
-        Err(err) => {
-            return Err(err).context("reading {test_metadata_file}");
-        }
-    };
+    let config = load_config(PathBuf::from(&metadata.workspace_root))?;
 
     let client = Mutex::new(Client::new(cli_options.broker, metadata.workspace_root)?);
     let app = MainApp::new(
