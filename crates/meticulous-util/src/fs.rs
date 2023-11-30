@@ -124,6 +124,11 @@ impl Metadata {
     }
 }
 
+fn is_not_found_err(err: &anyhow::Error) -> bool {
+    let std_err = err.root_cause().downcast_ref::<std::io::Error>();
+    matches!(std_err, Some(e) if e.kind() == std::io::ErrorKind::NotFound)
+}
+
 impl Fs {
     pub fn create_dir<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         fs_trampoline!(create_dir, path)
@@ -163,6 +168,14 @@ impl Fs {
 
     pub fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
         fs_trampoline!(read_to_string, path)
+    }
+
+    pub fn read_to_string_if_exists<P: AsRef<Path>>(&self, path: P) -> Result<Option<String>> {
+        match fs_trampoline!(read_to_string, path) {
+            Ok(contents) => Ok(Some(contents)),
+            Err(err) if is_not_found_err(&err) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> Result<ReadDir> {

@@ -23,8 +23,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::IsTerminal as _;
 use std::path::{Path, PathBuf};
 use std::{
-    io::{self, ErrorKind},
-    iter,
+    io, iter,
     net::{SocketAddr, ToSocketAddrs as _},
     process::Command,
     str,
@@ -470,22 +469,17 @@ struct Metadata {
     workspace_root: String,
 }
 
-fn is_not_found_err(err: &anyhow::Error) -> bool {
-    let std_err = err.root_cause().downcast_ref::<std::io::Error>();
-    matches!(std_err, Some(e) if e.kind() == ErrorKind::NotFound)
-}
-
 fn load_config(workspace_root: PathBuf) -> Result<Config> {
     let fs = Fs::new();
     let path = workspace_root.join("metest-metadata.toml");
 
-    match fs.read_to_string(&path) {
-        Ok(contents) => {
-            Ok(toml::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
-        }
-        Err(err) if is_not_found_err(&err) => Ok(Config::default()),
-        Err(err) => Err(err).with_context(|| format!("reading {}", path.display())),
-    }
+    Ok(fs
+        .read_to_string_if_exists(&path)?
+        .map(|c| -> Result<Config> {
+            toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
+        })
+        .transpose()?
+        .unwrap_or_default())
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
