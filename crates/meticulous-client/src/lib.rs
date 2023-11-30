@@ -12,7 +12,7 @@ use meticulous_util::{ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    io::{self, Read},
+    io,
     net::{SocketAddr, TcpStream},
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, SyncSender},
@@ -43,24 +43,15 @@ fn add_artifact(
 ) -> Result<Sha256Digest> {
     let fs = Fs::new();
     let mut hasher = Sha256::new();
-    match path.extension() {
-        Some(ext) if ext == "tar" => {}
-        _ => {
-            return Err(anyhow!(
-                "path \"{}\" does not end in \".tar\"",
-                path.to_string_lossy()
-            ));
-        }
+    if path.extension() != Some("tar".as_ref()) {
+        return Err(anyhow!(
+            "path \"{}\" does not end in \".tar\"",
+            path.display()
+        ));
     }
     let mut f = fs.open_file(&path)?;
-    let mut buf = [0u8; 8192];
-    loop {
-        let n = f.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
+    std::io::copy(&mut f, &mut hasher)?;
+
     let digest = Sha256Digest::new(hasher.finalize().into());
     artifacts.insert(digest.clone(), path);
     Ok(digest)
