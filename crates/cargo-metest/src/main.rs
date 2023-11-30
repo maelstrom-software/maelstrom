@@ -22,10 +22,7 @@ use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
-use serde::{
-    ser::{SerializeMap, Serializer},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     io::{self, IsTerminal as _},
@@ -91,8 +88,9 @@ struct Config {
     broker: BrokerAddr,
 }
 
-#[derive(Default)]
+#[derive(Default, Serialize)]
 struct ConfigOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
     broker: Option<String>,
 }
 
@@ -100,19 +98,6 @@ impl From<&CliOptions> for ConfigOptions {
     fn from(cli: &CliOptions) -> ConfigOptions {
         let broker = cli.broker.clone();
         ConfigOptions { broker }
-    }
-}
-
-impl Serialize for ConfigOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        if let Some(broker) = &self.broker {
-            map.serialize_entry("broker", broker)?;
-        }
-        map.end()
     }
 }
 
