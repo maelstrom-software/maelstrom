@@ -222,6 +222,10 @@ impl Fs {
     pub fn canonicalize<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
         fs_trampoline!(canonicalize, path)
     }
+
+    pub fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
+        path.as_ref().exists()
+    }
 }
 
 pub struct File<'fs> {

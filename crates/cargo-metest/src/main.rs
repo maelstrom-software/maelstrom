@@ -123,14 +123,22 @@ fn collect_environment_vars() -> Vec<String> {
 fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
     let fs = Fs::new();
     let binary = fs.open_file(binary_path)?;
-    let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
 
     let mut tar_path = PathBuf::from(binary_path);
     assert!(tar_path.set_extension("tar"));
 
+    if fs.exists(&tar_path) {
+        let binary_mtime = binary.metadata()?.modified()?;
+        let tar_mtime = fs.metadata(&tar_path)?.modified()?;
+        if binary_mtime < tar_mtime {
+            return Ok(tar_path);
+        }
+    }
+
     let tar_file = fs.create_file(&tar_path)?;
     let mut a = tar::Builder::new(tar_file);
 
+    let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
     a.append_file(binary_path_in_tar, &mut binary.into_inner())?;
     a.finish()?;
 
@@ -139,11 +147,21 @@ fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
 
 fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
     let fs = Fs::new();
-    let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
-    let deps = dep_tree.analyze(binary_path)?;
 
     let mut tar_path = PathBuf::from(binary_path);
     assert!(tar_path.set_extension("deps.tar"));
+
+    if fs.exists(&tar_path) {
+        let binary_mtime = fs.metadata(binary_path)?.modified()?;
+        let tar_mtime = fs.metadata(&tar_path)?.modified()?;
+
+        if binary_mtime < tar_mtime {
+            return Ok(tar_path);
+        }
+    }
+
+    let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
+    let deps = dep_tree.analyze(binary_path)?;
 
     let mut paths = BTreeSet::new();
     if let Some(p) = deps.interpreter {
