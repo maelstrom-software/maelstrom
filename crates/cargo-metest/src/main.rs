@@ -469,7 +469,7 @@ struct Metadata {
     workspace_root: String,
 }
 
-fn load_config(workspace_root: PathBuf) -> Result<Config> {
+fn load_config(workspace_root: &Path) -> Result<Config> {
     let fs = Fs::new();
     let path = workspace_root.join("metest-metadata.toml");
 
@@ -494,9 +494,11 @@ pub fn main() -> Result<ExitCode> {
     let metadata: Metadata =
         serde_json::from_slice(&metadata_output.stdout).context("parsing cargo metadata")?;
 
-    let config = load_config(PathBuf::from(&metadata.workspace_root))?;
+    let workspace_root = PathBuf::from(&metadata.workspace_root);
+    let config = load_config(&workspace_root)?;
 
-    let client = Mutex::new(Client::new(cli_options.broker, metadata.workspace_root)?);
+    let cache_dir = workspace_root.join("target");
+    let client = Mutex::new(Client::new(cli_options.broker, &workspace_root, cache_dir)?);
     let app = MainApp::new(
         client,
         "cargo".into(),

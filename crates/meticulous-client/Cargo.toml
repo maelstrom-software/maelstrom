@@ -5,7 +5,9 @@ edition = "2021"
 
 [dependencies]
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
+directories.workspace = true
 figment.workspace = true
 gethostname.workspace = true
 indicatif.workspace = true
@@ -15,6 +17,9 @@ meticulous-container.workspace = true
 regex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_repr.workspace = true
+serde_with.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
+toml.workspace = true

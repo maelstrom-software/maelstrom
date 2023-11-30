@@ -240,8 +240,10 @@ fn run_app(
     filter: Option<String>,
 ) {
     let tmp_dir = tempdir().unwrap();
+    let tmp_path = tmp_dir.path();
     let broker_address = fake_broker(state);
-    let client = Mutex::new(Client::new(broker_address, tmp_dir.path()).unwrap());
+    let client =
+        Mutex::new(Client::new(broker_address, &tmp_path, tmp_path.join("target")).unwrap());
 
     let mut stderr = vec![];
     let app = MainApp::new(

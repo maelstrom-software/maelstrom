@@ -147,6 +147,13 @@ fn add_artifact(client: &mut Client, layer: &str) -> Result<NonEmpty<Sha256Diges
     })
 }
 
+fn cache_dir() -> PathBuf {
+    directories::BaseDirs::new()
+        .expect("failed to find cache dir")
+        .cache_dir()
+        .join("meticulous")
+}
+
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
@@ -170,7 +177,7 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(config.broker.into_inner(), ".")?;
+    let mut client = Client::new(config.broker.into_inner(), ".", cache_dir())?;
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {
