@@ -9,6 +9,7 @@ cargo_metadata.workspace = true
 clap.workspace = true
 colored.workspace = true
 console.workspace = true
+figment.workspace = true
 indicatif.workspace = true
 lddtree.workspace = true
 meticulous-base.workspace = true

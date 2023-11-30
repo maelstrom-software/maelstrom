@@ -5,76 +5,115 @@ mod visitor;
 use anyhow::{anyhow, Context as _, Result};
 use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use console::Term;
+use figment::{
+    error::Kind,
+    providers::{Env, Format, Serialized, Toml},
+    Figment,
+};
 use indicatif::TermLike;
 use meticulous_base::{
     EnumSet, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
-use meticulous_util::fs::Fs;
-use meticulous_util::process::ExitCode;
+use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
-use serde::Deserialize;
-use std::collections::{BTreeSet, HashMap, HashSet};
-use std::io::IsTerminal as _;
-use std::path::{Path, PathBuf};
+use serde::{
+    ser::{SerializeMap, Serializer},
+    Deserialize, Serialize,
+};
 use std::{
-    io, iter,
-    net::{SocketAddr, ToSocketAddrs as _},
+    collections::{BTreeSet, HashMap, HashSet},
+    io::{self, IsTerminal as _},
+    iter,
+    path::{Path, PathBuf},
     process::Command,
-    str,
+    str::{self, FromStr as _},
     sync::{Arc, Mutex},
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
-
-fn parse_socket_addr(arg: &str) -> io::Result<SocketAddr> {
-    let addrs: Vec<SocketAddr> = arg.to_socket_addrs()?.collect();
-    // It's not clear how we could end up with an empty iterator. We'll assume
-    // that's impossible until proven wrong.
-    Ok(*addrs.first().unwrap())
-}
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser)]
 #[command(version, bin_name = "cargo")]
 struct Cli {
     #[clap(subcommand)]
-    subcommand: Subcommand,
+    subcommand: CliSubcommand,
 }
 
 impl Cli {
-    fn subcommand(self) -> MetestCli {
+    fn subcommand(self) -> CliOptions {
         match self.subcommand {
-            Subcommand::Metest(cmd) => cmd,
+            CliSubcommand::Metest(cmd) => cmd,
         }
     }
 }
 
-#[derive(Debug, clap::Args)]
-struct MetestCli {
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
-    #[arg(value_parser = parse_socket_addr)]
-    broker: SocketAddr,
-    /// Don't output information about the tests being run
-    #[arg(short, long)]
-    quiet: bool,
-    /// Only run tests from the given package
-    #[arg(short, long)]
-    package: Option<String>,
-    /// Only run tests whose names contain the given string
-    filter: Option<String>,
-    /// Configuration file.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/cargo-metest.toml").into_os_string())]
-    config_file: PathBuf,
+#[derive(Debug, Subcommand)]
+enum CliSubcommand {
+    Metest(CliOptions),
 }
 
-#[derive(Debug, clap::Subcommand)]
-enum Subcommand {
-    Metest(MetestCli),
+#[derive(Debug, Args)]
+struct CliOptions {
+    /// Configuration file. Values set in the configuration file will be overridden by values set
+    /// through environment variables and values set on the command line. If not set, the file
+    /// .config/cargo-metest.toml in the workspace root will be used, if it exists.
+    #[arg(short = 'c', long)]
+    config_file: Option<PathBuf>,
+
+    /// Print configuration and exit
+    #[arg(short = 'P', long)]
+    print_config: bool,
+
+    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
+    #[arg(short = 'b', long)]
+    broker: Option<String>,
+
+    /// Don't output information about the tests being run
+    #[arg(short = 'q', long)]
+    quiet: bool,
+
+    /// Only run tests from the given package
+    #[arg(short = 'p', long)]
+    package: Option<String>,
+
+    /// Only run tests whose names contain the given string
+    filter: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Config {
+    broker: BrokerAddr,
+}
+
+#[derive(Default)]
+struct ConfigOptions {
+    broker: Option<String>,
+}
+
+impl From<&CliOptions> for ConfigOptions {
+    fn from(cli: &CliOptions) -> ConfigOptions {
+        let broker = cli.broker.clone();
+        ConfigOptions { broker }
+    }
+}
+
+impl Serialize for ConfigOptions {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(broker) = &self.broker {
+            map.serialize_entry("broker", broker)?;
+        }
+        map.end()
+    }
 }
 
 struct JobQueuer<StdErr> {
@@ -85,7 +124,7 @@ struct JobQueuer<StdErr> {
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: u64,
-    config: Config,
+    test_metadata: TestMetadata,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
@@ -95,7 +134,7 @@ impl<StdErr> JobQueuer<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
-        config: Config,
+        test_metadata: TestMetadata,
     ) -> Self {
         Self {
             cargo,
@@ -105,7 +144,7 @@ impl<StdErr> JobQueuer<StdErr> {
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: 0,
-            config,
+            test_metadata,
         }
     }
 }
@@ -277,7 +316,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
             let mut layers = vec![];
-            for layer in self.config.get_layers_for_test(package_name, &case) {
+            for layer in self.test_metadata.get_layers_for_test(package_name, &case) {
                 let mut client = client.lock().unwrap();
                 if layer.starts_with("docker:") {
                     let pkg = layer.split(':').nth(1).unwrap();
@@ -289,7 +328,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             }
 
             if self
-                .config
+                .test_metadata
                 .include_shared_libraries_for_test(package_name, &case)
             {
                 layers.push(deps_artifact.clone());
@@ -308,9 +347,10 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 &case,
                 &binary,
                 NonEmpty::try_from(layers).unwrap(),
-                self.config.get_devices_for_test(package_name, &case),
-                self.config.get_mounts_for_test(package_name, &case),
-                self.config.get_loopback_for_test(package_name, &case),
+                self.test_metadata.get_devices_for_test(package_name, &case),
+                self.test_metadata.get_mounts_for_test(package_name, &case),
+                self.test_metadata
+                    .get_loopback_for_test(package_name, &case),
             );
         }
 
@@ -363,11 +403,11 @@ impl<StdErr> MainApp<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
-        config: Config,
+        test_metadata: TestMetadata,
     ) -> Self {
         Self {
             client,
-            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, config),
+            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, test_metadata),
         }
     }
 }
@@ -421,12 +461,12 @@ struct TestGroup {
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct Config {
+struct TestMetadata {
     #[serde(default)]
     groups: Vec<TestGroup>,
 }
 
-impl Config {
+impl TestMetadata {
     fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
         self.groups
             .iter()
@@ -483,17 +523,17 @@ impl Config {
 }
 
 #[derive(Deserialize)]
-struct Metadata {
+struct CargoMetadata {
     workspace_root: String,
 }
 
-fn load_config(workspace_root: &Path) -> Result<Config> {
+fn load_test_metadata(workspace_root: &Path) -> Result<TestMetadata> {
     let fs = Fs::new();
     let path = workspace_root.join("metest-metadata.toml");
 
     Ok(fs
         .read_to_string_if_exists(&path)?
-        .map(|c| -> Result<Config> {
+        .map(|c| -> Result<TestMetadata> {
             toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
         })
         .transpose()?
@@ -505,18 +545,54 @@ fn load_config(workspace_root: &Path) -> Result<Config> {
 pub fn main() -> Result<ExitCode> {
     let cli_options = Cli::parse().subcommand();
 
-    let metadata_output = Command::new("cargo")
+    let cargo_metadata = Command::new("cargo")
         .args(["metadata", "--format-version=1"])
         .output()
         .context("getting cargo metadata")?;
-    let metadata: Metadata =
-        serde_json::from_slice(&metadata_output.stdout).context("parsing cargo metadata")?;
+    let cargo_metadata: CargoMetadata =
+        serde_json::from_slice(&cargo_metadata.stdout).context("parsing cargo metadata")?;
 
-    let workspace_root = PathBuf::from(&metadata.workspace_root);
-    let config = load_config(&workspace_root)?;
+    let config_file = match &cli_options.config_file {
+        Some(path) => {
+            if !path.exists() {
+                eprintln!("warning: config file {} not found", path.to_string_lossy());
+            }
+            path.clone()
+        }
+        None => {
+            let mut path = PathBuf::from_str(&cargo_metadata.workspace_root).unwrap();
+            path.push(".config");
+            path.push("cargo-metest.toml");
+            path
+        }
+    };
+
+    let config: Config = Figment::new()
+        .merge(Serialized::defaults(ConfigOptions::default()))
+        .merge(Toml::file(config_file))
+        .merge(Env::prefixed("CARGO_METEST_"))
+        .merge(Serialized::globals(ConfigOptions::from(&cli_options)))
+        .extract()
+        .map_err(|mut e| {
+            if let Kind::MissingField(field) = &e.kind {
+                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
+                e
+            } else {
+                e
+            }
+        })
+        .context("reading configuration")?;
+
+    if cli_options.print_config {
+        println!("{config:#?}");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let workspace_root = PathBuf::from(&cargo_metadata.workspace_root);
+    let test_metadata = load_test_metadata(&workspace_root)?;
 
     let cache_dir = workspace_root.join("target");
-    let client = Mutex::new(Client::new(cli_options.broker, &workspace_root, cache_dir)?);
+    let client = Mutex::new(Client::new(config.broker, workspace_root, cache_dir)?);
     let app = MainApp::new(
         client,
         "cargo".into(),
@@ -524,7 +600,7 @@ pub fn main() -> Result<ExitCode> {
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
-        config,
+        test_metadata,
     );
 
     let stdout_tty = std::io::stdout().is_terminal();

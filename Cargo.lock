@@ -659,6 +659,7 @@ dependencies = [
  "colored",
  "console",
  "enum-map",
+ "figment",
  "indicatif",
  "lddtree",
  "meticulous-base",

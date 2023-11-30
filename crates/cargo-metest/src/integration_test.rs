@@ -1,4 +1,4 @@
-use crate::{Config, MainApp};
+use crate::{MainApp, TestMetadata};
 use assert_matches::assert_matches;
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
@@ -8,12 +8,12 @@ use meticulous_base::{
     JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
 use meticulous_client::Client;
-use meticulous_util::fs::Fs;
+use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{self, Read as _, Write as _};
-use std::net::{Ipv6Addr, SocketAddr, SocketAddrV6, TcpListener, TcpStream};
+use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::sync::Mutex;
@@ -184,10 +184,10 @@ struct BrokerState {
     job_states: JobStateCounts,
 }
 
-fn fake_broker(state: BrokerState) -> SocketAddr {
+fn fake_broker(state: BrokerState) -> BrokerAddr {
     let broker_listener =
         TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
-    let broker_address = broker_listener.local_addr().unwrap();
+    let broker_address = BrokerAddr::new(broker_listener.local_addr().unwrap());
     std::thread::spawn(move || fake_broker_main(broker_listener, state));
     broker_address
 }
@@ -253,7 +253,7 @@ fn run_app(
         filter,
         &mut stderr,
         false,
-        Config::default(),
+        TestMetadata::default(),
     );
     app.run(stdout_tty, quiet, term.clone())
         .unwrap_or_else(|e| {

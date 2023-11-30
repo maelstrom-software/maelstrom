@@ -13,6 +13,10 @@ use std::{
 pub struct BrokerAddr(SocketAddr);
 
 impl BrokerAddr {
+    pub fn new(inner: SocketAddr) -> Self {
+        BrokerAddr(inner)
+    }
+
     pub fn inner(&self) -> &SocketAddr {
         &self.0
     }

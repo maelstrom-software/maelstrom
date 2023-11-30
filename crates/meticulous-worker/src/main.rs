@@ -201,12 +201,11 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
 fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
-    let print_config = cli_options.print_config;
     let config: Config = Figment::new()
         .merge(Serialized::defaults(CliOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_WORKER_"))
-        .merge(Serialized::globals(cli_options))
+        .merge(Serialized::globals(&cli_options))
         .extract()
         .map_err(|mut e| {
             if let Kind::MissingField(field) = &e.kind {
@@ -217,7 +216,7 @@ fn main() -> Result<()> {
             }
         })
         .context("reading configuration")?;
-    if print_config {
+    if cli_options.print_config {
         println!("{config:#?}");
         return Ok(());
     }

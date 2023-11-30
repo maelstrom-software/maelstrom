@@ -9,29 +9,28 @@ use meticulous_base::{
     ClientJobId, JobResult, JobSpec, NonEmpty, Sha256Digest,
 };
 use meticulous_container::ContainerImageDepot;
-use meticulous_util::{ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
+use meticulous_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest as _, Sha256};
-use std::io::SeekFrom;
-use std::time::SystemTime;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    io::{self, Read as _, Seek as _, Write as _},
-    net::{SocketAddr, TcpStream},
+    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
+    net::TcpStream,
     path::{Path, PathBuf},
     sync::mpsc::{self, Receiver, SyncSender},
     thread::{self, JoinHandle},
+    time::SystemTime,
 };
 
 fn artifact_pusher_main(
-    broker_addr: SocketAddr,
+    broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
 ) -> Result<()> {
     let fs = Fs::new();
-    let mut stream = TcpStream::connect(broker_addr)?;
+    let mut stream = TcpStream::connect(broker_addr.inner())?;
     let file = fs.open_file(path)?;
     let size = file.metadata()?.len();
     let mut file = FixedSizeReader::new(file, size);
@@ -70,7 +69,7 @@ enum DispatcherMessage {
 fn dispatcher_main(
     receiver: Receiver<DispatcherMessage>,
     mut stream: TcpStream,
-    broker_addr: SocketAddr,
+    broker_addr: BrokerAddr,
 ) -> Result<()> {
     let mut stop_when_all_completed = false;
     let mut next_client_job_id = 0u32;
@@ -251,11 +250,11 @@ pub struct Client {
 
 impl Client {
     pub fn new(
-        broker_addr: SocketAddr,
+        broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut stream = TcpStream::connect(broker_addr)?;
+        let mut stream = TcpStream::connect(broker_addr.inner())?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
