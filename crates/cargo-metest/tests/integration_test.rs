@@ -1,5 +1,5 @@
-use crate::{config::Quiet, MainApp, TestMetadata};
 use assert_matches::assert_matches;
+use cargo_metest::{config::Quiet, MainApp, TestMetadata};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{

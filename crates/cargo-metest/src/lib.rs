@@ -456,6 +456,3 @@ impl TestMetadata {
             .unwrap_or(false)
     }
 }
-
-#[cfg(test)]
-mod integration_test;
