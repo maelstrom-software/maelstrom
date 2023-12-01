@@ -14,11 +14,9 @@ use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
 };
-use serde::{
-    ser::{SerializeMap, Serializer},
-    Deserialize, Serialize,
-};
+use serde::{Deserialize, Serialize};
 use serde_json::{self, Deserializer};
+use serde_with::skip_serializing_none;
 use std::{
     io::{self, Read, Write as _},
     path::{Path, PathBuf},
@@ -51,18 +49,11 @@ struct CliOptions {
     broker: Option<String>,
 }
 
-impl Serialize for CliOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        // Don't serialize 'config_file'.
-        // Don't serialize 'print_config'.
-        if let Some(broker) = &self.broker {
-            map.serialize_entry("broker", broker)?;
+impl CliOptions {
+    fn to_config_options(&self) -> ConfigOptions {
+        ConfigOptions {
+            broker: self.broker.clone(),
         }
-        map.end()
     }
 }
 
@@ -71,6 +62,12 @@ impl Serialize for CliOptions {
 pub struct Config {
     /// Socket address of broker.
     pub broker: BrokerAddr,
+}
+
+#[skip_serializing_none]
+#[derive(Default, Serialize)]
+pub struct ConfigOptions {
+    pub broker: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -158,9 +155,10 @@ fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
     let config: Config = Figment::new()
+        .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_CLIENT_"))
-        .merge(Serialized::globals(cli_options))
+        .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
             if let Kind::MissingField(field) = &e.kind {
