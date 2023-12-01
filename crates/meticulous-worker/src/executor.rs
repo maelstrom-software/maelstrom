@@ -1349,6 +1349,31 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn dev_null_write() {
+        let spec = JobSpec {
+            program: "/usr/bin/bash",
+            arguments: &[
+                "-c".to_string(),
+                "echo foo > /dev/null".to_string(),
+            ],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::only(JobDevice::Null),
+            mounts: &[],
+            loopback: &false,
+        };
+        start_and_expect(
+            spec,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::None,
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn no_dev_random() {
         let details = JobSpec {
             program: "/usr/bin/bash",
