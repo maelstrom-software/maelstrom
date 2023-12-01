@@ -86,6 +86,15 @@ struct CliOptions {
     filter: Option<String>,
 }
 
+impl CliOptions {
+    fn to_config_options(&self) -> ConfigOptions {
+        let broker = self.broker.clone();
+        let quiet = if self.quiet { Some(true) } else { None };
+        ConfigOptions { broker, quiet }
+    }
+}
+
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -98,14 +107,6 @@ struct Config {
 struct ConfigOptions {
     broker: Option<String>,
     quiet: Option<bool>,
-}
-
-impl From<&CliOptions> for ConfigOptions {
-    fn from(cli: &CliOptions) -> ConfigOptions {
-        let broker = cli.broker.clone();
-        let quiet = if cli.quiet { Some(true) } else { None };
-        ConfigOptions { broker, quiet }
-    }
 }
 
 impl Default for ConfigOptions {
@@ -572,7 +573,7 @@ pub fn main() -> Result<ExitCode> {
         .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(config_file))
         .merge(Env::prefixed("CARGO_METEST_"))
-        .merge(Serialized::globals(ConfigOptions::from(&cli_options)))
+        .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
             if let Kind::MissingField(field) = &e.kind {
