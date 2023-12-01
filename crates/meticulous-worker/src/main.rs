@@ -6,7 +6,7 @@ use figment::{
     Figment,
 };
 use meticulous_util::{config::LogLevel, fs::Fs};
-use meticulous_worker::config::Config;
+use meticulous_worker::config::{Config, ConfigOptions};
 use nix::{
     errno::Errno,
     sys::{
@@ -14,10 +14,6 @@ use nix::{
         wait::{self, WaitStatus},
     },
     unistd::{self, Pid},
-};
-use serde::{
-    ser::{SerializeMap, Serializer},
-    Serialize,
 };
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
@@ -72,48 +68,16 @@ struct CliOptions {
     log_level: Option<LogLevel>,
 }
 
-impl Default for CliOptions {
-    fn default() -> Self {
-        CliOptions {
-            config_file: "".into(),
-            print_config: false,
-            broker: None,
-            slots: Some(num_cpus::get().try_into().unwrap()),
-            cache_root: Some(".cache/meticulous-worker".into()),
-            cache_bytes_used_target: Some(1_000_000_000),
-            inline_limit: Some(1_000_000),
-            log_level: Some(LogLevel::Info),
+impl CliOptions {
+    fn to_config_options(&self) -> ConfigOptions {
+        ConfigOptions {
+            broker: self.broker.clone(),
+            slots: self.slots,
+            cache_root: self.cache_root.clone(),
+            cache_bytes_used_target: self.cache_bytes_used_target,
+            inline_limit: self.inline_limit,
+            log_level: self.log_level,
         }
-    }
-}
-
-impl Serialize for CliOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        // Don't serialize 'config_file'.
-        // Don't serialize 'print_config'.
-        if let Some(broker) = &self.broker {
-            map.serialize_entry("broker", broker)?;
-        }
-        if let Some(slots) = &self.slots {
-            map.serialize_entry("slots", slots)?;
-        }
-        if let Some(cache_root) = &self.cache_root {
-            map.serialize_entry("cache_root", cache_root)?;
-        }
-        if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
-            map.serialize_entry("cache_bytes_used_target", cache_bytes_used_target)?;
-        }
-        if let Some(inline_limit) = &self.inline_limit {
-            map.serialize_entry("inline_limit", inline_limit)?;
-        }
-        if let Some(log_level) = &self.log_level {
-            map.serialize_entry("log_level", log_level)?;
-        }
-        map.end()
     }
 }
 
@@ -202,10 +166,10 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
     let config: Config = Figment::new()
-        .merge(Serialized::defaults(CliOptions::default()))
+        .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_WORKER_"))
-        .merge(Serialized::globals(&cli_options))
+        .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
             if let Kind::MissingField(field) = &e.kind {

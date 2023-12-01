@@ -91,7 +91,7 @@ impl Debug for CacheBytesUsedTarget {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ValueEnum)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
 #[clap(rename_all = "kebab_case")]
 #[serde(rename_all = "kebab-case")]
 pub enum LogLevel {

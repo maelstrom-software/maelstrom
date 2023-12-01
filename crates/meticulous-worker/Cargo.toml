@@ -22,6 +22,7 @@ nix.workspace = true
 num_cpus.workspace = true
 rand.workspace = true
 serde.workspace = true
+serde_with.workspace = true
 sha2.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
