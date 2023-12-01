@@ -1,5 +1,8 @@
 use anyhow::{Context as _, Result};
-use cargo_metest::{Config, ConfigOptions, MainApp, TestMetadata};
+use cargo_metest::{
+    config::{Config, ConfigOptions},
+    MainApp, TestMetadata,
+};
 use clap::{Args, Parser, Subcommand};
 use console::Term;
 use figment::{

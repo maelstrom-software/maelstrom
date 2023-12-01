@@ -7,13 +7,12 @@ use meticulous_base::{
     EnumSet, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty, Sha256Digest,
 };
 use meticulous_client::Client;
-use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
+use meticulous_util::{fs::Fs, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
-use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
+use serde::Deserialize;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     io, iter,
@@ -27,29 +26,6 @@ pub mod cargo;
 pub mod config;
 pub mod progress;
 pub mod visitor;
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Config {
-    pub broker: BrokerAddr,
-    pub quiet: Quiet,
-}
-
-#[skip_serializing_none]
-#[derive(Serialize)]
-pub struct ConfigOptions {
-    pub broker: Option<String>,
-    pub quiet: Option<bool>,
-}
-
-impl Default for ConfigOptions {
-    fn default() -> Self {
-        ConfigOptions {
-            broker: None,
-            quiet: Some(false),
-        }
-    }
-}
 
 struct JobQueuer<StdErr> {
     cargo: String,
