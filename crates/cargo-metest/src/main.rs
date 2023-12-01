@@ -87,6 +87,7 @@ struct CliOptions {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Config {
     broker: BrokerAddr,
     quiet: Quiet,
