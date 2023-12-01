@@ -110,7 +110,7 @@ impl From<&CliOptions> for ConfigOptions {
 
 impl Default for ConfigOptions {
     fn default() -> Self {
-        ConfigOptions  {
+        ConfigOptions {
             broker: None,
             quiet: Some(false),
         }
