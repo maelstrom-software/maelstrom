@@ -1,4 +1,4 @@
-use crate::{MainApp, TestMetadata};
+use crate::{config::Quiet, MainApp, TestMetadata};
 use assert_matches::assert_matches;
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
@@ -235,7 +235,7 @@ fn run_app(
     state: BrokerState,
     cargo: String,
     stdout_tty: bool,
-    quiet: bool,
+    quiet: Quiet,
     package: Option<String>,
     filter: Option<String>,
 ) {
@@ -266,7 +266,7 @@ fn run_app(
 
 fn run_all_tests_sync(
     fake_tests: FakeTests,
-    quiet: bool,
+    quiet: Quiet,
     package: Option<String>,
     filter: Option<String>,
 ) -> String {
@@ -300,7 +300,7 @@ fn no_tests_all_tests_sync() {
         }],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false, None, None),
+        run_all_tests_sync(fake_tests, false.into(), None, None),
         "\
         all jobs completed\n\
         \n\
@@ -332,7 +332,7 @@ fn two_tests_all_tests_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false, None, None),
+        run_all_tests_sync(fake_tests, false.into(), None, None),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -373,7 +373,7 @@ fn three_tests_filtered_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false, None, Some("test_it".into())),
+        run_all_tests_sync(fake_tests, false.into(), None, Some("test_it".into())),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -414,7 +414,7 @@ fn three_tests_single_package_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false, Some("foo".into()), None),
+        run_all_tests_sync(fake_tests, false.into(), Some("foo".into()), None),
         "\
         foo test_it.....................................OK\n\
         all jobs completed\n\
@@ -462,7 +462,7 @@ fn three_tests_single_package_filtered_sync() {
     assert_eq!(
         run_all_tests_sync(
             fake_tests,
-            false,
+            false.into(),
             Some("foo".into()),
             Some("test_it".into())
         ),
@@ -506,7 +506,7 @@ fn ignored_test_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false, None, None),
+        run_all_tests_sync(fake_tests, false.into(), None, None),
         "\
         bar test_it.....................................OK\n\
         baz test_it.....................................OK\n\
@@ -543,7 +543,7 @@ fn two_tests_all_tests_sync_quiet() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, true, None, None),
+        run_all_tests_sync(fake_tests, true.into(), None, None),
         "\
         all jobs completed\n\
         \n\
@@ -571,7 +571,15 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
 
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    run_app(term.clone(), state, cargo, false, false, None, None);
+    run_app(
+        term.clone(),
+        state,
+        cargo,
+        false,
+        Quiet::from(false),
+        None,
+        None,
+    );
 
     term.contents()
 }
@@ -617,7 +625,7 @@ fn failed_tests() {
 fn run_in_progress_test(
     fake_tests: FakeTests,
     job_states: JobStateCounts,
-    quiet: bool,
+    quiet: Quiet,
     expected_output: &str,
 ) {
     let tmp_dir = tempdir().unwrap();
@@ -685,7 +693,7 @@ fn waiting_for_artifacts() {
     run_in_progress_test(
         fake_tests,
         state,
-        false,
+        false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
         ------------------------ 0/2 pending\n\
@@ -724,7 +732,7 @@ fn pending() {
     run_in_progress_test(
         fake_tests,
         state,
-        false,
+        false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -763,7 +771,7 @@ fn running() {
     run_in_progress_test(
         fake_tests,
         state,
-        false,
+        false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
         ######################## 2/2 pending\n\
@@ -802,7 +810,7 @@ fn complete() {
     run_in_progress_test(
         fake_tests,
         state,
-        false,
+        false.into(),
         "\
         foo test_it.....................................OK\n\
         ######################## 2/2 waiting for artifacts\n\
@@ -842,7 +850,7 @@ fn complete_quiet() {
     run_in_progress_test(
         fake_tests,
         state,
-        true,
+        true.into(),
         "#####################-------------------- 1/2 jobs",
     );
 }

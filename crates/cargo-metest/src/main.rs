@@ -1,4 +1,5 @@
 mod cargo;
+mod config;
 mod progress;
 mod visitor;
 
@@ -6,6 +7,7 @@ use anyhow::{anyhow, Context as _, Result};
 use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use clap::{Args, Parser, Subcommand};
+use config::Quiet;
 use console::Term;
 use figment::{
     error::Kind,
@@ -86,18 +88,32 @@ struct CliOptions {
 #[derive(Debug, Deserialize)]
 struct Config {
     broker: BrokerAddr,
+    quiet: Quiet,
 }
 
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 struct ConfigOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     broker: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    quiet: Option<bool>,
 }
 
 impl From<&CliOptions> for ConfigOptions {
     fn from(cli: &CliOptions) -> ConfigOptions {
         let broker = cli.broker.clone();
-        ConfigOptions { broker }
+        let quiet = if cli.quiet { Some(true) } else { None };
+        ConfigOptions { broker, quiet }
+    }
+}
+
+impl Default for ConfigOptions {
+    fn default() -> Self {
+        ConfigOptions  {
+            broker: None,
+            quiet: Some(false),
+        }
     }
 }
 
@@ -420,11 +436,11 @@ impl<StdErr: io::Write> MainApp<StdErr> {
         Ok(tracker.exit_code())
     }
 
-    fn run<Term>(self, stdout_tty: bool, quiet: bool, term: Term) -> Result<ExitCode>
+    fn run<Term>(self, stdout_tty: bool, quiet: Quiet, term: Term) -> Result<ExitCode>
     where
         Term: TermLike + Clone + Send + Sync + 'static,
     {
-        match (stdout_tty, quiet) {
+        match (stdout_tty, quiet.into_inner()) {
             (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term)?),
             (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term)?),
             (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term)?),
@@ -589,7 +605,7 @@ pub fn main() -> Result<ExitCode> {
     );
 
     let stdout_tty = std::io::stdout().is_terminal();
-    app.run(stdout_tty, cli_options.quiet, Term::buffered_stdout())
+    app.run(stdout_tty, config.quiet, Term::buffered_stdout())
 }
 
 #[test]
