@@ -1,7 +1,11 @@
 use anyhow::Result;
 use meticulous_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
-use serde::Deserialize;
-use std::fmt::{self, Debug, Formatter};
+use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
+use std::{
+    fmt::{self, Debug, Formatter},
+    path::PathBuf,
+};
 
 #[derive(Deserialize)]
 #[serde(from = "u16")]
@@ -73,4 +77,26 @@ pub struct Config {
 
     /// Minimum log level to output.
     pub log_level: LogLevel,
+}
+
+#[skip_serializing_none]
+#[derive(Serialize)]
+pub struct ConfigOptions {
+    pub port: Option<u16>,
+    pub http_port: Option<u16>,
+    pub cache_root: Option<PathBuf>,
+    pub cache_bytes_used_target: Option<u64>,
+    pub log_level: Option<LogLevel>,
+}
+
+impl Default for ConfigOptions {
+    fn default() -> Self {
+        ConfigOptions {
+            port: Some(0),
+            http_port: Some(0),
+            cache_root: Some(".cache/meticulous-broker".into()),
+            cache_bytes_used_target: Some(1_000_000_000),
+            log_level: Some(LogLevel::Info),
+        }
+    }
 }

@@ -14,6 +14,7 @@ hyper.workspace = true
 meticulous-base.workspace = true
 meticulous-util.workspace = true
 serde.workspace = true
+serde_with.workspace = true
 tar.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }

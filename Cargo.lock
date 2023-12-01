@@ -2373,6 +2373,7 @@ dependencies = [
  "meticulous-test",
  "meticulous-util",
  "serde",
+ "serde_with",
  "slog",
  "slog-async",
  "slog-term",

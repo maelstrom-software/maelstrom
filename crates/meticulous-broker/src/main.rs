@@ -5,12 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_broker::config::Config;
+use meticulous_broker::config::{Config, ConfigOptions};
 use meticulous_util::config::LogLevel;
-use serde::{
-    ser::{SerializeMap, Serializer},
-    Serialize,
-};
 use slog::{info, o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
@@ -78,30 +74,15 @@ impl Default for CliOptions {
     }
 }
 
-impl Serialize for CliOptions {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut map = serializer.serialize_map(None)?;
-        // Don't serialize 'config_file'.
-        // Don't serialize 'print_config'.
-        if let Some(port) = &self.port {
-            map.serialize_entry("port", port)?;
+impl CliOptions {
+    fn to_config_options(&self) -> ConfigOptions {
+        ConfigOptions {
+            port: self.port,
+            http_port: self.http_port,
+            cache_root: self.cache_root.clone(),
+            cache_bytes_used_target: self.cache_bytes_used_target,
+            log_level: self.log_level,
         }
-        if let Some(http_port) = &self.http_port {
-            map.serialize_entry("http_port", http_port)?;
-        }
-        if let Some(cache_root) = &self.cache_root {
-            map.serialize_entry("cache_root", cache_root)?;
-        }
-        if let Some(cache_bytes_used_target) = &self.cache_bytes_used_target {
-            map.serialize_entry("cache_bytes_used_target", cache_bytes_used_target)?;
-        }
-        if let Some(log_level) = &self.log_level {
-            map.serialize_entry("log_level", log_level)?;
-        }
-        map.end()
     }
 }
 
@@ -109,10 +90,10 @@ fn main() -> Result<()> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
     let config: Config = Figment::new()
-        .merge(Serialized::defaults(CliOptions::default()))
+        .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
         .merge(Env::prefixed("METICULOUS_BROKER_"))
-        .merge(Serialized::globals(cli_options))
+        .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
             if let Kind::MissingField(field) = &e.kind {
