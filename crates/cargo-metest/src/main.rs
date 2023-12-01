@@ -25,6 +25,7 @@ use progress::{
     QuietProgressBar,
 };
 use serde::{Deserialize, Serialize};
+use serde_with::skip_serializing_none;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
     io::{self, IsTerminal as _},
@@ -91,12 +92,10 @@ struct Config {
     quiet: Quiet,
 }
 
+#[skip_serializing_none]
 #[derive(Serialize)]
 struct ConfigOptions {
-    #[serde(skip_serializing_if = "Option::is_none")]
     broker: Option<String>,
-
-    #[serde(skip_serializing_if = "Option::is_none")]
     quiet: Option<bool>,
 }
 
