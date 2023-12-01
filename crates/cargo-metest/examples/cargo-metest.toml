@@ -1,0 +1,26 @@
+# Example config for cargo metest.
+#
+# Save this as <workspace-root>/.cache/cargo-metest.toml or wherever you
+# specify the config file using the --config-file or -c option.
+
+# The host and port of the broker.
+#
+# Can also be specified via the `--broker` or `-b` command-line options, or via
+# the CARGO_METEST_BROKER environment variable.
+#
+# There is no default. This option must be specified.
+#
+# Examples:
+# broker = "localhost:1234"
+# broker = "127.0.0.1:1234"
+broker = "[::1]:1234"
+
+# Whether the output should be "quiet". If this is true, then only a single
+# status bar will be output.
+#
+# Can also be specified via the `--quiet` or `-a` command-line options, or via
+# the CARGO_METEST_QUIET environment variable.
+#
+# Default: false
+# Examples:
+# quiet = true
