@@ -91,7 +91,7 @@ pub fn main() -> Result<ExitCode> {
     let config_file = match &cli_options.config_file {
         Some(path) => {
             if !path.exists() {
-                eprintln!("warning: config file {} not found", path.to_string_lossy());
+                eprintln!("warning: config file {} not found", path.display());
             }
             path.clone()
         }
