@@ -76,17 +76,16 @@ impl TestMetadata {
             .next()
             .unwrap_or(false)
     }
-}
 
-pub fn load_test_metadata(workspace_root: &Path) -> Result<TestMetadata> {
-    let fs = Fs::new();
-    let path = workspace_root.join("metest-metadata.toml");
+    pub fn load(workspace_root: &Path) -> Result<TestMetadata> {
+        let path = workspace_root.join("metest-metadata.toml");
 
-    Ok(fs
-        .read_to_string_if_exists(&path)?
-        .map(|c| -> Result<TestMetadata> {
-            toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
-        })
-        .transpose()?
-        .unwrap_or_default())
+        Ok(Fs::new()
+            .read_to_string_if_exists(&path)?
+            .map(|c| -> Result<TestMetadata> {
+                toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
+            })
+            .transpose()?
+            .unwrap_or_default())
+    }
 }
