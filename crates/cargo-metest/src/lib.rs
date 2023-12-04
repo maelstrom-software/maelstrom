@@ -6,7 +6,7 @@ use indicatif::TermLike;
 use metadata::TestMetadata;
 use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::Client;
-use meticulous_util::{fs::Fs, process::ExitCode};
+use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
@@ -307,14 +307,16 @@ pub struct MainApp<StdErr> {
 
 impl<StdErr> MainApp<StdErr> {
     pub fn new(
-        client: Mutex<Client>,
         cargo: String,
         package: Option<String>,
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
+        broker_addr: BrokerAddr,
     ) -> Result<Self> {
+        let cache_dir = workspace_root.as_ref().join("target");
+        let client = Mutex::new(Client::new(broker_addr, workspace_root, cache_dir)?);
         let test_metadata = metadata::load_test_metadata(workspace_root.as_ref())?;
         Ok(Self {
             client,

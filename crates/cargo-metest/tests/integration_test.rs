@@ -7,7 +7,6 @@ use meticulous_base::{
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
-use meticulous_client::Client;
 use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -16,7 +15,6 @@ use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::{tempdir, TempDir};
 
@@ -240,20 +238,16 @@ fn run_app(
     filter: Option<String>,
 ) {
     let tmp_dir = tempdir().unwrap();
-    let tmp_path = tmp_dir.path();
-    let broker_address = fake_broker(state);
-    let client =
-        Mutex::new(Client::new(broker_address, &tmp_path, tmp_path.join("target")).unwrap());
 
     let mut stderr = vec![];
     let app = MainApp::new(
-        client,
         cargo,
         package,
         filter,
         &mut stderr,
         false,
-        &tmp_path,
+        &tmp_dir,
+        fake_broker(state),
     )
     .unwrap();
     app.run(stdout_tty, quiet, term.clone())

@@ -10,7 +10,6 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use meticulous_client::Client;
 use meticulous_util::process::ExitCode;
 use serde::Deserialize;
 use std::{
@@ -18,7 +17,6 @@ use std::{
     path::PathBuf,
     process::Command,
     str::{self, FromStr as _},
-    sync::Mutex,
 };
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
@@ -133,20 +131,14 @@ pub fn main() -> Result<ExitCode> {
 
     let workspace_root = PathBuf::from(&cargo_metadata.workspace_root);
 
-    let cache_dir = workspace_root.join("target");
-    let client = Mutex::new(Client::new(
-        config.broker,
-        workspace_root.clone(),
-        cache_dir,
-    )?);
     let app = MainApp::new(
-        client,
         "cargo".into(),
         cli_options.package,
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
         &workspace_root,
+        config.broker,
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
