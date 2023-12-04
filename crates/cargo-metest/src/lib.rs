@@ -317,7 +317,7 @@ impl<StdErr> MainApp<StdErr> {
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(broker_addr, workspace_root, cache_dir)?);
-        let test_metadata = TestMetadata::load(workspace_root.as_ref())?;
+        let test_metadata = TestMetadata::load(workspace_root)?;
         Ok(Self {
             client,
             queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, test_metadata),

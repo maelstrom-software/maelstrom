@@ -77,8 +77,8 @@ impl TestMetadata {
             .unwrap_or(false)
     }
 
-    pub fn load(workspace_root: &Path) -> Result<TestMetadata> {
-        let path = workspace_root.join("metest-metadata.toml");
+    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<TestMetadata> {
+        let path = workspace_root.as_ref().join("metest-metadata.toml");
 
         Ok(Fs::new()
             .read_to_string_if_exists(&path)?
