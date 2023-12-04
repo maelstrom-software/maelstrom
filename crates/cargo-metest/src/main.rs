@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    metadata, MainApp,
+    MainApp,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -132,10 +132,13 @@ pub fn main() -> Result<ExitCode> {
     }
 
     let workspace_root = PathBuf::from(&cargo_metadata.workspace_root);
-    let test_metadata = metadata::load_test_metadata(&workspace_root)?;
 
     let cache_dir = workspace_root.join("target");
-    let client = Mutex::new(Client::new(config.broker, workspace_root, cache_dir)?);
+    let client = Mutex::new(Client::new(
+        config.broker,
+        workspace_root.clone(),
+        cache_dir,
+    )?);
     let app = MainApp::new(
         client,
         "cargo".into(),
@@ -143,8 +146,8 @@ pub fn main() -> Result<ExitCode> {
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
-        test_metadata,
-    );
+        &workspace_root,
+    )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
     app.run(stdout_tty, config.quiet, Term::buffered_stdout())

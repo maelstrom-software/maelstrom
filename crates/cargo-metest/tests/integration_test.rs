@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use cargo_metest::{config::Quiet, metadata::TestMetadata, MainApp};
+use cargo_metest::{config::Quiet, MainApp};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -253,8 +253,9 @@ fn run_app(
         filter,
         &mut stderr,
         false,
-        TestMetadata::default(),
-    );
+        &tmp_path,
+    )
+    .unwrap();
     app.run(stdout_tty, quiet, term.clone())
         .unwrap_or_else(|e| {
             panic!(

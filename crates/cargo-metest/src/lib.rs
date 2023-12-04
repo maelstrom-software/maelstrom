@@ -313,12 +313,13 @@ impl<StdErr> MainApp<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
-        test_metadata: TestMetadata,
-    ) -> Self {
-        Self {
+        workspace_root: &impl AsRef<Path>,
+    ) -> Result<Self> {
+        let test_metadata = metadata::load_test_metadata(workspace_root.as_ref())?;
+        Ok(Self {
             client,
             queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, test_metadata),
-        }
+        })
     }
 }
 
