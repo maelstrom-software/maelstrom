@@ -5,21 +5,21 @@ use serde::Deserialize;
 use std::{iter, path::Path, str};
 
 #[derive(Debug, Deserialize)]
-pub struct TestGroup {
-    pub tests: Option<String>,
-    pub module: Option<String>,
+struct TestGroup {
+    tests: Option<String>,
+    module: Option<String>,
     #[serde(default)]
-    pub include_shared_libraries: bool,
-    pub devices: Option<EnumSet<JobDeviceListDeserialize>>,
-    pub layers: Option<Vec<String>>,
-    pub mounts: Option<Vec<JobMount>>,
-    pub loopback: Option<bool>,
+    include_shared_libraries: bool,
+    devices: Option<EnumSet<JobDeviceListDeserialize>>,
+    layers: Option<Vec<String>>,
+    mounts: Option<Vec<JobMount>>,
+    loopback: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
 pub struct AllMetadata {
     #[serde(default)]
-    pub groups: Vec<TestGroup>,
+    groups: Vec<TestGroup>,
 }
 
 impl AllMetadata {
