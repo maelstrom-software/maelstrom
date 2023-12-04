@@ -12,12 +12,7 @@ use figment::{
 };
 use meticulous_util::process::ExitCode;
 use serde::Deserialize;
-use std::{
-    io::IsTerminal as _,
-    path::PathBuf,
-    process::Command,
-    str::{self, FromStr as _},
-};
+use std::{io::IsTerminal as _, path::PathBuf, process::Command, str};
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser)]
@@ -78,7 +73,7 @@ impl CliOptions {
 
 #[derive(Deserialize)]
 struct CargoMetadata {
-    workspace_root: String,
+    workspace_root: PathBuf,
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
@@ -100,12 +95,10 @@ pub fn main() -> Result<ExitCode> {
             }
             path.clone()
         }
-        None => {
-            let mut path = PathBuf::from_str(&cargo_metadata.workspace_root).unwrap();
-            path.push(".config");
-            path.push("cargo-metest.toml");
-            path
-        }
+        None => cargo_metadata
+            .workspace_root
+            .join(".config")
+            .join("cargo-metest.toml"),
     };
 
     let config: Config = Figment::new()
@@ -129,15 +122,13 @@ pub fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let workspace_root = PathBuf::from(&cargo_metadata.workspace_root);
-
     let app = MainApp::new(
         "cargo".into(),
         cli_options.package,
         cli_options.filter,
         std::io::stderr().lock(),
         std::io::stderr().is_terminal(),
-        &workspace_root,
+        &cargo_metadata.workspace_root,
         config.broker,
     )?;
 
