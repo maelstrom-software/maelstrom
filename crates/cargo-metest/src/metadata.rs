@@ -22,77 +22,51 @@ pub struct AllMetadata {
     groups: Vec<TestGroup>,
 }
 
-pub struct TestMetadata<'a> {
+pub struct TestMetadata {
     pub include_shared_libraries: bool,
     pub loopback: bool,
-    pub layers: Vec<&'a str>,
+    pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
 }
 
-impl AllMetadata {
-    fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .map(|group| group.include_shared_libraries)
-            .next()
-            .unwrap_or(true)
-    }
-
-    fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.layers.iter())
-            .flatten()
-            .map(String::as_str)
-            .collect()
-    }
-
-    fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.mounts.iter())
-            .flatten()
-            .cloned()
-            .collect()
-    }
-
-    fn get_devices_for_test(&self, module: &str, test: &str) -> EnumSet<JobDevice> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.devices)
-            .flatten()
-            .map(JobDevice::from)
-            .collect()
-    }
-
-    fn get_loopback_for_test(&self, module: &str, test: &str) -> bool {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.loopback.iter())
-            .cloned()
-            .next()
-            .unwrap_or(false)
-    }
-
-    pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata<'_> {
+impl Default for TestMetadata {
+    fn default() -> Self {
         TestMetadata {
-            include_shared_libraries: self.include_shared_libraries_for_test(module, test),
-            loopback: self.get_loopback_for_test(module, test),
-            layers: self.get_layers_for_test(module, test),
-            mounts: self.get_mounts_for_test(module, test),
-            devices: self.get_devices_for_test(module, test),
+            include_shared_libraries: true,
+            loopback: false,
+            layers: vec![],
+            mounts: vec![],
+            devices: EnumSet::EMPTY,
         }
+    }
+}
+
+impl TestMetadata {
+    fn fold(mut self, group: &TestGroup) -> Self {
+        self.include_shared_libraries = group.include_shared_libraries;
+        if let Some(loopback) = group.loopback {
+            self.loopback = loopback
+        }
+        if let Some(devices) = group.devices {
+            self.devices = devices.iter().map(JobDevice::from).collect();
+        }
+        if let Some(layers) = &group.layers {
+            self.layers = layers.clone();
+        }
+        if let Some(mounts) = &group.mounts {
+            self.mounts = mounts.clone();
+        }
+        self
+    }
+}
+
+impl AllMetadata {
+    pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata {
+        self.groups.iter()
+            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
+            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+            .fold(TestMetadata::default(), TestMetadata::fold)
     }
 
     pub fn load(workspace_root: &impl AsRef<Path>) -> Result<AllMetadata> {
