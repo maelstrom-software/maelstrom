@@ -1,8 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    metadata::TestMetadata,
-    MainApp,
+    metadata, MainApp,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -12,11 +11,11 @@ use figment::{
     Figment,
 };
 use meticulous_client::Client;
-use meticulous_util::{fs::Fs, process::ExitCode};
+use meticulous_util::process::ExitCode;
 use serde::Deserialize;
 use std::{
     io::IsTerminal as _,
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::Command,
     str::{self, FromStr as _},
     sync::Mutex,
@@ -84,19 +83,6 @@ struct CargoMetadata {
     workspace_root: String,
 }
 
-fn load_test_metadata(workspace_root: &Path) -> Result<TestMetadata> {
-    let fs = Fs::new();
-    let path = workspace_root.join("metest-metadata.toml");
-
-    Ok(fs
-        .read_to_string_if_exists(&path)?
-        .map(|c| -> Result<TestMetadata> {
-            toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
-        })
-        .transpose()?
-        .unwrap_or_default())
-}
-
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -146,7 +132,7 @@ pub fn main() -> Result<ExitCode> {
     }
 
     let workspace_root = PathBuf::from(&cargo_metadata.workspace_root);
-    let test_metadata = load_test_metadata(&workspace_root)?;
+    let test_metadata = metadata::load_test_metadata(&workspace_root)?;
 
     let cache_dir = workspace_root.join("target");
     let client = Mutex::new(Client::new(config.broker, workspace_root, cache_dir)?);
