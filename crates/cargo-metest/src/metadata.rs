@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
-use std::{iter, path::Path, str};
+use std::{path::Path, str};
 
 #[derive(Debug, Deserialize)]
 struct TestGroup {
@@ -29,8 +29,8 @@ impl AllMetadata {
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
             .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
             .map(|group| group.include_shared_libraries)
-            .chain(iter::once(true))
-            .next().unwrap()
+            .next()
+            .unwrap_or(true)
     }
 
     pub fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
