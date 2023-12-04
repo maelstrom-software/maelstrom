@@ -22,8 +22,16 @@ pub struct AllMetadata {
     groups: Vec<TestGroup>,
 }
 
+pub struct TestMetadata<'a> {
+    pub include_shared_libraries: bool,
+    pub loopback: bool,
+    pub layers: Vec<&'a str>,
+    pub mounts: Vec<JobMount>,
+    pub devices: EnumSet<JobDevice>,
+}
+
 impl AllMetadata {
-    pub fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
+    fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
         self.groups
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
@@ -33,7 +41,7 @@ impl AllMetadata {
             .unwrap_or(true)
     }
 
-    pub fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
+    fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
         self.groups
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
@@ -44,7 +52,7 @@ impl AllMetadata {
             .collect()
     }
 
-    pub fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
+    fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
         self.groups
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
@@ -55,7 +63,7 @@ impl AllMetadata {
             .collect()
     }
 
-    pub fn get_devices_for_test(&self, module: &str, test: &str) -> EnumSet<JobDevice> {
+    fn get_devices_for_test(&self, module: &str, test: &str) -> EnumSet<JobDevice> {
         self.groups
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
@@ -66,7 +74,7 @@ impl AllMetadata {
             .collect()
     }
 
-    pub fn get_loopback_for_test(&self, module: &str, test: &str) -> bool {
+    fn get_loopback_for_test(&self, module: &str, test: &str) -> bool {
         self.groups
             .iter()
             .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
@@ -75,6 +83,16 @@ impl AllMetadata {
             .cloned()
             .next()
             .unwrap_or(false)
+    }
+
+    pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata<'_> {
+        TestMetadata {
+            include_shared_libraries: self.include_shared_libraries_for_test(module, test),
+            loopback: self.get_loopback_for_test(module, test),
+            layers: self.get_layers_for_test(module, test),
+            mounts: self.get_mounts_for_test(module, test),
+            devices: self.get_devices_for_test(module, test),
+        }
     }
 
     pub fn load(workspace_root: &impl AsRef<Path>) -> Result<AllMetadata> {

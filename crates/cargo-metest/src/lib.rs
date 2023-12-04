@@ -225,8 +225,11 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             .add_artifact(&create_artifact_for_binary_deps(&binary)?)?;
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
+            let test_metadata = self
+                .test_metadata
+                .get_metadata_for_test(package_name, &case);
             let mut layers = vec![];
-            for layer in self.test_metadata.get_layers_for_test(package_name, &case) {
+            for layer in test_metadata.layers {
                 let mut client = client.lock().unwrap();
                 if layer.starts_with("docker:") {
                     let pkg = layer.split(':').nth(1).unwrap();
@@ -237,10 +240,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 }
             }
 
-            if self
-                .test_metadata
-                .include_shared_libraries_for_test(package_name, &case)
-            {
+            if test_metadata.include_shared_libraries {
                 layers.push(deps_artifact.clone());
             }
             layers.push(binary_artifact.clone());
@@ -257,10 +257,9 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 &case,
                 &binary,
                 NonEmpty::try_from(layers).unwrap(),
-                self.test_metadata.get_devices_for_test(package_name, &case),
-                self.test_metadata.get_mounts_for_test(package_name, &case),
-                self.test_metadata
-                    .get_loopback_for_test(package_name, &case),
+                test_metadata.devices,
+                test_metadata.mounts,
+                test_metadata.loopback,
             );
         }
 
