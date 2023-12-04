@@ -17,12 +17,12 @@ pub struct TestGroup {
 }
 
 #[derive(Debug, Deserialize, Default)]
-pub struct TestMetadata {
+pub struct AllMetadata {
     #[serde(default)]
     pub groups: Vec<TestGroup>,
 }
 
-impl TestMetadata {
+impl AllMetadata {
     pub fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
         self.groups
             .iter()
@@ -77,12 +77,12 @@ impl TestMetadata {
             .unwrap_or(false)
     }
 
-    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<TestMetadata> {
+    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<AllMetadata> {
         let path = workspace_root.as_ref().join("metest-metadata.toml");
 
         Ok(Fs::new()
             .read_to_string_if_exists(&path)?
-            .map(|c| -> Result<TestMetadata> {
+            .map(|c| -> Result<AllMetadata> {
                 toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
             })
             .transpose()?

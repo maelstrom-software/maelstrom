@@ -3,7 +3,7 @@ use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
 use indicatif::TermLike;
-use metadata::TestMetadata;
+use metadata::AllMetadata;
 use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::Client;
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
@@ -34,7 +34,7 @@ struct JobQueuer<StdErr> {
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: u64,
-    test_metadata: TestMetadata,
+    test_metadata: AllMetadata,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
@@ -44,7 +44,7 @@ impl<StdErr> JobQueuer<StdErr> {
         filter: Option<String>,
         stderr: StdErr,
         stderr_color: bool,
-        test_metadata: TestMetadata,
+        test_metadata: AllMetadata,
     ) -> Self {
         Self {
             cargo,
@@ -317,7 +317,7 @@ impl<StdErr> MainApp<StdErr> {
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(broker_addr, workspace_root, cache_dir)?);
-        let test_metadata = TestMetadata::load(workspace_root)?;
+        let test_metadata = AllMetadata::load(workspace_root)?;
         Ok(Self {
             client,
             queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, test_metadata),
