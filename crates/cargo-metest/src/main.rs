@@ -1,7 +1,8 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    MainApp, TestMetadata,
+    metadata::TestMetadata,
+    MainApp,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;

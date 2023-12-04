@@ -3,19 +3,17 @@ use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
 use indicatif::TermLike;
-use meticulous_base::{
-    EnumSet, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty, Sha256Digest,
-};
+use metadata::TestMetadata;
+use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::Client;
 use meticulous_util::{fs::Fs, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
     QuietProgressBar,
 };
-use serde::Deserialize;
 use std::{
     collections::{BTreeSet, HashMap, HashSet},
-    io, iter,
+    io,
     path::{Path, PathBuf},
     str,
     sync::{Arc, Mutex},
@@ -24,6 +22,7 @@ use visitor::{JobStatusTracker, JobStatusVisitor};
 
 pub mod cargo;
 pub mod config;
+pub mod metadata;
 pub mod progress;
 pub mod visitor;
 
@@ -356,79 +355,5 @@ impl<StdErr: io::Write> MainApp<StdErr> {
             (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term)?),
             (false, false) => Ok(self.run_with_progress(NoBar::new, term)?),
         }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TestGroup {
-    pub tests: Option<String>,
-    pub module: Option<String>,
-    #[serde(default)]
-    pub include_shared_libraries: bool,
-    pub devices: Option<EnumSet<JobDeviceListDeserialize>>,
-    pub layers: Option<Vec<String>>,
-    pub mounts: Option<Vec<JobMount>>,
-    pub loopback: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub struct TestMetadata {
-    #[serde(default)]
-    pub groups: Vec<TestGroup>,
-}
-
-impl TestMetadata {
-    fn include_shared_libraries_for_test(&self, module: &str, test: &str) -> bool {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .map(|group| group.include_shared_libraries)
-            .chain(iter::once(true))
-            .next().unwrap()
-    }
-
-    fn get_layers_for_test(&self, module: &str, test: &str) -> Vec<&str> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.layers.iter())
-            .flatten()
-            .map(String::as_str)
-            .collect()
-    }
-
-    fn get_mounts_for_test(&self, module: &str, test: &str) -> Vec<JobMount> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.mounts.iter())
-            .flatten()
-            .cloned()
-            .collect()
-    }
-
-    fn get_devices_for_test(&self, module: &str, test: &str) -> EnumSet<JobDevice> {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.devices)
-            .flatten()
-            .map(JobDevice::from)
-            .collect()
-    }
-
-    fn get_loopback_for_test(&self, module: &str, test: &str) -> bool {
-        self.groups
-            .iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
-            .flat_map(|group| group.loopback.iter())
-            .cloned()
-            .next()
-            .unwrap_or(false)
     }
 }
