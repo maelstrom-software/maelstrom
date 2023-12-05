@@ -1,5 +1,5 @@
 [[directives]]
-module = "meticulous-worker"
+package = "meticulous-worker"
 tests = "executor::"
 include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
@@ -11,7 +11,7 @@ mounts = [
 devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
-module = "cargo-metest"
+package = "cargo-metest"
 loopback_enabled = true
 layers = ["docker:rust", "dev-null.tar"]
 mounts = [
@@ -21,13 +21,13 @@ mounts = [
 ]
 
 [[directives]]
-module = "meticulous-container"
+package = "meticulous-container"
 include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-module = "meticulous-client"
+package = "meticulous-client"
 include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]

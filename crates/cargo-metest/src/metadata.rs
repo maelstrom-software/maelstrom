@@ -17,7 +17,7 @@ where
 #[derive(Debug, Default, Deserialize)]
 struct TestDirective {
     tests: Option<String>,
-    module: Option<String>,
+    package: Option<String>,
     include_shared_libraries: Option<bool>,
     loopback_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_devices")]
@@ -98,15 +98,15 @@ impl TestMetadata {
 }
 
 impl AllMetadata {
-    pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata {
+    pub fn get_metadata_for_test(&self, package: &str, test: &str) -> TestMetadata {
         self.directives
             .iter()
             .filter(|directive| match &directive.tests {
                 Some(directive_tests) => test.contains(directive_tests.as_str()),
                 None => true,
             })
-            .filter(|directive| match &directive.module {
-                Some(directive_module) => module == directive_module,
+            .filter(|directive| match &directive.package {
+                Some(directive_package) => package == directive_package,
                 None => true,
             })
             .fold(TestMetadata::default(), TestMetadata::fold)
@@ -145,11 +145,11 @@ mod test {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            module = "package1"
+            package = "package1"
             layers = ["layer1"]
 
             [[directives]]
-            module = "package1"
+            package = "package1"
             tests = "test1"
             layers = []
             "#,
@@ -181,11 +181,11 @@ mod test {
 
             [[directives]]
             include_shared_libraries = true
-            module = "package1"
+            package = "package1"
             layers = ["layer1"]
 
             [[directives]]
-            module = "package1"
+            package = "package1"
             tests = "test1"
             layers = []
             "#,
