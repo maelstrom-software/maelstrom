@@ -141,6 +141,38 @@ mod test {
     }
 
     #[test]
+    fn loopback_enabled() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            loopback_enabled = true
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            loopback_enabled = false
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1")
+                .loopback_enabled,
+            false
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2")
+                .loopback_enabled,
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1")
+                .loopback_enabled,
+            false
+        );
+    }
+
+    #[test]
     fn include_shared_libraries_defaults() {
         let all = AllMetadata::from_str(
             r#"
@@ -180,8 +212,8 @@ mod test {
             include_shared_libraries = false
 
             [[directives]]
-            include_shared_libraries = true
             package = "package1"
+            include_shared_libraries = true
             layers = ["layer1"]
 
             [[directives]]
