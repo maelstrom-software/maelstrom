@@ -5,8 +5,8 @@ pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
 
-pub use enumset::EnumSet;
 use enumset::EnumSetType;
+pub use enumset::{enum_set, EnumSet};
 pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
