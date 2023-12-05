@@ -1,8 +1,18 @@
 use anyhow::{Context as _, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::{path::Path, str};
+
+fn deserialize_devices<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<EnumSet<JobDevice>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let devices = Option::<EnumSet<JobDeviceListDeserialize>>::deserialize(deserializer)?;
+    Ok(devices.map(|d| d.iter().map(JobDevice::from).collect()))
+}
 
 #[derive(Debug, Default, Deserialize)]
 struct TestGroup {
@@ -10,7 +20,8 @@ struct TestGroup {
     module: Option<String>,
     #[serde(default)]
     include_shared_libraries: bool,
-    devices: Option<EnumSet<JobDeviceListDeserialize>>,
+    #[serde(default, deserialize_with = "deserialize_devices")]
+    devices: Option<EnumSet<JobDevice>>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
     loopback: Option<bool>,
@@ -67,14 +78,7 @@ impl TestMetadata {
         {
             self.devices.clear();
         } else {
-            self.devices = self.devices.union(
-                group
-                    .devices
-                    .unwrap_or_default()
-                    .iter()
-                    .map(JobDevice::from)
-                    .collect(),
-            );
+            self.devices = self.devices.union(group.devices.unwrap_or_default());
         }
         self
     }
@@ -318,9 +322,7 @@ mod test {
             AllMetadata {
                 groups: vec![
                     TestGroup {
-                        devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Full
-                        }),
+                        devices: Some(enum_set! { JobDevice::Full }),
                         ..Default::default()
                     },
                     TestGroup {
@@ -328,14 +330,12 @@ mod test {
                         ..Default::default()
                     },
                     TestGroup {
-                        devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Null
-                        }),
+                        devices: Some(enum_set! { JobDevice::Null }),
                         ..Default::default()
                     },
                     TestGroup {
                         devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Null | JobDeviceListDeserialize::Zero
+                            JobDevice::Null | JobDevice::Zero
                         }),
                         ..Default::default()
                     },
@@ -359,14 +359,12 @@ mod test {
             AllMetadata {
                 groups: vec![
                     TestGroup {
-                        devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Full
-                        }),
+                        devices: Some(enum_set! { JobDevice::Full }),
                         ..Default::default()
                     },
                     TestGroup {
                         devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Null | JobDeviceListDeserialize::Zero
+                            JobDevice::Null | JobDevice::Zero
                         }),
                         ..Default::default()
                     },
@@ -375,9 +373,7 @@ mod test {
                         ..Default::default()
                     },
                     TestGroup {
-                        devices: Some(enum_set! {
-                            JobDeviceListDeserialize::Null
-                        }),
+                        devices: Some(enum_set! { JobDevice::Null }),
                         ..Default::default()
                     },
                 ],
