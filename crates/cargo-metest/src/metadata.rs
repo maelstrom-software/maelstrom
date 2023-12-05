@@ -63,9 +63,16 @@ impl TestMetadata {
 
 impl AllMetadata {
     pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata {
-        self.groups.iter()
-            .filter(|group| !matches!(&group.tests, Some(group_tests) if !test.contains(group_tests.as_str())))
-            .filter(|group| !matches!(&group.module, Some(group_module) if module != group_module))
+        self.groups
+            .iter()
+            .filter(|group| match &group.tests {
+                Some(group_tests) => test.contains(group_tests.as_str()),
+                None => true,
+            })
+            .filter(|group| match &group.module {
+                Some(group_module) => module == group_module,
+                None => true,
+            })
             .fold(TestMetadata::default(), TestMetadata::fold)
     }
 
