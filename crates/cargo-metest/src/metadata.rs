@@ -100,7 +100,7 @@ impl AllMetadata {
     }
 
     pub fn load(workspace_root: &impl AsRef<Path>) -> Result<AllMetadata> {
-        let path = workspace_root.as_ref().join("metest-metadata.toml");
+        let path = workspace_root.as_ref().join("meticulous-test.toml");
 
         Ok(Fs::new()
             .read_to_string_if_exists(&path)?
