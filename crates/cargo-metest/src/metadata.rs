@@ -15,7 +15,7 @@ where
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct TestGroup {
+struct TestDirective {
     tests: Option<String>,
     module: Option<String>,
     #[serde(default)]
@@ -30,7 +30,7 @@ struct TestGroup {
 #[derive(Debug, Deserialize, Default)]
 pub struct AllMetadata {
     #[serde(default)]
-    groups: Vec<TestGroup>,
+    directives: Vec<TestDirective>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -55,22 +55,34 @@ impl Default for TestMetadata {
 }
 
 impl TestMetadata {
-    fn fold(mut self, group: &TestGroup) -> Self {
-        self.include_shared_libraries = group.include_shared_libraries;
-        if let Some(loopback) = group.loopback_enabled {
+    fn fold(mut self, directive: &TestDirective) -> Self {
+        self.include_shared_libraries = directive.include_shared_libraries;
+        if let Some(loopback) = directive.loopback_enabled {
             self.loopback_enabled = loopback
         }
-        if group.layers.as_ref().map(Vec::is_empty).unwrap_or(false) {
+        if directive
+            .layers
+            .as_ref()
+            .map(Vec::is_empty)
+            .unwrap_or(false)
+        {
             self.layers.clear();
         } else {
-            self.layers.extend(group.layers.iter().flatten().cloned());
+            self.layers
+                .extend(directive.layers.iter().flatten().cloned());
         }
-        if group.mounts.as_ref().map(Vec::is_empty).unwrap_or(false) {
+        if directive
+            .mounts
+            .as_ref()
+            .map(Vec::is_empty)
+            .unwrap_or(false)
+        {
             self.mounts.clear();
         } else {
-            self.mounts.extend(group.mounts.iter().flatten().cloned());
+            self.mounts
+                .extend(directive.mounts.iter().flatten().cloned());
         }
-        if group
+        if directive
             .devices
             .as_ref()
             .map(EnumSet::is_empty)
@@ -78,7 +90,7 @@ impl TestMetadata {
         {
             self.devices.clear();
         } else {
-            self.devices = self.devices.union(group.devices.unwrap_or_default());
+            self.devices = self.devices.union(directive.devices.unwrap_or_default());
         }
         self
     }
@@ -86,14 +98,14 @@ impl TestMetadata {
 
 impl AllMetadata {
     pub fn get_metadata_for_test(&self, module: &str, test: &str) -> TestMetadata {
-        self.groups
+        self.directives
             .iter()
-            .filter(|group| match &group.tests {
-                Some(group_tests) => test.contains(group_tests.as_str()),
+            .filter(|directive| match &directive.tests {
+                Some(directive_tests) => test.contains(directive_tests.as_str()),
                 None => true,
             })
-            .filter(|group| match &group.module {
-                Some(group_module) => module == group_module,
+            .filter(|directive| match &directive.module {
+                Some(directive_module) => module == directive_module,
                 None => true,
             })
             .fold(TestMetadata::default(), TestMetadata::fold)
@@ -120,16 +132,16 @@ mod test {
     #[test]
     fn default() {
         assert_eq!(
-            AllMetadata { groups: vec![] }.get_metadata_for_test("mod", "test"),
+            AllMetadata { directives: vec![] }.get_metadata_for_test("mod", "test"),
             TestMetadata::default(),
         );
     }
 
     #[test]
-    fn any_group_sets_include_shared_libraries_to_false() {
+    fn any_directive_sets_include_shared_libraries_to_false() {
         assert_eq!(
             AllMetadata {
-                groups: vec![TestGroup {
+                directives: vec![TestDirective {
                     layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
                     ..Default::default()
                 }]
@@ -147,12 +159,12 @@ mod test {
     fn include_shared_libraries_can_be_set() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
                         include_shared_libraries: true,
                         ..Default::default()
@@ -174,19 +186,19 @@ mod test {
     }
 
     #[test]
-    fn layers_are_appended_in_order_ignoring_unset_groups() {
+    fn layers_are_appended_in_order_ignoring_unset_directives() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         loopback_enabled: Some(true),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
                         ..Default::default()
                     },
@@ -211,16 +223,16 @@ mod test {
     fn layers_are_reset_with_empty_vec() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         layers: Some(vec![]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
                         ..Default::default()
                     },
@@ -236,22 +248,22 @@ mod test {
     }
 
     #[test]
-    fn mounts_are_appended_in_order_ignoring_unset_groups() {
+    fn mounts_are_appended_in_order_ignoring_unset_directives() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         mounts: Some(vec![JobMount {
                             fs_type: JobMountFsType::Proc,
                             mount_point: "/proc".to_string()
                         }]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         loopback_enabled: Some(true),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         mounts: Some(vec![JobMount {
                             fs_type: JobMountFsType::Tmp,
                             mount_point: "/tmp".to_string()
@@ -283,19 +295,19 @@ mod test {
     fn mounts_are_reset_with_empty_vec() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         mounts: Some(vec![JobMount {
                             fs_type: JobMountFsType::Proc,
                             mount_point: "/proc".to_string()
                         }]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         mounts: Some(vec![]),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         mounts: Some(vec![JobMount {
                             fs_type: JobMountFsType::Tmp,
                             mount_point: "/tmp".to_string()
@@ -317,23 +329,23 @@ mod test {
     }
 
     #[test]
-    fn devices_are_unioned_ignoring_unset_groups() {
+    fn devices_are_unioned_ignoring_unset_directives() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         devices: Some(enum_set! { JobDevice::Full }),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         loopback_enabled: Some(true),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         devices: Some(enum_set! { JobDevice::Null }),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         devices: Some(enum_set! {
                             JobDevice::Null | JobDevice::Zero
                         }),
@@ -357,22 +369,22 @@ mod test {
     fn devices_are_reset_with_empty_set() {
         assert_eq!(
             AllMetadata {
-                groups: vec![
-                    TestGroup {
+                directives: vec![
+                    TestDirective {
                         devices: Some(enum_set! { JobDevice::Full }),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         devices: Some(enum_set! {
                             JobDevice::Null | JobDevice::Zero
                         }),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         devices: Some(enum_set! {}),
                         ..Default::default()
                     },
-                    TestGroup {
+                    TestDirective {
                         devices: Some(enum_set! { JobDevice::Null }),
                         ..Default::default()
                     },
