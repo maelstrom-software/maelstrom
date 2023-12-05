@@ -15,18 +15,20 @@ where
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TestDirective {
     tests: Option<String>,
     package: Option<String>,
     include_shared_libraries: Option<bool>,
     loopback_enabled: Option<bool>,
-    #[serde(default, deserialize_with = "deserialize_devices")]
-    devices: Option<EnumSet<JobDevice>>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
+    #[serde(default, deserialize_with = "deserialize_devices")]
+    devices: Option<EnumSet<JobDevice>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct AllMetadata {
     #[serde(default)]
     directives: Vec<TestDirective>,
@@ -131,6 +133,7 @@ impl AllMetadata {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, JobMountFsType};
+    use toml::de::Error as TomlError;
 
     #[test]
     fn default() {
@@ -411,6 +414,74 @@ mod test {
                 },
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn bad_field_in_all_metadata() {
+        let err = AllMetadata::from_str(
+            r#"
+            [not_a_field]
+            foo = "three"
+            "#,
+        )
+        .unwrap_err();
+        let err = err.downcast_ref::<TomlError>().unwrap();
+        let message = err.message();
+        assert!(
+            message.starts_with("unknown field `not_a_field`, expected `directives`"),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn bad_field_in_test_directive() {
+        let err = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            not_a_field = "three"
+            "#,
+        )
+        .unwrap_err();
+        let err = err.downcast_ref::<TomlError>().unwrap();
+        let message = err.message();
+        assert!(
+            message.starts_with("unknown field `not_a_field`, expected"),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn bad_field_in_job_mount() {
+        let err = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            mounts = [ { not_a_field = "foo" } ]
+            "#,
+        )
+        .unwrap_err();
+        let err = err.downcast_ref::<TomlError>().unwrap();
+        let message = err.message();
+        assert!(
+            message.starts_with("unknown field `not_a_field`, expected"),
+            "message: {message}"
+        );
+    }
+
+    #[test]
+    fn bad_devices_field() {
+        let err = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            devices = ["not_a_value"]
+            "#,
+        )
+        .unwrap_err();
+        let err = err.downcast_ref::<TomlError>().unwrap();
+        let message = err.message();
+        assert!(
+            message.starts_with("unknown variant `not_a_value`, expected one of"),
+            "message: {message}"
         );
     }
 }

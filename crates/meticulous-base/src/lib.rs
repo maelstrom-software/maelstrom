@@ -69,7 +69,6 @@ pub enum JobDevice {
 
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
 #[serde(rename_all = "kebab-case")]
-#[enumset(serialize_deny_unknown)]
 #[enumset(serialize_repr = "list")]
 pub enum JobDeviceListDeserialize {
     Full,
@@ -102,6 +101,7 @@ pub enum JobMountFsType {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct JobMount {
     pub fs_type: JobMountFsType,
     pub mount_point: String,
