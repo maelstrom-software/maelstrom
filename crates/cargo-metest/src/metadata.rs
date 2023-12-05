@@ -111,14 +111,16 @@ impl AllMetadata {
             .fold(TestMetadata::default(), TestMetadata::fold)
     }
 
-    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<AllMetadata> {
+    fn from_str(contents: &str) -> Result<Self> {
+        Ok(toml::from_str(contents)?)
+    }
+
+    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<Self> {
         let path = workspace_root.as_ref().join("meticulous-test.toml");
 
         Ok(Fs::new()
             .read_to_string_if_exists(&path)?
-            .map(|c| -> Result<AllMetadata> {
-                toml::from_str(&c).with_context(|| format!("parsing {}", path.display()))
-            })
+            .map(|c| Self::from_str(&c).with_context(|| format!("parsing {}", path.display())))
             .transpose()?
             .unwrap_or_default())
     }
@@ -140,12 +142,13 @@ mod test {
     #[test]
     fn any_directive_sets_include_shared_libraries_to_false() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![TestDirective {
-                    layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
-                    ..Default::default()
-                }]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                layers = ["layer1", "layer2"]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 layers: vec!["layer1".to_string(), "layer2".to_string()],
@@ -158,19 +161,17 @@ mod test {
     #[test]
     fn include_shared_libraries_can_be_set() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
-                        include_shared_libraries: true,
-                        ..Default::default()
-                    },
-                ]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                layers = ["layer1", "layer2"]
+
+                [[directives]]
+                include_shared_libraries = true
+                layers = ["layer3", "layer4"]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 layers: vec![
@@ -188,22 +189,19 @@ mod test {
     #[test]
     fn layers_are_appended_in_order_ignoring_unset_directives() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        loopback_enabled: Some(true),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
-                        ..Default::default()
-                    },
-                ]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                layers = ["layer1", "layer2"]
+
+                [[directives]]
+                loopback_enabled = true
+
+                [[directives]]
+                layers = ["layer3", "layer4"]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 loopback_enabled: true,
@@ -222,22 +220,19 @@ mod test {
     #[test]
     fn layers_are_reset_with_empty_vec() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        layers: Some(vec![]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
-                        ..Default::default()
-                    },
-                ]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                layers = ["layer1", "layer2"]
+
+                [[directives]]
+                layers = []
+
+                [[directives]]
+                layers = ["layer3", "layer4"]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
@@ -250,28 +245,19 @@ mod test {
     #[test]
     fn mounts_are_appended_in_order_ignoring_unset_directives() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        mounts: Some(vec![JobMount {
-                            fs_type: JobMountFsType::Proc,
-                            mount_point: "/proc".to_string()
-                        }]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        loopback_enabled: Some(true),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        mounts: Some(vec![JobMount {
-                            fs_type: JobMountFsType::Tmp,
-                            mount_point: "/tmp".to_string()
-                        }]),
-                        ..Default::default()
-                    },
-                ]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
+
+                [[directives]]
+                loopback_enabled = true
+
+                [[directives]]
+                mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 loopback_enabled: true,
@@ -294,28 +280,19 @@ mod test {
     #[test]
     fn mounts_are_reset_with_empty_vec() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        mounts: Some(vec![JobMount {
-                            fs_type: JobMountFsType::Proc,
-                            mount_point: "/proc".to_string()
-                        }]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        mounts: Some(vec![]),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        mounts: Some(vec![JobMount {
-                            fs_type: JobMountFsType::Tmp,
-                            mount_point: "/tmp".to_string()
-                        }]),
-                        ..Default::default()
-                    },
-                ]
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
+
+                [[directives]]
+                mounts = []
+
+                [[directives]]
+                mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 mounts: vec![JobMount {
@@ -331,28 +308,22 @@ mod test {
     #[test]
     fn devices_are_unioned_ignoring_unset_directives() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        devices: Some(enum_set! { JobDevice::Full }),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        loopback_enabled: Some(true),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        devices: Some(enum_set! { JobDevice::Null }),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        devices: Some(enum_set! {
-                            JobDevice::Null | JobDevice::Zero
-                        }),
-                        ..Default::default()
-                    },
-                ],
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                devices = [ "full" ]
+
+                [[directives]]
+                loopback_enabled = true
+
+                [[directives]]
+                devices = [ "null" ]
+
+                [[directives]]
+                devices = [ "null", "zero" ]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 loopback_enabled: true,
@@ -368,28 +339,22 @@ mod test {
     #[test]
     fn devices_are_reset_with_empty_set() {
         assert_eq!(
-            AllMetadata {
-                directives: vec![
-                    TestDirective {
-                        devices: Some(enum_set! { JobDevice::Full }),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        devices: Some(enum_set! {
-                            JobDevice::Null | JobDevice::Zero
-                        }),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        devices: Some(enum_set! {}),
-                        ..Default::default()
-                    },
-                    TestDirective {
-                        devices: Some(enum_set! { JobDevice::Null }),
-                        ..Default::default()
-                    },
-                ],
-            }
+            AllMetadata::from_str(
+                r#"
+                [[directives]]
+                devices = [ "full" ]
+
+                [[directives]]
+                devices = [ "null", "zero" ]
+
+                [[directives]]
+                devices = []
+
+                [[directives]]
+                devices = [ "null" ]
+                "#
+            )
+            .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 devices: enum_set! {
