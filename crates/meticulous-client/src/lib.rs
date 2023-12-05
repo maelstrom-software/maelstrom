@@ -317,12 +317,50 @@ impl SocketReader {
     }
 }
 
+struct ClientDeps {
+    dispatcher: Dispatcher,
+    artifact_pusher: ArtifactPusher,
+    socket_reader: SocketReader,
+    dispatcher_sender: SyncSender<DispatcherMessage>,
+}
+
+impl ClientDeps {
+    fn new(broker_addr: BrokerAddr) -> Result<Self> {
+        let mut stream = TcpStream::connect(broker_addr.inner())?;
+        net::write_message_to_socket(&mut stream, Hello::Client)?;
+
+        let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
+        let (artifact_send, artifact_recv) = mpsc::sync_channel(1000);
+        let stream_clone = stream.try_clone()?;
+        Ok(Self {
+            dispatcher: Dispatcher::new(dispatcher_receiver, stream_clone, artifact_send),
+            artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv),
+            socket_reader: SocketReader::new(stream, dispatcher_sender.clone()),
+            dispatcher_sender,
+        })
+    }
+
+    fn run_on_thread(mut self) -> JoinHandle<Result<()>> {
+        thread::spawn(move || {
+            thread::scope(|scope| {
+                let dispatcher_handle = scope.spawn(move || {
+                    while self.dispatcher.process_one()? {}
+                    self.dispatcher.stream.shutdown(std::net::Shutdown::Both)?;
+                    Ok(())
+                });
+                scope.spawn(move || while self.artifact_pusher.process_one(scope) {});
+                scope.spawn(move || while self.socket_reader.process_one() {});
+                dispatcher_handle.join().unwrap()
+            })
+        })
+    }
+}
+
 pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<()> + Send + Sync>;
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
-    dispatcher_handle: JoinHandle<Result<()>>,
-    artifact_handle: JoinHandle<()>,
+    deps_handle: JoinHandle<Result<()>>,
     digest_repo: DigestRespository,
     container_image_depot: ContainerImageDepot,
     digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
@@ -335,34 +373,13 @@ impl Client {
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut stream = TcpStream::connect(broker_addr.inner())?;
-        net::write_message_to_socket(&mut stream, Hello::Client)?;
-
-        let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
-
-        let (artifact_send, artifact_recv) = mpsc::sync_channel(1000);
-        let stream_clone = stream.try_clone()?;
-        let dispatcher_handle = thread::spawn(move || {
-            let mut dispatcher = Dispatcher::new(dispatcher_receiver, stream_clone, artifact_send);
-            while dispatcher.process_one()? {}
-            Ok(())
-        });
-
-        let artifact_handle = thread::spawn(move || {
-            let mut artifact_pusher = ArtifactPusher::new(broker_addr, artifact_recv);
-            thread::scope(|scope| while artifact_pusher.process_one(scope) {});
-        });
-
-        let dispatcher_sender_clone = dispatcher_sender.clone();
-        thread::spawn(move || {
-            let mut reader = SocketReader::new(stream, dispatcher_sender_clone);
-            while reader.process_one() {}
-        });
+        let deps = ClientDeps::new(broker_addr)?;
+        let dispatcher_sender = deps.dispatcher_sender.clone();
+        let deps_handle = deps.run_on_thread();
 
         Ok(Client {
             dispatcher_sender,
-            dispatcher_handle,
-            artifact_handle,
+            deps_handle,
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             digest_to_container_env: HashMap::default(),
@@ -431,8 +448,7 @@ impl Client {
 
     pub fn wait_for_outstanding_jobs(self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
-        self.dispatcher_handle.join().unwrap()?;
-        self.artifact_handle.join().unwrap();
+        self.deps_handle.join().unwrap()?;
         Ok(())
     }
 
