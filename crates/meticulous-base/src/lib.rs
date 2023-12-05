@@ -93,7 +93,7 @@ impl From<JobDeviceListDeserialize> for JobDevice {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobMountFsType {
     Proc,
@@ -101,7 +101,7 @@ pub enum JobMountFsType {
     Sys,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct JobMount {
     pub fs_type: JobMountFsType,
     pub mount_point: String,

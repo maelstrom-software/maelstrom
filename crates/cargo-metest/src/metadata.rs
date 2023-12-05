@@ -4,7 +4,7 @@ use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{path::Path, str};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 struct TestGroup {
     tests: Option<String>,
     module: Option<String>,
@@ -22,6 +22,7 @@ pub struct AllMetadata {
     groups: Vec<TestGroup>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct TestMetadata {
     pub include_shared_libraries: bool,
     pub loopback: bool,
@@ -86,5 +87,61 @@ impl AllMetadata {
             })
             .transpose()?
             .unwrap_or_default())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn default() {
+        assert_eq!(
+            AllMetadata { groups: vec![] }.get_metadata_for_test("mod", "test"),
+            TestMetadata::default(),
+        );
+    }
+
+    #[test]
+    fn any_group_sets_include_shared_libraries_to_false() {
+        assert_eq!(
+            AllMetadata {
+                groups: vec![TestGroup {
+                    layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
+                    ..Default::default()
+                }]
+            }
+            .get_metadata_for_test("mod", "test"),
+            TestMetadata {
+                layers: vec!["layer1".to_string(), "layer2".to_string()],
+                include_shared_libraries: false,
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn include_shared_libraries_can_be_set() {
+        assert_eq!(
+            AllMetadata {
+                groups: vec![
+                    TestGroup {
+                        layers: Some(vec!["layer1".to_string(), "layer2".to_string()]),
+                        ..Default::default()
+                    },
+                    TestGroup {
+                        layers: Some(vec!["layer3".to_string(), "layer4".to_string()]),
+                        include_shared_libraries: true,
+                        ..Default::default()
+                    },
+                ]
+            }
+            .get_metadata_for_test("mod", "test"),
+            TestMetadata {
+                layers: vec!["layer3".to_string(), "layer4".to_string()],
+                include_shared_libraries: true,
+                ..Default::default()
+            }
+        );
     }
 }
