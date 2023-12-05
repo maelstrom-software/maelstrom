@@ -1,45 +1,33 @@
 [[directives]]
 module = "meticulous-worker"
 tests = "executor::"
-layers = ["proc-and-tmp.tar"]
-devices = ["full", "null", "random", "tty", "urandom", "zero"]
 include_shared_libraries = true
-[[directives.mounts]]
-fs_type = "tmp"
-mount_point = "/tmp"
-[[directives.mounts]]
-fs_type = "proc"
-mount_point = "/proc"
-[[directives.mounts]]
-fs_type = "sys"
-mount_point = "/sys"
+layers = ["proc-and-tmp.tar"]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "proc", mount_point = "/proc" },
+    { fs_type = "sys", mount_point = "/sys" },
+]
+devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 module = "cargo-metest"
-layers = ["docker:rust", "dev-null.tar"]
 loopback_enabled = true
-[[directives.mounts]]
-fs_type = "tmp"
-mount_point = "/tmp"
-[[directives.mounts]]
-fs_type = "tmp"
-mount_point = "/root"
-[[directives.mounts]]
-fs_type = "proc"
-mount_point = "/proc"
+layers = ["docker:rust", "dev-null.tar"]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "tmp", mount_point = "/root" },
+    { fs_type = "proc", mount_point = "/proc" },
+]
 
 [[directives]]
 module = "meticulous-container"
-layers = ["proc-and-tmp.tar"]
 include_shared_libraries = true
-[[directives.mounts]]
-fs_type = "tmp"
-mount_point = "/tmp"
+layers = ["proc-and-tmp.tar"]
+mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 module = "meticulous-client"
-layers = ["proc-and-tmp.tar"]
 include_shared_libraries = true
-[[directives.mounts]]
-fs_type = "tmp"
-mount_point = "/tmp"
+layers = ["proc-and-tmp.tar"]
+mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
