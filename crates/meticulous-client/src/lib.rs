@@ -66,53 +66,76 @@ enum DispatcherMessage {
     Stop,
 }
 
-fn dispatcher_main(
+struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
-    mut stream: TcpStream,
+    stream: TcpStream,
     broker_addr: BrokerAddr,
-) -> Result<()> {
-    let mut stop_when_all_completed = false;
-    let mut next_client_job_id = 0u32;
-    let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
-    let mut handlers = HashMap::<ClientJobId, JobResponseHandler>::default();
-    let mut stats_reqs: VecDeque<SyncSender<JobStateCounts>> = VecDeque::new();
-    loop {
-        let msg = receiver.recv()?;
-        match msg {
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                handlers.remove(&cjid).unwrap()(cjid, result)?;
-                if stop_when_all_completed && handlers.is_empty() {
-                    return Ok(());
+}
+
+impl Dispatcher {
+    fn new(
+        receiver: Receiver<DispatcherMessage>,
+        stream: TcpStream,
+        broker_addr: BrokerAddr,
+    ) -> Self {
+        Self {
+            receiver,
+            stream,
+            broker_addr,
+        }
+    }
+
+    fn main(&mut self) -> Result<()> {
+        let mut stop_when_all_completed = false;
+        let mut next_client_job_id = 0u32;
+        let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
+        let mut handlers = HashMap::<ClientJobId, JobResponseHandler>::default();
+        let mut stats_reqs: VecDeque<SyncSender<JobStateCounts>> = VecDeque::new();
+        loop {
+            let msg = self.receiver.recv()?;
+            match msg {
+                DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
+                    handlers.remove(&cjid).unwrap()(cjid, result)?;
+                    if stop_when_all_completed && handlers.is_empty() {
+                        return Ok(());
+                    }
                 }
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                let path = artifacts.get(&digest).unwrap().clone();
-                thread::spawn(move || artifact_pusher_main(broker_addr, path, digest));
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
-                unimplemented!("this client doesn't send statistics requests")
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
-                stats_reqs.pop_front().unwrap().send(res).ok();
-            }
-            DispatcherMessage::AddArtifact(path, digest) => {
-                artifacts.insert(digest, path);
-            }
-            DispatcherMessage::AddJob(spec, handler) => {
-                let cjid = next_client_job_id.into();
-                handlers.insert(cjid, handler).assert_is_none();
-                next_client_job_id = next_client_job_id.checked_add(1).unwrap();
-                net::write_message_to_socket(&mut stream, ClientToBroker::JobRequest(cjid, spec))?;
-            }
-            DispatcherMessage::Stop => {
-                if handlers.is_empty() {
-                    return Ok(());
+                DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
+                    let path = artifacts.get(&digest).unwrap().clone();
+                    let broker_addr = self.broker_addr.clone();
+                    thread::spawn(move || artifact_pusher_main(broker_addr, path, digest));
                 }
-                stop_when_all_completed = true;
-            }
-            DispatcherMessage::GetJobStateCounts(sender) => {
-                net::write_message_to_socket(&mut stream, ClientToBroker::JobStateCountsRequest)?;
-                stats_reqs.push_back(sender);
+                DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+                    unimplemented!("this client doesn't send statistics requests")
+                }
+                DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
+                    stats_reqs.pop_front().unwrap().send(res).ok();
+                }
+                DispatcherMessage::AddArtifact(path, digest) => {
+                    artifacts.insert(digest, path);
+                }
+                DispatcherMessage::AddJob(spec, handler) => {
+                    let cjid = next_client_job_id.into();
+                    handlers.insert(cjid, handler).assert_is_none();
+                    next_client_job_id = next_client_job_id.checked_add(1).unwrap();
+                    net::write_message_to_socket(
+                        &mut self.stream,
+                        ClientToBroker::JobRequest(cjid, spec),
+                    )?;
+                }
+                DispatcherMessage::Stop => {
+                    if handlers.is_empty() {
+                        return Ok(());
+                    }
+                    stop_when_all_completed = true;
+                }
+                DispatcherMessage::GetJobStateCounts(sender) => {
+                    net::write_message_to_socket(
+                        &mut self.stream,
+                        ClientToBroker::JobStateCountsRequest,
+                    )?;
+                    stats_reqs.push_back(sender);
+                }
             }
         }
     }
@@ -260,8 +283,10 @@ impl Client {
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
 
         let stream_clone = stream.try_clone()?;
-        let dispatcher_handle =
-            thread::spawn(move || dispatcher_main(dispatcher_receiver, stream_clone, broker_addr));
+        let dispatcher_handle = thread::spawn(move || {
+            let mut dispatcher = Dispatcher::new(dispatcher_receiver, stream_clone, broker_addr);
+            dispatcher.main()
+        });
 
         let dispatcher_sender_clone = dispatcher_sender.clone();
         thread::spawn(move || {
