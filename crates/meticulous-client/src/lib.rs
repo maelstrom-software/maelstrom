@@ -297,6 +297,26 @@ fn digest_repository_simple_add_get_after_modify() {
     assert_eq!(repo.get(&foo_path).unwrap(), None);
 }
 
+struct SocketReader {
+    stream: TcpStream,
+    channel: SyncSender<DispatcherMessage>,
+}
+
+impl SocketReader {
+    fn new(stream: TcpStream, channel: SyncSender<DispatcherMessage>) -> Self {
+        Self { stream, channel }
+    }
+
+    fn process_one(&mut self) -> bool {
+        let Ok(msg) = net::read_message_from_socket(&mut self.stream) else {
+            return false;
+        };
+        self.channel
+            .send(DispatcherMessage::BrokerToClient(msg))
+            .is_ok()
+    }
+}
+
 pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<()> + Send + Sync>;
 
 pub struct Client {
@@ -335,11 +355,8 @@ impl Client {
 
         let dispatcher_sender_clone = dispatcher_sender.clone();
         thread::spawn(move || {
-            net::socket_reader(
-                stream,
-                dispatcher_sender_clone,
-                DispatcherMessage::BrokerToClient,
-            )
+            let mut reader = SocketReader::new(stream, dispatcher_sender_clone);
+            while reader.process_one() {}
         });
 
         Ok(Client {
