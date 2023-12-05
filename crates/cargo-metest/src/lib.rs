@@ -3,8 +3,8 @@ use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
 use indicatif::TermLike;
-use metadata::AllMetadata;
-use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
+use metadata::{AllMetadata, TestMetadata};
+use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
@@ -82,9 +82,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         case: &str,
         binary: &Path,
         layers: NonEmpty<Sha256Digest>,
-        devices: EnumSet<JobDevice>,
-        mounts: Vec<JobMount>,
-        loopback: bool,
+        metadata: TestMetadata,
     ) where
         ProgressIndicatorT: ProgressIndicatorScope,
     {
@@ -103,9 +101,9 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
                 layers,
-                devices,
-                mounts,
-                loopback,
+                devices: metadata.devices,
+                mounts: metadata.mounts,
+                loopback: metadata.loopback_enabled,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
@@ -169,9 +167,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 &case,
                 &binary,
                 NonEmpty::try_from(layers).unwrap(),
-                test_metadata.devices,
-                test_metadata.mounts,
-                test_metadata.loopback_enabled,
+                test_metadata,
             );
         }
 
