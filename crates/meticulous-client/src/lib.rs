@@ -24,11 +24,7 @@ use std::{
     time::SystemTime,
 };
 
-fn artifact_pusher_main(
-    broker_addr: BrokerAddr,
-    path: PathBuf,
-    digest: Sha256Digest,
-) -> Result<()> {
+fn push_one_artifact(broker_addr: BrokerAddr, path: PathBuf, digest: Sha256Digest) -> Result<()> {
     let fs = Fs::new();
     let mut stream = TcpStream::connect(broker_addr.inner())?;
     let file = fs.open_file(path)?;
@@ -66,10 +62,45 @@ enum DispatcherMessage {
     Stop,
 }
 
+struct ArtifactPushRequest {
+    path: PathBuf,
+    digest: Sha256Digest,
+}
+
+struct ArtifactPusher {
+    broker_addr: BrokerAddr,
+    receiver: Receiver<ArtifactPushRequest>,
+}
+
+impl ArtifactPusher {
+    fn new(broker_addr: BrokerAddr, receiver: Receiver<ArtifactPushRequest>) -> Self {
+        Self {
+            broker_addr,
+            receiver,
+        }
+    }
+
+    /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
+    /// until the function return false
+    fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
+    where
+        'a: 'b,
+    {
+        if let Ok(msg) = self.receiver.recv() {
+            let broker_addr = self.broker_addr.clone();
+            // N.B. We are ignoring this Result<_>
+            scope.spawn(move || push_one_artifact(broker_addr, msg.path, msg.digest));
+            true
+        } else {
+            false
+        }
+    }
+}
+
 struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
     stream: TcpStream,
-    broker_addr: BrokerAddr,
+    artifact_pusher: SyncSender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
@@ -81,12 +112,12 @@ impl Dispatcher {
     fn new(
         receiver: Receiver<DispatcherMessage>,
         stream: TcpStream,
-        broker_addr: BrokerAddr,
+        artifact_pusher: SyncSender<ArtifactPushRequest>,
     ) -> Self {
         Self {
             receiver,
             stream,
-            broker_addr,
+            artifact_pusher,
             stop_when_all_completed: false,
             next_client_job_id: 0u32,
             artifacts: Default::default(),
@@ -108,8 +139,8 @@ impl Dispatcher {
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
                 let path = self.artifacts.get(&digest).unwrap().clone();
-                let broker_addr = self.broker_addr.clone();
-                thread::spawn(move || artifact_pusher_main(broker_addr, path, digest));
+                self.artifact_pusher
+                    .send(ArtifactPushRequest { path, digest })?;
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
@@ -271,6 +302,7 @@ pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<(
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     dispatcher_handle: JoinHandle<Result<()>>,
+    artifact_handle: JoinHandle<()>,
     digest_repo: DigestRespository,
     container_image_depot: ContainerImageDepot,
     digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
@@ -288,11 +320,17 @@ impl Client {
 
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
 
+        let (artifact_send, artifact_recv) = mpsc::sync_channel(1000);
         let stream_clone = stream.try_clone()?;
         let dispatcher_handle = thread::spawn(move || {
-            let mut dispatcher = Dispatcher::new(dispatcher_receiver, stream_clone, broker_addr);
+            let mut dispatcher = Dispatcher::new(dispatcher_receiver, stream_clone, artifact_send);
             while dispatcher.process_one()? {}
             Ok(())
+        });
+
+        let artifact_handle = thread::spawn(move || {
+            let mut artifact_pusher = ArtifactPusher::new(broker_addr, artifact_recv);
+            thread::scope(|scope| while artifact_pusher.process_one(scope) {});
         });
 
         let dispatcher_sender_clone = dispatcher_sender.clone();
@@ -307,6 +345,7 @@ impl Client {
         Ok(Client {
             dispatcher_sender,
             dispatcher_handle,
+            artifact_handle,
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             digest_to_container_env: HashMap::default(),
@@ -376,6 +415,7 @@ impl Client {
     pub fn wait_for_outstanding_jobs(self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         self.dispatcher_handle.join().unwrap()?;
+        self.artifact_handle.join().unwrap();
         Ok(())
     }
 
