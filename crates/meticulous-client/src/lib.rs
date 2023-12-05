@@ -70,6 +70,11 @@ struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
     stream: TcpStream,
     broker_addr: BrokerAddr,
+    stop_when_all_completed: bool,
+    next_client_job_id: u32,
+    artifacts: HashMap<Sha256Digest, PathBuf>,
+    handlers: HashMap<ClientJobId, JobResponseHandler>,
+    stats_reqs: VecDeque<SyncSender<JobStateCounts>>,
 }
 
 impl Dispatcher {
@@ -82,26 +87,26 @@ impl Dispatcher {
             receiver,
             stream,
             broker_addr,
+            stop_when_all_completed: false,
+            next_client_job_id: 0u32,
+            artifacts: Default::default(),
+            handlers: Default::default(),
+            stats_reqs: Default::default(),
         }
     }
 
     fn main(&mut self) -> Result<()> {
-        let mut stop_when_all_completed = false;
-        let mut next_client_job_id = 0u32;
-        let mut artifacts = HashMap::<Sha256Digest, PathBuf>::default();
-        let mut handlers = HashMap::<ClientJobId, JobResponseHandler>::default();
-        let mut stats_reqs: VecDeque<SyncSender<JobStateCounts>> = VecDeque::new();
         loop {
             let msg = self.receiver.recv()?;
             match msg {
                 DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                    handlers.remove(&cjid).unwrap()(cjid, result)?;
-                    if stop_when_all_completed && handlers.is_empty() {
+                    self.handlers.remove(&cjid).unwrap()(cjid, result)?;
+                    if self.stop_when_all_completed && self.handlers.is_empty() {
                         return Ok(());
                     }
                 }
                 DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                    let path = artifacts.get(&digest).unwrap().clone();
+                    let path = self.artifacts.get(&digest).unwrap().clone();
                     let broker_addr = self.broker_addr.clone();
                     thread::spawn(move || artifact_pusher_main(broker_addr, path, digest));
                 }
@@ -109,32 +114,32 @@ impl Dispatcher {
                     unimplemented!("this client doesn't send statistics requests")
                 }
                 DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
-                    stats_reqs.pop_front().unwrap().send(res).ok();
+                    self.stats_reqs.pop_front().unwrap().send(res).ok();
                 }
                 DispatcherMessage::AddArtifact(path, digest) => {
-                    artifacts.insert(digest, path);
+                    self.artifacts.insert(digest, path);
                 }
                 DispatcherMessage::AddJob(spec, handler) => {
-                    let cjid = next_client_job_id.into();
-                    handlers.insert(cjid, handler).assert_is_none();
-                    next_client_job_id = next_client_job_id.checked_add(1).unwrap();
+                    let cjid = self.next_client_job_id.into();
+                    self.handlers.insert(cjid, handler).assert_is_none();
+                    self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
                     net::write_message_to_socket(
                         &mut self.stream,
                         ClientToBroker::JobRequest(cjid, spec),
                     )?;
                 }
                 DispatcherMessage::Stop => {
-                    if handlers.is_empty() {
+                    if self.handlers.is_empty() {
                         return Ok(());
                     }
-                    stop_when_all_completed = true;
+                    self.stop_when_all_completed = true;
                 }
                 DispatcherMessage::GetJobStateCounts(sender) => {
                     net::write_message_to_socket(
                         &mut self.stream,
                         ClientToBroker::JobStateCountsRequest,
                     )?;
-                    stats_reqs.push_back(sender);
+                    self.stats_reqs.push_back(sender);
                 }
             }
         }
