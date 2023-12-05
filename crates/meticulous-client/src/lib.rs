@@ -67,7 +67,7 @@ struct ArtifactPushRequest {
     digest: Sha256Digest,
 }
 
-struct ArtifactPusher {
+pub struct ArtifactPusher {
     broker_addr: BrokerAddr,
     receiver: Receiver<ArtifactPushRequest>,
 }
@@ -82,7 +82,7 @@ impl ArtifactPusher {
 
     /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
     /// until the function return false
-    fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
+    pub fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
     where
         'a: 'b,
     {
@@ -97,7 +97,7 @@ impl ArtifactPusher {
     }
 }
 
-struct Dispatcher {
+pub struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
     stream: TcpStream,
     artifact_pusher: SyncSender<ArtifactPushRequest>,
@@ -128,7 +128,7 @@ impl Dispatcher {
 
     /// Processes one request. In order to drive the dispatcher, this should be called in a loop
     /// until the function return false
-    fn process_one(&mut self) -> Result<bool> {
+    pub fn process_one(&mut self) -> Result<bool> {
         let msg = self.receiver.recv()?;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
@@ -297,7 +297,7 @@ fn digest_repository_simple_add_get_after_modify() {
     assert_eq!(repo.get(&foo_path).unwrap(), None);
 }
 
-struct SocketReader {
+pub struct SocketReader {
     stream: TcpStream,
     channel: SyncSender<DispatcherMessage>,
 }
@@ -307,7 +307,7 @@ impl SocketReader {
         Self { stream, channel }
     }
 
-    fn process_one(&mut self) -> bool {
+    pub fn process_one(&mut self) -> bool {
         let Ok(msg) = net::read_message_from_socket(&mut self.stream) else {
             return false;
         };
@@ -317,10 +317,10 @@ impl SocketReader {
     }
 }
 
-struct ClientDeps {
-    dispatcher: Dispatcher,
-    artifact_pusher: ArtifactPusher,
-    socket_reader: SocketReader,
+pub struct ClientDeps {
+    pub dispatcher: Dispatcher,
+    pub artifact_pusher: ArtifactPusher,
+    pub socket_reader: SocketReader,
     dispatcher_sender: SyncSender<DispatcherMessage>,
 }
 
@@ -339,20 +339,37 @@ impl ClientDeps {
             dispatcher_sender,
         })
     }
+}
 
-    fn run_on_thread(mut self) -> JoinHandle<Result<()>> {
-        thread::spawn(move || {
+pub trait ClientDriver {
+    fn drive(&mut self, deps: ClientDeps);
+    fn stop(&mut self) -> Result<()>;
+}
+
+#[derive(Default)]
+pub struct DefaultClientDriver {
+    handle: Option<JoinHandle<Result<()>>>,
+}
+
+impl ClientDriver for DefaultClientDriver {
+    fn drive(&mut self, mut deps: ClientDeps) {
+        assert!(self.handle.is_none());
+        self.handle = Some(thread::spawn(move || {
             thread::scope(|scope| {
                 let dispatcher_handle = scope.spawn(move || {
-                    while self.dispatcher.process_one()? {}
-                    self.dispatcher.stream.shutdown(std::net::Shutdown::Both)?;
+                    while deps.dispatcher.process_one()? {}
+                    deps.dispatcher.stream.shutdown(std::net::Shutdown::Both)?;
                     Ok(())
                 });
-                scope.spawn(move || while self.artifact_pusher.process_one(scope) {});
-                scope.spawn(move || while self.socket_reader.process_one() {});
+                scope.spawn(move || while deps.artifact_pusher.process_one(scope) {});
+                scope.spawn(move || while deps.socket_reader.process_one() {});
                 dispatcher_handle.join().unwrap()
             })
-        })
+        }));
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        self.handle.take().unwrap().join().unwrap()
     }
 }
 
@@ -360,7 +377,7 @@ pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<(
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
-    deps_handle: JoinHandle<Result<()>>,
+    driver: Box<dyn ClientDriver + Send + Sync>,
     digest_repo: DigestRespository,
     container_image_depot: ContainerImageDepot,
     digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
@@ -368,18 +385,19 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(
+    pub fn new<DriverT: ClientDriver + 'static + Send + Sync>(
+        mut driver: DriverT,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
         let deps = ClientDeps::new(broker_addr)?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
-        let deps_handle = deps.run_on_thread();
+        driver.drive(deps);
 
         Ok(Client {
             dispatcher_sender,
-            deps_handle,
+            driver: Box::new(driver),
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             digest_to_container_env: HashMap::default(),
@@ -446,9 +464,9 @@ impl Client {
             .send(DispatcherMessage::AddJob(spec, handler));
     }
 
-    pub fn wait_for_outstanding_jobs(self) -> Result<()> {
+    pub fn wait_for_outstanding_jobs(mut self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
-        self.deps_handle.join().unwrap()?;
+        self.driver.stop()?;
         Ok(())
     }
 

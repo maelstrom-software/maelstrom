@@ -9,7 +9,7 @@ use meticulous_base::{
     ClientJobId, EnumSet, JobDevice, JobDeviceListDeserialize, JobError, JobMount, JobOutputResult,
     JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty, Sha256Digest,
 };
-use meticulous_client::Client;
+use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
@@ -175,7 +175,12 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(config.broker, ".", cache_dir())?;
+    let mut client = Client::new(
+        DefaultClientDriver::default(),
+        config.broker,
+        ".",
+        cache_dir(),
+    )?;
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
     for job in jobs {

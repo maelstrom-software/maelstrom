@@ -5,7 +5,7 @@ use config::Quiet;
 use indicatif::TermLike;
 use metadata::AllMetadata;
 use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
-use meticulous_client::Client;
+use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
@@ -315,7 +315,12 @@ impl<StdErr> MainApp<StdErr> {
         broker_addr: BrokerAddr,
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
-        let client = Mutex::new(Client::new(broker_addr, workspace_root, cache_dir)?);
+        let client = Mutex::new(Client::new(
+            DefaultClientDriver::default(),
+            broker_addr,
+            workspace_root,
+            cache_dir,
+        )?);
         let test_metadata = AllMetadata::load(workspace_root)?;
         Ok(Self {
             client,
