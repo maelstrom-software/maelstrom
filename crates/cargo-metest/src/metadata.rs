@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Deserializer};
-use std::{path::Path, str};
+use std::{collections::BTreeMap, path::Path, str};
 
 fn deserialize_devices<'de, D>(
     deserializer: D,
@@ -25,6 +25,7 @@ struct TestDirective {
     mounts: Option<Vec<JobMount>>,
     #[serde(default, deserialize_with = "deserialize_devices")]
     devices: Option<EnumSet<JobDevice>>,
+    environment: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -41,6 +42,7 @@ pub struct TestMetadata {
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
+    environment: BTreeMap<String, String>,
 }
 
 impl TestMetadata {
@@ -54,6 +56,13 @@ impl TestMetadata {
             Some(val) => val,
             None => self.layers.is_empty(),
         }
+    }
+
+    pub fn environment(&self) -> Vec<String> {
+        self.environment
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect()
     }
 
     fn fold(mut self, directive: &TestDirective) -> Self {
@@ -94,6 +103,22 @@ impl TestMetadata {
             self.devices.clear();
         } else {
             self.devices = self.devices.union(directive.devices.unwrap_or_default());
+        }
+        if directive
+            .environment
+            .as_ref()
+            .map(BTreeMap::is_empty)
+            .unwrap_or(false)
+        {
+            self.environment.clear();
+        } else {
+            self.environment.extend(
+                directive
+                    .environment
+                    .iter()
+                    .flatten()
+                    .map(|(k, v)| (k.clone(), v.clone())),
+            );
         }
         self
     }
@@ -414,6 +439,62 @@ mod test {
                 },
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn environment() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            environment = { FOO = "foo", BAR = "bar" }
+
+            [[directives]]
+            package = "package1"
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            environment = { BAR = "baz", FROB = "frob" }
+
+            [[directives]]
+            package = "package1"
+            tests = "test3"
+            environment = {}
+
+            [[directives]]
+            package = "package1"
+            tests = "test31"
+            environment = { A = "a" }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1").environment(),
+            vec![
+                "BAR=baz".to_string(),
+                "FOO=foo".to_string(),
+                "FROB=frob".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2").environment(),
+            vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test3").environment(),
+            Vec::<String>::default(),
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test31")
+                .environment(),
+            vec!["A=a".to_string()],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1").environment(),
+            Vec::<String>::default(),
         );
     }
 
