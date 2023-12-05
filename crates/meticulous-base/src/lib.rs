@@ -116,7 +116,7 @@ pub struct JobSpec {
     pub layers: NonEmpty<Sha256Digest>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
-    pub loopback: bool,
+    pub enable_loopback: bool,
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a

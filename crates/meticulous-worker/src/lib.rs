@@ -93,7 +93,7 @@ impl DispatcherDeps for DispatcherAdapter {
             devices: &spec.devices,
             layers: &layers,
             mounts: spec.mounts.as_slice(),
-            loopback: &spec.loopback,
+            enable_loopback: &spec.enable_loopback,
         };
         let result = self.executor.start(
             &spec,

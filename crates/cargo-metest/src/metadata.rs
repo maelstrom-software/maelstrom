@@ -20,7 +20,7 @@ struct TestDirective {
     tests: Option<String>,
     package: Option<String>,
     include_shared_libraries: Option<bool>,
-    loopback_enabled: Option<bool>,
+    enable_loopback: Option<bool>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
     #[serde(default, deserialize_with = "deserialize_devices")]
@@ -37,7 +37,7 @@ pub struct AllMetadata {
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
-    pub loopback_enabled: bool,
+    pub enable_loopback: bool,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
@@ -60,8 +60,8 @@ impl TestMetadata {
         if directive.include_shared_libraries.is_some() {
             self.include_shared_libraries = directive.include_shared_libraries;
         }
-        if let Some(loopback) = directive.loopback_enabled {
-            self.loopback_enabled = loopback
+        if let Some(enable_loopback) = directive.enable_loopback {
+            self.enable_loopback = enable_loopback
         }
         if directive
             .layers
@@ -144,33 +144,33 @@ mod test {
     }
 
     #[test]
-    fn loopback_enabled() {
+    fn enable_loopback() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
             package = "package1"
-            loopback_enabled = true
+            enable_loopback = true
 
             [[directives]]
             package = "package1"
             tests = "test1"
-            loopback_enabled = false
+            enable_loopback = false
             "#,
         )
         .unwrap();
         assert_eq!(
             all.get_metadata_for_test("package1", "test1")
-                .loopback_enabled,
+                .enable_loopback,
             false
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test2")
-                .loopback_enabled,
+                .enable_loopback,
             true
         );
         assert_eq!(
             all.get_metadata_for_test("package2", "test1")
-                .loopback_enabled,
+                .enable_loopback,
             false
         );
     }
@@ -252,7 +252,7 @@ mod test {
                 layers = ["layer1", "layer2"]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 layers = ["layer3", "layer4"]
@@ -261,7 +261,7 @@ mod test {
             .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 layers: vec![
                     "layer1".to_string(),
                     "layer2".to_string(),
@@ -306,7 +306,7 @@ mod test {
                 mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
@@ -315,7 +315,7 @@ mod test {
             .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 mounts: vec![
                     JobMount {
                         fs_type: JobMountFsType::Proc,
@@ -367,7 +367,7 @@ mod test {
                 devices = [ "full" ]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 devices = [ "null" ]
@@ -379,7 +379,7 @@ mod test {
             .unwrap()
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 devices: enum_set! {
                     JobDevice::Full | JobDevice::Null | JobDevice::Zero
                 },

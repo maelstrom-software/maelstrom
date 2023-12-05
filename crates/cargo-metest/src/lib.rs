@@ -103,7 +103,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 layers,
                 devices: metadata.devices,
                 mounts: metadata.mounts,
-                loopback: metadata.loopback_enabled,
+                enable_loopback: metadata.enable_loopback,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );

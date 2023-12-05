@@ -14,7 +14,7 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 package = "cargo-metest"
-loopback_enabled = true
+enable_loopback = true
 include_shared_libraries = false
 layers = ["docker:rust", "dev-null.tar"]
 mounts = [
