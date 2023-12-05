@@ -87,7 +87,7 @@ impl ArtifactPusher {
         'a: 'b,
     {
         if let Ok(msg) = self.receiver.recv() {
-            let broker_addr = self.broker_addr.clone();
+            let broker_addr = self.broker_addr;
             // N.B. We are ignoring this Result<_>
             scope.spawn(move || push_one_artifact(broker_addr, msg.path, msg.digest));
             true
