@@ -17,7 +17,7 @@ mount_point = "/sys"
 [[groups]]
 module = "cargo-metest"
 layers = ["docker:rust", "dev-null.tar"]
-loopback = true
+loopback_enabled = true
 [[groups.mounts]]
 fs_type = "tmp"
 mount_point = "/tmp"

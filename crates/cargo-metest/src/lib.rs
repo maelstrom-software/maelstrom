@@ -259,7 +259,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 NonEmpty::try_from(layers).unwrap(),
                 test_metadata.devices,
                 test_metadata.mounts,
-                test_metadata.loopback,
+                test_metadata.loopback_enabled,
             );
         }
 

@@ -20,11 +20,11 @@ struct TestGroup {
     module: Option<String>,
     #[serde(default)]
     include_shared_libraries: bool,
+    loopback_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_devices")]
     devices: Option<EnumSet<JobDevice>>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
-    loopback: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -36,7 +36,7 @@ pub struct AllMetadata {
 #[derive(Debug, Eq, PartialEq)]
 pub struct TestMetadata {
     pub include_shared_libraries: bool,
-    pub loopback: bool,
+    pub loopback_enabled: bool,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
@@ -46,7 +46,7 @@ impl Default for TestMetadata {
     fn default() -> Self {
         TestMetadata {
             include_shared_libraries: true,
-            loopback: false,
+            loopback_enabled: false,
             layers: vec![],
             mounts: vec![],
             devices: EnumSet::EMPTY,
@@ -57,8 +57,8 @@ impl Default for TestMetadata {
 impl TestMetadata {
     fn fold(mut self, group: &TestGroup) -> Self {
         self.include_shared_libraries = group.include_shared_libraries;
-        if let Some(loopback) = group.loopback {
-            self.loopback = loopback
+        if let Some(loopback) = group.loopback_enabled {
+            self.loopback_enabled = loopback
         }
         if group.layers.as_ref().map(Vec::is_empty).unwrap_or(false) {
             self.layers.clear();
@@ -183,7 +183,7 @@ mod test {
                         ..Default::default()
                     },
                     TestGroup {
-                        loopback: Some(true),
+                        loopback_enabled: Some(true),
                         ..Default::default()
                     },
                     TestGroup {
@@ -194,7 +194,7 @@ mod test {
             }
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback: true,
+                loopback_enabled: true,
                 layers: vec![
                     "layer1".to_string(),
                     "layer2".to_string(),
@@ -248,7 +248,7 @@ mod test {
                         ..Default::default()
                     },
                     TestGroup {
-                        loopback: Some(true),
+                        loopback_enabled: Some(true),
                         ..Default::default()
                     },
                     TestGroup {
@@ -262,7 +262,7 @@ mod test {
             }
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback: true,
+                loopback_enabled: true,
                 mounts: vec![
                     JobMount {
                         fs_type: JobMountFsType::Proc,
@@ -326,7 +326,7 @@ mod test {
                         ..Default::default()
                     },
                     TestGroup {
-                        loopback: Some(true),
+                        loopback_enabled: Some(true),
                         ..Default::default()
                     },
                     TestGroup {
@@ -343,7 +343,7 @@ mod test {
             }
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
-                loopback: true,
+                loopback_enabled: true,
                 devices: enum_set! {
                     JobDevice::Full | JobDevice::Null | JobDevice::Zero
                 },
