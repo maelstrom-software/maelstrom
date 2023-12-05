@@ -18,8 +18,7 @@ where
 struct TestDirective {
     tests: Option<String>,
     module: Option<String>,
-    #[serde(default)]
-    include_shared_libraries: bool,
+    include_shared_libraries: Option<bool>,
     loopback_enabled: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_devices")]
     devices: Option<EnumSet<JobDevice>>,
@@ -33,30 +32,32 @@ pub struct AllMetadata {
     directives: Vec<TestDirective>,
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
-    pub include_shared_libraries: bool,
+    include_shared_libraries: Option<bool>,
     pub loopback_enabled: bool,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
 }
 
-impl Default for TestMetadata {
-    fn default() -> Self {
-        TestMetadata {
-            include_shared_libraries: true,
-            loopback_enabled: false,
-            layers: vec![],
-            mounts: vec![],
-            devices: EnumSet::EMPTY,
+impl TestMetadata {
+    /// Return whether to include a layer of shared library dependencies.
+    ///
+    /// The logic here is that if they explicitly set the value to something, we should return
+    /// that. Otherwise, we should see if they set any layers. If they explicitly added layers,
+    /// they probably don't want us pushing shared libraries on those layers.
+    pub fn include_shared_libraries(&self) -> bool {
+        match self.include_shared_libraries {
+            Some(val) => val,
+            None => self.layers.is_empty(),
         }
     }
-}
 
-impl TestMetadata {
     fn fold(mut self, directive: &TestDirective) -> Self {
-        self.include_shared_libraries = directive.include_shared_libraries;
+        if directive.include_shared_libraries.is_some() {
+            self.include_shared_libraries = directive.include_shared_libraries;
+        }
         if let Some(loopback) = directive.loopback_enabled {
             self.loopback_enabled = loopback
         }
@@ -140,49 +141,70 @@ mod test {
     }
 
     #[test]
-    fn any_directive_sets_include_shared_libraries_to_false() {
+    fn include_shared_libraries_defaults() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            module = "package1"
+            layers = ["layer1"]
+
+            [[directives]]
+            module = "package1"
+            tests = "test1"
+            layers = []
+            "#,
+        )
+        .unwrap();
         assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                layers = ["layer1", "layer2"]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test"),
-            TestMetadata {
-                layers: vec!["layer1".to_string(), "layer2".to_string()],
-                include_shared_libraries: false,
-                ..Default::default()
-            }
+            all.get_metadata_for_test("package1", "test1")
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2")
+                .include_shared_libraries(),
+            false
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1")
+                .include_shared_libraries(),
+            true
         );
     }
 
     #[test]
     fn include_shared_libraries_can_be_set() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                layers = ["layer1", "layer2"]
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            include_shared_libraries = false
 
-                [[directives]]
-                include_shared_libraries = true
-                layers = ["layer3", "layer4"]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test"),
-            TestMetadata {
-                layers: vec![
-                    "layer1".to_string(),
-                    "layer2".to_string(),
-                    "layer3".to_string(),
-                    "layer4".to_string()
-                ],
-                include_shared_libraries: true,
-                ..Default::default()
-            }
+            [[directives]]
+            include_shared_libraries = true
+            module = "package1"
+            layers = ["layer1"]
+
+            [[directives]]
+            module = "package1"
+            tests = "test1"
+            layers = []
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1")
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2")
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1")
+                .include_shared_libraries(),
+            false
         );
     }
 
@@ -211,7 +233,6 @@ mod test {
                     "layer3".to_string(),
                     "layer4".to_string()
                 ],
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );
@@ -236,7 +257,6 @@ mod test {
             .get_metadata_for_test("mod", "test"),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );
@@ -271,7 +291,6 @@ mod test {
                         mount_point: "/tmp".to_string()
                     },
                 ],
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );
@@ -299,7 +318,6 @@ mod test {
                     fs_type: JobMountFsType::Tmp,
                     mount_point: "/tmp".to_string()
                 }],
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );
@@ -330,7 +348,6 @@ mod test {
                 devices: enum_set! {
                     JobDevice::Full | JobDevice::Null | JobDevice::Zero
                 },
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );
@@ -360,7 +377,6 @@ mod test {
                 devices: enum_set! {
                     JobDevice::Null
                 },
-                include_shared_libraries: false,
                 ..Default::default()
             }
         );

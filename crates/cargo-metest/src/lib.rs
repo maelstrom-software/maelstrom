@@ -229,7 +229,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 .test_metadata
                 .get_metadata_for_test(package_name, &case);
             let mut layers = vec![];
-            for layer in test_metadata.layers {
+            for layer in &test_metadata.layers {
                 let mut client = client.lock().unwrap();
                 if layer.starts_with("docker:") {
                     let pkg = layer.split(':').nth(1).unwrap();
@@ -240,7 +240,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
                 }
             }
 
-            if test_metadata.include_shared_libraries {
+            if test_metadata.include_shared_libraries() {
                 layers.push(deps_artifact.clone());
             }
             layers.push(binary_artifact.clone());
