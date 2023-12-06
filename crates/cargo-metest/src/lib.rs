@@ -13,7 +13,7 @@ use progress::{
 };
 use std::{
     collections::HashSet,
-    env, io,
+    io,
     path::{Path, PathBuf},
     str,
     sync::{Arc, Mutex},
@@ -61,16 +61,6 @@ impl<StdErr> JobQueuer<StdErr> {
     }
 }
 
-fn collect_environment_vars() -> Vec<String> {
-    let mut env = vec![];
-    for (key, value) in env::vars() {
-        if key.starts_with("RUST_") {
-            env.push(format!("{key}={value}"));
-        }
-    }
-    env
-}
-
 impl<StdErr: io::Write> JobQueuer<StdErr> {
     #[allow(clippy::too_many_arguments)]
     fn queue_job_from_case<ProgressIndicatorT>(
@@ -100,7 +90,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             JobSpec {
                 program: format!("/{}", binary_name),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
-                environment: collect_environment_vars(),
+                environment: metadata.environment(),
                 layers,
                 devices: metadata.devices,
                 mounts: metadata.mounts,

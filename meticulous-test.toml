@@ -1,5 +1,6 @@
 [[directives]]
 include_shared_libraries = true
+environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-}" }
 
 [[directives]]
 package = "meticulous-worker"
