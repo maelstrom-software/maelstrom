@@ -1,4 +1,7 @@
-use std::{borrow::Cow, error, fmt, result};
+use std::{
+    borrow::{Borrow, Cow},
+    error, fmt, result,
+};
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Error {
@@ -25,36 +28,55 @@ impl fmt::Display for Error {
 
 impl error::Error for Error {}
 
-fn handle_variable<'a, 'b, 'c>(
+fn handle_variable<'a, 'b, LookupT, VarT>(
     result: &'a mut String,
     input: &'b str,
-    lookup: impl Fn(&'b str) -> anyhow::Result<Option<&'c str>>,
-) -> Result<()> {
+    lookup: LookupT,
+) -> Result<()>
+where
+    LookupT: Fn(&'b str) -> anyhow::Result<Option<VarT>>,
+    VarT: Borrow<str>,
+{
     let (var, rest) = input
         .split_once('}')
         .map_or_else(|| Err(Error::UnterminatedBrace), Ok)?;
-    let expansion = match var.split_once(":-") {
-        Some((var, default)) => match lookup(var) {
-            Ok(Some("")) | Ok(None) => default,
-            Ok(Some(val)) => val,
-            Err(err) => {
-                return Err(Error::LookupError(var.to_string(), format!("{err}")));
-            }
-        },
-        None => lookup(var)
-            .map_err(|err| Error::LookupError(var.to_string(), format!("{err}")))?
-            .map_or_else(|| Err(Error::UnknownVariable(var.to_string())), Ok)?,
+
+    let (var, default) = if let Some((head, tail)) = var.split_once(":-") {
+        (head, Some(tail))
+    } else {
+        (var, None)
     };
-    result.push_str(expansion);
+
+    let val = lookup(var).map_err(|err| Error::LookupError(var.to_string(), format!("{err}")))?;
+    match (val, default) {
+        (None, Some(default)) => {
+            result.push_str(default);
+        }
+        (Some(val), Some(default)) if val.borrow().is_empty() => {
+            result.push_str(default);
+        }
+        (None, _) => {
+            return Err(Error::UnknownVariable(var.to_string()));
+        }
+        (Some(val), _) => {
+            result.push_str(val.borrow());
+        }
+    }
     result.push_str(rest);
     Ok(())
 }
 
-pub fn substitute<'a, 'b, 'c>(
+pub fn substitute<'a, EnvLookupT, EnvVarT, PrevLookupT, PrevVarT>(
     input: &'a str,
-    env_lookup: impl Fn(&'a str) -> anyhow::Result<Option<&'b str>>,
-    prev_lookup: impl Fn(&'a str) -> Option<&'c str>,
-) -> Result<Cow<'a, str>> {
+    env_lookup: EnvLookupT,
+    prev_lookup: PrevLookupT,
+) -> Result<Cow<'a, str>>
+where
+    EnvLookupT: Fn(&'a str) -> anyhow::Result<Option<EnvVarT>>,
+    EnvVarT: Borrow<str>,
+    PrevLookupT: Fn(&'a str) -> Option<PrevVarT>,
+    PrevVarT: Borrow<str>,
+{
     let mut iter = input.split('$').peekable();
     let first = iter.next().unwrap();
 
@@ -93,11 +115,11 @@ mod tests {
     use super::*;
     use anyhow::anyhow;
 
-    fn env_lookup(key: &str) -> anyhow::Result<Option<&str>> {
+    fn env_lookup(key: &str) -> anyhow::Result<Option<String>> {
         match key {
-            "FOO" => Ok(Some("foo")),
-            "BAR" => Ok(Some("bar")),
-            "EMPTY" => Ok(Some("")),
+            "FOO" => Ok(Some("foo".to_string())),
+            "BAR" => Ok(Some("bar".to_string())),
+            "EMPTY" => Ok(Some("".to_string())),
             "ERROR" => Err(anyhow!("an error occurred")),
             _ => Ok(None),
         }

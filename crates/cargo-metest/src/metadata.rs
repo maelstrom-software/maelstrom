@@ -120,7 +120,7 @@ impl TestMetadata {
                 .map(|(k, v)| {
                     substitute::substitute(
                         v,
-                        |_| Ok(None),
+                        |_| Ok(None::<String>),
                         |var| self.environment.get(var).map(String::as_str),
                     )
                     .map(|v| (k.clone(), String::from(v)))
