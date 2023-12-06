@@ -3,8 +3,8 @@ use cargo::{get_cases_from_binary, CargoBuild};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
 use indicatif::TermLike;
-use metadata::AllMetadata;
-use meticulous_base::{EnumSet, JobDevice, JobMount, JobSpec, NonEmpty, Sha256Digest};
+use metadata::{AllMetadata, TestMetadata};
+use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
@@ -70,47 +70,99 @@ fn collect_environment_vars() -> Vec<String> {
     env
 }
 
-impl<StdErr: io::Write> JobQueuer<StdErr> {
-    #[allow(clippy::too_many_arguments)]
-    fn queue_job_from_case<ProgressIndicatorT>(
-        &mut self,
-        client: &Mutex<Client>,
+struct ArtifactQueing<'client, ProgressIndicatorT> {
+    client: &'client Mutex<Client>,
+    width: usize,
+    ind: ProgressIndicatorT,
+    ignored_cases: HashSet<String>,
+    package_name: String,
+    binary: PathBuf,
+    tracker: Arc<JobStatusTracker>,
+}
+
+impl<'client, ProgressIndicatorT> ArtifactQueing<'client, ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicatorScope,
+{
+    fn new(
+        client: &'client Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
-        ignored_cases: &HashSet<String>,
-        package_name: &str,
-        case: &str,
-        binary: &Path,
-        layers: NonEmpty<Sha256Digest>,
-        devices: EnumSet<JobDevice>,
-        mounts: Vec<JobMount>,
-        loopback: bool,
-    ) where
-        ProgressIndicatorT: ProgressIndicatorScope,
-    {
-        let case_str = format!("{package_name} {case}");
-        let visitor = JobStatusVisitor::new(self.tracker.clone(), case_str, width, ind);
+        ignored_cases: HashSet<String>,
+        package_name: String,
+        binary: PathBuf,
+        tracker: Arc<JobStatusTracker>,
+    ) -> Self {
+        Self {
+            client,
+            width,
+            ind,
+            ignored_cases,
+            package_name,
+            binary,
+            tracker,
+        }
+    }
 
-        if ignored_cases.contains(case) {
+    fn calculate_job_layers(
+        &mut self,
+        test_metadata: &TestMetadata,
+        binary_artifact: Sha256Digest,
+        deps_artifact: Sha256Digest,
+    ) -> Result<NonEmpty<Sha256Digest>> {
+        let mut layers = vec![];
+        for layer in &test_metadata.layers {
+            let mut client = self.client.lock().unwrap();
+            if layer.starts_with("docker:") {
+                let pkg = layer.split(':').nth(1).unwrap();
+                let prog = self.ind.new_container_progress();
+                layers.extend(client.add_container(pkg, "latest", prog)?);
+            } else {
+                layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);
+            }
+        }
+
+        if test_metadata.include_shared_libraries() {
+            layers.push(deps_artifact.clone());
+        }
+        layers.push(binary_artifact.clone());
+
+        Ok(NonEmpty::try_from(layers).unwrap())
+    }
+
+    fn queue_job_from_case(
+        &mut self,
+        case: &str,
+        test_metadata: TestMetadata,
+        layers: NonEmpty<Sha256Digest>,
+    ) {
+        let package_name = &self.package_name;
+        let case_str = format!("{package_name} {case}");
+        let visitor =
+            JobStatusVisitor::new(self.tracker.clone(), case_str, self.width, self.ind.clone());
+
+        if self.ignored_cases.contains(case) {
             visitor.job_ignored();
             return;
         }
 
-        let binary_name = binary.file_name().unwrap().to_str().unwrap();
-        client.lock().unwrap().add_job(
+        let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
+        self.client.lock().unwrap().add_job(
             JobSpec {
-                program: format!("/{}", binary_name),
+                program: format!("/{binary_name}"),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
-                layers,
-                devices,
-                mounts,
-                loopback,
+                layers: layers,
+                devices: test_metadata.devices,
+                mounts: test_metadata.mounts,
+                loopback: test_metadata.loopback_enabled,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
     }
+}
 
+impl<StdErr: io::Write> JobQueuer<StdErr> {
     fn queue_jobs_from_artifact<ProgressIndicatorT>(
         &mut self,
         client: &Mutex<Client>,
@@ -135,44 +187,31 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             .collect();
 
         let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
+        let mut artifact_queing = ArtifactQueing::new(
+            client,
+            width,
+            ind.clone(),
+            ignored_cases,
+            package_name.into(),
+            binary.clone(),
+            self.tracker.clone(),
+        );
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
             let test_metadata = self
                 .test_metadata
                 .get_metadata_for_test(package_name, &case);
-            let mut layers = vec![];
-            for layer in &test_metadata.layers {
-                let mut client = client.lock().unwrap();
-                if layer.starts_with("docker:") {
-                    let pkg = layer.split(':').nth(1).unwrap();
-                    let prog = ind.new_container_progress();
-                    layers.extend(client.add_container(pkg, "latest", prog)?);
-                } else {
-                    layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);
-                }
-            }
+            let layers = artifact_queing.calculate_job_layers(
+                &test_metadata,
+                binary_artifact.clone(),
+                deps_artifact.clone(),
+            )?;
 
-            if test_metadata.include_shared_libraries() {
-                layers.push(deps_artifact.clone());
-            }
-            layers.push(binary_artifact.clone());
-
+            // N.B. Must do this before we enqueue the job, but after we know we can't fail
             self.jobs_queued += 1;
             cb(self.jobs_queued);
 
-            self.queue_job_from_case(
-                client,
-                width,
-                ind.clone(),
-                &ignored_cases,
-                package_name,
-                &case,
-                &binary,
-                NonEmpty::try_from(layers).unwrap(),
-                test_metadata.devices,
-                test_metadata.mounts,
-                test_metadata.loopback_enabled,
-            );
+            artifact_queing.queue_job_from_case(&case, test_metadata, layers)
         }
 
         Ok(true)
