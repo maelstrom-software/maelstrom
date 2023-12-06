@@ -3,7 +3,12 @@ use anyhow::{Context as _, Error, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Deserializer};
-use std::{collections::BTreeMap, path::Path, str};
+use std::{
+    collections::BTreeMap,
+    env::{self, VarError},
+    path::Path,
+    str,
+};
 
 fn deserialize_devices<'de, D>(
     deserializer: D,
@@ -66,7 +71,11 @@ impl TestMetadata {
             .collect()
     }
 
-    fn fold(mut self, directive: &TestDirective) -> Result<Self> {
+    fn fold(
+        mut self,
+        directive: &TestDirective,
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
+    ) -> Result<Self> {
         if directive.include_shared_libraries.is_some() {
             self.include_shared_libraries = directive.include_shared_libraries;
         }
@@ -118,11 +127,9 @@ impl TestMetadata {
                 .iter()
                 .flatten()
                 .map(|(k, v)| {
-                    substitute::substitute(
-                        v,
-                        |_| Ok(None::<String>),
-                        |var| self.environment.get(var).map(String::as_str),
-                    )
+                    substitute::substitute(v, &env_lookup, |var| {
+                        self.environment.get(var).map(String::as_str)
+                    })
                     .map(|v| (k.clone(), String::from(v)))
                     .map_err(Error::new)
                 })
@@ -133,8 +140,21 @@ impl TestMetadata {
     }
 }
 
+fn std_env_lookup(var: &str) -> Result<Option<String>> {
+    match env::var(var) {
+        Ok(val) => Ok(Some(val)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(err) => Err(Error::new(err)),
+    }
+}
+
 impl AllMetadata {
-    pub fn get_metadata_for_test(&self, package: &str, test: &str) -> Result<TestMetadata> {
+    fn get_metadata_for_test(
+        &self,
+        package: &str,
+        test: &str,
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
+    ) -> Result<TestMetadata> {
         self.directives
             .iter()
             .filter(|directive| match &directive.tests {
@@ -145,7 +165,15 @@ impl AllMetadata {
                 Some(directive_package) => package == directive_package,
                 None => true,
             })
-            .try_fold(TestMetadata::default(), TestMetadata::fold)
+            .try_fold(TestMetadata::default(), |m, d| m.fold(d, &env_lookup))
+    }
+
+    pub fn get_metadata_for_test_with_env(
+        &self,
+        package: &str,
+        test: &str,
+    ) -> Result<TestMetadata> {
+        self.get_metadata_for_test(package, test, std_env_lookup)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -169,11 +197,15 @@ mod test {
     use meticulous_base::{enum_set, JobMountFsType};
     use toml::de::Error as TomlError;
 
+    fn empty_env(_: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     #[test]
     fn default() {
         assert_eq!(
             AllMetadata { directives: vec![] }
-                .get_metadata_for_test("mod", "test")
+                .get_metadata_for_test("mod", "test", empty_env)
                 .unwrap(),
             TestMetadata::default(),
         );
@@ -195,19 +227,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
                 .unwrap()
                 .enable_loopback,
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
                 .unwrap()
                 .enable_loopback,
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
                 .unwrap()
                 .enable_loopback,
             false
@@ -230,19 +262,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             true
@@ -269,19 +301,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
                 .unwrap()
                 .include_shared_libraries(),
             false
@@ -304,7 +336,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -335,7 +367,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
@@ -360,7 +392,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -395,7 +427,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 mounts: vec![JobMount {
@@ -426,7 +458,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -457,7 +489,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test")
+            .get_metadata_for_test("mod", "test", empty_env)
             .unwrap(),
             TestMetadata {
                 devices: enum_set! {
@@ -498,7 +530,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
                 .unwrap()
                 .environment(),
             vec![
@@ -508,25 +540,25 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
                 .unwrap()
                 .environment(),
             vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test3")
+            all.get_metadata_for_test("package1", "test3", empty_env)
                 .unwrap()
                 .environment(),
             Vec::<String>::default(),
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test31")
+            all.get_metadata_for_test("package1", "test31", empty_env)
                 .unwrap()
                 .environment(),
             vec!["A=a".to_string()],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
                 .unwrap()
                 .environment(),
             Vec::<String>::default(),
@@ -534,7 +566,7 @@ mod test {
     }
 
     #[test]
-    fn environment_substitution() {
+    fn environment_substitution_prev() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
@@ -547,15 +579,15 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
                 .unwrap()
                 .environment(),
-            vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string(),],
+            vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string()],
         );
     }
 
     #[test]
-    fn environment_substitution_error() {
+    fn environment_substitution_prev_error() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
@@ -563,8 +595,36 @@ mod test {
             "#,
         )
         .unwrap();
-        let err = all.get_metadata_for_test("package1", "test1").unwrap_err();
+        let err = all
+            .get_metadata_for_test("package1", "test1", empty_env)
+            .unwrap_err();
         assert_eq!(format!("{err}"), "unknown variable \"FOO\"");
+    }
+
+    #[test]
+    fn environment_substitution_env() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { BAR = "y$env{BAR}y", FOO = "x$env{FOO}x" }
+            "#,
+        )
+        .unwrap();
+
+        let env = |key: &_| {
+            Ok(Some(match key {
+                "FOO" => "foo".to_string(),
+                "BAR" => "bar".to_string(),
+                _ => panic!(),
+            }))
+        };
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", env)
+                .unwrap()
+                .environment(),
+            vec!["BAR=ybary".to_string(), "FOO=xfoox".to_string()],
+        );
     }
 
     #[test]
@@ -632,6 +692,32 @@ mod test {
         assert!(
             message.starts_with("unknown variant `not_a_value`, expected one of"),
             "message: {message}"
+        );
+    }
+
+    #[test]
+    fn std_env_lookup_good() {
+        let var = "AN_ENVIRONMENT_VARIABLE_1";
+        let val = "foobar";
+        env::set_var(var, val);
+        assert_eq!(std_env_lookup(var).unwrap(), Some(val.to_string()));
+    }
+
+    #[test]
+    fn std_env_lookup_missing() {
+        let var = "AN_ENVIRONMENT_VARIABLE_TO_DELETE";
+        env::remove_var(var);
+        assert_eq!(std_env_lookup(var).unwrap(), None);
+    }
+
+    #[test]
+    fn std_env_lookup_error() {
+        let var = "AN_ENVIRONMENT_VARIABLE_2";
+        let val = unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(vec![0xff]) };
+        env::set_var(var, &val);
+        assert_eq!(
+            format!("{}", std_env_lookup(var).unwrap_err()),
+            r#"environment variable was not valid unicode: "\xFF""#
         );
     }
 }

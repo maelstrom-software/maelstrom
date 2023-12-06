@@ -13,7 +13,7 @@ use progress::{
 };
 use std::{
     collections::HashSet,
-    io,
+    env, io,
     path::{Path, PathBuf},
     str,
     sync::{Arc, Mutex},
@@ -63,7 +63,7 @@ impl<StdErr> JobQueuer<StdErr> {
 
 fn collect_environment_vars() -> Vec<String> {
     let mut env = vec![];
-    for (key, value) in std::env::vars() {
+    for (key, value) in env::vars() {
         if key.starts_with("RUST_") {
             env.push(format!("{key}={value}"));
         }
@@ -138,7 +138,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         for case in get_cases_from_binary(&binary, &self.filter)? {
             let test_metadata = self
                 .test_metadata
-                .get_metadata_for_test(package_name, &case)?;
+                .get_metadata_for_test_with_env(package_name, &case)?;
             let mut layers = vec![];
             for layer in &test_metadata.layers {
                 let mut client = client.lock().unwrap();
