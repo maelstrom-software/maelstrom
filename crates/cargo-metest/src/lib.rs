@@ -25,6 +25,7 @@ pub mod cargo;
 pub mod config;
 pub mod metadata;
 pub mod progress;
+pub mod substitute;
 pub mod visitor;
 
 struct JobQueuer<StdErr> {
