@@ -70,28 +70,30 @@ fn collect_environment_vars() -> Vec<String> {
     env
 }
 
-struct ArtifactQueing<'client, ProgressIndicatorT> {
-    client: &'client Mutex<Client>,
+struct ArtifactQueing<'a, ProgressIndicatorT> {
+    client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
     ignored_cases: HashSet<String>,
     package_name: String,
     binary: PathBuf,
     tracker: Arc<JobStatusTracker>,
+    test_metadata: &'a AllMetadata,
 }
 
-impl<'client, ProgressIndicatorT> ArtifactQueing<'client, ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> ArtifactQueing<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicatorScope,
 {
     fn new(
-        client: &'client Mutex<Client>,
+        client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
         ignored_cases: HashSet<String>,
         package_name: String,
         binary: PathBuf,
         tracker: Arc<JobStatusTracker>,
+        test_metadata: &'a AllMetadata,
     ) -> Self {
         Self {
             client,
@@ -101,6 +103,7 @@ where
             package_name,
             binary,
             tracker,
+            test_metadata,
         }
     }
 
@@ -132,10 +135,19 @@ where
 
     fn queue_job_from_case(
         &mut self,
+        binary_artifact: Sha256Digest,
+        deps_artifact: Sha256Digest,
         case: &str,
-        test_metadata: TestMetadata,
-        layers: NonEmpty<Sha256Digest>,
-    ) {
+        enqueue_cb: impl FnOnce(),
+    ) -> Result<()> {
+        let test_metadata = self
+            .test_metadata
+            .get_metadata_for_test(&self.package_name, &case);
+        let layers = self.calculate_job_layers(&test_metadata, binary_artifact, deps_artifact)?;
+
+        // N.B. Must do this before we enqueue the job, but after we know we can't fail
+        enqueue_cb();
+
         let package_name = &self.package_name;
         let case_str = format!("{package_name} {case}");
         let visitor =
@@ -143,7 +155,7 @@ where
 
         if self.ignored_cases.contains(case) {
             visitor.job_ignored();
-            return;
+            return Ok(());
         }
 
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
@@ -159,6 +171,8 @@ where
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
+
+        Ok(())
     }
 }
 
@@ -195,23 +209,19 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
             package_name.into(),
             binary.clone(),
             self.tracker.clone(),
+            &self.test_metadata,
         );
 
         for case in get_cases_from_binary(&binary, &self.filter)? {
-            let test_metadata = self
-                .test_metadata
-                .get_metadata_for_test(package_name, &case);
-            let layers = artifact_queing.calculate_job_layers(
-                &test_metadata,
+            artifact_queing.queue_job_from_case(
                 binary_artifact.clone(),
                 deps_artifact.clone(),
+                &case,
+                || {
+                    self.jobs_queued += 1;
+                    cb(self.jobs_queued);
+                },
             )?;
-
-            // N.B. Must do this before we enqueue the job, but after we know we can't fail
-            self.jobs_queued += 1;
-            cb(self.jobs_queued);
-
-            artifact_queing.queue_job_from_case(&case, test_metadata, layers)
         }
 
         Ok(true)
