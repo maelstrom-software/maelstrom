@@ -9,7 +9,13 @@ fn handle_variable<'a, 'b, 'c>(
     let (var, rest) = input
         .split_once('}')
         .map_or_else(|| Err(anyhow!("unterminated {{")), Ok)?;
-    let expansion = lookup(var).map_or_else(|| Err(anyhow!("couldn't find variable {var}")), Ok)?;
+    let expansion = match var.split_once(":-") {
+        Some((var, default)) => match lookup(var) {
+            Some("") | None => default,
+            Some(val) => val,
+        },
+        None => lookup(var).map_or_else(|| Err(anyhow!("couldn't find variable {var}")), Ok)?,
+    };
     result.push_str(expansion);
     result.push_str(rest);
     Ok(())
@@ -161,6 +167,19 @@ mod tests {
         assert_eq!(
             substitute("$env{FOO}$prev{BAR}", env_lookup, prev_lookup).unwrap(),
             "fooprev-bar"
+        );
+    }
+
+    #[test]
+    fn env_prev_defaults() {
+        assert_eq!(
+            substitute(
+                "$env{EMPTY:-Hello} $prev{X:-World}: $env{FOO:-bar}",
+                env_lookup,
+                prev_lookup
+            )
+            .unwrap(),
+            "Hello World: foo"
         );
     }
 }
