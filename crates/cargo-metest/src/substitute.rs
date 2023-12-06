@@ -1,20 +1,42 @@
-use anyhow::{anyhow, Result};
-use std::borrow::Cow;
+use std::{borrow::Cow, error, fmt, result};
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Error<'a> {
+    UnterminatedBrace,
+    InvalidVariable,
+    UnknownVariable(&'a str),
+}
+
+pub type Result<'a, T> = result::Result<T, Error<'a>>;
+
+impl<'a> fmt::Display for Error<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::UnterminatedBrace => write!(f, "unterminated {{"),
+            Error::InvalidVariable => {
+                write!(f, r#"$ must be followed by "$", "env{{", or "prev{{""#)
+            }
+            Error::UnknownVariable(var) => write!(f, "unknown variable {var}"),
+        }
+    }
+}
+
+impl<'a> error::Error for Error<'a> {}
 
 fn handle_variable<'a, 'b, 'c>(
     result: &'a mut String,
     input: &'b str,
     lookup: impl Fn(&'b str) -> Option<&'c str>,
-) -> Result<()> {
+) -> Result<'b, ()> {
     let (var, rest) = input
         .split_once('}')
-        .map_or_else(|| Err(anyhow!("unterminated {{")), Ok)?;
+        .map_or_else(|| Err(Error::UnterminatedBrace), Ok)?;
     let expansion = match var.split_once(":-") {
         Some((var, default)) => match lookup(var) {
             Some("") | None => default,
             Some(val) => val,
         },
-        None => lookup(var).map_or_else(|| Err(anyhow!("couldn't find variable {var}")), Ok)?,
+        None => lookup(var).map_or_else(|| Err(Error::UnknownVariable(var)), Ok)?,
     };
     result.push_str(expansion);
     result.push_str(rest);
@@ -36,7 +58,7 @@ pub fn substitute<'a, 'b, 'c>(
             if subst_str.is_empty() {
                 match iter.next() {
                     None => {
-                        return Err(anyhow!("string ended with $"));
+                        return Err(Error::InvalidVariable);
                     }
                     Some(next) => {
                         result.push('$');
@@ -48,7 +70,7 @@ pub fn substitute<'a, 'b, 'c>(
             } else if let Some(rest) = subst_str.strip_prefix("prev{") {
                 handle_variable(&mut result, rest, &prev_lookup)?;
             } else {
-                return Err(anyhow!("$ must be followed by \"env{{\" or \"prev{{\""));
+                return Err(Error::InvalidVariable);
             }
         }
 
@@ -112,17 +134,26 @@ mod tests {
 
     #[test]
     fn one_dollar_sign() {
-        substitute("$", env_lookup, prev_lookup).unwrap_err();
+        assert_eq!(
+            substitute("$", env_lookup, prev_lookup).unwrap_err(),
+            Error::InvalidVariable,
+        );
     }
 
     #[test]
     fn trailing_dollar_sign() {
-        substitute("foo$", env_lookup, prev_lookup).unwrap_err();
+        assert_eq!(
+            substitute("foo$", env_lookup, prev_lookup).unwrap_err(),
+            Error::InvalidVariable,
+        );
     }
 
     #[test]
     fn trailing_odd_number_of_dollar_signs() {
-        substitute("foo$$$$$", env_lookup, prev_lookup).unwrap_err();
+        assert_eq!(
+            substitute("foo$$$$$", env_lookup, prev_lookup).unwrap_err(),
+            Error::InvalidVariable,
+        );
     }
 
     #[test]
@@ -180,6 +211,46 @@ mod tests {
             )
             .unwrap(),
             "Hello World: foo"
+        );
+    }
+
+    #[test]
+    fn unterminated_brace() {
+        assert_eq!(
+            substitute("$env{FOO $env{BAR}", env_lookup, prev_lookup).unwrap_err(),
+            Error::UnterminatedBrace,
+        );
+    }
+
+    #[test]
+    fn unterminated_brace_at_end() {
+        assert_eq!(
+            substitute("$env{FOO} $env{BAR", env_lookup, prev_lookup).unwrap_err(),
+            Error::UnterminatedBrace,
+        );
+    }
+
+    #[test]
+    fn not_env_or_prev() {
+        assert_eq!(
+            substitute("$FOO", env_lookup, prev_lookup).unwrap_err(),
+            Error::InvalidVariable,
+        );
+    }
+
+    #[test]
+    fn not_env_or_prev_2() {
+        assert_eq!(
+            substitute("$blah{FOO}", env_lookup, prev_lookup).unwrap_err(),
+            Error::InvalidVariable,
+        );
+    }
+
+    #[test]
+    fn unknown_variable() {
+        assert_eq!(
+            substitute("$env{UNKNOWN}", env_lookup, prev_lookup).unwrap_err(),
+            Error::UnknownVariable("UNKNOWN"),
         );
     }
 }
