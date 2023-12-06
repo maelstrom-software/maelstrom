@@ -138,7 +138,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         for case in get_cases_from_binary(&binary, &self.filter)? {
             let test_metadata = self
                 .test_metadata
-                .get_metadata_for_test(package_name, &case);
+                .get_metadata_for_test(package_name, &case)?;
             let mut layers = vec![];
             for layer in &test_metadata.layers {
                 let mut client = client.lock().unwrap();

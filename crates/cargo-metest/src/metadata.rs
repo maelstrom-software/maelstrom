@@ -1,4 +1,5 @@
-use anyhow::{Context as _, Result};
+use crate::substitute;
+use anyhow::{Context as _, Error, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Deserializer};
@@ -65,7 +66,7 @@ impl TestMetadata {
             .collect()
     }
 
-    fn fold(mut self, directive: &TestDirective) -> Self {
+    fn fold(mut self, directive: &TestDirective) -> Result<Self> {
         if directive.include_shared_libraries.is_some() {
             self.include_shared_libraries = directive.include_shared_libraries;
         }
@@ -112,20 +113,28 @@ impl TestMetadata {
         {
             self.environment.clear();
         } else {
-            self.environment.extend(
-                directive
-                    .environment
-                    .iter()
-                    .flatten()
-                    .map(|(k, v)| (k.clone(), v.clone())),
-            );
+            let to_insert = directive
+                .environment
+                .iter()
+                .flatten()
+                .map(|(k, v)| {
+                    substitute::substitute(
+                        v,
+                        |_| Ok(None),
+                        |var| self.environment.get(var).map(String::as_str),
+                    )
+                    .map(|v| (k.clone(), String::from(v)))
+                    .map_err(Error::new)
+                })
+                .collect::<Result<Vec<(String, String)>>>()?;
+            self.environment.extend(to_insert);
         }
-        self
+        Ok(self)
     }
 }
 
 impl AllMetadata {
-    pub fn get_metadata_for_test(&self, package: &str, test: &str) -> TestMetadata {
+    pub fn get_metadata_for_test(&self, package: &str, test: &str) -> Result<TestMetadata> {
         self.directives
             .iter()
             .filter(|directive| match &directive.tests {
@@ -136,7 +145,7 @@ impl AllMetadata {
                 Some(directive_package) => package == directive_package,
                 None => true,
             })
-            .fold(TestMetadata::default(), TestMetadata::fold)
+            .try_fold(TestMetadata::default(), TestMetadata::fold)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -163,7 +172,9 @@ mod test {
     #[test]
     fn default() {
         assert_eq!(
-            AllMetadata { directives: vec![] }.get_metadata_for_test("mod", "test"),
+            AllMetadata { directives: vec![] }
+                .get_metadata_for_test("mod", "test")
+                .unwrap(),
             TestMetadata::default(),
         );
     }
@@ -185,16 +196,19 @@ mod test {
         .unwrap();
         assert_eq!(
             all.get_metadata_for_test("package1", "test1")
+                .unwrap()
                 .enable_loopback,
             false
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test2")
+                .unwrap()
                 .enable_loopback,
             true
         );
         assert_eq!(
             all.get_metadata_for_test("package2", "test1")
+                .unwrap()
                 .enable_loopback,
             false
         );
@@ -217,16 +231,19 @@ mod test {
         .unwrap();
         assert_eq!(
             all.get_metadata_for_test("package1", "test1")
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test2")
+                .unwrap()
                 .include_shared_libraries(),
             false
         );
         assert_eq!(
             all.get_metadata_for_test("package2", "test1")
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
@@ -253,16 +270,19 @@ mod test {
         .unwrap();
         assert_eq!(
             all.get_metadata_for_test("package1", "test1")
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test2")
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
             all.get_metadata_for_test("package2", "test1")
+                .unwrap()
                 .include_shared_libraries(),
             false
         );
@@ -284,7 +304,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 enable_loopback: true,
                 layers: vec![
@@ -314,7 +335,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
                 ..Default::default()
@@ -338,7 +360,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 enable_loopback: true,
                 mounts: vec![
@@ -372,7 +395,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 mounts: vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -402,7 +426,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 enable_loopback: true,
                 devices: enum_set! {
@@ -432,7 +457,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test")
+            .unwrap(),
             TestMetadata {
                 devices: enum_set! {
                     JobDevice::Null
@@ -472,7 +498,9 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1").environment(),
+            all.get_metadata_for_test("package1", "test1")
+                .unwrap()
+                .environment(),
             vec![
                 "BAR=baz".to_string(),
                 "FOO=foo".to_string(),
@@ -480,22 +508,63 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2").environment(),
+            all.get_metadata_for_test("package1", "test2")
+                .unwrap()
+                .environment(),
             vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test3").environment(),
+            all.get_metadata_for_test("package1", "test3")
+                .unwrap()
+                .environment(),
             Vec::<String>::default(),
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test31")
+                .unwrap()
                 .environment(),
             vec!["A=a".to_string()],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1").environment(),
+            all.get_metadata_for_test("package2", "test1")
+                .unwrap()
+                .environment(),
             Vec::<String>::default(),
         );
+    }
+
+    #[test]
+    fn environment_substitution() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { FOO = "foo", BAR = "bar" }
+
+            [[directives]]
+            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1")
+                .unwrap()
+                .environment(),
+            vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string(),],
+        );
+    }
+
+    #[test]
+    fn environment_substitution_error() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
+            "#,
+        )
+        .unwrap();
+        let err = all.get_metadata_for_test("package1", "test1").unwrap_err();
+        assert_eq!(format!("{err}"), "unknown variable \"FOO\"");
     }
 
     #[test]

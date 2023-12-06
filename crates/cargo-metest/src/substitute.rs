@@ -1,42 +1,49 @@
 use std::{borrow::Cow, error, fmt, result};
 
 #[derive(Debug, Eq, PartialEq)]
-pub enum Error<'a> {
+pub enum Error {
     UnterminatedBrace,
     InvalidVariable,
-    UnknownVariable(&'a str),
+    UnknownVariable(String),
+    LookupError(String, String),
 }
 
-pub type Result<'a, T> = result::Result<T, Error<'a>>;
+pub type Result<T> = result::Result<T, Error>;
 
-impl<'a> fmt::Display for Error<'a> {
+impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::UnterminatedBrace => write!(f, "unterminated {{"),
             Error::InvalidVariable => {
                 write!(f, r#"$ must be followed by "$", "env{{", or "prev{{""#)
             }
-            Error::UnknownVariable(var) => write!(f, "unknown variable {var}"),
+            Error::UnknownVariable(var) => write!(f, "unknown variable {var:?}"),
+            Error::LookupError(var, err) => write!(f, "error lookup up variable {var:?}: {err}"),
         }
     }
 }
 
-impl<'a> error::Error for Error<'a> {}
+impl error::Error for Error {}
 
 fn handle_variable<'a, 'b, 'c>(
     result: &'a mut String,
     input: &'b str,
-    lookup: impl Fn(&'b str) -> Option<&'c str>,
-) -> Result<'b, ()> {
+    lookup: impl Fn(&'b str) -> anyhow::Result<Option<&'c str>>,
+) -> Result<()> {
     let (var, rest) = input
         .split_once('}')
         .map_or_else(|| Err(Error::UnterminatedBrace), Ok)?;
     let expansion = match var.split_once(":-") {
         Some((var, default)) => match lookup(var) {
-            Some("") | None => default,
-            Some(val) => val,
+            Ok(Some("")) | Ok(None) => default,
+            Ok(Some(val)) => val,
+            Err(err) => {
+                return Err(Error::LookupError(var.to_string(), format!("{err}")));
+            }
         },
-        None => lookup(var).map_or_else(|| Err(Error::UnknownVariable(var)), Ok)?,
+        None => lookup(var)
+            .map_err(|err| Error::LookupError(var.to_string(), format!("{err}")))?
+            .map_or_else(|| Err(Error::UnknownVariable(var.to_string())), Ok)?,
     };
     result.push_str(expansion);
     result.push_str(rest);
@@ -45,7 +52,7 @@ fn handle_variable<'a, 'b, 'c>(
 
 pub fn substitute<'a, 'b, 'c>(
     input: &'a str,
-    env_lookup: impl Fn(&'a str) -> Option<&'b str>,
+    env_lookup: impl Fn(&'a str) -> anyhow::Result<Option<&'b str>>,
     prev_lookup: impl Fn(&'a str) -> Option<&'c str>,
 ) -> Result<Cow<'a, str>> {
     let mut iter = input.split('$').peekable();
@@ -68,7 +75,7 @@ pub fn substitute<'a, 'b, 'c>(
             } else if let Some(rest) = subst_str.strip_prefix("env{") {
                 handle_variable(&mut result, rest, &env_lookup)?;
             } else if let Some(rest) = subst_str.strip_prefix("prev{") {
-                handle_variable(&mut result, rest, &prev_lookup)?;
+                handle_variable(&mut result, rest, |k| Ok(prev_lookup(k)))?;
             } else {
                 return Err(Error::InvalidVariable);
             }
@@ -84,13 +91,15 @@ pub fn substitute<'a, 'b, 'c>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use anyhow::anyhow;
 
-    fn env_lookup(key: &str) -> Option<&str> {
+    fn env_lookup(key: &str) -> anyhow::Result<Option<&str>> {
         match key {
-            "FOO" => Some("foo"),
-            "BAR" => Some("bar"),
-            "EMPTY" => Some(""),
-            _ => None,
+            "FOO" => Ok(Some("foo")),
+            "BAR" => Ok(Some("bar")),
+            "EMPTY" => Ok(Some("")),
+            "ERROR" => Err(anyhow!("an error occurred")),
+            _ => Ok(None),
         }
     }
 
@@ -250,7 +259,15 @@ mod tests {
     fn unknown_variable() {
         assert_eq!(
             substitute("$env{UNKNOWN}", env_lookup, prev_lookup).unwrap_err(),
-            Error::UnknownVariable("UNKNOWN"),
+            Error::UnknownVariable("UNKNOWN".to_string()),
+        );
+    }
+
+    #[test]
+    fn lookup_error() {
+        assert_eq!(
+            substitute("$env{ERROR}", env_lookup, prev_lookup).unwrap_err(),
+            Error::LookupError("ERROR".to_string(), "an error occurred".to_string()),
         );
     }
 }
