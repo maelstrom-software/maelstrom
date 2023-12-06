@@ -74,9 +74,11 @@ struct ArtifactQueing<'a, ProgressIndicatorT> {
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
+    binary: PathBuf,
+    binary_artifact: Sha256Digest,
+    deps_artifact: Sha256Digest,
     ignored_cases: HashSet<String>,
     package_name: String,
-    binary: PathBuf,
     tracker: Arc<JobStatusTracker>,
     test_metadata: &'a AllMetadata,
 }
@@ -89,29 +91,35 @@ where
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
-        ignored_cases: HashSet<String>,
+        artifact: CargoArtifact,
         package_name: String,
-        binary: PathBuf,
         tracker: Arc<JobStatusTracker>,
         test_metadata: &'a AllMetadata,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        let binary = PathBuf::from(artifact.executable.unwrap());
+        let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
+            .into_iter()
+            .collect();
+
+        let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
+
+        Ok(Self {
             client,
             width,
             ind,
+            binary,
+            binary_artifact,
+            deps_artifact,
             ignored_cases,
             package_name,
-            binary,
             tracker,
             test_metadata,
-        }
+        })
     }
 
     fn calculate_job_layers(
         &mut self,
         test_metadata: &TestMetadata,
-        binary_artifact: Sha256Digest,
-        deps_artifact: Sha256Digest,
     ) -> Result<NonEmpty<Sha256Digest>> {
         let mut layers = vec![];
         for layer in &test_metadata.layers {
@@ -126,24 +134,18 @@ where
         }
 
         if test_metadata.include_shared_libraries() {
-            layers.push(deps_artifact.clone());
+            layers.push(self.deps_artifact.clone());
         }
-        layers.push(binary_artifact.clone());
+        layers.push(self.binary_artifact.clone());
 
         Ok(NonEmpty::try_from(layers).unwrap())
     }
 
-    fn queue_job_from_case(
-        &mut self,
-        binary_artifact: Sha256Digest,
-        deps_artifact: Sha256Digest,
-        case: &str,
-        enqueue_cb: impl FnOnce(),
-    ) -> Result<()> {
+    fn queue_job_from_case(&mut self, case: &str, enqueue_cb: impl FnOnce()) -> Result<()> {
         let test_metadata = self
             .test_metadata
             .get_metadata_for_test(&self.package_name, &case);
-        let layers = self.calculate_job_layers(&test_metadata, binary_artifact, deps_artifact)?;
+        let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
         enqueue_cb();
@@ -188,40 +190,28 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
     where
         ProgressIndicatorT: ProgressIndicatorScope,
     {
-        let package_name = artifact.package_id.repr.split(' ').next().unwrap();
+        let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
         if let Some(package) = &self.package {
-            if package_name != package {
+            if &package_name != package {
                 return Ok(false);
             }
         }
 
-        let binary = PathBuf::from(artifact.executable.unwrap());
-        let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
-            .into_iter()
-            .collect();
-
-        let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
         let mut artifact_queing = ArtifactQueing::new(
             client,
             width,
             ind.clone(),
-            ignored_cases,
-            package_name.into(),
-            binary.clone(),
+            artifact,
+            package_name,
             self.tracker.clone(),
             &self.test_metadata,
-        );
+        )?;
 
-        for case in get_cases_from_binary(&binary, &self.filter)? {
-            artifact_queing.queue_job_from_case(
-                binary_artifact.clone(),
-                deps_artifact.clone(),
-                &case,
-                || {
-                    self.jobs_queued += 1;
-                    cb(self.jobs_queued);
-                },
-            )?;
+        for case in get_cases_from_binary(&artifact_queing.binary, &self.filter)? {
+            artifact_queing.queue_job_from_case(&case, || {
+                self.jobs_queued += 1;
+                cb(self.jobs_queued);
+            })?;
         }
 
         Ok(true)
