@@ -204,6 +204,7 @@ fn main() -> Result<ExitCode> {
                     .collect(),
                 mounts: job.mounts.unwrap_or(vec![]),
                 enable_loopback: job.enable_loopback.unwrap_or(false),
+                working_directory: PathBuf::from("/"),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );

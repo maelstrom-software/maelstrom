@@ -36,6 +36,7 @@ macro_rules! spec {
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
             enable_loopback: false,
+            working_directory: std::path::PathBuf::from("/"),
         }
     };
     [2] => {
@@ -47,6 +48,7 @@ macro_rules! spec {
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
             enable_loopback: false,
+            working_directory: std::path::PathBuf::from("/"),
         }
     };
     [3] => {
@@ -58,6 +60,7 @@ macro_rules! spec {
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
             enable_loopback: false,
+            working_directory: std::path::PathBuf::from("/"),
         }
     };
     [4] => {
@@ -69,6 +72,7 @@ macro_rules! spec {
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
             enable_loopback: false,
+            working_directory: std::path::PathBuf::from("/"),
         }
     };
     [$n:literal] => {
@@ -80,6 +84,7 @@ macro_rules! spec {
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
             enable_loopback: false,
+            working_directory: std::path::PathBuf::from("/"),
         }
     };
     [$n:literal, [$($digest:expr),*]] => {
@@ -93,6 +98,7 @@ macro_rules! spec {
                 devices: meticulous_base::EnumSet::EMPTY,
                 mounts: vec![],
                 enable_loopback: false,
+                working_directory: std::path::PathBuf::from("/"),
             }
         }
     }

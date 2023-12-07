@@ -26,7 +26,7 @@ use std::{
         fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
         unix::ffi::OsStrExt as _,
     },
-    path::PathBuf,
+    path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
 };
@@ -54,6 +54,7 @@ pub struct JobSpec<'a> {
     pub layers: &'a NonEmpty<PathBuf>,
     pub mounts: &'a [JobMount],
     pub enable_loopback: &'a bool,
+    pub working_directory: &'a Path,
 }
 
 pub struct Executor {
@@ -774,6 +775,7 @@ mod tests {
             devices,
             mounts: mounts.as_slice(),
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -802,6 +804,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1018,6 +1021,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
@@ -1091,6 +1095,7 @@ mod tests {
                 mount_point: "/sys".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1116,6 +1121,7 @@ mod tests {
                 mount_point: "/sys".to_string(),
             }],
             enable_loopback: &true,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1157,6 +1163,7 @@ mod tests {
                 mount_point: "/proc".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1179,6 +1186,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1209,6 +1217,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1235,6 +1244,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1260,6 +1270,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1285,6 +1296,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Full),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1310,6 +1322,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1335,6 +1348,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Null),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1357,6 +1371,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Null),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1382,6 +1397,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1407,6 +1423,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Random),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1432,6 +1449,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1457,6 +1475,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Tty),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1482,6 +1501,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1507,6 +1527,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Urandom),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1532,6 +1553,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1557,6 +1579,7 @@ mod tests {
             devices: &EnumSet::only(JobDevice::Zero),
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1582,6 +1605,7 @@ mod tests {
                 mount_point: "/proc".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1616,6 +1640,7 @@ mod tests {
                 },
             ],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1641,6 +1666,7 @@ mod tests {
                 mount_point: "/proc".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1675,6 +1701,7 @@ mod tests {
                 },
             ],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1697,6 +1724,7 @@ mod tests {
             devices: &EnumSet::EMPTY,
             mounts: &[],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1722,6 +1750,7 @@ mod tests {
                 mount_point: "/proc".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,
@@ -1749,6 +1778,7 @@ mod tests {
                 mount_point: "/proc".to_string(),
             }],
             enable_loopback: &false,
+            working_directory: Path::new("/"),
         };
         start_and_expect(
             spec,

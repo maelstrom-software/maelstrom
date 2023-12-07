@@ -179,6 +179,7 @@ where
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
+                working_directory: PathBuf::from("/"),
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );

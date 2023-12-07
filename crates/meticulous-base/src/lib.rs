@@ -13,6 +13,7 @@ use std::{
     error::Error,
     fmt::{self, Debug, Display, Formatter},
     hash::Hash,
+    path::PathBuf,
     result::Result,
     str::FromStr,
 };
@@ -117,6 +118,7 @@ pub struct JobSpec {
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
+    pub working_directory: PathBuf,
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
