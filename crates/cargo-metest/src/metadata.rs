@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
     env::{self, VarError},
-    path::Path,
+    path::{Path, PathBuf},
     str,
 };
 
@@ -27,6 +27,7 @@ struct TestDirective {
     package: Option<String>,
     include_shared_libraries: Option<bool>,
     enable_loopback: Option<bool>,
+    working_directory: Option<PathBuf>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
     #[serde(default, deserialize_with = "deserialize_devices")]
@@ -41,14 +42,29 @@ pub struct AllMetadata {
     directives: Vec<TestDirective>,
 }
 
-#[derive(Debug, Default, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub enable_loopback: bool,
+    pub working_directory: PathBuf,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
     environment: BTreeMap<String, String>,
+}
+
+impl Default for TestMetadata {
+    fn default() -> Self {
+        Self {
+            include_shared_libraries: Default::default(),
+            enable_loopback: Default::default(),
+            working_directory: PathBuf::from("/"),
+            layers: Default::default(),
+            mounts: Default::default(),
+            devices: Default::default(),
+            environment: Default::default(),
+        }
+    }
 }
 
 impl TestMetadata {
@@ -81,6 +97,9 @@ impl TestMetadata {
         }
         if let Some(enable_loopback) = directive.enable_loopback {
             self.enable_loopback = enable_loopback
+        }
+        if let Some(working_directory) = &directive.working_directory {
+            self.working_directory = working_directory.clone()
         }
         if directive
             .layers
