@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    main_app_new, MainAppDeps, ProgressDriver,
+    main_app_new, DefaultProgressDriver, MainAppDeps,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -141,7 +141,7 @@ pub fn main() -> Result<ExitCode> {
             stdout_tty,
             config.quiet,
             Term::buffered_stdout(),
-            ProgressDriver::new(scope),
+            DefaultProgressDriver::new(scope),
         )?;
         while app.enqueue_one()? {}
         app.finish()

@@ -321,19 +321,33 @@ impl<StdErr> MainAppDeps<StdErr> {
     }
 }
 
-pub struct ProgressDriver<'scope, 'env> {
+pub trait ProgressDriver<'scope> {
+    fn drive<'dep, ProgressIndicatorT>(
+        &mut self,
+        client: &'dep Mutex<Client>,
+        ind: ProgressIndicatorT,
+    ) where
+        ProgressIndicatorT: ProgressIndicator,
+        'dep: 'scope;
+
+    fn stop(&mut self) -> Result<()>;
+}
+
+pub struct DefaultProgressDriver<'scope, 'env> {
     scope: &'scope thread::Scope<'scope, 'env>,
     handle: Option<thread::ScopedJoinHandle<'scope, Result<()>>>,
 }
 
-impl<'scope, 'env> ProgressDriver<'scope, 'env> {
+impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
     pub fn new(scope: &'scope thread::Scope<'scope, 'env>) -> Self {
         Self {
             scope,
             handle: None,
         }
     }
+}
 
+impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
     fn drive<'dep, ProgressIndicatorT>(
         &mut self,
         client: &'dep Mutex<Client>,
@@ -359,21 +373,21 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT> {
+struct MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT> {
     main_app: &'main_app MainAppDeps<StdErr>,
     queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
-    prog_driver: ProgressDriver<'scope, 'env>,
+    prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: Term,
 }
 
-impl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
-    MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
+impl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
         main_app: &'main_app MainAppDeps<StdErr>,
         queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
-        prog_driver: ProgressDriver<'scope, 'env>,
+        prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: Term,
     ) -> Self {
@@ -387,12 +401,13 @@ impl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
     }
 }
 
-impl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT> MainApp
-    for MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
+impl<'main_app, 'scope, StdErr, Term, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
 where
     StdErr: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
     Term: TermLike + Clone + 'static,
+    ProgressDriverT: ProgressDriver<'scope>,
 {
     fn enqueue_one(&mut self) -> Result<bool> {
         self.queing.enqueue_one()
@@ -422,7 +437,7 @@ fn new_helper<'deps, 'scope, StdErr, ProgressIndicatorT, Term>(
     deps: &'deps MainAppDeps<StdErr>,
     prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
     term: Term,
-    mut prog_driver: ProgressDriver<'scope, '_>,
+    mut prog_driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErr: io::Write + Send,
@@ -450,7 +465,7 @@ pub fn main_app_new<'deps, 'scope, Term, StdErr>(
     stdout_tty: bool,
     quiet: Quiet,
     term: Term,
-    driver: ProgressDriver<'scope, '_>,
+    driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErr: io::Write + Send,

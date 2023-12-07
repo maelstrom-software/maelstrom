@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use cargo_metest::{config::Quiet, main_app_new, MainAppDeps, ProgressDriver};
+use cargo_metest::{config::Quiet, main_app_new, DefaultProgressDriver, MainAppDeps};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -258,7 +258,7 @@ fn run_app(
             stdout_tty,
             quiet,
             term.clone(),
-            ProgressDriver::new(scope),
+            DefaultProgressDriver::new(scope),
         )?;
         while app.enqueue_one()? {}
         app.finish()
