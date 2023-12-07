@@ -336,12 +336,41 @@ impl<StdErr> MainApp<StdErr> {
     }
 }
 
+pub struct ProgressDriver<'scope, 'env> {
+    scope: &'scope thread::Scope<'scope, 'env>,
+    handle: Option<thread::ScopedJoinHandle<'scope, Result<()>>>,
+}
+
+impl<'scope, 'env> ProgressDriver<'scope, 'env> {
+    pub fn new(scope: &'scope thread::Scope<'scope, 'env>) -> Self {
+        Self {
+            scope,
+            handle: None,
+        }
+    }
+
+    fn drive<'dep, ProgressIndicatorT>(
+        &mut self,
+        client: &'dep Mutex<Client>,
+        ind: ProgressIndicatorT,
+    ) where
+        ProgressIndicatorT: ProgressIndicator,
+        'dep: 'scope,
+    {
+        self.handle = Some(self.scope.spawn(move || ind.update_in_background(client)));
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        self.handle.take().unwrap().join().unwrap()
+    }
+}
+
 impl<StdErr: io::Write + Send> MainApp<StdErr> {
     fn run_with_progress<'elf, 'scope, ProgressIndicatorT, Term>(
         &'elf self,
         prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
         term: Term,
-        scope: &'scope thread::Scope<'scope, '_>,
+        mut prog_driver: ProgressDriver<'scope, '_>,
     ) -> Result<ExitCode>
     where
         ProgressIndicatorT: ProgressIndicator,
@@ -352,14 +381,13 @@ impl<StdErr: io::Write + Send> MainApp<StdErr> {
         let prog = prog_factory(term.clone());
         let tracker = self.queuer.tracker.clone();
 
-        let bg_prog = prog.clone();
-        let update_thread = scope.spawn(move || bg_prog.update_in_background(&self.client));
+        prog_driver.drive(&self.client, prog.clone());
 
         let res = self.queuer.queue_jobs(&self.client, width, prog.clone());
         prog.done_queuing_jobs();
 
         res?;
-        update_thread.join().unwrap()?;
+        prog_driver.stop()?;
 
         self.client.lock().unwrap().wait_for_outstanding_jobs()?;
 
@@ -374,17 +402,17 @@ impl<StdErr: io::Write + Send> MainApp<StdErr> {
         stdout_tty: bool,
         quiet: Quiet,
         term: Term,
-        scope: &'scope thread::Scope<'scope, '_>,
+        driver: ProgressDriver<'scope, '_>,
     ) -> Result<ExitCode>
     where
         Term: TermLike + Clone + Send + Sync + 'static,
         'elf: 'scope,
     {
         match (stdout_tty, quiet.into_inner()) {
-            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term, scope)?),
-            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term, scope)?),
-            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term, scope)?),
-            (false, false) => Ok(self.run_with_progress(NoBar::new, term, scope)?),
+            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term, driver)?),
+            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term, driver)?),
+            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term, driver)?),
+            (false, false) => Ok(self.run_with_progress(NoBar::new, term, driver)?),
         }
     }
 }

@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use cargo_metest::{config::Quiet, MainApp};
+use cargo_metest::{config::Quiet, MainApp, ProgressDriver};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -250,14 +250,15 @@ fn run_app(
         fake_broker(state),
     )
     .unwrap();
-    std::thread::scope(|scope| app.run(stdout_tty, quiet, term.clone(), scope)).unwrap_or_else(
-        |e| {
-            panic!(
-                "err = {e:?} stderr = {}",
-                String::from_utf8_lossy(&stderr[..])
-            )
-        },
-    );
+    std::thread::scope(|scope| {
+        app.run(stdout_tty, quiet, term.clone(), ProgressDriver::new(scope))
+    })
+    .unwrap_or_else(|e| {
+        panic!(
+            "err = {e:?} stderr = {}",
+            String::from_utf8_lossy(&stderr[..])
+        )
+    });
 }
 
 fn run_all_tests_sync(

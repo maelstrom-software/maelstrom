@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    MainApp,
+    MainApp, ProgressDriver,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -133,7 +133,14 @@ pub fn main() -> Result<ExitCode> {
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
-    std::thread::scope(|scope| app.run(stdout_tty, config.quiet, Term::buffered_stdout(), scope))
+    std::thread::scope(|scope| {
+        app.run(
+            stdout_tty,
+            config.quiet,
+            Term::buffered_stdout(),
+            ProgressDriver::new(scope),
+        )
+    })
 }
 
 #[test]
