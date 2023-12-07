@@ -9,7 +9,6 @@ use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use std::{
-    cell::RefCell,
     collections::HashSet,
     env, io,
     path::{Path, PathBuf},
@@ -18,6 +17,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
+    thread,
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -33,7 +33,7 @@ struct JobQueuer<StdErr> {
     cargo: String,
     package: Option<String>,
     filter: Option<String>,
-    stderr: RefCell<StdErr>,
+    stderr: Mutex<StdErr>,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
@@ -53,7 +53,7 @@ impl<StdErr> JobQueuer<StdErr> {
             cargo,
             package,
             filter,
-            stderr: RefCell::new(stderr),
+            stderr: Mutex::new(stderr),
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: AtomicU64::new(0),
@@ -197,7 +197,7 @@ where
 
 impl<StdErr: io::Write> JobQueuer<StdErr> {
     fn queue_jobs<ProgressIndicatorT>(
-        self,
+        &self,
         client: &Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
@@ -205,7 +205,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
     where
         ProgressIndicatorT: ProgressIndicator,
     {
-        let mut queing = JobQueing::new(&self, client, width, ind)?;
+        let mut queing = JobQueing::new(self, client, width, ind)?;
         while queing.enqueue_one()? {}
 
         Ok(())
@@ -282,7 +282,7 @@ where
         self.cargo_build
             .take()
             .unwrap()
-            .check_status(&mut *self.job_queuer.stderr.borrow_mut())?;
+            .check_status(&mut *self.job_queuer.stderr.lock().unwrap())?;
 
         if let Some(package) = &self.job_queuer.package {
             if !self.package_match {
@@ -336,34 +336,32 @@ impl<StdErr> MainApp<StdErr> {
     }
 }
 
-impl<StdErr: io::Write> MainApp<StdErr> {
-    fn run_with_progress<ProgressIndicatorT, Term>(
-        self,
+impl<StdErr: io::Write + Send> MainApp<StdErr> {
+    fn run_with_progress<'elf, 'scope, ProgressIndicatorT, Term>(
+        &'elf self,
         prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
         term: Term,
+        scope: &'scope thread::Scope<'scope, '_>,
     ) -> Result<ExitCode>
     where
         ProgressIndicatorT: ProgressIndicator,
         Term: TermLike + Clone + 'static,
+        'elf: 'scope,
     {
         let width = term.width() as usize;
         let prog = prog_factory(term.clone());
         let tracker = self.queuer.tracker.clone();
 
-        std::thread::scope(|scope| -> Result<()> {
-            let update_thread = scope.spawn(|| prog.update_in_background(&self.client));
-            let res = self.queuer.queue_jobs(&self.client, width, prog.clone());
-            prog.done_queuing_jobs();
+        let bg_prog = prog.clone();
+        let update_thread = scope.spawn(move || bg_prog.update_in_background(&self.client));
 
-            res?;
-            update_thread.join().unwrap()?;
-            Ok(())
-        })?;
+        let res = self.queuer.queue_jobs(&self.client, width, prog.clone());
+        prog.done_queuing_jobs();
 
-        self.client
-            .into_inner()
-            .unwrap()
-            .wait_for_outstanding_jobs()?;
+        res?;
+        update_thread.join().unwrap()?;
+
+        self.client.lock().unwrap().wait_for_outstanding_jobs()?;
 
         prog.finished()?;
 
@@ -371,15 +369,22 @@ impl<StdErr: io::Write> MainApp<StdErr> {
         Ok(tracker.exit_code())
     }
 
-    pub fn run<Term>(self, stdout_tty: bool, quiet: Quiet, term: Term) -> Result<ExitCode>
+    pub fn run<'elf, 'scope, Term>(
+        &'elf self,
+        stdout_tty: bool,
+        quiet: Quiet,
+        term: Term,
+        scope: &'scope thread::Scope<'scope, '_>,
+    ) -> Result<ExitCode>
     where
         Term: TermLike + Clone + Send + Sync + 'static,
+        'elf: 'scope,
     {
         match (stdout_tty, quiet.into_inner()) {
-            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term)?),
-            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term)?),
-            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term)?),
-            (false, false) => Ok(self.run_with_progress(NoBar::new, term)?),
+            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term, scope)?),
+            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term, scope)?),
+            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term, scope)?),
+            (false, false) => Ok(self.run_with_progress(NoBar::new, term, scope)?),
         }
     }
 }

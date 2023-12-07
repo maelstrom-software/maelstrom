@@ -126,14 +126,14 @@ pub fn main() -> Result<ExitCode> {
         "cargo".into(),
         cli_options.package,
         cli_options.filter,
-        std::io::stderr().lock(),
+        std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
         config.broker,
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
-    app.run(stdout_tty, config.quiet, Term::buffered_stdout())
+    std::thread::scope(|scope| app.run(stdout_tty, config.quiet, Term::buffered_stdout(), scope))
 }
 
 #[test]

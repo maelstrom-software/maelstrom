@@ -464,7 +464,7 @@ impl Client {
             .send(DispatcherMessage::AddJob(spec, handler));
     }
 
-    pub fn wait_for_outstanding_jobs(mut self) -> Result<()> {
+    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         self.driver.stop()?;
         Ok(())

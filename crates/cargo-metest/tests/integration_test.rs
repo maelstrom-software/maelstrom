@@ -250,13 +250,14 @@ fn run_app(
         fake_broker(state),
     )
     .unwrap();
-    app.run(stdout_tty, quiet, term.clone())
-        .unwrap_or_else(|e| {
+    std::thread::scope(|scope| app.run(stdout_tty, quiet, term.clone(), scope)).unwrap_or_else(
+        |e| {
             panic!(
                 "err = {e:?} stderr = {}",
                 String::from_utf8_lossy(&stderr[..])
             )
-        });
+        },
+    );
 }
 
 fn run_all_tests_sync(
