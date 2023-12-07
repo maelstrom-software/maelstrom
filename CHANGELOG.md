@@ -12,15 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 - This CHANGELOG file.
-- Add ability to set working directory for jobs. This can be specified in
+- Ability to set working directory for jobs. This can be specified in
   `cargo metest` and `meticulous-client`.
   [Issue #89](https://github.com/meticulous-software/meticulous/issues/89).
+- Ability to specify uid and gid for jobs. This can be specified in `cargo
+  metest` and `meticulous-client`.
+  [Issue #51](https://github.com/meticulous-software/meticulous/issues/51).
 
 ### `cargo-metest`
 
 #### Added
 
-- A `--version` flag.
+- `--version` flag.
 
 ## [0.1.0] - 2023-12-07
 
