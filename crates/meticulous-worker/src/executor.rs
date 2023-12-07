@@ -6,8 +6,8 @@ use bumpalo::{collections::Vec as BumpVec, Bump};
 use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
-    EnumSet, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType, JobOutputResult,
-    NonEmpty,
+    EnumSet, GroupId, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType,
+    JobOutputResult, NonEmpty, UserId,
 };
 use meticulous_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -55,6 +55,8 @@ pub struct JobSpec<'a> {
     pub mounts: &'a [JobMount],
     pub enable_loopback: &'a bool,
     pub working_directory: &'a Path,
+    pub user: &'a UserId,
+    pub group: &'a GroupId,
 }
 
 pub struct Executor {
@@ -787,6 +789,8 @@ mod tests {
             mounts: mounts.as_slice(),
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -816,6 +820,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1033,6 +1039,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
@@ -1107,6 +1115,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1133,6 +1143,8 @@ mod tests {
             }],
             enable_loopback: &true,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1175,6 +1187,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1198,6 +1212,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1229,6 +1245,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1256,6 +1274,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1282,6 +1302,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1308,6 +1330,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1334,6 +1358,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1360,6 +1386,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1383,6 +1411,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1409,6 +1439,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1435,6 +1467,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1461,6 +1495,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1487,6 +1523,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1513,6 +1551,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1539,6 +1579,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1565,6 +1607,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1591,6 +1635,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1617,6 +1663,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1652,6 +1700,8 @@ mod tests {
             ],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1678,6 +1728,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1713,6 +1765,8 @@ mod tests {
             ],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1736,6 +1790,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1762,6 +1818,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1790,6 +1848,8 @@ mod tests {
             }],
             enable_loopback: &false,
             working_directory: Path::new("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1813,6 +1873,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: &PathBuf::from("/"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1836,6 +1898,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: &PathBuf::from("/usr/bin"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         start_and_expect(
             spec,
@@ -1858,6 +1922,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: &PathBuf::from("/dev/null"),
+            user: &UserId::from(0),
+            group: &GroupId::from(0),
         };
         let err = Executor::new(tempfile::tempdir().unwrap().into_path())
             .unwrap()

@@ -95,6 +95,8 @@ impl DispatcherDeps for DispatcherAdapter {
             mounts: spec.mounts.as_slice(),
             enable_loopback: &spec.enable_loopback,
             working_directory: &spec.working_directory,
+            user: &spec.user,
+            group: &spec.group,
         };
         let result = self.executor.start(
             &spec,
