@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    MainApp, ProgressDriver,
+    main_app_new, MainAppDeps, ProgressDriver,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -122,7 +122,7 @@ pub fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let app = MainApp::new(
+    let deps = MainAppDeps::new(
         "cargo".into(),
         cli_options.package,
         cli_options.filter,
@@ -134,12 +134,15 @@ pub fn main() -> Result<ExitCode> {
 
     let stdout_tty = std::io::stdout().is_terminal();
     std::thread::scope(|scope| {
-        app.run(
+        let mut app = main_app_new(
+            &deps,
             stdout_tty,
             config.quiet,
             Term::buffered_stdout(),
             ProgressDriver::new(scope),
-        )
+        )?;
+        while app.enqueue_one()? {}
+        app.finish()
     })
 }
 

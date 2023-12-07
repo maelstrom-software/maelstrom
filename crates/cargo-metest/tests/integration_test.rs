@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use cargo_metest::{config::Quiet, MainApp, ProgressDriver};
+use cargo_metest::{config::Quiet, main_app_new, MainAppDeps, ProgressDriver};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -240,7 +240,7 @@ fn run_app(
     let tmp_dir = tempdir().unwrap();
 
     let mut stderr = vec![];
-    let app = MainApp::new(
+    let deps = MainAppDeps::new(
         cargo,
         package,
         filter,
@@ -251,7 +251,15 @@ fn run_app(
     )
     .unwrap();
     std::thread::scope(|scope| {
-        app.run(stdout_tty, quiet, term.clone(), ProgressDriver::new(scope))
+        let mut app = main_app_new(
+            &deps,
+            stdout_tty,
+            quiet,
+            term.clone(),
+            ProgressDriver::new(scope),
+        )?;
+        while app.enqueue_one()? {}
+        app.finish()
     })
     .unwrap_or_else(|e| {
         panic!(

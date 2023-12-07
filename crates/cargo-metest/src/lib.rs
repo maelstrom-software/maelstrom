@@ -195,23 +195,6 @@ where
     }
 }
 
-impl<StdErr: io::Write> JobQueuer<StdErr> {
-    fn queue_jobs<ProgressIndicatorT>(
-        &self,
-        client: &Mutex<Client>,
-        width: usize,
-        ind: ProgressIndicatorT,
-    ) -> Result<()>
-    where
-        ProgressIndicatorT: ProgressIndicator,
-    {
-        let mut queing = JobQueing::new(self, client, width, ind)?;
-        while queing.enqueue_one()? {}
-
-        Ok(())
-    }
-}
-
 struct JobQueing<'a, StdErr, ProgressIndicatorT> {
     job_queuer: &'a JobQueuer<StdErr>,
     client: &'a Mutex<Client>,
@@ -306,12 +289,12 @@ where
     }
 }
 
-pub struct MainApp<StdErr> {
+pub struct MainAppDeps<StdErr> {
     client: Mutex<Client>,
     queuer: JobQueuer<StdErr>,
 }
 
-impl<StdErr> MainApp<StdErr> {
+impl<StdErr> MainAppDeps<StdErr> {
     pub fn new(
         cargo: String,
         package: Option<String>,
@@ -368,54 +351,114 @@ impl<'scope, 'env> ProgressDriver<'scope, 'env> {
     }
 }
 
-impl<StdErr: io::Write + Send> MainApp<StdErr> {
-    fn run_with_progress<'elf, 'scope, ProgressIndicatorT, Term>(
-        &'elf self,
-        prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
+// This trait exists only for type-erasure purposes
+pub trait MainApp {
+    fn enqueue_one(&mut self) -> Result<bool>;
+    fn finish(&mut self) -> Result<ExitCode>;
+}
+
+struct MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT> {
+    main_app: &'main_app MainAppDeps<StdErr>,
+    queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
+    prog_driver: ProgressDriver<'scope, 'env>,
+    prog: ProgressIndicatorT,
+    term: Term,
+}
+
+impl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
+    MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
+{
+    fn new(
+        main_app: &'main_app MainAppDeps<StdErr>,
+        queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
+        prog_driver: ProgressDriver<'scope, 'env>,
+        prog: ProgressIndicatorT,
         term: Term,
-        mut prog_driver: ProgressDriver<'scope, '_>,
-    ) -> Result<ExitCode>
-    where
-        ProgressIndicatorT: ProgressIndicator,
-        Term: TermLike + Clone + 'static,
-        'elf: 'scope,
-    {
-        let width = term.width() as usize;
-        let prog = prog_factory(term.clone());
-        let tracker = self.queuer.tracker.clone();
+    ) -> Self {
+        Self {
+            main_app,
+            queing,
+            prog_driver,
+            prog,
+            term,
+        }
+    }
+}
 
-        prog_driver.drive(&self.client, prog.clone());
-
-        let res = self.queuer.queue_jobs(&self.client, width, prog.clone());
-        prog.done_queuing_jobs();
-
-        res?;
-        prog_driver.stop()?;
-
-        self.client.lock().unwrap().wait_for_outstanding_jobs()?;
-
-        prog.finished()?;
-
-        tracker.print_summary(width, term)?;
-        Ok(tracker.exit_code())
+impl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT> MainApp
+    for MainAppImpl<'main_app, 'scope, 'env, StdErr, Term, ProgressIndicatorT>
+where
+    StdErr: io::Write + Send,
+    ProgressIndicatorT: ProgressIndicator,
+    Term: TermLike + Clone + 'static,
+{
+    fn enqueue_one(&mut self) -> Result<bool> {
+        self.queing.enqueue_one()
     }
 
-    pub fn run<'elf, 'scope, Term>(
-        &'elf self,
-        stdout_tty: bool,
-        quiet: Quiet,
-        term: Term,
-        driver: ProgressDriver<'scope, '_>,
-    ) -> Result<ExitCode>
-    where
-        Term: TermLike + Clone + Send + Sync + 'static,
-        'elf: 'scope,
-    {
-        match (stdout_tty, quiet.into_inner()) {
-            (true, true) => Ok(self.run_with_progress(QuietProgressBar::new, term, driver)?),
-            (true, false) => Ok(self.run_with_progress(MultipleProgressBars::new, term, driver)?),
-            (false, true) => Ok(self.run_with_progress(QuietNoBar::new, term, driver)?),
-            (false, false) => Ok(self.run_with_progress(NoBar::new, term, driver)?),
-        }
+    fn finish(&mut self) -> Result<ExitCode> {
+        self.prog.done_queuing_jobs();
+        self.prog_driver.stop()?;
+
+        self.main_app
+            .client
+            .lock()
+            .unwrap()
+            .wait_for_outstanding_jobs()?;
+        self.prog.finished()?;
+
+        let width = self.term.width() as usize;
+        self.main_app
+            .queuer
+            .tracker
+            .print_summary(width, self.term.clone())?;
+        Ok(self.main_app.queuer.tracker.exit_code())
+    }
+}
+
+fn new_helper<'deps, 'scope, StdErr, ProgressIndicatorT, Term>(
+    deps: &'deps MainAppDeps<StdErr>,
+    prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
+    term: Term,
+    mut prog_driver: ProgressDriver<'scope, '_>,
+) -> Result<Box<dyn MainApp + 'scope>>
+where
+    StdErr: io::Write + Send,
+    ProgressIndicatorT: ProgressIndicator,
+    Term: TermLike + Clone + 'static,
+    'deps: 'scope,
+{
+    let width = term.width() as usize;
+    let prog = prog_factory(term.clone());
+
+    prog_driver.drive(&deps.client, prog.clone());
+
+    let queing = JobQueing::new(&deps.queuer, &deps.client, width, prog.clone())?;
+    Ok(Box::new(MainAppImpl::new(
+        deps,
+        queing,
+        prog_driver,
+        prog,
+        term,
+    )))
+}
+
+pub fn main_app_new<'deps, 'scope, Term, StdErr>(
+    deps: &'deps MainAppDeps<StdErr>,
+    stdout_tty: bool,
+    quiet: Quiet,
+    term: Term,
+    driver: ProgressDriver<'scope, '_>,
+) -> Result<Box<dyn MainApp + 'scope>>
+where
+    StdErr: io::Write + Send,
+    Term: TermLike + Clone + Send + Sync + 'static,
+    'deps: 'scope,
+{
+    match (stdout_tty, quiet.into_inner()) {
+        (true, true) => Ok(new_helper(deps, QuietProgressBar::new, term, driver)?),
+        (true, false) => Ok(new_helper(deps, MultipleProgressBars::new, term, driver)?),
+        (false, true) => Ok(new_helper(deps, QuietNoBar::new, term, driver)?),
+        (false, false) => Ok(new_helper(deps, NoBar::new, term, driver)?),
     }
 }
