@@ -37,6 +37,7 @@ enum CliSubcommand {
 }
 
 #[derive(Debug, Args)]
+#[command(version)]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line. If not set, the file
