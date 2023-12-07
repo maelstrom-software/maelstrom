@@ -357,7 +357,10 @@ impl<'scope, 'env> ProgressDriver<'scope, 'env> {
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
-        self.handle = Some(self.scope.spawn(move || ind.update_in_background(client)));
+        self.handle = Some(self.scope.spawn(move || {
+            while ind.update_in_background(client)? {}
+            Ok(())
+        }));
     }
 
     fn stop(&mut self) -> Result<()> {

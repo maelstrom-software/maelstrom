@@ -36,8 +36,9 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
         None
     }
 
-    /// Meant to be called on another thread to update stuff in parallel
-    fn update_in_background(&self, client: &Mutex<Client>) -> Result<()>;
+    /// Meant to be called on another thread to update stuff in parallel. Should be called in a
+    /// loop until it return false
+    fn update_in_background(&self, client: &Mutex<Client>) -> Result<bool>;
 
     /// Called when all jobs are running
     fn done_queuing_jobs(&self);
@@ -127,23 +128,21 @@ impl ProgressIndicator for MultipleProgressBars {
         )
     }
 
-    fn update_in_background(&self, client: &Mutex<Client>) -> Result<()> {
-        while !self.is_finished() {
-            let counts = client.lock().unwrap().get_job_state_counts()?;
-            for state in JobState::iter().filter(|s| s != &JobState::Complete) {
-                let jobs = JobState::iter()
-                    .filter(|s| s >= &state)
-                    .map(|s| counts[s])
-                    .sum();
-                self.bars.get(&state).unwrap().set_position(jobs);
-            }
-
-            if !self.done_queuing_jobs.load(Ordering::Relaxed) {
-                self.build_spinner.tick();
-            }
-            std::thread::sleep(Duration::from_millis(500));
+    fn update_in_background(&self, client: &Mutex<Client>) -> Result<bool> {
+        let counts = client.lock().unwrap().get_job_state_counts()?;
+        for state in JobState::iter().filter(|s| s != &JobState::Complete) {
+            let jobs = JobState::iter()
+                .filter(|s| s >= &state)
+                .map(|s| counts[s])
+                .sum();
+            self.bars.get(&state).unwrap().set_position(jobs);
         }
-        Ok(())
+
+        if !self.done_queuing_jobs.load(Ordering::Relaxed) {
+            self.build_spinner.tick();
+        }
+        std::thread::sleep(Duration::from_millis(500));
+        Ok(!self.is_finished())
     }
 
     fn done_queuing_jobs(&self) {
@@ -184,9 +183,9 @@ impl ProgressIndicator for QuietProgressBar {
         self.bar.set_length(new_length);
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<()> {
+    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
         // do nothing
-        Ok(())
+        Ok(false)
     }
 
     fn done_queuing_jobs(&self) {
@@ -226,9 +225,9 @@ where
         // do nothing
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<()> {
+    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
         // do nothing
-        Ok(())
+        Ok(false)
     }
 
     fn done_queuing_jobs(&self) {
@@ -269,9 +268,9 @@ where
         // do nothing
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<()> {
+    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
         // do nothing
-        Ok(())
+        Ok(false)
     }
 
     fn done_queuing_jobs(&self) {
