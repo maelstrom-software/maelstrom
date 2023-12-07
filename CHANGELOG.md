@@ -15,9 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `cargo-metest`
 
-- A `--version` flag.
-
 #### Added
+
+- A `--version` flag.
 
 ## [0.1.0] - 2023-12-07
 
