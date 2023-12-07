@@ -10,6 +10,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use meticulous_client::DefaultClientDriver;
 use meticulous_util::process::ExitCode;
 use serde::Deserialize;
 use std::{io::IsTerminal as _, path::PathBuf, process::Command, str};
@@ -130,6 +131,7 @@ pub fn main() -> Result<ExitCode> {
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
         config.broker,
+        DefaultClientDriver::default(),
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();

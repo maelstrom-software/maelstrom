@@ -7,6 +7,7 @@ use meticulous_base::{
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
+use meticulous_client::DefaultClientDriver;
 use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -248,6 +249,7 @@ fn run_app(
         false,
         &tmp_dir,
         fake_broker(state),
+        DefaultClientDriver::default(),
     )
     .unwrap();
     std::thread::scope(|scope| {

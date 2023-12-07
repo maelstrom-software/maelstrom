@@ -5,7 +5,7 @@ use config::Quiet;
 use indicatif::TermLike;
 use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
-use meticulous_client::{Client, DefaultClientDriver};
+use meticulous_client::{Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use std::{
@@ -295,6 +295,7 @@ pub struct MainAppDeps<StdErr> {
 }
 
 impl<StdErr> MainAppDeps<StdErr> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         cargo: String,
         package: Option<String>,
@@ -303,10 +304,11 @@ impl<StdErr> MainAppDeps<StdErr> {
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         broker_addr: BrokerAddr,
+        client_driver: impl ClientDriver + Send + Sync + 'static,
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(
-            DefaultClientDriver::default(),
+            client_driver,
             broker_addr,
             workspace_root,
             cache_dir,
