@@ -40,7 +40,7 @@ impl LineStacker {
         }
     }
 
-    fn stack_points(&self, points: &mut Vec<[f64; 2]>) {
+    fn stack_points(&self, points: &mut [[f64; 2]]) {
         if let Some(prev_points) = &self.prev_points {
             for (p, prev) in points.iter_mut().zip(prev_points.iter()) {
                 p[1] += prev[1];
@@ -123,10 +123,10 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                     .fold(JobStateCounts::default(), merge_job_state_counts)
             })
             .collect();
-        CollapsingHeader::new(&format!("All Clients Job Graph"))
+        CollapsingHeader::new("All Clients Job Graph")
             .default_open(true)
             .show(ui, |ui| {
-                Plot::new(&format!("all_clients_job_statistics"))
+                Plot::new("all_clients_job_statistics")
                     .width(1000.0)
                     .height(200.0)
                     .legend(Legend::default())
@@ -142,8 +142,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
         let last_entry = stats.job_statistics.iter().last();
         let clients: BTreeSet<_> = last_entry
             .into_iter()
-            .map(|s| s.client_to_stats.keys())
-            .flatten()
+            .flat_map(|s| s.client_to_stats.keys())
             .collect();
 
         for client in clients {
@@ -151,8 +150,8 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
                 .job_statistics
                 .iter()
                 .filter_map(|s| s.client_to_stats.get(client));
-            ui.collapsing(&format!("Client {client} Job Graph"), |ui| {
-                Plot::new(&format!("client_{client}_job_statistics"))
+            ui.collapsing(format!("Client {client} Job Graph"), |ui| {
+                Plot::new(format!("client_{client}_job_statistics"))
                     .width(1000.0)
                     .height(200.0)
                     .legend(Legend::default())
