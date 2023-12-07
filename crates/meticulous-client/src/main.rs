@@ -71,6 +71,7 @@ pub struct ConfigOptions {
 }
 
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 struct JobDescription {
     program: String,
     arguments: Option<Vec<String>>,
@@ -79,6 +80,7 @@ struct JobDescription {
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
     mounts: Option<Vec<JobMount>>,
     enable_loopback: Option<bool>,
+    working_directory: Option<PathBuf>,
 }
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
@@ -204,7 +206,7 @@ fn main() -> Result<ExitCode> {
                     .collect(),
                 mounts: job.mounts.unwrap_or(vec![]),
                 enable_loopback: job.enable_loopback.unwrap_or(false),
-                working_directory: PathBuf::from("/"),
+                working_directory: job.working_directory.unwrap_or_else(|| PathBuf::from("/")),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );
