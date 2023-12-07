@@ -151,7 +151,7 @@ where
         let test_metadata = self
             .job_queuer
             .test_metadata
-            .get_metadata_for_test_with_env(&self.package_name, &case)?;
+            .get_metadata_for_test_with_env(&self.package_name, case)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
@@ -178,7 +178,7 @@ where
                 program: format!("/{binary_name}"),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: collect_environment_vars(),
-                layers: layers,
+                layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
@@ -297,11 +297,9 @@ where
     }
 
     fn enqueue_one(&mut self) -> Result<bool> {
-        if self.artifact_queing.is_none() {
-            if !self.start_queuing_from_artifact()? {
-                self.finish()?;
-                return Ok(false);
-            }
+        if self.artifact_queing.is_none() && !self.start_queuing_from_artifact()? {
+            self.finish()?;
+            return Ok(false);
         }
         self.package_match = true;
         if !self.artifact_queing.as_mut().unwrap().enqueue_one()? {
