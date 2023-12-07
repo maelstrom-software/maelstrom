@@ -1,5 +1,8 @@
+use anyhow::Result;
 use assert_matches::assert_matches;
-use cargo_metest::{config::Quiet, main_app_new, DefaultProgressDriver, MainAppDeps};
+use cargo_metest::{
+    config::Quiet, main_app_new, progress::ProgressIndicator, MainAppDeps, ProgressDriver,
+};
 use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -7,15 +10,18 @@ use meticulous_base::{
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
-use meticulous_client::DefaultClientDriver;
+use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::time::Duration;
 use tempfile::{tempdir, TempDir};
 
@@ -229,6 +235,34 @@ impl FakeTests {
     }
 }
 
+#[derive(Default, Clone)]
+struct TestProgressDriver<'scope> {
+    update_func: Rc<RefCell<Option<Box<dyn FnMut() -> Result<bool> + 'scope>>>>,
+}
+
+impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
+    fn drive<'dep, ProgressIndicatorT>(
+        &mut self,
+        client: &'dep Mutex<Client>,
+        ind: ProgressIndicatorT,
+    ) where
+        ProgressIndicatorT: ProgressIndicator,
+        'dep: 'scope,
+    {
+        *self.update_func.borrow_mut() = Some(Box::new(move || ind.update_in_background(client)));
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<'scope> TestProgressDriver<'scope> {
+    fn update(&self) -> Result<bool> {
+        (self.update_func.borrow_mut().as_mut().unwrap())()
+    }
+}
+
 fn run_app(
     term: InMemoryTerm,
     state: BrokerState,
@@ -241,28 +275,25 @@ fn run_app(
     let tmp_dir = tempdir().unwrap();
 
     let mut stderr = vec![];
-    let deps = MainAppDeps::new(
-        cargo,
-        package,
-        filter,
-        &mut stderr,
-        false,
-        &tmp_dir,
-        fake_broker(state),
-        DefaultClientDriver::default(),
-    )
-    .unwrap();
-    std::thread::scope(|scope| {
-        let mut app = main_app_new(
-            &deps,
-            stdout_tty,
-            quiet,
-            term.clone(),
-            DefaultProgressDriver::new(scope),
-        )?;
-        while app.enqueue_one()? {}
+    (|| {
+        let deps = MainAppDeps::new(
+            cargo,
+            package,
+            filter,
+            &mut stderr,
+            false,
+            &tmp_dir,
+            fake_broker(state),
+            DefaultClientDriver::default(),
+        )
+        .unwrap();
+        let prog_driver = TestProgressDriver::default();
+        let mut app = main_app_new(&deps, stdout_tty, quiet, term.clone(), prog_driver.clone())?;
+        while app.enqueue_one()? {
+            prog_driver.update()?;
+        }
         app.finish()
-    })
+    })()
     .unwrap_or_else(|e| {
         panic!(
             "err = {e:?} stderr = {}",
