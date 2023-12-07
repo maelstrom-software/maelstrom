@@ -37,6 +37,8 @@ macro_rules! spec {
             mounts: vec![],
             enable_loopback: false,
             working_directory: std::path::PathBuf::from("/"),
+            user: meticulous_base::UserId::from(0),
+            group: meticulous_base::GroupId::from(0),
         }
     };
     [2] => {
@@ -49,6 +51,8 @@ macro_rules! spec {
             mounts: vec![],
             enable_loopback: false,
             working_directory: std::path::PathBuf::from("/"),
+            user: meticulous_base::UserId::from(0),
+            group: meticulous_base::GroupId::from(0),
         }
     };
     [3] => {
@@ -61,6 +65,8 @@ macro_rules! spec {
             mounts: vec![],
             enable_loopback: false,
             working_directory: std::path::PathBuf::from("/"),
+            user: meticulous_base::UserId::from(0),
+            group: meticulous_base::GroupId::from(0),
         }
     };
     [4] => {
@@ -73,6 +79,8 @@ macro_rules! spec {
             mounts: vec![],
             enable_loopback: false,
             working_directory: std::path::PathBuf::from("/"),
+            user: meticulous_base::UserId::from(0),
+            group: meticulous_base::GroupId::from(0),
         }
     };
     [$n:literal] => {
@@ -85,6 +93,8 @@ macro_rules! spec {
             mounts: vec![],
             enable_loopback: false,
             working_directory: std::path::PathBuf::from("/"),
+            user: meticulous_base::UserId::from(0),
+            group: meticulous_base::GroupId::from(0),
         }
     };
     [$n:literal, [$($digest:expr),*]] => {
@@ -99,6 +109,8 @@ macro_rules! spec {
                 mounts: vec![],
                 enable_loopback: false,
                 working_directory: std::path::PathBuf::from("/"),
+                user: meticulous_base::UserId::from(0),
+                group: meticulous_base::GroupId::from(0),
             }
         }
     }

@@ -180,6 +180,8 @@ where
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
                 working_directory: test_metadata.working_directory,
+                user: test_metadata.user,
+                group: test_metadata.group,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );

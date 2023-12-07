@@ -108,6 +108,38 @@ pub struct JobMount {
     pub mount_point: String,
 }
 
+/// ID of a user. This should be compatible with uid_t.
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct UserId(u32);
+
+impl From<u32> for UserId {
+    fn from(input: u32) -> Self {
+        UserId(input)
+    }
+}
+
+impl Display for UserId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
+/// ID of a group. This should be compatible with gid_t.
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct GroupId(u32);
+
+impl From<u32> for GroupId {
+    fn from(input: u32) -> Self {
+        GroupId(input)
+    }
+}
+
+impl Display for GroupId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_fmt(format_args!("{}", self.0))
+    }
+}
+
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobSpec {
@@ -119,6 +151,8 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
     pub working_directory: PathBuf,
+    pub user: UserId,
+    pub group: GroupId,
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a

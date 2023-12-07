@@ -6,8 +6,8 @@ use figment::{
     Figment,
 };
 use meticulous_base::{
-    ClientJobId, EnumSet, JobDevice, JobDeviceListDeserialize, JobError, JobMount, JobOutputResult,
-    JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty, Sha256Digest,
+    ClientJobId, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobError, JobMount,
+    JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty, Sha256Digest, UserId,
 };
 use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{
@@ -81,6 +81,8 @@ struct JobDescription {
     mounts: Option<Vec<JobMount>>,
     enable_loopback: Option<bool>,
     working_directory: Option<PathBuf>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
 }
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
@@ -207,6 +209,8 @@ fn main() -> Result<ExitCode> {
                 mounts: job.mounts.unwrap_or(vec![]),
                 enable_loopback: job.enable_loopback.unwrap_or(false),
                 working_directory: job.working_directory.unwrap_or_else(|| PathBuf::from("/")),
+                user: job.user.unwrap_or(UserId::from(0)),
+                group: job.group.unwrap_or(GroupId::from(0)),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );

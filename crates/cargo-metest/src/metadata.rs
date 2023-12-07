@@ -1,6 +1,6 @@
 use crate::substitute;
 use anyhow::{Context as _, Error, Result};
-use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
+use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Deserializer};
 use std::{
@@ -28,6 +28,8 @@ struct TestDirective {
     include_shared_libraries: Option<bool>,
     enable_loopback: Option<bool>,
     working_directory: Option<PathBuf>,
+    user: Option<UserId>,
+    group: Option<GroupId>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
     #[serde(default, deserialize_with = "deserialize_devices")]
@@ -51,6 +53,8 @@ pub struct TestMetadata {
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
     environment: BTreeMap<String, String>,
+    pub user: UserId,
+    pub group: GroupId,
 }
 
 impl Default for TestMetadata {
@@ -59,6 +63,8 @@ impl Default for TestMetadata {
             include_shared_libraries: Default::default(),
             enable_loopback: Default::default(),
             working_directory: PathBuf::from("/"),
+            user: UserId::from(0),
+            group: GroupId::from(0),
             layers: Default::default(),
             mounts: Default::default(),
             devices: Default::default(),
@@ -96,10 +102,16 @@ impl TestMetadata {
             self.include_shared_libraries = directive.include_shared_libraries;
         }
         if let Some(enable_loopback) = directive.enable_loopback {
-            self.enable_loopback = enable_loopback
+            self.enable_loopback = enable_loopback;
         }
         if let Some(working_directory) = &directive.working_directory {
-            self.working_directory = working_directory.clone()
+            self.working_directory = working_directory.clone();
+        }
+        if let Some(user) = directive.user {
+            self.user = user;
+        }
+        if let Some(group) = directive.group {
+            self.group = group;
         }
         if directive
             .layers
