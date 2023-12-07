@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use cargo::{get_cases_from_binary, CargoBuild};
+use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
 use indicatif::TermLike;
@@ -12,11 +12,15 @@ use progress::{
     QuietProgressBar,
 };
 use std::{
+    cell::RefCell,
     collections::HashSet,
     io,
     path::{Path, PathBuf},
     str,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
@@ -31,10 +35,10 @@ struct JobQueuer<StdErr> {
     cargo: String,
     package: Option<String>,
     filter: Option<String>,
-    stderr: StdErr,
+    stderr: RefCell<StdErr>,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
-    jobs_queued: u64,
+    jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
 }
 
@@ -51,10 +55,10 @@ impl<StdErr> JobQueuer<StdErr> {
             cargo,
             package,
             filter,
-            stderr,
+            stderr: RefCell::new(stderr),
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
-            jobs_queued: 0,
+            jobs_queued: AtomicU64::new(0),
             test_metadata,
         }
     }
@@ -70,7 +74,8 @@ fn collect_environment_vars() -> Vec<String> {
     env
 }
 
-struct ArtifactQueing<'a, ProgressIndicatorT> {
+struct ArtifactQueing<'a, StdErr, ProgressIndicatorT> {
+    job_queuer: &'a JobQueuer<StdErr>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
@@ -79,22 +84,20 @@ struct ArtifactQueing<'a, ProgressIndicatorT> {
     deps_artifact: Sha256Digest,
     ignored_cases: HashSet<String>,
     package_name: String,
-    tracker: Arc<JobStatusTracker>,
-    test_metadata: &'a AllMetadata,
+    cases: <Vec<String> as IntoIterator>::IntoIter,
 }
 
-impl<'a, ProgressIndicatorT> ArtifactQueing<'a, ProgressIndicatorT>
+impl<'a, StdErr, ProgressIndicatorT> ArtifactQueing<'a, StdErr, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicatorScope,
 {
     fn new(
+        job_queuer: &'a JobQueuer<StdErr>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
         artifact: CargoArtifact,
         package_name: String,
-        tracker: Arc<JobStatusTracker>,
-        test_metadata: &'a AllMetadata,
     ) -> Result<Self> {
         let binary = PathBuf::from(artifact.executable.unwrap());
         let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
@@ -103,7 +106,10 @@ where
 
         let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
 
+        let cases = get_cases_from_binary(&binary, &job_queuer.filter)?;
+
         Ok(Self {
+            job_queuer,
             client,
             width,
             ind,
@@ -112,8 +118,7 @@ where
             deps_artifact,
             ignored_cases,
             package_name,
-            tracker,
-            test_metadata,
+            cases: cases.into_iter(),
         })
     }
 
@@ -141,19 +146,25 @@ where
         Ok(NonEmpty::try_from(layers).unwrap())
     }
 
-    fn queue_job_from_case(&mut self, case: &str, enqueue_cb: impl FnOnce()) -> Result<()> {
+    fn queue_job_from_case(&mut self, case: &str) -> Result<()> {
         let test_metadata = self
+            .job_queuer
             .test_metadata
             .get_metadata_for_test(&self.package_name, &case);
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
-        enqueue_cb();
+        let count = self.job_queuer.jobs_queued.fetch_add(1, Ordering::AcqRel);
+        self.ind.update_length(count + 1);
 
         let package_name = &self.package_name;
         let case_str = format!("{package_name} {case}");
-        let visitor =
-            JobStatusVisitor::new(self.tracker.clone(), case_str, self.width, self.ind.clone());
+        let visitor = JobStatusVisitor::new(
+            self.job_queuer.tracker.clone(),
+            case_str,
+            self.width,
+            self.ind.clone(),
+        );
 
         if self.ignored_cases.contains(case) {
             visitor.job_ignored();
@@ -176,77 +187,127 @@ where
 
         Ok(())
     }
+
+    fn enqueue_one(&mut self) -> Result<bool> {
+        let Some(case) = self.cases.next() else {
+            return Ok(false);
+        };
+        self.queue_job_from_case(&case)?;
+        Ok(true)
+    }
 }
 
 impl<StdErr: io::Write> JobQueuer<StdErr> {
-    fn queue_jobs_from_artifact<ProgressIndicatorT>(
-        &mut self,
-        client: &Mutex<Client>,
-        width: usize,
-        ind: ProgressIndicatorT,
-        cb: &mut impl FnMut(u64),
-        artifact: CargoArtifact,
-    ) -> Result<bool>
-    where
-        ProgressIndicatorT: ProgressIndicatorScope,
-    {
-        let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
-        if let Some(package) = &self.package {
-            if &package_name != package {
-                return Ok(false);
-            }
-        }
-
-        let mut artifact_queing = ArtifactQueing::new(
-            client,
-            width,
-            ind.clone(),
-            artifact,
-            package_name,
-            self.tracker.clone(),
-            &self.test_metadata,
-        )?;
-
-        for case in get_cases_from_binary(&artifact_queing.binary, &self.filter)? {
-            artifact_queing.queue_job_from_case(&case, || {
-                self.jobs_queued += 1;
-                cb(self.jobs_queued);
-            })?;
-        }
-
-        Ok(true)
-    }
-
     fn queue_jobs<ProgressIndicatorT>(
-        mut self,
+        self,
         client: &Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
-        mut cb: impl FnMut(u64),
     ) -> Result<()>
     where
         ProgressIndicatorT: ProgressIndicatorScope,
     {
-        let mut cargo_build =
-            CargoBuild::new(&self.cargo, self.stderr_color, self.package.clone())?;
+        let mut queing = JobQueing::new(&self, client, width, ind)?;
+        while queing.enqueue_one()? {}
 
-        let mut package_match = false;
+        Ok(())
+    }
+}
 
-        for artifact in cargo_build.artifact_stream() {
-            let artifact = artifact?;
-            package_match |=
-                self.queue_jobs_from_artifact(client, width, ind.clone(), &mut cb, artifact)?;
-        }
+struct JobQueing<'a, StdErr, ProgressIndicatorT> {
+    job_queuer: &'a JobQueuer<StdErr>,
+    client: &'a Mutex<Client>,
+    width: usize,
+    ind: ProgressIndicatorT,
+    cargo_build: Option<CargoBuild>,
+    package_match: bool,
+    artifacts: TestArtifactStream,
+    artifact_queing: Option<ArtifactQueing<'a, StdErr, ProgressIndicatorT>>,
+}
 
-        cargo_build.check_status(self.stderr)?;
+impl<'a, StdErr, ProgressIndicatorT: ProgressIndicatorScope>
+    JobQueing<'a, StdErr, ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicatorScope,
+    StdErr: io::Write,
+{
+    fn new(
+        job_queuer: &'a JobQueuer<StdErr>,
+        client: &'a Mutex<Client>,
+        width: usize,
+        ind: ProgressIndicatorT,
+    ) -> Result<Self> {
+        let mut cargo_build = CargoBuild::new(
+            &job_queuer.cargo,
+            job_queuer.stderr_color,
+            job_queuer.package.clone(),
+        )?;
+        Ok(Self {
+            job_queuer,
+            client,
+            width,
+            ind,
+            package_match: false,
+            artifacts: cargo_build.artifact_stream(),
+            artifact_queing: None,
+            cargo_build: Some(cargo_build),
+        })
+    }
 
-        if let Some(package) = self.package {
-            if !package_match {
+    fn start_queuing_from_artifact(&mut self) -> Result<bool> {
+        let mut stream = (&mut self.artifacts).filter(|artifact_res: &Result<CargoArtifact>| {
+            artifact_res.is_err()
+                || artifact_res.as_ref().is_ok_and(|artifact| {
+                    let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+                    let filtered_package = self.job_queuer.package.as_ref();
+                    filtered_package.is_none() || Some(&package_name) == filtered_package
+                })
+        });
+        let Some(artifact) = stream.next() else {
+            return Ok(false);
+        };
+        let artifact = artifact?;
+
+        let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+        self.artifact_queing = Some(ArtifactQueing::new(
+            self.job_queuer,
+            self.client,
+            self.width,
+            self.ind.clone(),
+            artifact,
+            package_name,
+        )?);
+
+        Ok(true)
+    }
+
+    fn finish(&mut self) -> Result<()> {
+        self.cargo_build
+            .take()
+            .unwrap()
+            .check_status(&mut *self.job_queuer.stderr.borrow_mut())?;
+
+        if let Some(package) = &self.job_queuer.package {
+            if !self.package_match {
                 return Err(anyhow!("package {package:?} unknown"));
             }
         }
-
         Ok(())
+    }
+
+    fn enqueue_one(&mut self) -> Result<bool> {
+        if self.artifact_queing.is_none() {
+            if !self.start_queuing_from_artifact()? {
+                self.finish()?;
+                return Ok(false);
+            }
+        }
+        self.package_match = true;
+        if !self.artifact_queing.as_mut().unwrap().enqueue_one()? {
+            self.artifact_queing = None;
+        }
+
+        Ok(true)
     }
 }
 
@@ -295,8 +356,7 @@ impl<StdErr: io::Write> MainApp<StdErr> {
         let tracker = self.queuer.tracker.clone();
 
         prog.run(self.client, |client, bar_scope| {
-            let cb = |num_jobs| bar_scope.update_length(num_jobs);
-            self.queuer.queue_jobs(client, width, bar_scope.clone(), cb)
+            self.queuer.queue_jobs(client, width, bar_scope.clone())
         })?;
 
         tracker.print_summary(width, term)?;
