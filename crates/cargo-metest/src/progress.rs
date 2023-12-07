@@ -83,7 +83,6 @@ impl MultipleProgressBars {
         multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
         let build_spinner =
             multi_bar.add(ProgressBar::new_spinner().with_message("building artifacts..."));
-        build_spinner.enable_steady_tick(Duration::from_millis(500));
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
@@ -138,6 +137,11 @@ impl ProgressIndicator for MultipleProgressBars {
                     .sum();
                 self.bars.get(&state).unwrap().set_position(jobs);
             }
+
+            if !self.done_queuing_jobs.load(Ordering::Relaxed) {
+                self.build_spinner.tick();
+            }
+            std::thread::sleep(Duration::from_millis(500));
         }
         Ok(())
     }
@@ -145,7 +149,6 @@ impl ProgressIndicator for MultipleProgressBars {
     fn done_queuing_jobs(&self) {
         self.done_queuing_jobs.store(true, Ordering::Relaxed);
 
-        self.build_spinner.disable_steady_tick();
         self.build_spinner.finish_and_clear();
     }
 
