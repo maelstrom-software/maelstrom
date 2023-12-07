@@ -7,10 +7,7 @@ use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, DefaultClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
-use progress::{
-    MultipleProgressBars, NoBar, ProgressIndicator, ProgressIndicatorScope, QuietNoBar,
-    QuietProgressBar,
-};
+use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use std::{
     cell::RefCell,
     collections::HashSet,
@@ -90,7 +87,7 @@ struct ArtifactQueing<'a, StdErr, ProgressIndicatorT> {
 
 impl<'a, StdErr, ProgressIndicatorT> ArtifactQueing<'a, StdErr, ProgressIndicatorT>
 where
-    ProgressIndicatorT: ProgressIndicatorScope,
+    ProgressIndicatorT: ProgressIndicator,
 {
     fn new(
         job_queuer: &'a JobQueuer<StdErr>,
@@ -206,7 +203,7 @@ impl<StdErr: io::Write> JobQueuer<StdErr> {
         ind: ProgressIndicatorT,
     ) -> Result<()>
     where
-        ProgressIndicatorT: ProgressIndicatorScope,
+        ProgressIndicatorT: ProgressIndicator,
     {
         let mut queing = JobQueing::new(&self, client, width, ind)?;
         while queing.enqueue_one()? {}
@@ -226,10 +223,9 @@ struct JobQueing<'a, StdErr, ProgressIndicatorT> {
     artifact_queing: Option<ArtifactQueing<'a, StdErr, ProgressIndicatorT>>,
 }
 
-impl<'a, StdErr, ProgressIndicatorT: ProgressIndicatorScope>
-    JobQueing<'a, StdErr, ProgressIndicatorT>
+impl<'a, StdErr, ProgressIndicatorT: ProgressIndicator> JobQueing<'a, StdErr, ProgressIndicatorT>
 where
-    ProgressIndicatorT: ProgressIndicatorScope,
+    ProgressIndicatorT: ProgressIndicator,
     StdErr: io::Write,
 {
     fn new(
@@ -354,9 +350,22 @@ impl<StdErr: io::Write> MainApp<StdErr> {
         let prog = prog_factory(term.clone());
         let tracker = self.queuer.tracker.clone();
 
-        prog.run(self.client, |client, bar_scope| {
-            self.queuer.queue_jobs(client, width, bar_scope.clone())
+        std::thread::scope(|scope| -> Result<()> {
+            let update_thread = scope.spawn(|| prog.update_in_background(&self.client));
+            let res = self.queuer.queue_jobs(&self.client, width, prog.clone());
+            prog.done_queuing_jobs();
+
+            res?;
+            update_thread.join().unwrap()?;
+            Ok(())
         })?;
+
+        self.client
+            .into_inner()
+            .unwrap()
+            .wait_for_outstanding_jobs()?;
+
+        prog.finished()?;
 
         tracker.print_summary(width, term)?;
         Ok(tracker.exit_code())

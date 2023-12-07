@@ -1,4 +1,4 @@
-use crate::ProgressIndicatorScope;
+use crate::ProgressIndicator;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -120,7 +120,7 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     }
 }
 
-impl<ProgressIndicatorT: ProgressIndicatorScope> JobStatusVisitor<ProgressIndicatorT> {
+impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
     fn print_job_result(&self, result_str: ColoredString) {
         if self.width > 10 {
             let case_width = self.case.width();
