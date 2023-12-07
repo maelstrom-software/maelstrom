@@ -61,8 +61,8 @@ pub struct JobSpec<'a> {
 
 pub struct Executor {
     setgroups_contents: String,
-    uid_map_contents: String,
-    gid_map_contents: String,
+    user: UserId,
+    group: GroupId,
     mount_dir: CString,
     netlink_socket_addr: sockaddr_nl_t,
     netlink_message: Box<[u8]>,
@@ -92,8 +92,8 @@ impl Executor {
         }
 
         let setgroups_contents = "deny\n".to_string();
-        let uid_map_contents = format!("0 {} 1\n", unistd::getuid().as_raw());
-        let gid_map_contents = format!("0 {} 1\n", unistd::getgid().as_raw());
+        let user = UserId::from(unistd::getuid().as_raw());
+        let group = GroupId::from(unistd::getgid().as_raw());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
         let netlink_socket_addr = sockaddr_nl_t {
             sin_family: nc::AF_NETLINK as nc::sa_family_t,
@@ -114,8 +114,8 @@ impl Executor {
 
         Ok(Executor {
             setgroups_contents,
-            uid_map_contents,
-            gid_map_contents,
+            user,
+            group,
             mount_dir,
             netlink_socket_addr,
             netlink_message: buffer,
@@ -291,6 +291,8 @@ impl Executor {
         let overlayfs_options;
         let child_mount_points;
         let working_directory;
+        let uid_map_contents;
+        let gid_map_contents;
         let program = CString::new(spec.program)
             .map_err(Error::from)
             .map_err(JobError::System)?;
@@ -358,14 +360,14 @@ impl Executor {
 
         // We now need to set up the new user namespace. This first set of syscalls sets up the
         // uid mapping.
+        uid_map_contents = format!("{} {} 1\n", spec.user, self.user);
         builder.push(
             Syscall::OpenAndSave(c_str!("/proc/self/uid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
-        builder.push(
-            Syscall::WriteSaved(self.uid_map_contents.as_bytes()),
-            &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
-        );
+        builder.push(Syscall::WriteSaved(uid_map_contents.as_bytes()), &|err| {
+            JobError::System(anyhow!("writing to /proc/self/uid_map: {err}"))
+        });
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
@@ -387,14 +389,14 @@ impl Executor {
         // exec.
 
         // Finally, we set up the gid mapping.
+        gid_map_contents = format!("{} {} 1\n", spec.group, self.group);
         builder.push(
             Syscall::OpenAndSave(c_str!("/proc/self/gid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
-        builder.push(
-            Syscall::WriteSaved(self.gid_map_contents.as_bytes()),
-            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
-        );
+        builder.push(Syscall::WriteSaved(gid_map_contents.as_bytes()), &|err| {
+            JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
+        });
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
@@ -808,6 +810,25 @@ mod tests {
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
     ) {
+        start_and_expect_python_with_user_and_group(
+            script,
+            expected_status,
+            expected_stdout,
+            expected_stderr,
+            UserId::from(0),
+            GroupId::from(0),
+        )
+        .await;
+    }
+
+    async fn start_and_expect_python_with_user_and_group(
+        script: &'static str,
+        expected_status: JobStatus,
+        expected_stdout: JobOutputResult,
+        expected_stderr: JobOutputResult,
+        user: UserId,
+        group: GroupId,
+    ) {
         let program = "/usr/bin/python3";
         let arguments = vec!["-c".to_string(), script.to_string()];
         let layers = &NonEmpty::new(extract_dependencies());
@@ -820,8 +841,8 @@ mod tests {
             mounts: &[],
             enable_loopback: &false,
             working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
+            user: &user,
+            group: &group,
         };
         start_and_expect(
             spec,
@@ -1158,7 +1179,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn uid_and_gid() {
+    async fn user_and_group_0() {
         start_and_expect_python(
             concat!(
                 "import os;",
@@ -1168,6 +1189,24 @@ mod tests {
             JobStatus::Exited(0),
             JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")),
             JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn user_and_group_nonzero() {
+        start_and_expect_python_with_user_and_group(
+            concat!(
+                "import os;",
+                "print('uid:', os.getuid());",
+                "print('gid:', os.getgid());",
+            ),
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"uid: 43\ngid: 100\n")),
+            JobOutputResult::None,
+            UserId::from(43),
+            GroupId::from(100),
         )
         .await;
     }
