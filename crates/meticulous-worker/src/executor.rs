@@ -288,6 +288,7 @@ impl Executor {
         let layer0_path;
         let overlayfs_options;
         let child_mount_points;
+        let working_directory;
         let program = CString::new(spec.program)
             .map_err(Error::from)
             .map_err(JobError::System)?;
@@ -559,6 +560,16 @@ impl Executor {
         builder.push(Syscall::Umount2(c_str!("."), MNT_DETACH), &|err| {
             JobError::System(anyhow!("umount of old root: {err}"))
         });
+
+        // Change to the working directory, if it's not "/".
+        if spec.working_directory != Path::new("/") {
+            working_directory = CString::new(spec.working_directory.as_os_str().as_encoded_bytes())
+                .map_err(Error::from)
+                .map_err(JobError::System)?;
+            builder.push(Syscall::Chdir(&working_directory), &|err| {
+                JobError::Execution(anyhow!("chdir: {err}"))
+            });
+        }
 
         // Finally, do the exec.
         builder.push(
@@ -1788,5 +1799,73 @@ mod tests {
             JobOutputResult::None,
         )
         .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn working_directory_root() {
+        let spec = JobSpec {
+            program: "/usr/bin/bash",
+            arguments: &["-c".to_string(), "pwd".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+            enable_loopback: &false,
+            working_directory: &PathBuf::from("/"),
+        };
+        start_and_expect(
+            spec,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"/\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn working_directory_not_root() {
+        let spec = JobSpec {
+            program: "./bash",
+            arguments: &["-c".to_string(), "pwd".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+            enable_loopback: &false,
+            working_directory: &PathBuf::from("/usr/bin"),
+        };
+        start_and_expect(
+            spec,
+            100,
+            JobStatus::Exited(0),
+            JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")),
+            JobOutputResult::None,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn bad_working_directory_is_an_execution_error() {
+        let spec = JobSpec {
+            program: "/usr/bin/bash",
+            arguments: &["-c".to_string(), "pwd".to_string()],
+            environment: &[],
+            layers: &NonEmpty::new(extract_dependencies()),
+            devices: &EnumSet::EMPTY,
+            mounts: &[],
+            enable_loopback: &false,
+            working_directory: &PathBuf::from("/dev/null"),
+        };
+        let err = Executor::new(tempfile::tempdir().unwrap().into_path())
+            .unwrap()
+            .start(&spec, InlineLimit::from(0), |_| {}, |_| {})
+            .unwrap_err();
+        match err {
+            JobError::Execution(_) => {}
+            _ => panic!("expected JobError::Execution, got {err:?}"),
+        }
     }
 }
