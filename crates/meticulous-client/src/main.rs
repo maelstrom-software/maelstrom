@@ -78,7 +78,7 @@ struct JobDescription {
     layers: NonEmpty<String>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
     mounts: Option<Vec<JobMount>>,
-    loopback: Option<bool>,
+    enable_loopback: Option<bool>,
 }
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
@@ -203,7 +203,7 @@ fn main() -> Result<ExitCode> {
                     .map(JobDevice::from)
                     .collect(),
                 mounts: job.mounts.unwrap_or(vec![]),
-                loopback: job.loopback.unwrap_or(false),
+                enable_loopback: job.enable_loopback.unwrap_or(false),
             },
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );

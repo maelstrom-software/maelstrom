@@ -35,7 +35,7 @@ macro_rules! spec {
             layers: meticulous_base::nonempty![digest!(1)],
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
-            loopback: false,
+            enable_loopback: false,
         }
     };
     [2] => {
@@ -46,7 +46,7 @@ macro_rules! spec {
             layers: meticulous_base::nonempty![digest!(2)],
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
-            loopback: false,
+            enable_loopback: false,
         }
     };
     [3] => {
@@ -57,7 +57,7 @@ macro_rules! spec {
             layers: meticulous_base::nonempty![digest!(3)],
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
-            loopback: false,
+            enable_loopback: false,
         }
     };
     [4] => {
@@ -68,7 +68,7 @@ macro_rules! spec {
             layers: meticulous_base::nonempty![digest!(4)],
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
-            loopback: false,
+            enable_loopback: false,
         }
     };
     [$n:literal] => {
@@ -79,7 +79,7 @@ macro_rules! spec {
             layers: meticulous_base::nonempty![digest!($n)],
             devices: meticulous_base::EnumSet::EMPTY,
             mounts: vec![],
-            loopback: false,
+            enable_loopback: false,
         }
     };
     [$n:literal, [$($digest:expr),*]] => {
@@ -92,7 +92,7 @@ macro_rules! spec {
                 layers: meticulous_base::nonempty![$(digest!($digest)),*],
                 devices: meticulous_base::EnumSet::EMPTY,
                 mounts: vec![],
-                loopback: false,
+                enable_loopback: false,
             }
         }
     }

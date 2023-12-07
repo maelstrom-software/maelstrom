@@ -14,7 +14,7 @@ use progress::{
 use std::{
     cell::RefCell,
     collections::HashSet,
-    io,
+    env, io,
     path::{Path, PathBuf},
     str,
     sync::{
@@ -29,6 +29,7 @@ pub mod cargo;
 pub mod config;
 pub mod metadata;
 pub mod progress;
+pub mod substitute;
 pub mod visitor;
 
 struct JobQueuer<StdErr> {
@@ -66,7 +67,7 @@ impl<StdErr> JobQueuer<StdErr> {
 
 fn collect_environment_vars() -> Vec<String> {
     let mut env = vec![];
-    for (key, value) in std::env::vars() {
+    for (key, value) in env::vars() {
         if key.starts_with("RUST_") {
             env.push(format!("{key}={value}"));
         }
@@ -150,7 +151,7 @@ where
         let test_metadata = self
             .job_queuer
             .test_metadata
-            .get_metadata_for_test(&self.package_name, &case);
+            .get_metadata_for_test_with_env(&self.package_name, &case)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
@@ -180,7 +181,7 @@ where
                 layers: layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
-                loopback: test_metadata.loopback_enabled,
+                enable_loopback: test_metadata.enable_loopback,
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );

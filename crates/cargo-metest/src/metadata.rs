@@ -1,8 +1,14 @@
-use anyhow::{Context as _, Result};
+use crate::substitute;
+use anyhow::{Context as _, Error, Result};
 use meticulous_base::{EnumSet, JobDevice, JobDeviceListDeserialize, JobMount};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Deserializer};
-use std::{path::Path, str};
+use std::{
+    collections::BTreeMap,
+    env::{self, VarError},
+    path::Path,
+    str,
+};
 
 fn deserialize_devices<'de, D>(
     deserializer: D,
@@ -20,11 +26,12 @@ struct TestDirective {
     tests: Option<String>,
     package: Option<String>,
     include_shared_libraries: Option<bool>,
-    loopback_enabled: Option<bool>,
+    enable_loopback: Option<bool>,
     layers: Option<Vec<String>>,
     mounts: Option<Vec<JobMount>>,
     #[serde(default, deserialize_with = "deserialize_devices")]
     devices: Option<EnumSet<JobDevice>>,
+    environment: Option<BTreeMap<String, String>>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -37,10 +44,11 @@ pub struct AllMetadata {
 #[derive(Debug, Default, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
-    pub loopback_enabled: bool,
+    pub enable_loopback: bool,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
+    environment: BTreeMap<String, String>,
 }
 
 impl TestMetadata {
@@ -56,12 +64,23 @@ impl TestMetadata {
         }
     }
 
-    fn fold(mut self, directive: &TestDirective) -> Self {
+    pub fn environment(&self) -> Vec<String> {
+        self.environment
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect()
+    }
+
+    fn fold(
+        mut self,
+        directive: &TestDirective,
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
+    ) -> Result<Self> {
         if directive.include_shared_libraries.is_some() {
             self.include_shared_libraries = directive.include_shared_libraries;
         }
-        if let Some(loopback) = directive.loopback_enabled {
-            self.loopback_enabled = loopback
+        if let Some(enable_loopback) = directive.enable_loopback {
+            self.enable_loopback = enable_loopback
         }
         if directive
             .layers
@@ -95,12 +114,47 @@ impl TestMetadata {
         } else {
             self.devices = self.devices.union(directive.devices.unwrap_or_default());
         }
-        self
+        if directive
+            .environment
+            .as_ref()
+            .map(BTreeMap::is_empty)
+            .unwrap_or(false)
+        {
+            self.environment.clear();
+        } else {
+            let to_insert = directive
+                .environment
+                .iter()
+                .flatten()
+                .map(|(k, v)| {
+                    substitute::substitute(v, &env_lookup, |var| {
+                        self.environment.get(var).map(String::as_str)
+                    })
+                    .map(|v| (k.clone(), String::from(v)))
+                    .map_err(Error::new)
+                })
+                .collect::<Result<Vec<(String, String)>>>()?;
+            self.environment.extend(to_insert);
+        }
+        Ok(self)
+    }
+}
+
+fn std_env_lookup(var: &str) -> Result<Option<String>> {
+    match env::var(var) {
+        Ok(val) => Ok(Some(val)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(err) => Err(Error::new(err)),
     }
 }
 
 impl AllMetadata {
-    pub fn get_metadata_for_test(&self, package: &str, test: &str) -> TestMetadata {
+    fn get_metadata_for_test(
+        &self,
+        package: &str,
+        test: &str,
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
+    ) -> Result<TestMetadata> {
         self.directives
             .iter()
             .filter(|directive| match &directive.tests {
@@ -111,7 +165,15 @@ impl AllMetadata {
                 Some(directive_package) => package == directive_package,
                 None => true,
             })
-            .fold(TestMetadata::default(), TestMetadata::fold)
+            .try_fold(TestMetadata::default(), |m, d| m.fold(d, &env_lookup))
+    }
+
+    pub fn get_metadata_for_test_with_env(
+        &self,
+        package: &str,
+        test: &str,
+    ) -> Result<TestMetadata> {
+        self.get_metadata_for_test(package, test, std_env_lookup)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -135,42 +197,51 @@ mod test {
     use meticulous_base::{enum_set, JobMountFsType};
     use toml::de::Error as TomlError;
 
+    fn empty_env(_: &str) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     #[test]
     fn default() {
         assert_eq!(
-            AllMetadata { directives: vec![] }.get_metadata_for_test("mod", "test"),
+            AllMetadata { directives: vec![] }
+                .get_metadata_for_test("mod", "test", empty_env)
+                .unwrap(),
             TestMetadata::default(),
         );
     }
 
     #[test]
-    fn loopback_enabled() {
+    fn enable_loopback() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
             package = "package1"
-            loopback_enabled = true
+            enable_loopback = true
 
             [[directives]]
             package = "package1"
             tests = "test1"
-            loopback_enabled = false
+            enable_loopback = false
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
-                .loopback_enabled,
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
+                .enable_loopback,
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
-                .loopback_enabled,
+            all.get_metadata_for_test("package1", "test2", empty_env)
+                .unwrap()
+                .enable_loopback,
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
-                .loopback_enabled,
+            all.get_metadata_for_test("package2", "test1", empty_env)
+                .unwrap()
+                .enable_loopback,
             false
         );
     }
@@ -191,17 +262,20 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
@@ -227,17 +301,20 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1")
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2")
+            all.get_metadata_for_test("package1", "test2", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1")
+            all.get_metadata_for_test("package2", "test1", empty_env)
+                .unwrap()
                 .include_shared_libraries(),
             false
         );
@@ -252,16 +329,17 @@ mod test {
                 layers = ["layer1", "layer2"]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 layers = ["layer3", "layer4"]
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 layers: vec![
                     "layer1".to_string(),
                     "layer2".to_string(),
@@ -289,7 +367,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
                 ..Default::default()
@@ -306,16 +385,17 @@ mod test {
                 mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 mounts: vec![
                     JobMount {
                         fs_type: JobMountFsType::Proc,
@@ -347,7 +427,8 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
                 mounts: vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -367,7 +448,7 @@ mod test {
                 devices = [ "full" ]
 
                 [[directives]]
-                loopback_enabled = true
+                enable_loopback = true
 
                 [[directives]]
                 devices = [ "null" ]
@@ -377,9 +458,10 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
-                loopback_enabled: true,
+                enable_loopback: true,
                 devices: enum_set! {
                     JobDevice::Full | JobDevice::Null | JobDevice::Zero
                 },
@@ -407,13 +489,141 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test"),
+            .get_metadata_for_test("mod", "test", empty_env)
+            .unwrap(),
             TestMetadata {
                 devices: enum_set! {
                     JobDevice::Null
                 },
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn environment() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            environment = { FOO = "foo", BAR = "bar" }
+
+            [[directives]]
+            package = "package1"
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            environment = { BAR = "baz", FROB = "frob" }
+
+            [[directives]]
+            package = "package1"
+            tests = "test3"
+            environment = {}
+
+            [[directives]]
+            package = "package1"
+            tests = "test31"
+            environment = { A = "a" }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=baz".to_string(),
+                "FOO=foo".to_string(),
+                "FROB=frob".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env)
+                .unwrap()
+                .environment(),
+            vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test3", empty_env)
+                .unwrap()
+                .environment(),
+            Vec::<String>::default(),
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test31", empty_env)
+                .unwrap()
+                .environment(),
+            vec!["A=a".to_string()],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env)
+                .unwrap()
+                .environment(),
+            Vec::<String>::default(),
+        );
+    }
+
+    #[test]
+    fn environment_substitution_prev() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { FOO = "foo", BAR = "bar" }
+
+            [[directives]]
+            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
+                .environment(),
+            vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string()],
+        );
+    }
+
+    #[test]
+    fn environment_substitution_prev_error() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
+            "#,
+        )
+        .unwrap();
+        let err = all
+            .get_metadata_for_test("package1", "test1", empty_env)
+            .unwrap_err();
+        assert_eq!(format!("{err}"), "unknown variable \"FOO\"");
+    }
+
+    #[test]
+    fn environment_substitution_env() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { BAR = "y$env{BAR}y", FOO = "x$env{FOO}x" }
+            "#,
+        )
+        .unwrap();
+
+        let env = |key: &_| {
+            Ok(Some(match key {
+                "FOO" => "foo".to_string(),
+                "BAR" => "bar".to_string(),
+                _ => panic!(),
+            }))
+        };
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", env)
+                .unwrap()
+                .environment(),
+            vec!["BAR=ybary".to_string(), "FOO=xfoox".to_string()],
         );
     }
 
@@ -482,6 +692,32 @@ mod test {
         assert!(
             message.starts_with("unknown variant `not_a_value`, expected one of"),
             "message: {message}"
+        );
+    }
+
+    #[test]
+    fn std_env_lookup_good() {
+        let var = "AN_ENVIRONMENT_VARIABLE_1";
+        let val = "foobar";
+        env::set_var(var, val);
+        assert_eq!(std_env_lookup(var).unwrap(), Some(val.to_string()));
+    }
+
+    #[test]
+    fn std_env_lookup_missing() {
+        let var = "AN_ENVIRONMENT_VARIABLE_TO_DELETE";
+        env::remove_var(var);
+        assert_eq!(std_env_lookup(var).unwrap(), None);
+    }
+
+    #[test]
+    fn std_env_lookup_error() {
+        let var = "AN_ENVIRONMENT_VARIABLE_2";
+        let val = unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(vec![0xff]) };
+        env::set_var(var, &val);
+        assert_eq!(
+            format!("{}", std_env_lookup(var).unwrap_err()),
+            r#"environment variable was not valid unicode: "\xFF""#
         );
     }
 }

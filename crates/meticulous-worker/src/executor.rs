@@ -53,7 +53,7 @@ pub struct JobSpec<'a> {
     pub devices: &'a EnumSet<JobDevice>,
     pub layers: &'a NonEmpty<PathBuf>,
     pub mounts: &'a [JobMount],
-    pub loopback: &'a bool,
+    pub enable_loopback: &'a bool,
 }
 
 pub struct Executor {
@@ -322,7 +322,7 @@ impl Executor {
 
         let mut builder = ScriptBuilder::new(&bump);
 
-        if *spec.loopback {
+        if *spec.enable_loopback {
             // In order to have a loopback network interface, we need to create a netlink socket and
             // configure things with the kernel. This creates the socket.
             builder.push(
@@ -773,7 +773,7 @@ mod tests {
             layers,
             devices,
             mounts: mounts.as_slice(),
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -801,7 +801,7 @@ mod tests {
             layers,
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1017,7 +1017,7 @@ mod tests {
             layers,
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         assert_matches!(
             Executor::new(tempfile::tempdir().unwrap().into_path())
@@ -1090,7 +1090,7 @@ mod tests {
                 fs_type: JobMountFsType::Sys,
                 mount_point: "/sys".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1115,7 +1115,7 @@ mod tests {
                 fs_type: JobMountFsType::Sys,
                 mount_point: "/sys".to_string(),
             }],
-            loopback: &true,
+            enable_loopback: &true,
         };
         start_and_expect(
             spec,
@@ -1156,7 +1156,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1178,7 +1178,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1208,7 +1208,7 @@ mod tests {
             ],
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1234,7 +1234,7 @@ mod tests {
             ],
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1259,7 +1259,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1284,7 +1284,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Full),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1309,7 +1309,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1334,7 +1334,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Null),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1356,7 +1356,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Null),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1381,7 +1381,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1406,7 +1406,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Random),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1431,7 +1431,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1456,7 +1456,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Tty),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1481,7 +1481,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1506,7 +1506,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Urandom),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1531,7 +1531,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1556,7 +1556,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::only(JobDevice::Zero),
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1581,7 +1581,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1615,7 +1615,7 @@ mod tests {
                     mount_point: "/tmp".to_string(),
                 },
             ],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1640,7 +1640,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1674,7 +1674,7 @@ mod tests {
                     mount_point: "/sys".to_string(),
                 },
             ],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1696,7 +1696,7 @@ mod tests {
             layers: &NonEmpty::new(extract_dependencies()),
             devices: &EnumSet::EMPTY,
             mounts: &[],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1721,7 +1721,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,
@@ -1748,7 +1748,7 @@ mod tests {
                 fs_type: JobMountFsType::Proc,
                 mount_point: "/proc".to_string(),
             }],
-            loopback: &false,
+            enable_loopback: &false,
         };
         start_and_expect(
             spec,

@@ -1,7 +1,10 @@
 [[directives]]
+include_shared_libraries = true
+environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-}" }
+
+[[directives]]
 package = "meticulous-worker"
 tests = "executor::"
-include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
@@ -12,7 +15,8 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 package = "cargo-metest"
-loopback_enabled = true
+enable_loopback = true
+include_shared_libraries = false
 layers = ["docker:rust", "dev-null.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
@@ -22,12 +26,10 @@ mounts = [
 
 [[directives]]
 package = "meticulous-container"
-include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 package = "meticulous-client"
-include_shared_libraries = true
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
