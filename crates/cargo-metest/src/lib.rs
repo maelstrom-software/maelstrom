@@ -407,26 +407,26 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT> {
-    main_app: &'main_app MainAppDeps<StdErr>,
-    queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
+struct MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT> {
+    deps: &'deps MainAppDeps<StdErr>,
+    queing: JobQueing<'deps, StdErr, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: Term,
 }
 
-impl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
-        main_app: &'main_app MainAppDeps<StdErr>,
-        queing: JobQueing<'main_app, StdErr, ProgressIndicatorT>,
+        deps: &'deps MainAppDeps<StdErr>,
+        queing: JobQueing<'deps, StdErr, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: Term,
     ) -> Self {
         Self {
-            main_app,
+            deps,
             queing,
             prog_driver,
             prog,
@@ -435,8 +435,8 @@ impl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'main_app, 'scope, StdErr, Term, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'main_app, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, 'scope, StdErr, Term, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
 where
     StdErr: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
@@ -450,12 +450,12 @@ where
     fn drain(&mut self) -> Result<()> {
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
-        self.main_app.client.lock().unwrap().stop_accepting()?;
+        self.deps.client.lock().unwrap().stop_accepting()?;
         Ok(())
     }
 
     fn finish(&mut self) -> Result<ExitCode> {
-        self.main_app
+        self.deps
             .client
             .lock()
             .unwrap()
@@ -463,11 +463,11 @@ where
         self.prog.finished()?;
 
         let width = self.term.width() as usize;
-        self.main_app
+        self.deps
             .queuer
             .tracker
             .print_summary(width, self.term.clone())?;
-        Ok(self.main_app.queuer.tracker.exit_code())
+        Ok(self.deps.queuer.tracker.exit_code())
     }
 }
 

@@ -307,7 +307,7 @@ fn digest_repository_simple_add_get_after_modify() {
 }
 
 pub struct SocketReader {
-    pub stream: TcpStream,
+    stream: TcpStream,
     channel: SyncSender<DispatcherMessage>,
 }
 
