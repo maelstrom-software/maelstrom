@@ -144,7 +144,8 @@ pub fn main() -> Result<ExitCode> {
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
         )?;
-        while app.enqueue_one()? {}
+        while !app.enqueue_one()?.is_done() {}
+        app.drain()?;
         app.finish()
     })
 }

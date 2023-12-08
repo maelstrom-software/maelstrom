@@ -130,6 +130,15 @@ impl Dispatcher {
     /// until the function return false
     pub fn process_one(&mut self) -> Result<bool> {
         let msg = self.receiver.recv()?;
+        self.handle_message(msg)
+    }
+
+    pub fn try_process_one(&mut self) -> Result<bool> {
+        let msg = self.receiver.try_recv()?;
+        self.handle_message(msg)
+    }
+
+    fn handle_message(&mut self, msg: DispatcherMessage) -> Result<bool> {
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 self.handlers.remove(&cjid).unwrap()(cjid, result)?;
@@ -298,7 +307,7 @@ fn digest_repository_simple_add_get_after_modify() {
 }
 
 pub struct SocketReader {
-    stream: TcpStream,
+    pub stream: TcpStream,
     channel: SyncSender<DispatcherMessage>,
 }
 
@@ -464,16 +473,25 @@ impl Client {
             .send(DispatcherMessage::AddJob(spec, handler));
     }
 
-    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+    pub fn stop_accepting(&mut self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
+        Ok(())
+    }
+
+    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+        self.stop_accepting().ok();
         self.driver.stop()?;
         Ok(())
     }
 
-    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
+    pub fn get_job_state_counts_async(&mut self) -> Result<Receiver<JobStateCounts>> {
         let (sender, recv) = mpsc::sync_channel(1);
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))?;
-        Ok(recv.recv()?)
+        Ok(recv)
+    }
+
+    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
+        Ok(self.get_job_state_counts_async()?.recv()?)
     }
 }

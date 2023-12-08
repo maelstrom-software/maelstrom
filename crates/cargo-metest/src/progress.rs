@@ -1,16 +1,14 @@
 use anyhow::Result;
 use colored::Colorize as _;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
-use meticulous_base::stats::JobState;
-use meticulous_client::Client;
+use meticulous_base::stats::{JobState, JobStateCounts};
 use std::{
     collections::HashMap,
     str,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
-    time::Duration,
 };
 
 pub trait ProgressIndicator: Clone + Send + Sync + 'static {
@@ -36,9 +34,7 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
         None
     }
 
-    /// Meant to be called on another thread to update stuff in parallel. Should be called in a
-    /// loop until it return false
-    fn update_in_background(&self, client: &Mutex<Client>) -> Result<bool>;
+    fn update_job_states(&self, counts: JobStateCounts) -> Result<bool>;
 
     /// Called when all jobs are running
     fn done_queuing_jobs(&self);
@@ -128,8 +124,7 @@ impl ProgressIndicator for MultipleProgressBars {
         )
     }
 
-    fn update_in_background(&self, client: &Mutex<Client>) -> Result<bool> {
-        let counts = client.lock().unwrap().get_job_state_counts()?;
+    fn update_job_states(&self, counts: JobStateCounts) -> Result<bool> {
         for state in JobState::iter().filter(|s| s != &JobState::Complete) {
             let jobs = JobState::iter()
                 .filter(|s| s >= &state)
@@ -141,7 +136,6 @@ impl ProgressIndicator for MultipleProgressBars {
         if !self.done_queuing_jobs.load(Ordering::Relaxed) {
             self.build_spinner.tick();
         }
-        std::thread::sleep(Duration::from_millis(500));
         Ok(!self.is_finished())
     }
 
@@ -183,7 +177,7 @@ impl ProgressIndicator for QuietProgressBar {
         self.bar.set_length(new_length);
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
+    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
         // do nothing
         Ok(false)
     }
@@ -225,7 +219,7 @@ where
         // do nothing
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
+    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
         // do nothing
         Ok(false)
     }
@@ -268,7 +262,7 @@ where
         // do nothing
     }
 
-    fn update_in_background(&self, _client: &Mutex<Client>) -> Result<bool> {
+    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
         // do nothing
         Ok(false)
     }

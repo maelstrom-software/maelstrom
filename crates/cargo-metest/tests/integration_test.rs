@@ -1,16 +1,16 @@
 use anyhow::Result;
 use assert_matches::assert_matches;
 use cargo_metest::{
-    config::Quiet, main_app_new, progress::ProgressIndicator, MainAppDeps, ProgressDriver,
+    config::Quiet, main_app_new, progress::ProgressIndicator, EnqueueResult, MainAppDeps,
+    ProgressDriver,
 };
-use enum_map::enum_map;
 use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
 };
-use meticulous_client::{Client, DefaultClientDriver};
+use meticulous_client::{Client, ClientDeps, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -21,8 +21,7 @@ use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use tempfile::{tempdir, TempDir};
 
 fn put_file(fs: &Fs, path: &Path, contents: &str) {
@@ -110,11 +109,11 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
     cargo_path.display().to_string()
 }
 
-struct MessageStream<'a> {
-    stream: &'a TcpStream,
+struct MessageStream {
+    stream: TcpStream,
 }
 
-impl<'a> MessageStream<'a> {
+impl MessageStream {
     fn next<T: DeserializeOwned>(&mut self) -> io::Result<T> {
         let mut msg_len: [u8; 4] = [0; 4];
         self.stream.read_exact(&mut msg_len)?;
@@ -150,57 +149,97 @@ fn test_path(spec: &JobSpec) -> TestPath {
     TestPath { binary, test_name }
 }
 
-fn fake_broker_main(listener: TcpListener, mut state: BrokerState) {
-    let (stream, _) = listener.accept().unwrap();
-    let mut messages = MessageStream { stream: &stream };
+struct FakeBroker {
+    #[allow(dead_code)]
+    listener: TcpListener,
+    state: BrokerState,
+    address: BrokerAddr,
+}
 
-    let msg: Hello = messages.next().unwrap();
-    assert_matches!(msg, Hello::Client);
+struct FakeBrokerConnection {
+    messages: MessageStream,
+    state: BrokerState,
+}
 
-    while let Ok(msg) = messages.next::<ClientToBroker>() {
-        match msg {
-            ClientToBroker::JobRequest(id, spec) => {
-                let test_path = test_path(&spec);
-                match state.job_responses.remove(&test_path).unwrap() {
-                    JobAction::Respond(res) => {
-                        send_message(&stream, &BrokerToClient::JobResponse(id, res))
-                    }
-                    JobAction::Ignore => (),
-                }
-            }
-            ClientToBroker::JobStateCountsRequest => send_message(
-                &stream,
-                &BrokerToClient::JobStateCountsResponse(state.job_states.clone()),
-            ),
+impl FakeBroker {
+    fn new(state: BrokerState) -> Self {
+        let listener =
+            TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
+        let address = BrokerAddr::new(listener.local_addr().unwrap());
 
-            _ => continue,
+        Self {
+            listener,
+            state,
+            address,
+        }
+    }
+
+    fn accept(&mut self) -> FakeBrokerConnection {
+        let (stream, _) = self.listener.accept().unwrap();
+        let mut messages = MessageStream { stream };
+
+        let msg: Hello = messages.next().unwrap();
+        assert_matches!(msg, Hello::Client);
+
+        FakeBrokerConnection {
+            messages,
+            state: self.state.clone(),
         }
     }
 }
 
+impl FakeBrokerConnection {
+    fn process(&mut self, count: usize) {
+        for _ in 0..count {
+            let msg = self.messages.next::<ClientToBroker>().unwrap();
+            match msg {
+                ClientToBroker::JobRequest(id, spec) => {
+                    let test_path = test_path(&spec);
+                    match self.state.job_responses.remove(&test_path).unwrap() {
+                        JobAction::Respond(res) => send_message(
+                            &self.messages.stream,
+                            &BrokerToClient::JobResponse(id, res),
+                        ),
+                        JobAction::Ignore => (),
+                    }
+                }
+                ClientToBroker::JobStateCountsRequest => send_message(
+                    &self.messages.stream,
+                    &BrokerToClient::JobStateCountsResponse(self.state.job_states.clone()),
+                ),
+
+                _ => (),
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
 enum JobAction {
     Ignore,
     Respond(JobResult),
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct BrokerState {
     job_responses: HashMap<TestPath, JobAction>,
     job_states: JobStateCounts,
 }
 
-fn fake_broker(state: BrokerState) -> BrokerAddr {
-    let broker_listener =
-        TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
-    let broker_address = BrokerAddr::new(broker_listener.local_addr().unwrap());
-    std::thread::spawn(move || fake_broker_main(broker_listener, state));
-    broker_address
-}
-
-#[derive(Default)]
 struct FakeTestCase {
     name: String,
     ignored: bool,
+    desired_state: JobState,
+}
+
+impl Default for FakeTestCase {
+    fn default() -> Self {
+        Self {
+            name: "".into(),
+            ignored: false,
+            desired_state: JobState::Complete,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -220,36 +259,83 @@ struct TestPath {
 }
 
 impl FakeTests {
-    fn all_tests(&self) -> impl Iterator<Item = TestPath> + '_ {
+    fn all_test_paths(&self) -> impl Iterator<Item = (&FakeTestCase, TestPath)> + '_ {
         self.test_binaries
             .iter()
             .map(|b| {
                 b.tests.iter().filter_map(|t| {
-                    (!t.ignored).then(|| TestPath {
-                        binary: b.name.clone(),
-                        test_name: t.name.clone(),
+                    (!t.ignored).then(|| {
+                        (
+                            t,
+                            TestPath {
+                                binary: b.name.clone(),
+                                test_name: t.name.clone(),
+                            },
+                        )
                     })
                 })
             })
             .flatten()
     }
+
+    fn get(&self, package_name: &str, case: &str) -> &FakeTestCase {
+        let binary = self
+            .test_binaries
+            .iter()
+            .find(|b| b.name == package_name)
+            .unwrap();
+        binary.tests.iter().find(|t| t.name == case).unwrap()
+    }
+}
+
+#[derive(Default, Clone)]
+struct TestClientDriver {
+    deps: Arc<Mutex<Option<ClientDeps>>>,
+}
+
+impl ClientDriver for TestClientDriver {
+    fn drive(&mut self, deps: ClientDeps) {
+        *self.deps.lock().unwrap() = Some(deps);
+    }
+
+    fn stop(&mut self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl TestClientDriver {
+    fn process_broker_msg(&self, count: usize) {
+        let mut locked_deps = self.deps.lock().unwrap();
+        let deps = locked_deps.as_mut().unwrap();
+
+        for _ in 0..count {
+            deps.socket_reader.process_one();
+            deps.dispatcher.try_process_one().unwrap();
+        }
+    }
+
+    fn process_client_messages(&self) {
+        let mut locked_deps = self.deps.lock().unwrap();
+        let deps = locked_deps.as_mut().unwrap();
+        while deps.dispatcher.try_process_one().is_ok() {}
+    }
 }
 
 #[derive(Default, Clone)]
 struct TestProgressDriver<'scope> {
-    update_func: Rc<RefCell<Option<Box<dyn FnMut() -> Result<bool> + 'scope>>>>,
+    update_func: Rc<RefCell<Option<Box<dyn FnMut(JobStateCounts) -> Result<bool> + 'scope>>>>,
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
     fn drive<'dep, ProgressIndicatorT>(
         &mut self,
-        client: &'dep Mutex<Client>,
+        _client: &'dep Mutex<Client>,
         ind: ProgressIndicatorT,
     ) where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
-        *self.update_func.borrow_mut() = Some(Box::new(move || ind.update_in_background(client)));
+        *self.update_func.borrow_mut() = Some(Box::new(move |state| ind.update_job_states(state)));
     }
 
     fn stop(&mut self) -> Result<()> {
@@ -258,48 +344,83 @@ impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
 }
 
 impl<'scope> TestProgressDriver<'scope> {
-    fn update(&self) -> Result<bool> {
-        (self.update_func.borrow_mut().as_mut().unwrap())()
+    fn update(&self, states: JobStateCounts) -> Result<bool> {
+        (self.update_func.borrow_mut().as_mut().unwrap())(states)
     }
 }
 
 fn run_app(
     term: InMemoryTerm,
+    fake_tests: FakeTests,
     state: BrokerState,
     cargo: String,
     stdout_tty: bool,
     quiet: Quiet,
     package: Option<String>,
     filter: Option<String>,
-) {
+    finish: bool,
+) -> String {
     let tmp_dir = tempdir().unwrap();
 
     let mut stderr = vec![];
-    (|| {
-        let deps = MainAppDeps::new(
-            cargo,
-            package,
-            filter,
-            &mut stderr,
-            false,
-            &tmp_dir,
-            fake_broker(state),
-            DefaultClientDriver::default(),
-        )
-        .unwrap();
-        let prog_driver = TestProgressDriver::default();
-        let mut app = main_app_new(&deps, stdout_tty, quiet, term.clone(), prog_driver.clone())?;
-        while app.enqueue_one()? {
-            prog_driver.update()?;
+    let mut b = FakeBroker::new(state);
+    let client_driver = TestClientDriver::default();
+    let deps = MainAppDeps::new(
+        cargo,
+        package,
+        filter,
+        &mut stderr,
+        false,
+        &tmp_dir,
+        b.address.clone(),
+        client_driver.clone(),
+    )
+    .unwrap();
+    let prog_driver = TestProgressDriver::default();
+    let mut app =
+        main_app_new(&deps, stdout_tty, quiet, term.clone(), prog_driver.clone()).unwrap();
+
+    let mut b_conn = b.accept();
+
+    loop {
+        let res = app.enqueue_one().unwrap();
+        let (package_name, case) = match res {
+            EnqueueResult::Done => break,
+            EnqueueResult::Ignored => continue,
+            EnqueueResult::Enqueued { package_name, case } => (package_name, case),
+        };
+        let test = fake_tests.get(&package_name, &case);
+
+        // process job enqueuing
+        client_driver.process_client_messages();
+        b_conn.process(1);
+        if test.desired_state == JobState::Complete {
+            client_driver.process_broker_msg(1);
         }
-        app.finish()
-    })()
-    .unwrap_or_else(|e| {
-        panic!(
-            "err = {e:?} stderr = {}",
-            String::from_utf8_lossy(&stderr[..])
-        )
-    });
+
+        let counts = deps
+            .client
+            .lock()
+            .unwrap()
+            .get_job_state_counts_async()
+            .unwrap();
+        client_driver.process_client_messages();
+
+        // process job state request
+        b_conn.process(1);
+        client_driver.process_broker_msg(1);
+
+        prog_driver.update(counts.try_recv().unwrap()).unwrap();
+    }
+
+    app.drain().unwrap();
+    client_driver.process_client_messages();
+
+    if finish {
+        app.finish().unwrap();
+    }
+
+    term.contents()
 }
 
 fn run_all_tests_sync(
@@ -311,9 +432,9 @@ fn run_all_tests_sync(
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for test in fake_tests.all_tests() {
+    for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
-            test.clone(),
+            test_path,
             JobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
@@ -324,9 +445,17 @@ fn run_all_tests_sync(
 
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
-    run_app(term.clone(), state, cargo, false, quiet, package, filter);
-
-    term.contents()
+    run_app(
+        term.clone(),
+        fake_tests,
+        state,
+        cargo,
+        false,
+        quiet,
+        package,
+        filter,
+        true,
+    )
 }
 
 #[test]
@@ -596,9 +725,9 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for test in fake_tests.all_tests() {
+    for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
-            test.clone(),
+            test_path,
             JobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(1),
                 stdout: JobOutputResult::None,
@@ -611,12 +740,14 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     let term = InMemoryTerm::new(50, 50);
     run_app(
         term.clone(),
+        fake_tests,
         state,
         cargo,
         false,
         Quiet::from(false),
         None,
         None,
+        true,
     );
 
     term.contents()
@@ -660,46 +791,33 @@ fn failed_tests() {
     );
 }
 
-fn run_in_progress_test(
-    fake_tests: FakeTests,
-    job_states: JobStateCounts,
-    quiet: Quiet,
-    expected_output: &str,
-) {
+fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
 
     let mut state = BrokerState::default();
-    for test in fake_tests
-        .all_tests()
-        .take(job_states[JobState::Complete] as usize)
-    {
-        state.job_responses.insert(
-            test.clone(),
-            JobAction::Respond(Ok(JobSuccess {
-                status: JobStatus::Exited(0),
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-            })),
-        );
+    for (test, test_path) in fake_tests.all_test_paths() {
+        if test.desired_state == JobState::Complete {
+            state.job_responses.insert(
+                test_path,
+                JobAction::Respond(Ok(JobSuccess {
+                    status: JobStatus::Exited(0),
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                })),
+            );
+        } else {
+            state.job_responses.insert(test_path, JobAction::Ignore);
+        }
+        state.job_states[test.desired_state] += 1;
     }
-    for test in fake_tests
-        .all_tests()
-        .skip(job_states[JobState::Complete] as usize)
-    {
-        state.job_responses.insert(test.clone(), JobAction::Ignore);
-    }
-    state.job_states = job_states;
 
     let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
-    std::thread::spawn(move || run_app(term_clone, state, cargo, true, quiet, None, None));
-
-    // wait until we get the expected contents
-    while term.contents() != expected_output {
-        std::thread::sleep(Duration::from_millis(550));
-        println!("waiting, current terminal output:\n{}", term.contents());
-    }
+    let contents = run_app(
+        term_clone, fake_tests, state, cargo, true, quiet, None, None, false,
+    );
+    assert_eq!(contents, expected_output);
 }
 
 #[test]
@@ -710,6 +828,7 @@ fn waiting_for_artifacts() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::WaitingForArtifacts,
                     ..Default::default()
                 }],
             },
@@ -717,20 +836,14 @@ fn waiting_for_artifacts() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::WaitingForArtifacts,
                     ..Default::default()
                 }],
             },
         ],
     };
-    let state = enum_map! {
-        JobState::WaitingForArtifacts => 2,
-        JobState::Pending => 0,
-        JobState::Running => 0,
-        JobState::Complete => 0,
-    };
     run_in_progress_test(
         fake_tests,
-        state,
         false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
@@ -749,6 +862,7 @@ fn pending() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Pending,
                     ..Default::default()
                 }],
             },
@@ -756,20 +870,14 @@ fn pending() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Pending,
                     ..Default::default()
                 }],
             },
         ],
     };
-    let state = enum_map! {
-        JobState::WaitingForArtifacts => 0,
-        JobState::Pending => 2,
-        JobState::Running => 0,
-        JobState::Complete => 0,
-    };
     run_in_progress_test(
         fake_tests,
-        state,
         false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
@@ -788,6 +896,7 @@ fn running() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Running,
                     ..Default::default()
                 }],
             },
@@ -795,20 +904,14 @@ fn running() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Running,
                     ..Default::default()
                 }],
             },
         ],
     };
-    let state = enum_map! {
-        JobState::WaitingForArtifacts => 0,
-        JobState::Pending => 0,
-        JobState::Running => 2,
-        JobState::Complete => 0,
-    };
     run_in_progress_test(
         fake_tests,
-        state,
         false.into(),
         "\
         ######################## 2/2 waiting for artifacts\n\
@@ -827,6 +930,7 @@ fn complete() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Complete,
                     ..Default::default()
                 }],
             },
@@ -834,20 +938,14 @@ fn complete() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Running,
                     ..Default::default()
                 }],
             },
         ],
     };
-    let state = enum_map! {
-        JobState::WaitingForArtifacts => 0,
-        JobState::Pending => 0,
-        JobState::Running => 1,
-        JobState::Complete => 1,
-    };
     run_in_progress_test(
         fake_tests,
-        state,
         false.into(),
         "\
         foo test_it.....................................OK\n\
@@ -867,6 +965,7 @@ fn complete_quiet() {
                 name: "foo".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Complete,
                     ..Default::default()
                 }],
             },
@@ -874,20 +973,14 @@ fn complete_quiet() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    desired_state: JobState::Running,
                     ..Default::default()
                 }],
             },
         ],
     };
-    let state = enum_map! {
-        JobState::WaitingForArtifacts => 0,
-        JobState::Pending => 0,
-        JobState::Running => 1,
-        JobState::Complete => 1,
-    };
     run_in_progress_test(
         fake_tests,
-        state,
         true.into(),
         "#####################-------------------- 1/2 jobs",
     );
