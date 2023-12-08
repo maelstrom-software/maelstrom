@@ -155,6 +155,71 @@ pub struct JobSpec {
     pub group: GroupId,
 }
 
+impl JobSpec {
+    pub fn new(program: impl Into<String>, layers: impl Into<NonEmpty<Sha256Digest>>) -> Self {
+        JobSpec {
+            program: program.into(),
+            layers: layers.into(),
+            arguments: Default::default(),
+            environment: Default::default(),
+            devices: Default::default(),
+            mounts: Default::default(),
+            enable_loopback: false,
+            working_directory: PathBuf::from("/"),
+            user: UserId::from(0),
+            group: GroupId::from(0),
+        }
+    }
+
+    pub fn arguments<I, T>(mut self, arguments: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.arguments = arguments.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn environment<I, T>(mut self, environment: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.environment = environment.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn devices(mut self, devices: impl IntoIterator<Item = JobDevice>) -> Self {
+        self.devices = devices.into_iter().collect();
+        self
+    }
+
+    pub fn mounts(mut self, mounts: impl IntoIterator<Item = JobMount>) -> Self {
+        self.mounts = mounts.into_iter().collect();
+        self
+    }
+
+    pub fn enable_loopback(mut self, enable_loopback: bool) -> Self {
+        self.enable_loopback = enable_loopback;
+        self
+    }
+
+    pub fn working_directory(mut self, working_directory: impl Into<PathBuf>) -> Self {
+        self.working_directory = working_directory.into();
+        self
+    }
+
+    pub fn user(mut self, user: impl Into<UserId>) -> Self {
+        self.user = user.into();
+        self
+    }
+
+    pub fn group(mut self, group: impl Into<GroupId>) -> Self {
+        self.group = group.into();
+        self
+    }
+}
+
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
 /// signal.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

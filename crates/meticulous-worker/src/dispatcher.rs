@@ -40,9 +40,9 @@ pub trait DispatcherDeps {
     fn start_job(
         &mut self,
         jid: JobId,
-        spec: &JobSpec,
+        spec: JobSpec,
         layers: NonEmpty<PathBuf>,
-    ) -> JobErrorResult<Pid, String>;
+    ) -> (JobErrorResult<Pid, String>, NonEmpty<Sha256Digest>);
 
     /// Kill a running job using the [`Pid`] obtained from [`JobErrorResult::Ok`].
     fn kill_job(&mut self, pid: Pid);
@@ -209,14 +209,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
             let (jid, spec, layer_paths) = self.queued.pop_front().unwrap();
-            match self.deps.start_job(jid, &spec, layer_paths) {
-                Ok(pid) => {
-                    let executing_job = ExecutingJob::new(pid, spec.layers);
+            match self.deps.start_job(jid, spec, layer_paths) {
+                (Ok(pid), layers) => {
+                    let executing_job = ExecutingJob::new(pid, layers);
                     self.executing.insert(jid, executing_job).assert_is_none();
                     self.executing_pids.insert(pid, jid).assert_is_none();
                 }
-                Err(e) => {
-                    for digest in spec.layers {
+                (Err(e), layers) => {
+                    for digest in layers {
                         self.cache.decrement_ref_count(&digest);
                     }
                     self.deps
@@ -444,16 +444,15 @@ mod tests {
         fn start_job(
             &mut self,
             jid: JobId,
-            spec: &JobSpec,
+            spec: JobSpec,
             layers: NonEmpty<PathBuf>,
-        ) -> JobErrorResult<Pid, String> {
+        ) -> (JobErrorResult<Pid, String>, NonEmpty<Sha256Digest>) {
             let mut mut_ref = self.borrow_mut();
-            mut_ref.messages.push(StartJob(
-                jid,
-                spec.clone(),
-                layers.into_iter().collect::<Vec<_>>(),
-            ));
-            mut_ref.start_job_returns.remove(0)
+            let digest_layers = spec.layers.clone();
+            mut_ref
+                .messages
+                .push(StartJob(jid, spec, layers.into_iter().collect::<Vec<_>>()));
+            (mut_ref.start_job_returns.remove(0), digest_layers)
         }
 
         fn kill_job(&mut self, pid: Pid) {

@@ -7,7 +7,7 @@ use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType,
-    JobOutputResult, NonEmpty, UserId,
+    JobOutputResult, NonEmpty, Sha256Digest, UserId,
 };
 use meticulous_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -46,17 +46,52 @@ use tuple::Map as _;
  */
 
 /// All necessary information for the worker to execute a job.
-pub struct JobSpec<'a> {
-    pub program: &'a str,
-    pub arguments: &'a [String],
-    pub environment: &'a [String],
-    pub devices: &'a EnumSet<JobDevice>,
-    pub layers: &'a NonEmpty<PathBuf>,
-    pub mounts: &'a [JobMount],
-    pub enable_loopback: &'a bool,
-    pub working_directory: &'a Path,
-    pub user: &'a UserId,
-    pub group: &'a GroupId,
+pub struct JobSpec {
+    pub program: String,
+    pub arguments: Vec<String>,
+    pub environment: Vec<String>,
+    pub layers: NonEmpty<PathBuf>,
+    pub devices: EnumSet<JobDevice>,
+    pub mounts: Vec<JobMount>,
+    pub enable_loopback: bool,
+    pub working_directory: PathBuf,
+    pub user: UserId,
+    pub group: GroupId,
+}
+
+impl JobSpec {
+    pub fn from_spec_and_layers(
+        spec: meticulous_base::JobSpec,
+        layers: NonEmpty<PathBuf>,
+    ) -> (Self, NonEmpty<Sha256Digest>) {
+        let meticulous_base::JobSpec {
+            program,
+            arguments,
+            environment,
+            layers: digest_layers,
+            devices,
+            mounts,
+            enable_loopback,
+            working_directory,
+            user,
+            group,
+        } = spec;
+        (
+            JobSpec {
+                program,
+                arguments,
+                environment,
+                layers,
+                devices,
+                mounts,
+                enable_loopback,
+                working_directory,
+                user,
+                group,
+            },
+            digest_layers,
+        )
+    }
 }
 
 pub struct Executor {
@@ -295,7 +330,7 @@ impl Executor {
         let uid_map_contents;
         #[allow(clippy::needless_late_init)]
         let gid_map_contents;
-        let program = CString::new(spec.program)
+        let program = CString::new(spec.program.as_str())
             .map_err(Error::from)
             .map_err(JobError::System)?;
         let arguments = spec
@@ -330,7 +365,7 @@ impl Executor {
 
         let mut builder = ScriptBuilder::new(&bump);
 
-        if *spec.enable_loopback {
+        if spec.enable_loopback {
             // In order to have a loopback network interface, we need to create a netlink socket and
             // configure things with the kernel. This creates the socket.
             builder.push(
@@ -699,7 +734,7 @@ mod tests {
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
     use meticulous_base::{nonempty, JobStatus};
-    use meticulous_test::boxed_u8;
+    use meticulous_test::{boxed_u8, digest};
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
     use std::ops::ControlFlow;
@@ -748,172 +783,107 @@ mod tests {
         extract_layer_tar(include_bytes!("executor-test-deps.tar").as_slice())
     }
 
-    async fn start_and_expect_bash(
-        command: &'static str,
+    struct Test {
+        spec: JobSpec,
+        inline_limit: InlineLimit,
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
-    ) {
-        start_and_expect_bash_full(
-            command,
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            1000,
-            expected_status,
-            expected_stdout,
-            expected_stderr,
-        )
-        .await;
     }
 
-    async fn start_and_expect_bash_full(
-        command: &'static str,
-        environment: Vec<&'static str>,
-        devices: &EnumSet<JobDevice>,
-        mounts: Vec<JobMount>,
-        inline_limit: u64,
-        expected_status: JobStatus,
-        expected_stdout: JobOutputResult,
-        expected_stderr: JobOutputResult,
-    ) {
-        let program = "/usr/bin/bash";
-        let arguments = vec!["-c".to_string(), command.to_string()];
-        let environment = environment
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>();
-        let layers = &NonEmpty::new(extract_dependencies());
-        let spec = JobSpec {
-            program,
-            arguments: arguments.as_slice(),
-            environment: environment.as_slice(),
-            layers,
-            devices,
-            mounts: mounts.as_slice(),
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            inline_limit,
-            expected_status,
-            expected_stdout,
-            expected_stderr,
-        )
-        .await;
+    impl Test {
+        fn new(spec: JobSpec) -> Self {
+            Test {
+                spec,
+                inline_limit: InlineLimit::from(1000),
+                expected_status: JobStatus::Exited(0),
+                expected_stdout: JobOutputResult::None,
+                expected_stderr: JobOutputResult::None,
+            }
+        }
+
+        fn from_spec(spec: meticulous_base::JobSpec) -> Self {
+            let (spec, _) =
+                JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
+            Self::new(spec)
+        }
+
+        fn inline_limit(mut self, inline_limit: impl Into<InlineLimit>) -> Self {
+            self.inline_limit = inline_limit.into();
+            self
+        }
+
+        fn expected_status(mut self, expected_status: JobStatus) -> Self {
+            self.expected_status = expected_status;
+            self
+        }
+
+        fn expected_stdout(mut self, expected_stdout: JobOutputResult) -> Self {
+            self.expected_stdout = expected_stdout;
+            self
+        }
+
+        fn expected_stderr(mut self, expected_stderr: JobOutputResult) -> Self {
+            self.expected_stderr = expected_stderr;
+            self
+        }
+
+        async fn run(&self) {
+            let dummy_child_pid = reaper::clone_dummy_child().unwrap();
+            let (stdout_tx, stdout_rx) = oneshot::channel();
+            let (stderr_tx, stderr_rx) = oneshot::channel();
+            let start_result = Executor::new(tempfile::tempdir().unwrap().into_path())
+                .unwrap()
+                .start(
+                    &self.spec,
+                    InlineLimit::from(self.inline_limit),
+                    |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
+                    |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
+                );
+            assert_matches!(start_result, Ok(_));
+            let Ok(pid) = start_result else {
+                unreachable!();
+            };
+            let reaper = task::spawn_blocking(move || {
+                let mut adapter = ReaperAdapter::new(pid);
+                reaper::main(&mut adapter, dummy_child_pid);
+                let result = adapter.result.unwrap();
+                signal::kill(dummy_child_pid, Signal::SIGKILL).ok();
+                let mut adapter = ReaperAdapter::new(dummy_child_pid);
+                reaper::main(&mut adapter, Pid::from_raw(0));
+                result
+            });
+            assert_eq!(reaper.await.unwrap(), self.expected_status);
+            assert_eq!(stdout_rx.await.unwrap(), self.expected_stdout);
+            assert_eq!(stderr_rx.await.unwrap(), self.expected_stderr);
+        }
     }
 
-    async fn start_and_expect_python(
-        script: &'static str,
-        expected_status: JobStatus,
-        expected_stdout: JobOutputResult,
-        expected_stderr: JobOutputResult,
-    ) {
-        start_and_expect_python_with_user_and_group(
-            script,
-            expected_status,
-            expected_stdout,
-            expected_stderr,
-            UserId::from(0),
-            GroupId::from(0),
-        )
-        .await;
+    fn test_spec(program: &str) -> meticulous_base::JobSpec {
+        meticulous_base::JobSpec::new(program, nonempty![digest![0]])
     }
 
-    async fn start_and_expect_python_with_user_and_group(
-        script: &'static str,
-        expected_status: JobStatus,
-        expected_stdout: JobOutputResult,
-        expected_stderr: JobOutputResult,
-        user: UserId,
-        group: GroupId,
-    ) {
-        let program = "/usr/bin/python3";
-        let arguments = vec!["-c".to_string(), script.to_string()];
-        let layers = &NonEmpty::new(extract_dependencies());
-        let spec = JobSpec {
-            program,
-            arguments: arguments.as_slice(),
-            environment: &[],
-            layers,
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &user,
-            group: &group,
-        };
-        start_and_expect(
-            spec,
-            1000,
-            expected_status,
-            expected_stdout,
-            expected_stderr,
-        )
-        .await;
+    fn bash_spec(script: &str) -> meticulous_base::JobSpec {
+        test_spec("/usr/bin/bash").arguments(["-c", script])
     }
 
-    async fn start_and_expect<'a>(
-        spec: JobSpec<'a>,
-        inline_limit: u64,
-        expected_status: JobStatus,
-        expected_stdout: JobOutputResult,
-        expected_stderr: JobOutputResult,
-    ) {
-        let dummy_child_pid = reaper::clone_dummy_child().unwrap();
-        let (stdout_tx, stdout_rx) = oneshot::channel();
-        let (stderr_tx, stderr_rx) = oneshot::channel();
-        let start_result = Executor::new(tempfile::tempdir().unwrap().into_path())
-            .unwrap()
-            .start(
-                &spec,
-                InlineLimit::from(inline_limit),
-                |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
-                |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
-            );
-        assert_matches!(start_result, Ok(_));
-        let Ok(pid) = start_result else {
-            unreachable!();
-        };
-        let reaper = task::spawn_blocking(move || {
-            let mut adapter = ReaperAdapter::new(pid);
-            reaper::main(&mut adapter, dummy_child_pid);
-            let result = adapter.result.unwrap();
-            signal::kill(dummy_child_pid, Signal::SIGKILL).ok();
-            let mut adapter = ReaperAdapter::new(dummy_child_pid);
-            reaper::main(&mut adapter, Pid::from_raw(0));
-            result
-        });
-        assert_eq!(reaper.await.unwrap(), expected_status);
-        assert_eq!(stdout_rx.await.unwrap(), expected_stdout);
-        assert_eq!(stderr_rx.await.unwrap(), expected_stderr);
+    fn python_spec(script: &str) -> meticulous_base::JobSpec {
+        test_spec("/usr/bin/python3").arguments(["-c", script])
     }
 
     #[tokio::test]
     #[serial]
     async fn exited_0() {
-        start_and_expect_bash(
-            "exit 0",
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("exit 0")).run().await;
     }
 
     #[tokio::test]
     #[serial]
     async fn exited_1() {
-        start_and_expect_bash(
-            "exit 1",
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("exit 1"))
+            .expected_status(JobStatus::Exited(1))
+            .run()
+            .await;
     }
 
     // $$ returns the pid of outer-most bash. This doesn't do what we expect it to do when using
@@ -922,183 +892,127 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn signaled_11() {
-        start_and_expect_python(
-            concat!(
-                "import os;",
-                "import sys;",
-                "print('a');",
-                "sys.stdout.flush();",
-                "print('b', file=sys.stderr);",
-                "sys.stderr.flush();",
-                "os.abort()",
-            ),
-            JobStatus::Signaled(11),
-            JobOutputResult::Inline(boxed_u8!(b"a\n")),
-            JobOutputResult::Inline(boxed_u8!(b"b\n")),
-        )
+        Test::from_spec(python_spec(concat!(
+            "import os;",
+            "import sys;",
+            "print('a');",
+            "sys.stdout.flush();",
+            "print('b', file=sys.stderr);",
+            "sys.stderr.flush();",
+            "os.abort()",
+        )))
+        .expected_status(JobStatus::Signaled(11))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
+        .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"b\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
-    async fn stdout() {
-        start_and_expect_bash_full(
-            "echo a",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            0,
-            JobStatus::Exited(0),
-            JobOutputResult::Truncated {
+    async fn stdout_inline_limit_0() {
+        Test::from_spec(bash_spec("echo a"))
+            .inline_limit(0)
+            .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b""),
                 truncated: 2,
-            },
-            JobOutputResult::None,
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            1,
-            JobStatus::Exited(0),
-            JobOutputResult::Truncated {
-                first: boxed_u8!(b"a"),
-                truncated: 1,
-            },
-            JobOutputResult::None,
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            2,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"a\n")),
-            JobOutputResult::None,
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            3,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"a\n")),
-            JobOutputResult::None,
-        )
-        .await;
+            })
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
-    async fn stderr() {
-        start_and_expect_bash_full(
-            "echo a >&2",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            0,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::Truncated {
-                first: boxed_u8!(b""),
-                truncated: 2,
-            },
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a >&2",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            1,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::Truncated {
+    async fn stdout_inline_limit_1() {
+        Test::from_spec(bash_spec("echo a"))
+            .inline_limit(1)
+            .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b"a"),
                 truncated: 1,
-            },
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a >&2",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            2,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::Inline(boxed_u8!(b"a\n")),
-        )
-        .await;
-        start_and_expect_bash_full(
-            "echo a >&2",
-            vec![],
-            &EnumSet::EMPTY,
-            vec![],
-            3,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::Inline(boxed_u8!(b"a\n")),
-        )
-        .await;
+            })
+            .run()
+            .await;
     }
 
-    #[test]
+    #[tokio::test]
     #[serial]
-    fn execution_error() {
-        let layers = &NonEmpty::new(extract_dependencies());
-        let spec = JobSpec {
-            program: "a_program_that_does_not_exist",
-            arguments: &[],
-            environment: &[],
-            layers,
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        assert_matches!(
-            Executor::new(tempfile::tempdir().unwrap().into_path())
-                .unwrap()
-                .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
-            Err(JobError::Execution(_))
-        );
+    async fn stdout_inline_limit_2() {
+        Test::from_spec(bash_spec("echo a"))
+            .inline_limit(2)
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stdout_inline_limit_3() {
+        Test::from_spec(bash_spec("echo a"))
+            .inline_limit(3)
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stderr_inline_limit_0() {
+        Test::from_spec(bash_spec("echo a >&2"))
+            .inline_limit(0)
+            .expected_stderr(JobOutputResult::Truncated {
+                first: boxed_u8!(b""),
+                truncated: 2,
+            })
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stderr_inline_limit_1() {
+        Test::from_spec(bash_spec("echo a >&2"))
+            .inline_limit(1)
+            .expected_stderr(JobOutputResult::Truncated {
+                first: boxed_u8!(b"a"),
+                truncated: 1,
+            })
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stderr_inline_limit_2() {
+        Test::from_spec(bash_spec("echo a >&2"))
+            .inline_limit(2)
+            .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn stderr_inline_limit_3() {
+        Test::from_spec(bash_spec("echo a >&2"))
+            .inline_limit(3)
+            .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn environment() {
-        start_and_expect_bash_full(
-            "echo -n $FOO - $BAR",
-            vec!["FOO=3", "BAR=4"],
-            &EnumSet::EMPTY,
-            vec![],
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"3 - 4")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"3 - 4")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn stdin_empty() {
-        start_and_expect_bash(
-            "cat",
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(test_spec("/bin/cat")).run().await;
     }
 
     #[tokio::test]
@@ -1108,871 +1022,453 @@ mod tests {
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
         // We should have pgid 1, indicating that we're the group leader.
         // We should have sid 1, indicating that we're the session leader.
-        start_and_expect_python(
-            concat!(
-                "import os;",
-                "print('pid:', os.getpid());",
-                "print('ppid:', os.getppid());",
-                "print('pgid:', os.getpgid(0));",
-                "print('sid:', os.getsid(0));",
-            ),
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n")),
-            JobOutputResult::None,
-        )
+        Test::from_spec(python_spec(concat!(
+            "import os;",
+            "print('pid:', os.getpid());",
+            "print('ppid:', os.getppid());",
+            "print('pgid:', os.getpgid(0));",
+            "print('sid:', os.getsid(0));",
+        )))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(
+            b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n"
+        )))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_loopback() {
-        let spec = JobSpec {
-            program: "/bin/cat",
-            arguments: &["/sys/class/net/lo/carrier".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Sys,
-                mount_point: "/sys".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::Inline(boxed_u8!(b"cat: read error: Invalid argument\n")),
+        Test::from_spec(
+            test_spec("/bin/cat")
+                .arguments(["/sys/class/net/lo/carrier"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                }]),
         )
+        .expected_status(JobStatus::Exited(1))
+        .expected_stderr(JobOutputResult::Inline(boxed_u8!(
+            b"cat: read error: Invalid argument\n"
+        )))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn loopback() {
-        let spec = JobSpec {
-            program: "/bin/cat",
-            arguments: &["/sys/class/net/lo/carrier".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Sys,
-                mount_point: "/sys".to_string(),
-            }],
-            enable_loopback: &true,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/cat")
+                .arguments(["/sys/class/net/lo/carrier"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                }])
+                .enable_loopback(true),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn user_and_group_0() {
-        start_and_expect_python(
-            concat!(
-                "import os;",
-                "print('uid:', os.getuid());",
-                "print('gid:', os.getgid());",
-            ),
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")),
-            JobOutputResult::None,
-        )
+        Test::from_spec(python_spec(concat!(
+            "import os;",
+            "print('uid:', os.getuid());",
+            "print('gid:', os.getgid());",
+        )))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn user_and_group_nonzero() {
-        start_and_expect_python_with_user_and_group(
-            concat!(
+        Test::from_spec(
+            python_spec(concat!(
                 "import os;",
                 "print('uid:', os.getuid());",
                 "print('gid:', os.getgid());",
-            ),
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"uid: 43\ngid: 100\n")),
-            JobOutputResult::None,
-            UserId::from(43),
-            GroupId::from(100),
+            ))
+            .user(UserId::from(43))
+            .group(GroupId::from(100)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 43\ngid: 100\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn close_range() {
-        let spec = JobSpec {
-            program: "/bin/ls",
-            arguments: &["/proc/self/fd".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/ls")
+                .arguments(["/proc/self/fd"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                }]),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn one_layer_is_read_only() {
-        let spec = JobSpec {
-            program: "/bin/touch",
-            arguments: &["/foo".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::Inline(boxed_u8!(b"touch: /foo: Read-only file system\n")),
-        )
-        .await;
+        Test::from_spec(test_spec("/bin/touch").arguments(["/foo"]))
+            .expected_status(JobStatus::Exited(1))
+            .expected_stderr(JobOutputResult::Inline(boxed_u8!(
+                b"touch: /foo: Read-only file system\n"
+            )))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn multiple_layers_in_correct_order() {
-        let spec = JobSpec {
-            program: "/bin/cat",
-            arguments: &[
-                "/root/file".to_string(),
-                "/root/bottom-file".to_string(),
-                "/root/top-file".to_string(),
-            ],
-            environment: &[],
-            layers: &nonempty![
+        let (spec, _) = JobSpec::from_spec_and_layers(
+            meticulous_base::JobSpec::new(
+                "/bin/cat",
+                nonempty![digest![0], digest![1], digest![2]],
+            )
+            .arguments(["/root/file", "/root/bottom-file", "/root/top-file"]),
+            nonempty![
                 extract_dependencies(),
                 extract_layer_tar(include_bytes!("bottom-layer.tar")),
                 extract_layer_tar(include_bytes!("top-layer.tar"))
             ],
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"top\nbottom file\ntop file\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        );
+        Test::new(spec)
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(
+                b"top\nbottom file\ntop file\n"
+            )))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn multiple_layers_read_only() {
-        let spec = JobSpec {
-            program: "/bin/touch",
-            arguments: &["/foo".to_string()],
-            environment: &[],
-            layers: &nonempty![
+        let (spec, _) = JobSpec::from_spec_and_layers(
+            meticulous_base::JobSpec::new(
+                "/bin/touch",
+                nonempty![digest![0], digest![1], digest![2]],
+            )
+            .arguments(["/foo"]),
+            nonempty![
                 extract_dependencies(),
                 extract_layer_tar(include_bytes!("bottom-layer.tar")),
                 extract_layer_tar(include_bytes!("top-layer.tar"))
             ],
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::Inline(boxed_u8!(b"touch: /foo: Read-only file system\n")),
-        )
-        .await;
+        );
+        Test::new(spec)
+            .expected_status(JobStatus::Exited(1))
+            .expected_stderr(JobOutputResult::Inline(boxed_u8!(
+                b"touch: /foo: Read-only file system\n"
+            )))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_full() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/full | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_full() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/full | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Full),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1, 7\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Full)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_null() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/null | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_null() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/null | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Null),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1, 3\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Null)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_null_write() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &["-c".to_string(), "echo foo > /dev/null".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Null),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("echo foo > /dev/null && cat /dev/null")
+                .devices(EnumSet::only(JobDevice::Null)),
         )
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_random() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/random | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_random() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/random | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Random),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1, 8\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Random)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_tty() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/tty | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_tty() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/tty | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Tty),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"5, 0\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Tty)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_urandom() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/urandom | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_urandom() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/urandom | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Urandom),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1, 9\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Urandom)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_dev_zero() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/zero | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn dev_zero() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &[
-                "-c".to_string(),
-                "/bin/ls -l /dev/zero | awk '{print $5, $6}'".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::only(JobDevice::Zero),
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"1, 5\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
+                .devices(EnumSet::only(JobDevice::Zero)),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_tmpfs() {
-        let spec = JobSpec {
-            program: "/bin/grep",
-            arguments: &["^tmpfs /tmp".to_string(), "/proc/self/mounts".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/grep")
+                .arguments(["^tmpfs /tmp", "/proc/self/mounts"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                }]),
         )
+        .expected_status(JobStatus::Exited(1))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn tmpfs() {
-        let spec = JobSpec {
-            program: "/bin/awk",
-            arguments: &[
-                r#"/^none \/tmp/ { print $1, $2, $3 }"#.to_string(),
-                "/proc/self/mounts".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
-                },
-                JobMount {
-                    fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string(),
-                },
-            ],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/awk")
+                .arguments([r#"/^none \/tmp/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .mounts([
+                    JobMount {
+                        fs_type: JobMountFsType::Proc,
+                        mount_point: "/proc".to_string(),
+                    },
+                    JobMount {
+                        fs_type: JobMountFsType::Tmp,
+                        mount_point: "/tmp".to_string(),
+                    },
+                ]),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_sysfs() {
-        let spec = JobSpec {
-            program: "/bin/grep",
-            arguments: &["^sysfs /sys".to_string(), "/proc/self/mounts".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(1),
-            JobOutputResult::None,
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/grep")
+                .arguments(["^sysfs /sys", "/proc/self/mounts"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                }]),
         )
+        .expected_status(JobStatus::Exited(1))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn sysfs() {
-        let spec = JobSpec {
-            program: "/bin/awk",
-            arguments: &[
-                r#"/^none \/sys/ { print $1, $2, $3 }"#.to_string(),
-                "/proc/self/mounts".to_string(),
-            ],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
-                },
-                JobMount {
-                    fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
-                },
-            ],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/awk")
+                .arguments([r#"/^none \/sys/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .mounts([
+                    JobMount {
+                        fs_type: JobMountFsType::Proc,
+                        mount_point: "/proc".to_string(),
+                    },
+                    JobMount {
+                        fs_type: JobMountFsType::Sys,
+                        mount_point: "/sys".to_string(),
+                    },
+                ]),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn no_procfs() {
-        let spec = JobSpec {
-            program: "/bin/ls",
-            arguments: &["/proc".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            0,
-            JobStatus::Exited(0),
-            JobOutputResult::None,
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(test_spec("/bin/ls").arguments(["/proc"]))
+            .run()
+            .await
     }
 
     #[tokio::test]
     #[serial]
     async fn procfs() {
-        let spec = JobSpec {
-            program: "/bin/grep",
-            arguments: &["proc".to_string(), "/proc/self/mounts".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(
-                b"none /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
-            )),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/grep")
+                .arguments(["proc", "/proc/self/mounts"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                }]),
         )
-        .await;
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(
+            b"none /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
+        )))
+        .run()
+        .await
     }
 
     #[tokio::test]
     #[serial]
     async fn old_mounts_are_unmounted() {
-        let spec = JobSpec {
-            program: "/bin/wc",
-            arguments: &["-l".to_string(), "/proc/self/mounts".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
-            }],
-            enable_loopback: &false,
-            working_directory: Path::new("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            20,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")),
-            JobOutputResult::None,
+        Test::from_spec(
+            test_spec("/bin/wc")
+                .arguments(["-l", "/proc/self/mounts"])
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                }]),
         )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")))
+        .run()
         .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn working_directory_root() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &["-c".to_string(), "pwd".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: &PathBuf::from("/"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"/\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("pwd"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/\n")))
+            .run()
+            .await;
     }
 
     #[tokio::test]
     #[serial]
     async fn working_directory_not_root() {
-        let spec = JobSpec {
-            program: "./bash",
-            arguments: &["-c".to_string(), "pwd".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: &PathBuf::from("/usr/bin"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        start_and_expect(
-            spec,
-            100,
-            JobStatus::Exited(0),
-            JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")),
-            JobOutputResult::None,
-        )
-        .await;
+        Test::from_spec(bash_spec("pwd").working_directory("/usr/bin"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")))
+            .run()
+            .await;
     }
 
-    #[tokio::test]
-    async fn bad_working_directory_is_an_execution_error() {
-        let spec = JobSpec {
-            program: "/usr/bin/bash",
-            arguments: &["-c".to_string(), "pwd".to_string()],
-            environment: &[],
-            layers: &NonEmpty::new(extract_dependencies()),
-            devices: &EnumSet::EMPTY,
-            mounts: &[],
-            enable_loopback: &false,
-            working_directory: &PathBuf::from("/dev/null"),
-            user: &UserId::from(0),
-            group: &GroupId::from(0),
-        };
-        let err = Executor::new(tempfile::tempdir().unwrap().into_path())
-            .unwrap()
-            .start(&spec, InlineLimit::from(0), |_| {}, |_| {})
-            .unwrap_err();
-        match err {
-            JobError::Execution(_) => {}
-            _ => panic!("expected JobError::Execution, got {err:?}"),
-        }
+    fn assert_execution_error(spec: meticulous_base::JobSpec) {
+        let (spec, _) = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
+        assert_matches!(
+            Executor::new(tempfile::tempdir().unwrap().into_path())
+                .unwrap()
+                .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
+            Err(JobError::Execution(_))
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn execution_error() {
+        assert_execution_error(test_spec("a_program_that_does_not_exist"));
+    }
+
+    #[test]
+    #[serial]
+    fn bad_working_directory_is_an_execution_error() {
+        assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null"));
     }
 }

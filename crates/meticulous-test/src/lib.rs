@@ -28,90 +28,29 @@ macro_rules! jid {
 #[macro_export]
 macro_rules! spec {
     [1] => {
-        meticulous_base::JobSpec {
-            program: "test_1".to_string(),
-            arguments: vec![],
-            environment: vec![],
-            layers: meticulous_base::nonempty![digest!(1)],
-            devices: meticulous_base::EnumSet::EMPTY,
-            mounts: vec![],
-            enable_loopback: false,
-            working_directory: std::path::PathBuf::from("/"),
-            user: meticulous_base::UserId::from(0),
-            group: meticulous_base::GroupId::from(0),
-        }
+        meticulous_base::JobSpec::new("test_1", meticulous_base::nonempty![digest!(1)])
     };
     [2] => {
-        meticulous_base::JobSpec {
-            program: "test_2".to_string(),
-            arguments: vec!["arg_1".to_string()],
-            environment: vec![],
-            layers: meticulous_base::nonempty![digest!(2)],
-            devices: meticulous_base::EnumSet::EMPTY,
-            mounts: vec![],
-            enable_loopback: false,
-            working_directory: std::path::PathBuf::from("/"),
-            user: meticulous_base::UserId::from(0),
-            group: meticulous_base::GroupId::from(0),
-        }
+        meticulous_base::JobSpec::new("test_2", meticulous_base::nonempty![digest!(2)])
+            .arguments(["arg_1"])
     };
     [3] => {
-        meticulous_base::JobSpec {
-            program: "test_3".to_string(),
-            arguments: vec!["arg_1".to_string(), "arg_2".to_string()],
-            environment: vec![],
-            layers: meticulous_base::nonempty![digest!(3)],
-            devices: meticulous_base::EnumSet::EMPTY,
-            mounts: vec![],
-            enable_loopback: false,
-            working_directory: std::path::PathBuf::from("/"),
-            user: meticulous_base::UserId::from(0),
-            group: meticulous_base::GroupId::from(0),
-        }
+        meticulous_base::JobSpec::new("test_3", meticulous_base::nonempty![digest!(3)])
+            .arguments(["arg_1", "arg_2"])
     };
     [4] => {
-        meticulous_base::JobSpec {
-            program: "test_4".to_string(),
-            arguments: vec!["arg_1".to_string(), "arg_2".to_string(), "arg_3".to_string()],
-            environment: vec![],
-            layers: meticulous_base::nonempty![digest!(4)],
-            devices: meticulous_base::EnumSet::EMPTY,
-            mounts: vec![],
-            enable_loopback: false,
-            working_directory: std::path::PathBuf::from("/"),
-            user: meticulous_base::UserId::from(0),
-            group: meticulous_base::GroupId::from(0),
-        }
+        meticulous_base::JobSpec::new("test_4", meticulous_base::nonempty![digest!(4)])
+            .arguments(["arg_1", "arg_2", "arg_3"])
     };
     [$n:literal] => {
-        meticulous_base::JobSpec {
-            program: concat!("test_", stringify!($n)).to_string(),
-            arguments: vec!["arg_1".to_string()],
-            environment: vec![],
-            layers: meticulous_base::nonempty![digest!($n)],
-            devices: meticulous_base::EnumSet::EMPTY,
-            mounts: vec![],
-            enable_loopback: false,
-            working_directory: std::path::PathBuf::from("/"),
-            user: meticulous_base::UserId::from(0),
-            group: meticulous_base::GroupId::from(0),
-        }
+        meticulous_base::JobSpec::new(concat!("test_", stringify!($n)), meticulous_base::nonempty![digest!($n)])
+            .arguments(["arg_1"])
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
-            let meticulous_base::JobSpec { program, arguments, environment, .. } = spec![$n];
-            meticulous_base::JobSpec {
-                program,
-                arguments,
-                environment,
-                layers: meticulous_base::nonempty![$(digest!($digest)),*],
-                devices: meticulous_base::EnumSet::EMPTY,
-                mounts: vec![],
-                enable_loopback: false,
-                working_directory: std::path::PathBuf::from("/"),
-                user: meticulous_base::UserId::from(0),
-                group: meticulous_base::GroupId::from(0),
-            }
+            let mut spec = spec![$n];
+            spec.layers = meticulous_base::nonempty![$(digest!($digest)),*];
+            spec
         }
     }
 }

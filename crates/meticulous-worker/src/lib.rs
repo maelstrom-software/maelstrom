@@ -76,9 +76,9 @@ impl DispatcherDeps for DispatcherAdapter {
     fn start_job(
         &mut self,
         jid: JobId,
-        spec: &JobSpec,
+        spec: JobSpec,
         layers: NonEmpty<PathBuf>,
-    ) -> JobErrorResult<Pid, String> {
+    ) -> (JobErrorResult<Pid, String>, NonEmpty<Sha256Digest>) {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self
@@ -86,35 +86,27 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let spec = executor::JobSpec {
-            program: spec.program.as_str(),
-            arguments: spec.arguments.as_slice(),
-            environment: spec.environment.as_slice(),
-            devices: &spec.devices,
-            layers: &layers,
-            mounts: spec.mounts.as_slice(),
-            enable_loopback: &spec.enable_loopback,
-            working_directory: &spec.working_directory,
-            user: &spec.user,
-            group: &spec.group,
-        };
-        let result = self.executor.start(
-            &spec,
-            self.inline_limit,
-            move |result| {
-                debug!(log, "job stdout"; "result" => ?result);
-                sender
-                    .send(Message::JobStdout(jid, result.map_err(|e| e.to_string())))
-                    .ok();
-            },
-            move |result| {
-                debug!(log2, "job stderr"; "result" => ?result);
-                sender2
-                    .send(Message::JobStderr(jid, result.map_err(|e| e.to_string())))
-                    .ok();
-            },
-        );
-        result.map_err(|e| e.map(|inner| inner.to_string()))
+        let (spec, layers) = executor::JobSpec::from_spec_and_layers(spec, layers);
+        let result = self
+            .executor
+            .start(
+                &spec,
+                self.inline_limit,
+                move |result| {
+                    debug!(log, "job stdout"; "result" => ?result);
+                    sender
+                        .send(Message::JobStdout(jid, result.map_err(|e| e.to_string())))
+                        .ok();
+                },
+                move |result| {
+                    debug!(log2, "job stderr"; "result" => ?result);
+                    sender2
+                        .send(Message::JobStderr(jid, result.map_err(|e| e.to_string())))
+                        .ok();
+                },
+            )
+            .map_err(|e| e.map(|inner| inner.to_string()));
+        (result, layers)
     }
 
     fn kill_job(&mut self, pid: Pid) {
