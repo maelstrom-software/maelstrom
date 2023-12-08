@@ -197,7 +197,7 @@ where
         let Some(case) = self.cases.next() else {
             return Ok(EnqueueResult::Done);
         };
-        Ok(self.queue_job_from_case(&case)?)
+        self.queue_job_from_case(&case)
     }
 }
 

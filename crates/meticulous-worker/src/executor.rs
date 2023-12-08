@@ -291,7 +291,9 @@ impl Executor {
         let overlayfs_options;
         let child_mount_points;
         let working_directory;
+        #[allow(clippy::needless_late_init)]
         let uid_map_contents;
+        #[allow(clippy::needless_late_init)]
         let gid_map_contents;
         let program = CString::new(spec.program)
             .map_err(Error::from)
