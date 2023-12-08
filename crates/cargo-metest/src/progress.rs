@@ -146,7 +146,9 @@ impl ProgressIndicator for MultipleProgressBars {
     }
 
     fn finished(&self) -> Result<()> {
-        // do nothing
+        for bar in self.bars.values() {
+            bar.finish_and_clear();
+        }
         Ok(())
     }
 }
@@ -187,7 +189,7 @@ impl ProgressIndicator for QuietProgressBar {
     }
 
     fn finished(&self) -> Result<()> {
-        // do nothing
+        self.bar.finish_and_clear();
         Ok(())
     }
 }
