@@ -256,6 +256,7 @@ where
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
+                enable_writable_file_system: test_metadata.enable_writable_file_system,
                 working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
                 group: test_metadata.group,

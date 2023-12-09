@@ -27,6 +27,7 @@ struct TestDirective {
     package: Option<String>,
     include_shared_libraries: Option<bool>,
     enable_loopback: Option<bool>,
+    enable_writable_file_system: Option<bool>,
     working_directory: Option<PathBuf>,
     user: Option<UserId>,
     group: Option<GroupId>,
@@ -48,6 +49,7 @@ pub struct AllMetadata {
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub enable_loopback: bool,
+    pub enable_writable_file_system: bool,
     pub working_directory: PathBuf,
     pub layers: Vec<String>,
     pub mounts: Vec<JobMount>,
@@ -62,6 +64,7 @@ impl Default for TestMetadata {
         Self {
             include_shared_libraries: Default::default(),
             enable_loopback: Default::default(),
+            enable_writable_file_system: Default::default(),
             working_directory: PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
@@ -103,6 +106,9 @@ impl TestMetadata {
         }
         if let Some(enable_loopback) = directive.enable_loopback {
             self.enable_loopback = enable_loopback;
+        }
+        if let Some(enable_writable_file_system) = directive.enable_writable_file_system {
+            self.enable_writable_file_system = enable_writable_file_system;
         }
         if let Some(working_directory) = &directive.working_directory {
             self.working_directory = working_directory.clone();
@@ -273,6 +279,41 @@ mod test {
             all.get_metadata_for_test("package2", "test1", empty_env)
                 .unwrap()
                 .enable_loopback,
+            false
+        );
+    }
+
+    #[test]
+    fn enable_writable_file_system() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            enable_writable_file_system = true
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            enable_writable_file_system = false
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env)
+                .unwrap()
+                .enable_writable_file_system,
+            false
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env)
+                .unwrap()
+                .enable_writable_file_system,
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env)
+                .unwrap()
+                .enable_writable_file_system,
             false
         );
     }
