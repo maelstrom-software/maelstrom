@@ -109,6 +109,10 @@ impl ProgressIndicator for MultipleProgressBars {
     fn job_finished(&self) {
         let com = self.bars.get(&JobState::Complete).unwrap();
         com.inc(1);
+
+        for bar in self.bars.values() {
+            bar.set_position(std::cmp::max(com.position(), bar.position()));
+        }
     }
 
     fn update_length(&self, new_length: u64) {
@@ -125,12 +129,16 @@ impl ProgressIndicator for MultipleProgressBars {
     }
 
     fn update_job_states(&self, counts: JobStateCounts) -> Result<bool> {
+        let com = self.bars.get(&JobState::Complete).unwrap();
         for state in JobState::iter().filter(|s| s != &JobState::Complete) {
             let jobs = JobState::iter()
                 .filter(|s| s >= &state)
                 .map(|s| counts[s])
                 .sum();
-            self.bars.get(&state).unwrap().set_position(jobs);
+            self.bars
+                .get(&state)
+                .unwrap()
+                .set_position(std::cmp::max(jobs, com.position()));
         }
 
         if !self.done_queuing_jobs.load(Ordering::Relaxed) {
