@@ -98,6 +98,7 @@ where
         artifact: CargoArtifact,
         package_name: String,
     ) -> Result<Self> {
+        ind.update_enqueue_status(format!("processing {package_name}"));
         let binary = PathBuf::from(artifact.executable.unwrap());
         let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
             .into_iter()
@@ -146,6 +147,10 @@ where
     }
 
     fn queue_job_from_case(&mut self, case: &str) -> Result<EnqueueResult> {
+        let case_str = format!("{} {case}", &self.package_name);
+        self.ind
+            .update_enqueue_status(format!("processing {case_str}"));
+
         let test_metadata = self
             .job_queuer
             .test_metadata
@@ -156,8 +161,6 @@ where
         let count = self.job_queuer.jobs_queued.fetch_add(1, Ordering::AcqRel);
         self.ind.update_length(count + 1);
 
-        let package_name = &self.package_name;
-        let case_str = format!("{package_name} {case}");
         let visitor = JobStatusVisitor::new(
             self.job_queuer.tracker.clone(),
             case_str,
@@ -188,7 +191,7 @@ where
         );
 
         Ok(EnqueueResult::Enqueued {
-            package_name: package_name.clone(),
+            package_name: self.package_name.clone(),
             case: case.into(),
         })
     }

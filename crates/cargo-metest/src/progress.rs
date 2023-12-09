@@ -24,23 +24,32 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
     }
 
     /// Meant to be called with the job is complete, it updates the complete bar with this status
-    fn job_finished(&self);
+    fn job_finished(&self) {}
 
     /// Update the number of pending jobs indicated
-    fn update_length(&self, new_length: u64);
+    fn update_length(&self, _new_length: u64) {}
 
     /// Add a new progress bar which is meant to represent a container being downloaded
     fn new_container_progress(&self) -> Option<ProgressBar> {
         None
     }
 
-    fn update_job_states(&self, counts: JobStateCounts) -> Result<bool>;
+    /// Update any information pertaining to the states of jobs. Should be called repeatedly until
+    /// it returns false
+    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
+        Ok(false)
+    }
+
+    /// Update the message for the spinner which indicates jobs are being enqueued
+    fn update_enqueue_status(&self, _msg: impl Into<String>) {}
 
     /// Called when all jobs are running
-    fn done_queuing_jobs(&self);
+    fn done_queuing_jobs(&self) {}
 
     /// Called when all jobs are done
-    fn finished(&self) -> Result<()>;
+    fn finished(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 //                      waiting for artifacts, pending, running, complete
@@ -71,14 +80,14 @@ pub struct MultipleProgressBars {
     multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
     done_queuing_jobs: Arc<AtomicBool>,
-    build_spinner: ProgressBar,
+    enqueue_spinner: ProgressBar,
 }
 
 impl MultipleProgressBars {
     pub fn new(term: impl TermLike + 'static) -> Self {
         let multi_bar = MultiProgress::new();
         multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
-        let build_spinner =
+        let enqueue_spinner =
             multi_bar.add(ProgressBar::new_spinner().with_message("building artifacts..."));
 
         let mut bars = HashMap::new();
@@ -89,7 +98,7 @@ impl MultipleProgressBars {
         Self {
             multi_bar,
             bars,
-            build_spinner,
+            enqueue_spinner,
             done_queuing_jobs: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -128,6 +137,10 @@ impl ProgressIndicator for MultipleProgressBars {
         )
     }
 
+    fn update_enqueue_status(&self, msg: impl Into<String>) {
+        self.enqueue_spinner.set_message(msg.into());
+    }
+
     fn update_job_states(&self, counts: JobStateCounts) -> Result<bool> {
         let com = self.bars.get(&JobState::Complete).unwrap();
         for state in JobState::iter().filter(|s| s != &JobState::Complete) {
@@ -142,7 +155,7 @@ impl ProgressIndicator for MultipleProgressBars {
         }
 
         if !self.done_queuing_jobs.load(Ordering::Relaxed) {
-            self.build_spinner.tick();
+            self.enqueue_spinner.tick();
         }
         Ok(!self.is_finished())
     }
@@ -150,7 +163,7 @@ impl ProgressIndicator for MultipleProgressBars {
     fn done_queuing_jobs(&self) {
         self.done_queuing_jobs.store(true, Ordering::Relaxed);
 
-        self.build_spinner.finish_and_clear();
+        self.enqueue_spinner.finish_and_clear();
     }
 
     fn finished(&self) -> Result<()> {
@@ -187,15 +200,6 @@ impl ProgressIndicator for QuietProgressBar {
         self.bar.set_length(new_length);
     }
 
-    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
-        // do nothing
-        Ok(false)
-    }
-
-    fn done_queuing_jobs(&self) {
-        // do nothing
-    }
-
     fn finished(&self) -> Result<()> {
         self.bar.finish_and_clear();
         Ok(())
@@ -219,23 +223,6 @@ where
 {
     fn println(&self, _msg: String) {
         // quiet mode doesn't print anything
-    }
-
-    fn job_finished(&self) {
-        // do nothing
-    }
-
-    fn update_length(&self, _new_length: u64) {
-        // do nothing
-    }
-
-    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
-        // do nothing
-        Ok(false)
-    }
-
-    fn done_queuing_jobs(&self) {
-        // do nothing
     }
 
     fn finished(&self) -> Result<()> {
@@ -262,23 +249,6 @@ where
 {
     fn println(&self, msg: String) {
         self.term.write_line(&msg).ok();
-    }
-
-    fn job_finished(&self) {
-        // do nothing
-    }
-
-    fn update_length(&self, _new_length: u64) {
-        // do nothing
-    }
-
-    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
-        // do nothing
-        Ok(false)
-    }
-
-    fn done_queuing_jobs(&self) {
-        // do nothing
     }
 
     fn finished(&self) -> Result<()> {
