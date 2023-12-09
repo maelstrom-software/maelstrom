@@ -367,8 +367,8 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
     {
         self.handle = Some(self.scope.spawn(move || {
             loop {
-                let counts = client.lock().unwrap().get_job_state_counts()?;
-                if !ind.update_job_states(counts)? {
+                let counts = client.lock().unwrap().get_job_state_counts_async()?;
+                if !ind.update_job_states(counts.recv()?)? {
                     break;
                 }
 
