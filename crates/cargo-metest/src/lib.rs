@@ -134,7 +134,9 @@ where
             let mut client = self.client.lock().unwrap();
             if layer.starts_with("docker:") {
                 let pkg = layer.split(':').nth(1).unwrap();
-                let prog = self.ind.new_container_progress();
+                let prog = self
+                    .ind
+                    .new_side_progress(format!("downloading image {pkg}:latest"));
                 layers.extend(client.add_container(pkg, "latest", prog)?);
             } else {
                 layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);

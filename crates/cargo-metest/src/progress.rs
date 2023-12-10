@@ -27,8 +27,9 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
     /// Update the number of pending jobs indicated
     fn update_length(&self, _new_length: u64) {}
 
-    /// Add a new progress bar which is meant to represent a container being downloaded
-    fn new_container_progress(&self) -> Option<ProgressBar> {
+    /// Add another progress bar which is meant to show progress of some sub-task, like downloading
+    /// an image or uploading an artifact
+    fn new_side_progress(&self, _msg: impl Into<String>) -> Option<ProgressBar> {
         None
     }
 
@@ -134,10 +135,10 @@ impl ProgressIndicator for MultipleProgressBars {
         }
     }
 
-    fn new_container_progress(&self) -> Option<ProgressBar> {
+    fn new_side_progress(&self, msg: impl Into<String>) -> Option<ProgressBar> {
         Some(
             self.multi_bar
-                .insert(1, make_progress_bar("white", "downloading image", 21, true)),
+                .insert(1, make_progress_bar("white", msg, 21, true)),
         )
     }
 
