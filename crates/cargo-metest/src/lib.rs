@@ -6,7 +6,7 @@ use indicatif::TermLike;
 use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, ClientDriver};
-use meticulous_util::{config::BrokerAddr, process::ExitCode};
+use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use std::{
     collections::HashSet,
@@ -39,6 +39,7 @@ struct JobQueuer<StdErr> {
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
+    expected_job_count: Option<u64>,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
@@ -49,6 +50,7 @@ impl<StdErr> JobQueuer<StdErr> {
         stderr: StdErr,
         stderr_color: bool,
         test_metadata: AllMetadata,
+        expected_job_count: Option<u64>,
     ) -> Self {
         Self {
             cargo,
@@ -59,6 +61,7 @@ impl<StdErr> JobQueuer<StdErr> {
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: AtomicU64::new(0),
             test_metadata,
+            expected_job_count,
         }
     }
 }
@@ -159,7 +162,10 @@ where
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
         let count = self.job_queuer.jobs_queued.fetch_add(1, Ordering::AcqRel);
-        self.ind.update_length(count + 1);
+        self.ind.update_length(std::cmp::max(
+            self.job_queuer.expected_job_count.unwrap_or(0),
+            count + 1,
+        ));
 
         let visitor = JobStatusVisitor::new(
             self.job_queuer.tracker.clone(),
@@ -301,9 +307,27 @@ where
     }
 }
 
+const EXPECTED_JOB_COUNT_NAME: &str = ".meticulous_expected_job_count";
+
+fn load_expected_job_count(path: &Path) -> Result<Option<u64>> {
+    let fs = Fs::new();
+    if let Some(contents) = fs.read_to_string_if_exists(path)? {
+        Ok(Some(contents.trim().parse()?))
+    } else {
+        Ok(None)
+    }
+}
+
+fn write_expected_job_count(path: &Path, count: u64) -> Result<()> {
+    let fs = Fs::new();
+    fs.write(path, count.to_string().as_bytes())?;
+    Ok(())
+}
+
 pub struct MainAppDeps<StdErr> {
     pub client: Mutex<Client>,
     queuer: JobQueuer<StdErr>,
+    cache_dir: PathBuf,
 }
 
 impl<StdErr> MainAppDeps<StdErr> {
@@ -323,12 +347,23 @@ impl<StdErr> MainAppDeps<StdErr> {
             client_driver,
             broker_addr,
             workspace_root,
-            cache_dir,
+            cache_dir.clone(),
         )?);
         let test_metadata = AllMetadata::load(workspace_root)?;
+        let expected_job_count = load_expected_job_count(&cache_dir.join(EXPECTED_JOB_COUNT_NAME))?;
+
         Ok(Self {
             client,
-            queuer: JobQueuer::new(cargo, package, filter, stderr, stderr_color, test_metadata),
+            queuer: JobQueuer::new(
+                cargo,
+                package,
+                filter,
+                stderr,
+                stderr_color,
+                test_metadata,
+                expected_job_count,
+            ),
+            cache_dir,
         })
     }
 }
@@ -451,6 +486,8 @@ where
     }
 
     fn drain(&mut self) -> Result<()> {
+        self.prog
+            .update_length(self.deps.queuer.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
         self.deps.client.lock().unwrap().stop_accepting()?;
@@ -470,6 +507,12 @@ where
             .queuer
             .tracker
             .print_summary(width, self.term.clone())?;
+
+        write_expected_job_count(
+            &self.deps.cache_dir.join(EXPECTED_JOB_COUNT_NAME),
+            self.deps.queuer.jobs_queued.load(Ordering::Acquire),
+        )?;
+
         Ok(self.deps.queuer.tracker.exit_code())
     }
 }
@@ -490,6 +533,10 @@ where
     let prog = prog_factory(term.clone());
 
     prog_driver.drive(&deps.client, prog.clone());
+
+    if let Some(len) = &deps.queuer.expected_job_count {
+        prog.update_length(*len);
+    }
 
     let queing = JobQueing::new(&deps.queuer, &deps.client, width, prog.clone())?;
     Ok(Box::new(MainAppImpl::new(
