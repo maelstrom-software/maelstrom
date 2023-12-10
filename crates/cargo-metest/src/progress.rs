@@ -3,12 +3,10 @@ use colored::Colorize as _;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, ProgressStyle, TermLike};
 use meticulous_base::stats::{JobState, JobStateCounts};
 use std::{
+    cmp::max,
     collections::HashMap,
     str,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
+    sync::{Arc, Mutex},
 };
 
 pub trait ProgressIndicator: Clone + Send + Sync + 'static {
@@ -75,12 +73,19 @@ fn make_progress_bar(
     )
 }
 
+#[derive(Default)]
+struct MultiState {
+    done_queuing_jobs: bool,
+    length: u64,
+    finished: u64,
+}
+
 #[derive(Clone)]
 pub struct MultipleProgressBars {
     multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
-    done_queuing_jobs: Arc<AtomicBool>,
     enqueue_spinner: ProgressBar,
+    state: Arc<Mutex<MultiState>>,
 }
 
 impl MultipleProgressBars {
@@ -99,13 +104,8 @@ impl MultipleProgressBars {
             multi_bar,
             bars,
             enqueue_spinner,
-            done_queuing_jobs: Arc::new(AtomicBool::new(false)),
+            state: Default::default(),
         }
-    }
-
-    fn is_finished(&self) -> bool {
-        let com = self.bars.get(&JobState::Complete).unwrap();
-        self.done_queuing_jobs.load(Ordering::Relaxed) && com.position() >= com.length().unwrap()
     }
 }
 
@@ -116,15 +116,19 @@ impl ProgressIndicator for MultipleProgressBars {
     }
 
     fn job_finished(&self) {
-        let com = self.bars.get(&JobState::Complete).unwrap();
-        com.inc(1);
+        let mut state = self.state.lock().unwrap();
+        state.finished += 1;
 
         for bar in self.bars.values() {
-            bar.set_position(std::cmp::max(com.position(), bar.position()));
+            let pos = max(bar.position(), state.finished);
+            bar.set_position(pos);
         }
     }
 
     fn update_length(&self, new_length: u64) {
+        let mut state = self.state.lock().unwrap();
+        state.length = new_length;
+
         for bar in self.bars.values() {
             bar.set_length(new_length);
         }
@@ -142,26 +146,29 @@ impl ProgressIndicator for MultipleProgressBars {
     }
 
     fn update_job_states(&self, counts: JobStateCounts) -> Result<bool> {
-        let com = self.bars.get(&JobState::Complete).unwrap();
-        for state in JobState::iter().filter(|s| s != &JobState::Complete) {
+        let state = self.state.lock().unwrap();
+
+        for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
             let jobs = JobState::iter()
-                .filter(|s| s >= &state)
+                .filter(|s| s >= &job_state)
                 .map(|s| counts[s])
                 .sum();
-            self.bars
-                .get(&state)
-                .unwrap()
-                .set_position(std::cmp::max(jobs, com.position()));
+            let bar = self.bars.get(&job_state).unwrap();
+            let pos = max(jobs, state.finished);
+            bar.set_position(pos);
         }
 
-        if !self.done_queuing_jobs.load(Ordering::Relaxed) {
+        if !state.done_queuing_jobs {
             self.enqueue_spinner.tick();
         }
-        Ok(!self.is_finished())
+
+        let finished = state.done_queuing_jobs && state.finished >= state.length;
+        Ok(!finished)
     }
 
     fn done_queuing_jobs(&self) {
-        self.done_queuing_jobs.store(true, Ordering::Relaxed);
+        let mut state = self.state.lock().unwrap();
+        state.done_queuing_jobs = true;
 
         self.enqueue_spinner.finish_and_clear();
     }
