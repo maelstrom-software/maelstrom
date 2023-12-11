@@ -37,8 +37,15 @@ struct TestListing {
 }
 
 impl TestListing {
-    fn set_cases(&mut self, package: &str, cases: &[String]) {
-        self.package_to_cases.insert(package.into(), cases.to_vec());
+    fn add_cases(&mut self, package: &str, cases: &[String]) {
+        self.package_to_cases
+            .entry(package.into())
+            .or_default()
+            .extend(cases.iter().cloned())
+    }
+
+    fn remove_package(&mut self, package: &str) {
+        self.package_to_cases.remove(package);
     }
 
     fn expected_job_count(&self, package: &Option<String>, filter: &Option<String>) -> u64 {
@@ -75,11 +82,19 @@ impl<StdErr> JobQueuer<StdErr> {
         stderr: StdErr,
         stderr_color: bool,
         test_metadata: AllMetadata,
-        test_listing: Option<TestListing>,
+        last_test_listing: Option<TestListing>,
     ) -> Self {
-        let expected_job_count = test_listing
+        let expected_job_count = last_test_listing
             .as_ref()
             .map(|l| l.expected_job_count(&package, &filter));
+
+        let test_listing = if let Some(package) = &package {
+            let mut listing = last_test_listing.unwrap_or_default();
+            listing.remove_package(package);
+            listing
+        } else {
+            Default::default()
+        };
 
         Self {
             cargo,
@@ -91,7 +106,7 @@ impl<StdErr> JobQueuer<StdErr> {
             jobs_queued: AtomicU64::new(0),
             test_metadata,
             expected_job_count,
-            test_listing: Mutex::new(test_listing.unwrap_or_default()),
+            test_listing: Mutex::new(test_listing),
         }
     }
 }
@@ -145,7 +160,7 @@ where
         let mut cases = get_cases_from_binary(&binary, &None)?;
 
         let mut listing = job_queuer.test_listing.lock().unwrap();
-        listing.set_cases(&package_name, &cases[..]);
+        listing.add_cases(&package_name, &cases[..]);
 
         if let Some(filter) = &job_queuer.filter {
             cases.retain(|c| c.contains(filter));
