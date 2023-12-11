@@ -10,7 +10,7 @@ use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, HashSet},
+    collections::{BTreeMap, HashSet},
     env, io,
     path::{Path, PathBuf},
     str,
@@ -33,19 +33,12 @@ pub mod visitor;
 
 #[derive(Default, Serialize, Deserialize)]
 struct TestListing {
-    package_to_cases: BTreeMap<String, BTreeSet<String>>,
+    package_to_cases: BTreeMap<String, Vec<String>>,
 }
 
 impl TestListing {
-    fn add_case(&mut self, package: &str, case: &str) {
-        let entry = self.package_to_cases.entry(package.into()).or_default();
-        entry.insert(case.into());
-    }
-
-    fn add_cases(&mut self, package: &str, cases: &[String]) {
-        for case in cases {
-            self.add_case(package, case);
-        }
+    fn set_cases(&mut self, package: &str, cases: &[String]) {
+        self.package_to_cases.insert(package.into(), cases.to_vec());
     }
 
     fn expected_job_count(&self, package: &Option<String>, filter: &Option<String>) -> u64 {
@@ -152,7 +145,7 @@ where
         let mut cases = get_cases_from_binary(&binary, &None)?;
 
         let mut listing = job_queuer.test_listing.lock().unwrap();
-        listing.add_cases(&package_name, &cases[..]);
+        listing.set_cases(&package_name, &cases[..]);
 
         if let Some(filter) = &job_queuer.filter {
             cases.retain(|c| c.contains(filter));
