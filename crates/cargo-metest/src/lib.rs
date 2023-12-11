@@ -107,8 +107,10 @@ where
             .into_iter()
             .collect();
 
+        ind.update_enqueue_status(format!("tar {package_name}"));
         let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
 
+        ind.update_enqueue_status(format!("processing {package_name}"));
         let cases = get_cases_from_binary(&binary, &job_queuer.filter)?;
 
         Ok(Self {
@@ -252,6 +254,8 @@ where
     }
 
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
+        self.ind.update_enqueue_status("building artifacts...");
+
         let mut stream = (&mut self.artifacts).filter(|artifact_res: &Result<CargoArtifact>| {
             artifact_res.is_err()
                 || artifact_res.as_ref().is_ok_and(|artifact| {
