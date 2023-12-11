@@ -670,6 +670,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "serde_repr",
  "serde_with",
  "tar",
  "tempfile",

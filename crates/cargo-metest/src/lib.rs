@@ -9,6 +9,7 @@ use meticulous_client::{Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::{BTreeMap, HashSet},
     env, io,
@@ -31,8 +32,16 @@ pub mod progress;
 pub mod substitute;
 pub mod visitor;
 
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[repr(u32)]
+pub enum TestListingVersion {
+    #[default]
+    V0 = 0,
+}
+
 #[derive(Default, Serialize, Deserialize)]
 struct TestListing {
+    version: TestListingVersion,
     #[serde(flatten)]
     package_to_cases: BTreeMap<String, Vec<String>>,
 }
