@@ -348,7 +348,6 @@ impl Executor {
         let bump = Bump::new();
 
         let mut rtnetlink_response = [0; 1024];
-        let new_root_path;
         let layer0_path;
         let overlayfs_options;
         let child_mount_points;
@@ -494,21 +493,23 @@ impl Executor {
         // layers there are. If enable_writable_file_system, we're going to need at least two
         // layers, since we're going to push a writable top layer.
 
+        let new_root_path = self.mount_dir.as_c_str();
         if spec.layers.tail.is_empty() && !spec.enable_writable_file_system {
             layer0_path = CString::new(spec.layers[0].as_os_str().as_bytes())
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
-            new_root_path = layer0_path.as_c_str();
 
             // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
             // pivot_root to it later.
             builder.push(
-                Syscall::Mount(Some(new_root_path), new_root_path, None, nc::MS_BIND, None),
-                &|err| {
-                    JobError::System(anyhow!(
-                        "bind mounting target root directory onto itself: {err}"
-                    ))
-                },
+                Syscall::Mount(
+                    Some(layer0_path.as_c_str()),
+                    new_root_path,
+                    None,
+                    nc::MS_BIND,
+                    None,
+                ),
+                &|err| JobError::System(anyhow!("bind mounting target root directory: {err}")),
             );
 
             // We want that mount to be read-only!
@@ -528,7 +529,6 @@ impl Executor {
             );
         } else {
             // Use overlayfs.
-            new_root_path = self.mount_dir.as_c_str();
             let mut options = "lowerdir=".to_string();
             for (i, layer) in spec.layers.iter().rev().enumerate() {
                 if i != 0 {
