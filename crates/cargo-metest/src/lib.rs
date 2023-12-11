@@ -16,7 +16,7 @@ use std::{
     path::{Path, PathBuf},
     str,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -453,6 +453,7 @@ pub trait ProgressDriver<'scope> {
 pub struct DefaultProgressDriver<'scope, 'env> {
     scope: &'scope thread::Scope<'scope, 'env>,
     handle: Option<thread::ScopedJoinHandle<'scope, Result<()>>>,
+    canceled: Arc<AtomicBool>,
 }
 
 impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
@@ -460,7 +461,14 @@ impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
         Self {
             scope,
             handle: None,
+            canceled: Default::default(),
         }
+    }
+}
+
+impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
+    fn drop(&mut self) {
+        self.canceled.store(true, Ordering::Release);
     }
 }
 
@@ -473,14 +481,15 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
+        let cancelled = self.canceled.clone();
         self.handle = Some(self.scope.spawn(move || {
             thread::scope(|scope| {
                 scope.spawn(|| {
-                    while ind.tick() {
+                    while ind.tick() && !cancelled.load(Ordering::Acquire) {
                         thread::sleep(Duration::from_millis(500))
                     }
                 });
-                loop {
+                while !cancelled.load(Ordering::Acquire) {
                     let counts = client.lock().unwrap().get_job_state_counts_async()?;
                     if !ind.update_job_states(counts.recv()?)? {
                         break;
