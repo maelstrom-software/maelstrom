@@ -2,7 +2,10 @@
 
 use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
-use bumpalo::{collections::Vec as BumpVec, Bump};
+use bumpalo::{
+    collections::{String as BumpString, Vec as BumpVec},
+    Bump,
+};
 use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
@@ -18,7 +21,8 @@ use nix::{
     unistd::{self, Pid},
 };
 use std::{
-    ffi::CString,
+    ffi::{CStr, CString},
+    fmt::Write as _,
     fs::File,
     io::Read as _,
     iter, mem,
@@ -98,7 +102,6 @@ impl JobSpec {
 }
 
 pub struct Executor {
-    setgroups_contents: String,
     user: UserId,
     group: GroupId,
     mount_dir: CString,
@@ -133,7 +136,6 @@ impl Executor {
             unsafe { nc::dup2(stdin_read_fd.as_raw_fd(), 0) }.map_err(Errno::from_i32)?;
         }
 
-        let setgroups_contents = "deny\n".to_string();
         let user = UserId::from(unistd::getuid().as_raw());
         let group = GroupId::from(unistd::getgid().as_raw());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
@@ -171,7 +173,6 @@ impl Executor {
         netlink_message.serialize(&mut buffer[..]);
 
         Ok(Executor {
-            setgroups_contents,
             user,
             group,
             mount_dir,
@@ -302,6 +303,17 @@ impl<'a> ScriptBuilder<'a> {
     }
 }
 
+fn bump_c_str<'bump>(bump: &'bump Bump, bytes: &str) -> Result<&'bump CStr> {
+    bump_c_str_from_bytes(bump, bytes.as_bytes())
+}
+
+fn bump_c_str_from_bytes<'bump>(bump: &'bump Bump, bytes: &[u8]) -> Result<&'bump CStr> {
+    let mut vec = BumpVec::with_capacity_in(bytes.len().checked_add(1).unwrap(), bump);
+    vec.extend_from_slice(bytes);
+    vec.push(0);
+    CStr::from_bytes_with_nul(vec.into_bump_slice()).map_err(Error::new)
+}
+
 impl Executor {
     fn start_inner(
         &self,
@@ -346,49 +358,6 @@ impl Executor {
         // error.
 
         let bump = Bump::new();
-
-        let mut rtnetlink_response = [0; 1024];
-        let layer0_path;
-        let overlayfs_options;
-        let child_mount_points;
-        let working_directory;
-        #[allow(clippy::needless_late_init)]
-        let uid_map_contents;
-        #[allow(clippy::needless_late_init)]
-        let gid_map_contents;
-        let program = CString::new(spec.program.as_str())
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let arguments = spec
-            .arguments
-            .iter()
-            .map(String::as_str)
-            .map(CString::new)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let arguments = iter::once(Some(&program.to_bytes_with_nul()[0]))
-            .chain(
-                arguments
-                    .iter()
-                    .map(|cstr| Some(&cstr.to_bytes_with_nul()[0])),
-            )
-            .chain(iter::once(None))
-            .collect::<Vec<_>>();
-        let environment = spec
-            .environment
-            .iter()
-            .map(String::as_str)
-            .map(CString::new)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let environment = environment
-            .iter()
-            .map(|cstr| Some(&cstr.to_bytes_with_nul()[0]))
-            .chain(iter::once(None))
-            .collect::<Vec<_>>();
-
         let mut builder = ScriptBuilder::new(&bump);
 
         if spec.enable_loopback {
@@ -413,24 +382,28 @@ impl Executor {
             );
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
-            builder.push(
-                Syscall::RecvFromSaved(rtnetlink_response.as_mut_slice()),
-                &|err| JobError::System(anyhow!("receiving rtnetlink message: {err}")),
-            );
+            let rtnetlink_response = bump.alloc_slice_fill_default(1024);
+            builder.push(Syscall::RecvFromSaved(rtnetlink_response), &|err| {
+                JobError::System(anyhow!("receiving rtnetlink message: {err}"))
+            });
             // We don't need to close the socket because that will happen automatically for us when we
             // exec.
         }
 
         // We now need to set up the new user namespace. This first set of syscalls sets up the
         // uid mapping.
-        uid_map_contents = format!("{} {} 1\n", spec.user, self.user);
+        let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
+        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user)
+            .map_err(Error::new)
+            .map_err(JobError::System)?;
         builder.push(
             Syscall::OpenAndSave(c_str!("/proc/self/uid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
-        builder.push(Syscall::WriteSaved(uid_map_contents.as_bytes()), &|err| {
-            JobError::System(anyhow!("writing to /proc/self/uid_map: {err}"))
-        });
+        builder.push(
+            Syscall::WriteSaved(uid_map_contents.into_bump_str().as_bytes()),
+            &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
+        );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
@@ -444,22 +417,25 @@ impl Executor {
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
-        builder.push(
-            Syscall::WriteSaved(self.setgroups_contents.as_bytes()),
-            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
-        );
+        builder.push(Syscall::WriteSaved(b"deny\n"), &|err| {
+            JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
+        });
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
         // Finally, we set up the gid mapping.
-        gid_map_contents = format!("{} {} 1\n", spec.group, self.group);
+        let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
+        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group)
+            .map_err(Error::new)
+            .map_err(JobError::System)?;
         builder.push(
             Syscall::OpenAndSave(c_str!("/proc/self/gid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
-        builder.push(Syscall::WriteSaved(gid_map_contents.as_bytes()), &|err| {
-            JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
-        });
+        builder.push(
+            Syscall::WriteSaved(gid_map_contents.into_bump_str().as_bytes()),
+            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
+        );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
@@ -495,20 +471,14 @@ impl Executor {
 
         let new_root_path = self.mount_dir.as_c_str();
         if spec.layers.tail.is_empty() && !spec.enable_writable_file_system {
-            layer0_path = CString::new(spec.layers[0].as_os_str().as_bytes())
+            let layer0_path = bump_c_str_from_bytes(&bump, spec.layers[0].as_os_str().as_bytes())
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
 
             // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
             // pivot_root to it later.
             builder.push(
-                Syscall::Mount(
-                    Some(layer0_path.as_c_str()),
-                    new_root_path,
-                    None,
-                    nc::MS_BIND,
-                    None,
-                ),
+                Syscall::Mount(Some(layer0_path), new_root_path, None, nc::MS_BIND, None),
                 &|err| JobError::System(anyhow!("bind mounting target root directory: {err}")),
             );
 
@@ -529,7 +499,8 @@ impl Executor {
             );
         } else {
             // Use overlayfs.
-            let mut options = "lowerdir=".to_string();
+            let mut options = BumpString::with_capacity_in(1000, &bump);
+            options.push_str("lowerdir=");
             for (i, layer) in spec.layers.iter().rev().enumerate() {
                 if i != 0 {
                     options.push(':');
@@ -559,16 +530,14 @@ impl Executor {
                 });
                 options.push_str(self.comma_upperdir_comma_workdir.as_str());
             }
-            overlayfs_options = CString::new(options)
-                .map_err(Error::from)
-                .map_err(JobError::System)?;
+            options.push('\0');
             builder.push(
                 Syscall::Mount(
                     None,
                     new_root_path,
                     Some(c_str!("overlay")),
                     0,
-                    Some(overlayfs_options.as_c_str().to_bytes_with_nul()),
+                    Some(options.into_bytes().into_bump_slice()),
                 ),
                 &|err| JobError::System(anyhow!("mounting overlayfs: {err}")),
             );
@@ -597,6 +566,10 @@ impl Executor {
             };
             builder.push(
                 Syscall::Mount(Some(source), target, None, nc::MS_BIND, None),
+                // We have to be careful doing bump.alloc here with the move. The drop method is
+                // not going to be run on the closure, which means drop won't be run on any
+                // captured-and-moved variables. Since we're using a static string for
+                // `device_name`, we're okay.
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!("bind mount of device {device_name}: {err}",))
                 }),
@@ -614,14 +587,13 @@ impl Executor {
         // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
         // unless they are already mounted. So we have to do this before we unmount the old root.
         // If we do the unmount first, then we'll get permission errors mounting those fs types.
-        child_mount_points = spec
+        let child_mount_points = spec
             .mounts
             .iter()
-            .map(|m| CString::new(m.mount_point.as_str()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        for (mount, mount_point_cstr) in iter::zip(spec.mounts.iter(), child_mount_points.iter()) {
+            .map(|m| bump_c_str(&bump, m.mount_point.as_str()));
+        for (mount, mount_point) in iter::zip(spec.mounts.iter(), child_mount_points) {
+            let mount_point_cstr = mount_point.map_err(Error::from).map_err(JobError::System)?;
+
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
                     c_str!("proc"),
@@ -634,6 +606,10 @@ impl Executor {
             let mount_point = mount.mount_point.as_str();
             builder.push(
                 Syscall::Mount(None, mount_point_cstr, Some(fs_type), flags, None),
+                // We have to be careful doing bump.alloc here with the move. The drop method is
+                // not going to be run on the closure, which means drop won't be run on any
+                // captured-and-moved variables. Since we're using a static string for `type_name`,
+                // and since mount_point is just a reference, we're okay.
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!(
                         "mount of file system of type {type_name} to {mount_point}: {err}",
@@ -649,20 +625,37 @@ impl Executor {
 
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
-            working_directory = CString::new(spec.working_directory.as_os_str().as_encoded_bytes())
-                .map_err(Error::from)
-                .map_err(JobError::System)?;
-            builder.push(Syscall::Chdir(&working_directory), &|err| {
+            let working_directory =
+                bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?;
+            builder.push(Syscall::Chdir(working_directory), &|err| {
                 JobError::Execution(anyhow!("chdir: {err}"))
             });
         }
 
         // Finally, do the exec.
+        let program = bump_c_str(&bump, spec.program.as_str()).map_err(JobError::System)?;
+        let mut arguments =
+            BumpVec::with_capacity_in(spec.arguments.len().checked_add(2).unwrap(), &bump);
+        arguments.push(Some(&program.to_bytes_with_nul()[0]));
+        for argument in &spec.arguments {
+            let argument_cstr = bump_c_str(&bump, argument.as_str()).map_err(JobError::System)?;
+            arguments.push(Some(&argument_cstr.to_bytes_with_nul()[0]));
+        }
+        arguments.push(None);
+        let mut environment =
+            BumpVec::with_capacity_in(spec.environment.len().checked_add(1).unwrap(), &bump);
+        for var in &spec.environment {
+            let var_cstr = bump_c_str(&bump, var.as_str()).map_err(JobError::System)?;
+            environment.push(Some(&var_cstr.to_bytes_with_nul()[0]));
+        }
+        environment.push(None);
         builder.push(
             Syscall::Execve(
-                program.as_c_str(),
-                arguments.as_slice(),
-                environment.as_slice(),
+                program,
+                arguments.into_bump_slice(),
+                environment.into_bump_slice(),
             ),
             &|err| JobError::Execution(anyhow!("execvc: {err}")),
         );
