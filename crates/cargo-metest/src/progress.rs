@@ -39,6 +39,11 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
         Ok(false)
     }
 
+    /// Tick and spinners
+    fn tick(&self) -> bool {
+        false
+    }
+
     /// Update the message for the spinner which indicates jobs are being enqueued
     fn update_enqueue_status(&self, _msg: impl Into<String>) {}
 
@@ -159,12 +164,19 @@ impl ProgressIndicator for MultipleProgressBars {
             bar.set_position(pos);
         }
 
-        if !state.done_queuing_jobs {
-            self.enqueue_spinner.tick();
-        }
-
         let finished = state.done_queuing_jobs && state.finished >= state.length;
         Ok(!finished)
+    }
+
+    fn tick(&self) -> bool {
+        let state = self.state.lock().unwrap();
+
+        if state.done_queuing_jobs {
+            return false;
+        }
+
+        self.enqueue_spinner.tick();
+        true
     }
 
     fn done_queuing_jobs(&self) {

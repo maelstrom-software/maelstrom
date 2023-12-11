@@ -410,16 +410,23 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
         'dep: 'scope,
     {
         self.handle = Some(self.scope.spawn(move || {
-            loop {
-                let counts = client.lock().unwrap().get_job_state_counts_async()?;
-                if !ind.update_job_states(counts.recv()?)? {
-                    break;
-                }
+            thread::scope(|scope| {
+                scope.spawn(|| {
+                    while ind.tick() {
+                        thread::sleep(Duration::from_millis(500))
+                    }
+                });
+                loop {
+                    let counts = client.lock().unwrap().get_job_state_counts_async()?;
+                    if !ind.update_job_states(counts.recv()?)? {
+                        break;
+                    }
 
-                // Don't hammer server with requests, also this function updates the spinner
-                thread::sleep(Duration::from_millis(500));
-            }
-            Ok(())
+                    // Don't hammer server with requests
+                    thread::sleep(Duration::from_millis(500));
+                }
+                Ok(())
+            })
         }));
     }
 
