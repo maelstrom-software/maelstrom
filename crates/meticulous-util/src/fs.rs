@@ -86,6 +86,10 @@ pub struct Metadata {
 }
 
 impl Metadata {
+    pub fn into_inner(self) -> std::fs::Metadata {
+        self.inner
+    }
+
     pub fn file_type(&self) -> std::fs::FileType {
         self.inner.file_type()
     }

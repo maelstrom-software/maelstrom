@@ -1,12 +1,17 @@
+use crate::progress::ProgressIndicator;
 use anyhow::Result;
+use indicatif::ProgressBar;
 use meticulous_base::Sha256Digest;
 use meticulous_client::Client;
 use meticulous_util::fs::Fs;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use tar::Header;
 
-fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
+fn create_artifact_for_binary(binary_path: &Path, prog: Option<ProgressBar>) -> Result<PathBuf> {
+    let prog = prog.unwrap_or_else(ProgressBar::hidden);
+
     let fs = Fs::new();
     let binary = fs.open_file(binary_path)?;
 
@@ -25,13 +30,21 @@ fn create_artifact_for_binary(binary_path: &Path) -> Result<PathBuf> {
     let mut a = tar::Builder::new(tar_file);
 
     let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
-    a.append_file(binary_path_in_tar, &mut binary.into_inner())?;
+    let mut header = Header::new_gnu();
+    let meta = binary.metadata()?;
+    prog.set_length(meta.len());
+    header.set_metadata(&meta.into_inner());
+    a.append_data(&mut header, binary_path_in_tar, prog.wrap_read(binary))?;
     a.finish()?;
 
     Ok(tar_path)
 }
 
-fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
+fn create_artifact_for_binary_deps(
+    binary_path: &Path,
+    prog: Option<ProgressBar>,
+) -> Result<PathBuf> {
+    let prog = prog.unwrap_or_else(ProgressBar::hidden);
     let fs = Fs::new();
 
     let mut tar_path = PathBuf::from(binary_path);
@@ -79,8 +92,24 @@ fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
     let tar_file = fs.create_file(&tar_path)?;
     let mut a = tar::Builder::new(tar_file);
 
-    for path in paths {
-        a.append_path_with_name(&path, &remove_root(&path))?;
+    let files: Vec<_> = paths
+        .iter()
+        .map(|p| fs.open_file(p))
+        .collect::<Result<_>>()?;
+
+    let metas: Vec<_> = files.iter().map(|f| f.metadata()).collect::<Result<_>>()?;
+
+    let total_size = metas.iter().map(|m| m.len()).sum();
+    prog.set_length(total_size);
+
+    for ((path, file), meta) in paths
+        .into_iter()
+        .zip(files.into_iter())
+        .zip(metas.into_iter())
+    {
+        let mut header = Header::new_gnu();
+        header.set_metadata(&meta.into_inner());
+        a.append_data(&mut header, &remove_root(&path), prog.wrap_read(file))?;
     }
 
     a.finish()?;
@@ -91,14 +120,17 @@ fn create_artifact_for_binary_deps(binary_path: &Path) -> Result<PathBuf> {
 pub fn add_generated_artifacts(
     client: &Mutex<Client>,
     binary_path: &Path,
+    ind: &impl ProgressIndicator,
 ) -> Result<(Sha256Digest, Sha256Digest)> {
+    let prog = ind.new_side_progress("tar");
     let binary_artifact = client
         .lock()
         .unwrap()
-        .add_artifact(&create_artifact_for_binary(binary_path)?)?;
+        .add_artifact(&create_artifact_for_binary(binary_path, prog)?)?;
+    let prog = ind.new_side_progress("tar");
     let deps_artifact = client
         .lock()
         .unwrap()
-        .add_artifact(&create_artifact_for_binary_deps(binary_path)?)?;
+        .add_artifact(&create_artifact_for_binary_deps(binary_path, prog)?)?;
     Ok((binary_artifact, deps_artifact))
 }

@@ -108,7 +108,8 @@ where
             .collect();
 
         ind.update_enqueue_status(format!("tar {package_name}"));
-        let (binary_artifact, deps_artifact) = artifacts::add_generated_artifacts(client, &binary)?;
+        let (binary_artifact, deps_artifact) =
+            artifacts::add_generated_artifacts(client, &binary, &ind)?;
 
         ind.update_enqueue_status(format!("processing {package_name}"));
         let cases = get_cases_from_binary(&binary, &job_queuer.filter)?;
