@@ -33,6 +33,7 @@ pub mod visitor;
 
 #[derive(Default, Serialize, Deserialize)]
 struct TestListing {
+    #[serde(flatten)]
     package_to_cases: BTreeMap<String, Vec<String>>,
 }
 
