@@ -36,6 +36,7 @@ pub enum Syscall<'a> {
         Option<&'a [u8]>,
     ),
     Chdir(&'a CStr),
+    Mkdir(&'a CStr, mode_t),
     PivotRoot(&'a CStr, &'a CStr),
     Umount2(&'a CStr, usize),
     Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
@@ -107,6 +108,11 @@ impl<'a> Syscall<'a> {
             Syscall::Chdir(path) => {
                 syscalls::syscall1(nc::SYS_CHDIR, path.to_bytes_with_nul().as_ptr() as usize)
             }
+            Syscall::Mkdir(path, mode) => syscalls::syscall2(
+                nc::SYS_MKDIR,
+                path.to_bytes_with_nul().as_ptr() as usize,
+                *mode as usize,
+            ),
             Syscall::PivotRoot(new_root, put_old) => syscalls::syscall2(
                 nc::SYS_PIVOT_ROOT,
                 new_root.to_bytes_with_nul().as_ptr() as usize,

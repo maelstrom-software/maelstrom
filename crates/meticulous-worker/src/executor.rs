@@ -102,12 +102,16 @@ pub struct Executor {
     user: UserId,
     group: GroupId,
     mount_dir: CString,
+    tmpfs_dir: CString,
+    upper_dir: CString,
+    work_dir: CString,
+    comma_upperdir_comma_workdir: String,
     netlink_socket_addr: sockaddr_nl_t,
     netlink_message: Box<[u8]>,
 }
 
 impl Executor {
-    pub fn new(mount_dir: PathBuf) -> Result<Self> {
+    pub fn new(mount_dir: PathBuf, tmpfs_dir: PathBuf) -> Result<Self> {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
@@ -133,6 +137,22 @@ impl Executor {
         let user = UserId::from(unistd::getuid().as_raw());
         let group = GroupId::from(unistd::getgid().as_raw());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
+        let upper_dir = tmpfs_dir.join("upper");
+        let work_dir = tmpfs_dir.join("work");
+        let tmpfs_dir = CString::new(tmpfs_dir.as_os_str().as_bytes())?;
+        let comma_upperdir_comma_workdir = format!(
+            ",upperdir={},workdir={}",
+            upper_dir
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| anyhow!("could not convert upper_dir path to string"))?,
+            work_dir
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| anyhow!("could not convert work_dir path to string"))?
+        );
+        let upper_dir = CString::new(upper_dir.as_os_str().as_bytes())?;
+        let work_dir = CString::new(work_dir.as_os_str().as_bytes())?;
         let netlink_socket_addr = sockaddr_nl_t {
             sin_family: nc::AF_NETLINK as nc::sa_family_t,
             nl_pad: 0,
@@ -155,6 +175,10 @@ impl Executor {
             user,
             group,
             mount_dir,
+            tmpfs_dir,
+            upper_dir,
+            work_dir,
+            comma_upperdir_comma_workdir,
             netlink_socket_addr,
             netlink_message: buffer,
         })
@@ -467,9 +491,10 @@ impl Executor {
         );
 
         // We can't use overlayfs with only a single layer. So we have to diverge based on how many
-        // layers there are.
+        // layers there are. If enable_writable_file_system, we're going to need at least two
+        // layers, since we're going to push a writable top layer.
 
-        if spec.layers.tail.is_empty() {
+        if spec.layers.tail.is_empty() && !spec.enable_writable_file_system {
             layer0_path = CString::new(spec.layers[0].as_os_str().as_bytes())
                 .map_err(Error::from)
                 .map_err(JobError::System)?;
@@ -516,6 +541,23 @@ impl Executor {
                         .ok_or_else(|| anyhow!("could not convert path to string"))
                         .map_err(JobError::System)?,
                 );
+            }
+            // We need to create an upperdir and workdir. Create a temporary file system to contain
+            // both of them.
+            if spec.enable_writable_file_system {
+                builder.push(
+                    Syscall::Mount(None, self.tmpfs_dir.as_c_str(), Some(c_str!("tmpfs")), 0, None),
+                    &|err| {
+                        JobError::System(anyhow!(
+                            "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"))
+                    });
+                builder.push(Syscall::Mkdir(self.upper_dir.as_c_str(), 0o700), &|err| {
+                    JobError::System(anyhow!("making uppderdir for overlayfs: {err}"))
+                });
+                builder.push(Syscall::Mkdir(self.work_dir.as_c_str(), 0o700), &|err| {
+                    JobError::System(anyhow!("making workdir for overlayfs: {err}"))
+                });
+                options.push_str(self.comma_upperdir_comma_workdir.as_str());
             }
             overlayfs_options = CString::new(options)
                 .map_err(Error::from)
@@ -835,14 +877,17 @@ mod tests {
             let dummy_child_pid = reaper::clone_dummy_child().unwrap();
             let (stdout_tx, stdout_rx) = oneshot::channel();
             let (stderr_tx, stderr_rx) = oneshot::channel();
-            let start_result = Executor::new(tempfile::tempdir().unwrap().into_path())
-                .unwrap()
-                .start(
-                    &self.spec,
-                    InlineLimit::from(self.inline_limit),
-                    |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
-                    |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
-                );
+            let start_result = Executor::new(
+                tempfile::tempdir().unwrap().into_path(),
+                tempfile::tempdir().unwrap().into_path(),
+            )
+            .unwrap()
+            .start(
+                &self.spec,
+                InlineLimit::from(self.inline_limit),
+                |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
+                |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
+            );
             assert_matches!(start_result, Ok(_));
             let Ok(pid) = start_result else {
                 unreachable!();
@@ -1135,6 +1180,22 @@ mod tests {
 
     #[tokio::test]
     #[serial]
+    async fn one_layer_with_writable_file_system_is_writable() {
+        Test::from_spec(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
+            .expected_status(JobStatus::Exited(0))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
+            .run()
+            .await;
+
+        // Run another job to ensure that the file doesn't persist.
+        Test::from_spec(bash_spec("test -e /foo"))
+            .expected_status(JobStatus::Exited(1))
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
     async fn multiple_layers_in_correct_order() {
         let (spec, _) = JobSpec::from_spec_and_layers(
             meticulous_base::JobSpec::new(
@@ -1160,11 +1221,7 @@ mod tests {
     #[serial]
     async fn multiple_layers_read_only() {
         let (spec, _) = JobSpec::from_spec_and_layers(
-            meticulous_base::JobSpec::new(
-                "/bin/touch",
-                nonempty![digest![0], digest![1], digest![2]],
-            )
-            .arguments(["/foo"]),
+            test_spec("/bin/touch").arguments(["/foo"]),
             nonempty![
                 extract_dependencies(),
                 extract_layer_tar(include_bytes!("bottom-layer.tar")),
@@ -1176,6 +1233,38 @@ mod tests {
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(
                 b"touch: /foo: Read-only file system\n"
             )))
+            .run()
+            .await;
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn multiple_layers_with_writable_file_system_is_writable() {
+        let (spec, _) = JobSpec::from_spec_and_layers(
+            bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true),
+            nonempty![
+                extract_dependencies(),
+                extract_layer_tar(include_bytes!("bottom-layer.tar")),
+                extract_layer_tar(include_bytes!("top-layer.tar"))
+            ],
+        );
+        Test::new(spec)
+            .expected_status(JobStatus::Exited(0))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
+            .run()
+            .await;
+
+        // Run another job to ensure that the file doesn't persist.
+        let (spec, _) = JobSpec::from_spec_and_layers(
+            bash_spec("test -e /foo").enable_writable_file_system(true),
+            nonempty![
+                extract_dependencies(),
+                extract_layer_tar(include_bytes!("bottom-layer.tar")),
+                extract_layer_tar(include_bytes!("top-layer.tar"))
+            ],
+        );
+        Test::new(spec)
+            .expected_status(JobStatus::Exited(1))
             .run()
             .await;
     }
@@ -1456,9 +1545,12 @@ mod tests {
     fn assert_execution_error(spec: meticulous_base::JobSpec) {
         let (spec, _) = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
         assert_matches!(
-            Executor::new(tempfile::tempdir().unwrap().into_path())
-                .unwrap()
-                .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
+            Executor::new(
+                tempfile::tempdir().unwrap().into_path(),
+                tempfile::tempdir().unwrap().into_path()
+            )
+            .unwrap()
+            .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
             Err(JobError::Execution(_))
         );
     }

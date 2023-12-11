@@ -58,16 +58,18 @@ impl DispatcherAdapter {
         inline_limit: InlineLimit,
         log: Logger,
         mount_dir: PathBuf,
+        tmpfs_dir: PathBuf,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
+        fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
             dispatcher_sender,
             broker_socket_sender,
             broker_addr,
             inline_limit,
             log,
-            executor: Executor::new(mount_dir)?,
+            executor: Executor::new(mount_dir, tmpfs_dir)?,
         })
     }
 }
@@ -140,11 +142,9 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
     log: Logger,
 ) {
-    let mut mount_dir = config.cache_root.inner().to_owned();
-    mount_dir.push("mount");
-
-    let mut cache_root = config.cache_root.inner().to_owned();
-    cache_root.push("artifacts");
+    let mount_dir = config.cache_root.inner().join("mount");
+    let tmpfs_dir = config.cache_root.inner().join("upper");
+    let cache_root = config.cache_root.inner().join("artifacts");
 
     let cache = Cache::new(
         StdCacheFs,
@@ -159,6 +159,7 @@ async fn dispatcher_main(
         config.inline_limit,
         log.clone(),
         mount_dir,
+        tmpfs_dir,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);

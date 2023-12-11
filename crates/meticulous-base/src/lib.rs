@@ -206,6 +206,11 @@ impl JobSpec {
         self
     }
 
+    pub fn enable_writable_file_system(mut self, enable_writable_file_system: bool) -> Self {
+        self.enable_writable_file_system = enable_writable_file_system;
+        self
+    }
+
     pub fn working_directory(mut self, working_directory: impl Into<PathBuf>) -> Self {
         self.working_directory = working_directory.into();
         self
