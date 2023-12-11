@@ -8,8 +8,9 @@ use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
 use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
+use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, BTreeSet, HashSet},
     env, io,
     path::{Path, PathBuf},
     str,
@@ -30,6 +31,36 @@ pub mod progress;
 pub mod substitute;
 pub mod visitor;
 
+#[derive(Default, Serialize, Deserialize)]
+struct TestListing {
+    package_to_cases: BTreeMap<String, BTreeSet<String>>,
+}
+
+impl TestListing {
+    fn add_case(&mut self, package: &str, case: &str) {
+        let entry = self.package_to_cases.entry(package.into()).or_default();
+        entry.insert(case.into());
+    }
+
+    fn add_cases(&mut self, package: &str, cases: &[String]) {
+        for case in cases {
+            self.add_case(package, case);
+        }
+    }
+
+    fn expected_job_count(&self, package: &Option<String>, filter: &Option<String>) -> u64 {
+        self.package_to_cases
+            .iter()
+            .filter_map(|(p, cases)| {
+                (package.is_none() || package.as_ref().is_some_and(|exp_p| exp_p == p))
+                    .then_some(cases)
+            })
+            .flatten()
+            .filter(|c| filter.is_none() || filter.as_ref().is_some_and(|exp_c| c.contains(exp_c)))
+            .count() as u64
+    }
+}
+
 struct JobQueuer<StdErr> {
     cargo: String,
     package: Option<String>,
@@ -40,6 +71,7 @@ struct JobQueuer<StdErr> {
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
     expected_job_count: Option<u64>,
+    test_listing: Mutex<TestListing>,
 }
 
 impl<StdErr> JobQueuer<StdErr> {
@@ -50,8 +82,12 @@ impl<StdErr> JobQueuer<StdErr> {
         stderr: StdErr,
         stderr_color: bool,
         test_metadata: AllMetadata,
-        expected_job_count: Option<u64>,
+        test_listing: Option<TestListing>,
     ) -> Self {
+        let expected_job_count = test_listing
+            .as_ref()
+            .map(|l| l.expected_job_count(&package, &filter));
+
         Self {
             cargo,
             package,
@@ -62,6 +98,7 @@ impl<StdErr> JobQueuer<StdErr> {
             jobs_queued: AtomicU64::new(0),
             test_metadata,
             expected_job_count,
+            test_listing: Mutex::new(test_listing.unwrap_or_default()),
         }
     }
 }
@@ -112,7 +149,14 @@ where
             artifacts::add_generated_artifacts(client, &binary, &ind)?;
 
         ind.update_enqueue_status(format!("processing {package_name}"));
-        let cases = get_cases_from_binary(&binary, &job_queuer.filter)?;
+        let mut cases = get_cases_from_binary(&binary, &None)?;
+
+        let mut listing = job_queuer.test_listing.lock().unwrap();
+        listing.add_cases(&package_name, &cases[..]);
+
+        if let Some(filter) = &job_queuer.filter {
+            cases.retain(|c| c.contains(filter));
+        }
 
         Ok(Self {
             job_queuer,
@@ -314,20 +358,20 @@ where
     }
 }
 
-const EXPECTED_JOB_COUNT_NAME: &str = ".meticulous_expected_job_count";
+const LAST_TEST_LISTING_NAME: &str = "meticulous-test-listing.toml";
 
-fn load_expected_job_count(path: &Path) -> Result<Option<u64>> {
+fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
     let fs = Fs::new();
     if let Some(contents) = fs.read_to_string_if_exists(path)? {
-        Ok(Some(contents.trim().parse()?))
+        Ok(toml::from_str(&contents)?)
     } else {
         Ok(None)
     }
 }
 
-fn write_expected_job_count(path: &Path, count: u64) -> Result<()> {
+fn write_test_listing(path: &Path, job_listing: &TestListing) -> Result<()> {
     let fs = Fs::new();
-    fs.write(path, count.to_string().as_bytes())?;
+    fs.write(path, toml::to_string_pretty(job_listing)?)?;
     Ok(())
 }
 
@@ -357,7 +401,7 @@ impl<StdErr> MainAppDeps<StdErr> {
             cache_dir.clone(),
         )?);
         let test_metadata = AllMetadata::load(workspace_root)?;
-        let expected_job_count = load_expected_job_count(&cache_dir.join(EXPECTED_JOB_COUNT_NAME))?;
+        let last_test_listing = load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?;
 
         Ok(Self {
             client,
@@ -368,7 +412,7 @@ impl<StdErr> MainAppDeps<StdErr> {
                 stderr,
                 stderr_color,
                 test_metadata,
-                expected_job_count,
+                last_test_listing,
             ),
             cache_dir,
         })
@@ -522,9 +566,9 @@ where
             .tracker
             .print_summary(width, self.term.clone())?;
 
-        write_expected_job_count(
-            &self.deps.cache_dir.join(EXPECTED_JOB_COUNT_NAME),
-            self.deps.queuer.jobs_queued.load(Ordering::Acquire),
+        write_test_listing(
+            &self.deps.cache_dir.join(LAST_TEST_LISTING_NAME),
+            &self.deps.queuer.test_listing.lock().unwrap(),
         )?;
 
         Ok(self.deps.queuer.tracker.exit_code())
