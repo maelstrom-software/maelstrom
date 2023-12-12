@@ -521,23 +521,23 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT> {
+struct MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT> {
     deps: &'deps MainAppDeps<StdErrT>,
     queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
-    term: Term,
+    term: TermT,
 }
 
-impl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
         deps: &'deps MainAppDeps<StdErrT>,
         queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
-        term: Term,
+        term: TermT,
     ) -> Self {
         Self {
             deps,
@@ -549,12 +549,12 @@ impl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'deps, 'scope, StdErrT, Term, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, 'scope, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
 where
     StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
-    Term: TermLike + Clone + 'static,
+    TermT: TermLike + Clone + 'static,
     ProgressDriverT: ProgressDriver<'scope>,
 {
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
@@ -593,16 +593,16 @@ where
     }
 }
 
-fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, Term>(
+fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
     deps: &'deps MainAppDeps<StdErrT>,
-    prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
-    term: Term,
+    prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
+    term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
-    Term: TermLike + Clone + 'static,
+    TermT: TermLike + Clone + 'static,
     'deps: 'scope,
 {
     let width = term.width() as usize;
@@ -624,16 +624,16 @@ where
     )))
 }
 
-pub fn main_app_new<'deps, 'scope, Term, StdErrT>(
+pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     deps: &'deps MainAppDeps<StdErrT>,
     stdout_tty: bool,
     quiet: Quiet,
-    term: Term,
+    term: TermT,
     driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
-    Term: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + 'static,
     'deps: 'scope,
 {
     match (stdout_tty, quiet.into_inner()) {

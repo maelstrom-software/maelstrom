@@ -3,19 +3,19 @@ use anyhow::Result;
 use indicatif::TermLike;
 
 #[derive(Clone)]
-pub struct NoBar<Term> {
-    term: Term,
+pub struct NoBar<TermT> {
+    term: TermT,
 }
 
-impl<Term> NoBar<Term> {
-    pub fn new(term: Term) -> Self {
+impl<TermT> NoBar<TermT> {
+    pub fn new(term: TermT) -> Self {
         Self { term }
     }
 }
 
-impl<Term> ProgressIndicator for NoBar<Term>
+impl<TermT> ProgressIndicator for NoBar<TermT>
 where
-    Term: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + 'static,
 {
     fn println(&self, msg: String) {
         self.term.write_line(&msg).ok();

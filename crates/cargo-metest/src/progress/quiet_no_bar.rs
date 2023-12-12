@@ -3,19 +3,19 @@ use anyhow::Result;
 use indicatif::TermLike;
 
 #[derive(Clone)]
-pub struct QuietNoBar<Term> {
-    term: Term,
+pub struct QuietNoBar<TermT> {
+    term: TermT,
 }
 
-impl<Term> QuietNoBar<Term> {
-    pub fn new(term: Term) -> Self {
+impl<TermT> QuietNoBar<TermT> {
+    pub fn new(term: TermT) -> Self {
         Self { term }
     }
 }
 
-impl<Term> ProgressIndicator for QuietNoBar<Term>
+impl<TermT> ProgressIndicator for QuietNoBar<TermT>
 where
-    Term: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + 'static,
 {
     fn println(&self, _msg: String) {
         // quiet mode doesn't print anything
