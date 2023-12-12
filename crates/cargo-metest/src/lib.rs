@@ -471,15 +471,15 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
-        let cancelled = self.canceled.clone();
+        let canceled = self.canceled.clone();
         self.handle = Some(self.scope.spawn(move || {
             thread::scope(|scope| {
                 scope.spawn(|| {
-                    while ind.tick() && !cancelled.load(Ordering::Acquire) {
+                    while ind.tick() && !canceled.load(Ordering::Acquire) {
                         thread::sleep(Duration::from_millis(500))
                     }
                 });
-                while !cancelled.load(Ordering::Acquire) {
+                while !canceled.load(Ordering::Acquire) {
                     let counts = client.lock().unwrap().get_job_state_counts_async()?;
                     if !ind.update_job_states(counts.recv()?)? {
                         break;
