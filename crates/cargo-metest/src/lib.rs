@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
     collections::{BTreeMap, HashSet},
-    env, io,
+    io,
     path::{Path, PathBuf},
     str,
     sync::{
@@ -119,16 +119,6 @@ impl<StdErr> JobQueuer<StdErr> {
             test_listing: Mutex::new(test_listing),
         }
     }
-}
-
-fn collect_environment_vars() -> Vec<String> {
-    let mut env = vec![];
-    for (key, value) in env::vars() {
-        if key.starts_with("RUST_") {
-            env.push(format!("{key}={value}"));
-        }
-    }
-    env
 }
 
 struct ArtifactQueing<'a, StdErr, ProgressIndicatorT> {
@@ -251,7 +241,7 @@ where
             JobSpec {
                 program: format!("/{binary_name}"),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
-                environment: collect_environment_vars(),
+                environment: test_metadata.environment(),
                 layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
