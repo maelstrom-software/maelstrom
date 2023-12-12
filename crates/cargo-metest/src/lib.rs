@@ -71,11 +71,11 @@ impl TestListing {
     }
 }
 
-struct JobQueuer<StdErr> {
+struct JobQueuer<StdErrT> {
     cargo: String,
     package: Option<String>,
     filter: Option<String>,
-    stderr: Mutex<StdErr>,
+    stderr: Mutex<StdErrT>,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
@@ -84,12 +84,12 @@ struct JobQueuer<StdErr> {
     test_listing: Mutex<TestListing>,
 }
 
-impl<StdErr> JobQueuer<StdErr> {
+impl<StdErrT> JobQueuer<StdErrT> {
     fn new(
         cargo: String,
         package: Option<String>,
         filter: Option<String>,
-        stderr: StdErr,
+        stderr: StdErrT,
         stderr_color: bool,
         test_metadata: AllMetadata,
         last_test_listing: Option<TestListing>,
@@ -121,8 +121,8 @@ impl<StdErr> JobQueuer<StdErr> {
     }
 }
 
-struct ArtifactQueing<'a, StdErr, ProgressIndicatorT> {
-    job_queuer: &'a JobQueuer<StdErr>,
+struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
+    job_queuer: &'a JobQueuer<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
@@ -134,12 +134,12 @@ struct ArtifactQueing<'a, StdErr, ProgressIndicatorT> {
     cases: <Vec<String> as IntoIterator>::IntoIter,
 }
 
-impl<'a, StdErr, ProgressIndicatorT> ArtifactQueing<'a, StdErr, ProgressIndicatorT>
+impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueing<'a, StdErrT, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
     fn new(
-        job_queuer: &'a JobQueuer<StdErr>,
+        job_queuer: &'a JobQueuer<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
@@ -268,24 +268,24 @@ where
     }
 }
 
-struct JobQueing<'a, StdErr, ProgressIndicatorT> {
-    job_queuer: &'a JobQueuer<StdErr>,
+struct JobQueing<'a, StdErrT, ProgressIndicatorT> {
+    job_queuer: &'a JobQueuer<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
     cargo_build: Option<CargoBuild>,
     package_match: bool,
     artifacts: TestArtifactStream,
-    artifact_queing: Option<ArtifactQueing<'a, StdErr, ProgressIndicatorT>>,
+    artifact_queing: Option<ArtifactQueing<'a, StdErrT, ProgressIndicatorT>>,
 }
 
-impl<'a, StdErr, ProgressIndicatorT: ProgressIndicator> JobQueing<'a, StdErr, ProgressIndicatorT>
+impl<'a, StdErrT, ProgressIndicatorT: ProgressIndicator> JobQueing<'a, StdErrT, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
-    StdErr: io::Write,
+    StdErrT: io::Write,
 {
     fn new(
-        job_queuer: &'a JobQueuer<StdErr>,
+        job_queuer: &'a JobQueuer<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
@@ -384,19 +384,19 @@ fn write_test_listing(path: &Path, job_listing: &TestListing) -> Result<()> {
     Ok(())
 }
 
-pub struct MainAppDeps<StdErr> {
+pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
-    queuer: JobQueuer<StdErr>,
+    queuer: JobQueuer<StdErrT>,
     cache_dir: PathBuf,
 }
 
-impl<StdErr> MainAppDeps<StdErr> {
+impl<StdErrT> MainAppDeps<StdErrT> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cargo: String,
         package: Option<String>,
         filter: Option<String>,
-        stderr: StdErr,
+        stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         broker_addr: BrokerAddr,
@@ -521,20 +521,20 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT> {
-    deps: &'deps MainAppDeps<StdErr>,
-    queing: JobQueing<'deps, StdErr, ProgressIndicatorT>,
+struct MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT> {
+    deps: &'deps MainAppDeps<StdErrT>,
+    queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: Term,
 }
 
-impl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
-        deps: &'deps MainAppDeps<StdErr>,
-        queing: JobQueing<'deps, StdErr, ProgressIndicatorT>,
+        deps: &'deps MainAppDeps<StdErrT>,
+        queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: Term,
@@ -549,10 +549,10 @@ impl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'deps, 'scope, StdErr, Term, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'deps, StdErr, Term, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, 'scope, StdErrT, Term, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'deps, StdErrT, Term, ProgressIndicatorT, ProgressDriverT>
 where
-    StdErr: io::Write + Send,
+    StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
     Term: TermLike + Clone + 'static,
     ProgressDriverT: ProgressDriver<'scope>,
@@ -593,14 +593,14 @@ where
     }
 }
 
-fn new_helper<'deps, 'scope, StdErr, ProgressIndicatorT, Term>(
-    deps: &'deps MainAppDeps<StdErr>,
+fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, Term>(
+    deps: &'deps MainAppDeps<StdErrT>,
     prog_factory: impl FnOnce(Term) -> ProgressIndicatorT,
     term: Term,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
-    StdErr: io::Write + Send,
+    StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
     Term: TermLike + Clone + 'static,
     'deps: 'scope,
@@ -624,15 +624,15 @@ where
     )))
 }
 
-pub fn main_app_new<'deps, 'scope, Term, StdErr>(
-    deps: &'deps MainAppDeps<StdErr>,
+pub fn main_app_new<'deps, 'scope, Term, StdErrT>(
+    deps: &'deps MainAppDeps<StdErrT>,
     stdout_tty: bool,
     quiet: Quiet,
     term: Term,
     driver: impl ProgressDriver<'scope> + 'scope,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
-    StdErr: io::Write + Send,
+    StdErrT: io::Write + Send,
     Term: TermLike + Clone + Send + Sync + 'static,
     'deps: 'scope,
 {
