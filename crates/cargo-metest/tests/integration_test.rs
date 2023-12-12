@@ -14,16 +14,17 @@ use meticulous_base::{
 };
 use meticulous_client::{Client, ClientDeps, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs};
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::cell::RefCell;
-use std::collections::HashMap;
-use std::io::{self, Read as _, Write as _};
-use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
-use std::os::unix::fs::PermissionsExt as _;
-use std::path::Path;
-use std::rc::Rc;
-use std::sync::{Arc, Mutex};
+use serde::{de::DeserializeOwned, Serialize};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    io::{self, Read as _, Write as _},
+    net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream},
+    os::unix::fs::PermissionsExt as _,
+    path::Path,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 use tempfile::{tempdir, TempDir};
 
 fn put_file(fs: &Fs, path: &Path, contents: &str) {

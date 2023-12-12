@@ -4,8 +4,10 @@ use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
 };
-use meticulous_util::fs::{File, Fs};
-use meticulous_util::net;
+use meticulous_util::{
+    fs::{File, Fs},
+    net,
+};
 use slog::{debug, Logger};
 use std::{io, net::TcpStream, sync::mpsc};
 

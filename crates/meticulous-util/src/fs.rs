@@ -1,7 +1,9 @@
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
-use std::io::{self};
-use std::path::{Path, PathBuf};
+use std::{
+    io::{self},
+    path::{Path, PathBuf},
+};
 
 pub struct Fs;
 

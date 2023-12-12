@@ -3,10 +3,10 @@ use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
 use regex::Regex;
-use std::io;
-use std::path::Path;
 use std::{
+    io,
     io::BufReader,
+    path::Path,
     process::{Child, ChildStdout, Command, Stdio},
     str,
 };

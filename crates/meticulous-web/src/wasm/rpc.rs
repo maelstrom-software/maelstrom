@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
-use futures::channel::mpsc::{self, Receiver, Sender};
-use futures::{SinkExt as _, StreamExt as _};
+use futures::{
+    channel::mpsc::{self, Receiver, Sender},
+    SinkExt as _, StreamExt as _,
+};
 use gloo_net::websocket::{futures::WebSocket, Message};
 use gloo_utils::errors::JsError;
 use meticulous_base::proto::{BrokerToClient, ClientToBroker};

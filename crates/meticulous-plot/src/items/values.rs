@@ -1,8 +1,6 @@
-use std::ops::{Bound, RangeBounds, RangeInclusive};
-
-use egui::{Pos2, Shape, Stroke, Vec2};
-
 use crate::transform::PlotBounds;
+use egui::{Pos2, Shape, Stroke, Vec2};
+use std::ops::{Bound, RangeBounds, RangeInclusive};
 
 /// A point coordinate in the plot.
 ///

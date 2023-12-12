@@ -1,12 +1,12 @@
 use super::{Cursor, LabelFormatter, PlotBounds, PlotTransform};
-use egui::epaint::{util::FloatOrd, Mesh};
 use egui::{
-    epaint, pos2, vec2, Align2, Color32, NumExt as _, Pos2, Rect, Rgba, Shape, Stroke, TextStyle,
-    Ui, WidgetText,
+    epaint,
+    epaint::{util::FloatOrd, Mesh},
+    pos2, vec2, Align2, Color32, NumExt as _, Pos2, Rect, Rgba, Shape, Stroke, TextStyle, Ui,
+    WidgetText,
 };
 use std::ops::RangeInclusive;
 use values::{ClosestElem, PlotGeometry};
-
 pub use values::{LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints};
 
 mod values;

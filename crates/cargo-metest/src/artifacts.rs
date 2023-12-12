@@ -4,9 +4,11 @@ use indicatif::ProgressBar;
 use meticulous_base::Sha256Digest;
 use meticulous_client::Client;
 use meticulous_util::fs::Fs;
-use std::collections::{BTreeSet, HashMap};
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::{
+    collections::{BTreeSet, HashMap},
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 use tar::Header;
 
 fn create_artifact_for_binary(binary_path: &Path, prog: Option<ProgressBar>) -> Result<PathBuf> {

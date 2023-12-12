@@ -16,9 +16,9 @@ use meticulous_base::{
     proto::{Hello, WorkerToBroker},
     JobErrorResult, JobId, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
-use meticulous_util::fs::Fs;
 use meticulous_util::{
     config::{BrokerAddr, CacheRoot},
+    fs::Fs,
     net, sync,
 };
 use nix::{

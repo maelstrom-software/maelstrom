@@ -9,8 +9,7 @@ use meticulous_base::{
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
 };
 use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
-use std::collections::BTreeSet;
-use std::time::Duration;
+use std::{collections::BTreeSet, time::Duration};
 
 const REFRESH_INTERVAL: Duration = BROKER_STATISTICS_INTERVAL;
 

@@ -1,7 +1,9 @@
 use super::{transform::PlotTransform, GridMark};
-use egui::emath::{remap_clamp, round_to_decimals, Pos2, Rect};
-use egui::epaint::{Shape, Stroke, TextShape};
-use egui::{Response, Sense, TextStyle, Ui, WidgetText};
+use egui::{
+    emath::{remap_clamp, round_to_decimals, Pos2, Rect},
+    epaint::{Shape, Stroke, TextShape},
+    Response, Sense, TextStyle, Ui, WidgetText,
+};
 use std::{fmt::Debug, ops::RangeInclusive, sync::Arc};
 
 pub(super) type AxisFormatterFn = dyn Fn(f64, usize, &RangeInclusive<f64>) -> String;

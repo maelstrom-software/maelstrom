@@ -1,12 +1,12 @@
 //! Contains data-structures for maintaining historical statistics of jobs
 
-use crate::ring_buffer::{RingBuffer, RingBufferIter};
-use crate::{ClientId, WorkerId};
+use crate::{
+    ring_buffer::{RingBuffer, RingBufferIter},
+    ClientId, WorkerId,
+};
 use enum_map::EnumMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
-use std::time::Duration;
+use std::{collections::HashMap, fmt, time::Duration};
 
 /// The amount of time between broker statistic samples
 pub const BROKER_STATISTICS_INTERVAL: Duration = Duration::from_millis(500);

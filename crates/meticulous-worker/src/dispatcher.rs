@@ -409,13 +409,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
 #[cfg(test)]
 mod tests {
-    use super::Message::*;
-    use super::*;
+    use super::{Message::*, *};
     use anyhow::anyhow;
     use itertools::Itertools;
     use meticulous_test::*;
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::{cell::RefCell, rc::Rc};
     use BrokerToWorker::*;
 
     #[derive(Clone, Debug, PartialEq)]

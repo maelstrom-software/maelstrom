@@ -3,23 +3,22 @@
 //! This code is originally forked from egui-plot
 
 use axis::AxisWidget;
-use egui::ahash::{self, HashMap};
-use egui::epaint::{self, util::FloatOrd, Hsva};
+pub use axis::{Axis, AxisHints, HPlacement, Placement, VPlacement};
 use egui::{
+    ahash::{self, HashMap},
+    epaint::{self, util::FloatOrd, Hsva},
     lerp, remap_clamp, vec2, Align2, Color32, Context, CursorIcon, Id, Layout, Margin, NumExt as _,
     PointerButton, Pos2, Rect, Response, Rounding, Sense, Shape, Stroke, TextStyle, Ui, Vec2,
     WidgetText,
 };
 use items::{horizontal_line, rulers_color, vertical_line, PlotItem};
-use legend::LegendWidget;
-use std::{ops::RangeInclusive, sync::Arc};
-
-pub use axis::{Axis, AxisHints, HPlacement, Placement, VPlacement};
 pub use items::{
     Line, LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints, Points, Polygon, StackedLine,
     Text,
 };
+use legend::LegendWidget;
 pub use legend::{Corner, Legend};
+use std::{ops::RangeInclusive, sync::Arc};
 pub use transform::{PlotBounds, PlotTransform};
 
 mod axis;

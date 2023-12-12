@@ -6,12 +6,13 @@ use meticulous_util::fs::Fs;
 use oci_spec::image::{Descriptor, ImageConfiguration, ImageIndex, ImageManifest, Platform};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::{BTreeMap, HashMap};
-use std::fmt;
-use std::io::{Read as _, Seek as _, SeekFrom, Write as _};
-use std::path::{Path, PathBuf};
-use tokio::io::AsyncWrite;
-use tokio::task;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+    io::{Read as _, Seek as _, SeekFrom, Write as _},
+    path::{Path, PathBuf},
+};
+use tokio::{io::AsyncWrite, task};
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 
 #[derive(Deserialize, Debug, Clone)]

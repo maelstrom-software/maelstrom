@@ -7,8 +7,9 @@ use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
-use progress::ProgressDriver;
-use progress::{MultipleProgressBars, NoBar, ProgressIndicator, QuietNoBar, QuietProgressBar};
+use progress::{
+    MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
+};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
