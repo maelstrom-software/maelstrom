@@ -9,7 +9,7 @@ use std::{
 };
 
 #[derive(Default)]
-struct MultiState {
+struct State {
     done_queuing_jobs: bool,
     length: u64,
     finished: u64,
@@ -20,7 +20,7 @@ pub struct MultipleProgressBars {
     multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
     enqueue_spinner: ProgressBar,
-    state: Arc<Mutex<MultiState>>,
+    state: Arc<Mutex<State>>,
 }
 
 impl MultipleProgressBars {
