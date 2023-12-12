@@ -1,7 +1,9 @@
 use anyhow::{Context as _, Result};
 use cargo_metest::{
     config::{Config, ConfigOptions},
-    main_app_new, DefaultProgressDriver, MainAppDeps,
+    main_app_new,
+    progress::DefaultProgressDriver,
+    MainAppDeps,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;

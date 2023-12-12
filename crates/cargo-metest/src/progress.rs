@@ -1,3 +1,4 @@
+mod driver;
 mod multiple_progress_bars;
 mod no_bar;
 mod quiet_no_bar;
@@ -8,6 +9,7 @@ use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle};
 use meticulous_base::stats::JobStateCounts;
 
+pub use driver::{DefaultProgressDriver, ProgressDriver};
 pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
 pub use quiet_no_bar::QuietNoBar;

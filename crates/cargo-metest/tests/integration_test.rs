@@ -1,8 +1,10 @@
 use anyhow::Result;
 use assert_matches::assert_matches;
 use cargo_metest::{
-    config::Quiet, main_app_new, progress::ProgressIndicator, EnqueueResult, MainAppDeps,
-    ProgressDriver,
+    config::Quiet,
+    main_app_new,
+    progress::{ProgressDriver, ProgressIndicator},
+    EnqueueResult, MainAppDeps,
 };
 use indicatif::InMemoryTerm;
 use meticulous_base::{
