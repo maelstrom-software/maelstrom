@@ -1,7 +1,9 @@
 use crate::substitute;
 use anyhow::{Context as _, Error, Result};
+use enumset::EnumSetType;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
 use meticulous_util::fs::Fs;
+use serde::Serialize;
 use serde::{Deserialize, Deserializer};
 use std::{
     collections::BTreeMap,
@@ -18,6 +20,15 @@ where
 {
     let devices = Option::<EnumSet<JobDeviceListDeserialize>>::deserialize(deserializer)?;
     Ok(devices.map(|d| d.iter().map(JobDevice::from).collect()))
+}
+
+#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[enumset(serialize_repr = "list")]
+pub enum ImageInclude {
+    Layers,
+    Environment,
+    WorkingDirectory,
 }
 
 #[derive(Debug, Deserialize)]
@@ -37,6 +48,14 @@ enum TestDirective {
         #[serde(default, deserialize_with = "deserialize_devices")]
         devices: Option<EnumSet<JobDevice>>,
         environment: Option<BTreeMap<String, String>>,
+    },
+    Image {
+        tests: Option<String>,
+        package: Option<String>,
+        #[allow(dead_code)]
+        image: String,
+        #[allow(dead_code)]
+        include: EnumSet<ImageInclude>,
     },
 }
 
@@ -173,6 +192,13 @@ impl TestMetadata {
                 }
                 Ok(self)
             }
+            TestDirective::Image {
+                image: _image,
+                include: _include,
+                ..
+            } => {
+                todo!()
+            }
         }
     }
 }
@@ -194,19 +220,29 @@ impl AllMetadata {
     ) -> Result<TestMetadata> {
         self.directives
             .iter()
-            .filter(|directive| match &directive {
+            .filter(|directive| match directive {
                 TestDirective::Normal {
                     tests: Some(directive_tests),
                     ..
+                }
+                | TestDirective::Image {
+                    tests: Some(directive_tests),
+                    ..
                 } => test.contains(directive_tests.as_str()),
-                TestDirective::Normal { tests: None, .. } => true,
+                TestDirective::Normal { tests: None, .. }
+                | TestDirective::Image { tests: None, .. } => true,
             })
-            .filter(|directive| match &directive {
+            .filter(|directive| match directive {
                 TestDirective::Normal {
                     package: Some(directive_package),
                     ..
+                }
+                | TestDirective::Image {
+                    package: Some(directive_package),
+                    ..
                 } => package == directive_package,
-                TestDirective::Normal { package: None, .. } => true,
+                TestDirective::Normal { package: None, .. }
+                | TestDirective::Image { package: None, .. } => true,
             })
             .try_fold(TestMetadata::default(), |m, d| m.fold(d, &env_lookup))
     }
