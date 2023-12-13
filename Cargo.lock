@@ -666,6 +666,7 @@ dependencies = [
  "meticulous-base",
  "meticulous-broker",
  "meticulous-client",
+ "meticulous-test",
  "meticulous-util",
  "meticulous-worker",
  "regex",

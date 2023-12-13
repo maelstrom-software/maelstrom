@@ -1,5 +1,5 @@
 use crate::substitute;
-use anyhow::{Context as _, Error, Result};
+use anyhow::{anyhow, Context as _, Error, Result};
 use enumset::EnumSetType;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
 use meticulous_util::fs::Fs;
@@ -20,6 +20,12 @@ where
 {
     let devices = Option::<EnumSet<JobDeviceListDeserialize>>::deserialize(deserializer)?;
     Ok(devices.map(|d| d.iter().map(JobDevice::from).collect()))
+}
+
+pub struct ContainerImage {
+    pub layers: Vec<PathBuf>,
+    pub working_directory: Option<PathBuf>,
+    pub environment: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
@@ -117,10 +123,11 @@ impl TestMetadata {
             .collect()
     }
 
-    fn fold(
+    fn try_fold(
         mut self,
         directive: &TestDirective,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
+        mut image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> Result<Self> {
         match directive {
             TestDirective::Normal {
@@ -193,11 +200,54 @@ impl TestMetadata {
                 Ok(self)
             }
             TestDirective::Image {
-                image: _image,
-                include: _include,
+                image: image_name,
+                include,
                 ..
             } => {
-                todo!()
+                let image = image_lookup(image_name)?;
+                if include.contains(ImageInclude::Layers) {
+                    self.layers = image
+                        .layers
+                        .into_iter()
+                        .map(|p| p.into_os_string().into_string().unwrap())
+                        .collect();
+                }
+                if include.contains(ImageInclude::Environment) {
+                    let environment = image
+                        .environment
+                        .map_or_else(
+                            || {
+                                Err(anyhow!(
+                                    "image {image_name} doesn't have an environment to include"
+                                ))
+                            },
+                            Ok,
+                        )?
+                        .into_iter()
+                        .map(|var| {
+                            var.split_once('=').map_or_else(
+                                || {
+                                    Err(anyhow!(
+                                      "image {image_name}'s environment variable {var} is invalid"
+                                    ))
+                                },
+                                |(k, v)| Ok((k.to_string(), v.to_string())),
+                            )
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    self.environment = BTreeMap::from_iter(environment);
+                }
+                if include.contains(ImageInclude::WorkingDirectory) {
+                    self.working_directory = image.working_directory.map_or_else(
+                        || {
+                            Err(anyhow!(
+                                "image {image_name} doesn't have a working_directory to include"
+                            ))
+                        },
+                        Ok,
+                    )?;
+                }
+                Ok(self)
             }
         }
     }
@@ -217,6 +267,7 @@ impl AllMetadata {
         package: &str,
         test: &str,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
+        mut image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> Result<TestMetadata> {
         self.directives
             .iter()
@@ -244,15 +295,18 @@ impl AllMetadata {
                 TestDirective::Normal { package: None, .. }
                 | TestDirective::Image { package: None, .. } => true,
             })
-            .try_fold(TestMetadata::default(), |m, d| m.fold(d, &env_lookup))
+            .try_fold(TestMetadata::default(), |m, d| {
+                m.try_fold(d, &env_lookup, &mut image_lookup)
+            })
     }
 
     pub fn get_metadata_for_test_with_env(
         &self,
         package: &str,
         test: &str,
+        image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> Result<TestMetadata> {
-        self.get_metadata_for_test(package, test, std_env_lookup)
+        self.get_metadata_for_test(package, test, std_env_lookup, image_lookup)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -274,17 +328,22 @@ impl AllMetadata {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, JobMountFsType};
+    use meticulous_test::{path_buf, path_buf_vec};
     use toml::de::Error as TomlError;
 
     fn empty_env(_: &str) -> Result<Option<String>> {
         Ok(None)
     }
 
+    fn no_containers(_: &str) -> Result<ContainerImage> {
+        panic!()
+    }
+
     #[test]
     fn default() {
         assert_eq!(
             AllMetadata { directives: vec![] }
-                .get_metadata_for_test("mod", "test", empty_env)
+                .get_metadata_for_test("mod", "test", empty_env, no_containers)
                 .unwrap(),
             TestMetadata::default(),
         );
@@ -306,19 +365,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .enable_loopback,
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
                 .enable_loopback,
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env)
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
                 .enable_loopback,
             false
@@ -341,19 +400,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .enable_writable_file_system,
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
                 .enable_writable_file_system,
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env)
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
                 .enable_writable_file_system,
             false
@@ -376,19 +435,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             false
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env)
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             true
@@ -415,19 +474,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             true
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env)
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
                 .include_shared_libraries(),
             false
@@ -450,7 +509,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -481,7 +540,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 layers: vec!["layer3".to_string(), "layer4".to_string()],
@@ -506,7 +565,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -541,7 +600,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 mounts: vec![JobMount {
@@ -572,7 +631,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 enable_loopback: true,
@@ -603,7 +662,7 @@ mod test {
                 "#
             )
             .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env)
+            .get_metadata_for_test("mod", "test", empty_env, no_containers)
             .unwrap(),
             TestMetadata {
                 devices: enum_set! {
@@ -644,7 +703,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             vec![
@@ -654,25 +713,25 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test3", empty_env)
+            all.get_metadata_for_test("package1", "test3", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             Vec::<String>::default(),
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test31", empty_env)
+            all.get_metadata_for_test("package1", "test31", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             vec!["A=a".to_string()],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env)
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             Vec::<String>::default(),
@@ -693,7 +752,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env)
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
                 .environment(),
             vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string()],
@@ -710,7 +769,7 @@ mod test {
         )
         .unwrap();
         let err = all
-            .get_metadata_for_test("package1", "test1", empty_env)
+            .get_metadata_for_test("package1", "test1", empty_env, no_containers)
             .unwrap_err();
         assert_eq!(format!("{err}"), "unknown variable \"FOO\"");
     }
@@ -734,11 +793,145 @@ mod test {
         };
 
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", env)
+            all.get_metadata_for_test("package1", "test1", env, no_containers)
                 .unwrap()
                 .environment(),
             vec!["BAR=ybary".to_string(), "FOO=xfoox".to_string()],
         );
+    }
+
+    #[test]
+    fn image() {
+        let layers_1 = path_buf_vec!["layer11.tar", "layer12.tar"];
+        let working_directory_1 = path_buf!("/1");
+        let environment_1 = vec!["FOO=1".to_string(), "BAR=1".to_string()];
+        let layers_2 = path_buf_vec!["layer21.tar", "layer22.tar"];
+        let working_directory_2 = path_buf!("/2");
+        let environment_2 = vec!["FOO=2".to_string(), "BAZ=2".to_string()];
+        let image_lookup = |name: &_| match name {
+            "image1" => Ok(ContainerImage {
+                layers: layers_1.clone(),
+                working_directory: Some(working_directory_1.clone()),
+                environment: Some(environment_1.clone()),
+            }),
+            "image2" => Ok(ContainerImage {
+                layers: layers_2.clone(),
+                working_directory: Some(working_directory_2.clone()),
+                environment: Some(environment_2.clone()),
+            }),
+            _ => panic!(),
+        };
+
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            layers = ["base"]
+            environment = { FOO = "base", BAR = "base", BAZ = "base" }
+            working_directory = "/base"
+
+            [[directives]]
+            package = "package1"
+            image = "image1"
+            include = ["layers", "environment", "working-directory"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            image = "image2"
+            include = ["layers"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test2"
+            image = "image2"
+            include = ["environment"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test3"
+            image = "image2"
+            include = ["working-directory"]
+            "#,
+        )
+        .unwrap();
+
+        let metadata = all
+            .get_metadata_for_test("package0", "test1", empty_env, image_lookup)
+            .unwrap();
+        assert_eq!(metadata.layers, vec!["base".to_string()]);
+        assert_eq!(
+            metadata.environment,
+            BTreeMap::from([
+                ("FOO".to_string(), "base".to_string()),
+                ("BAR".to_string(), "base".to_string()),
+                ("BAZ".to_string(), "base".to_string()),
+            ])
+        );
+        assert_eq!(metadata.working_directory, path_buf!("/base"));
+
+        let metadata = all
+            .get_metadata_for_test("package1", "test0", empty_env, image_lookup)
+            .unwrap();
+        assert_eq!(
+            metadata.layers,
+            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+        );
+        assert_eq!(
+            metadata.environment,
+            BTreeMap::from([
+                ("FOO".to_string(), "1".to_string()),
+                ("BAR".to_string(), "1".to_string()),
+            ])
+        );
+        assert_eq!(metadata.working_directory, path_buf!("/1"));
+
+        let metadata = all
+            .get_metadata_for_test("package1", "test1", empty_env, image_lookup)
+            .unwrap();
+        assert_eq!(
+            metadata.layers,
+            vec!["layer21.tar".to_string(), "layer22.tar".to_string()]
+        );
+        assert_eq!(
+            metadata.environment,
+            BTreeMap::from([
+                ("FOO".to_string(), "1".to_string()),
+                ("BAR".to_string(), "1".to_string()),
+            ])
+        );
+        assert_eq!(metadata.working_directory, path_buf!("/1"));
+
+        let metadata = all
+            .get_metadata_for_test("package1", "test2", empty_env, image_lookup)
+            .unwrap();
+        assert_eq!(
+            metadata.layers,
+            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+        );
+        assert_eq!(
+            metadata.environment,
+            BTreeMap::from([
+                ("FOO".to_string(), "2".to_string()),
+                ("BAZ".to_string(), "2".to_string()),
+            ])
+        );
+        assert_eq!(metadata.working_directory, path_buf!("/1"));
+
+        let metadata = all
+            .get_metadata_for_test("package1", "test3", empty_env, image_lookup)
+            .unwrap();
+        assert_eq!(
+            metadata.layers,
+            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+        );
+        assert_eq!(
+            metadata.environment,
+            BTreeMap::from([
+                ("FOO".to_string(), "1".to_string()),
+                ("BAR".to_string(), "1".to_string()),
+            ])
+        );
+        assert_eq!(metadata.working_directory, path_buf!("/2"));
     }
 
     #[test]

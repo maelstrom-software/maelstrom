@@ -214,7 +214,7 @@ where
         let test_metadata = self
             .job_queuer
             .test_metadata
-            .get_metadata_for_test_with_env(&self.package_name, case)?;
+            .get_metadata_for_test_with_env(&self.package_name, case, |_| Err(anyhow!("error")))?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
