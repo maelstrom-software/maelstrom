@@ -15,9 +15,14 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 package = "cargo-metest"
+image = "rust"
+include = ["layers", "environment"]
+
+[[directives]]
+package = "cargo-metest"
 enable_loopback = true
 include_shared_libraries = false
-layers = ["docker:rust", "dev-null.tar"]
+layers = ["dev-null.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "tmp", mount_point = "/root" },

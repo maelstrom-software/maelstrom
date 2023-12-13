@@ -2,8 +2,8 @@ use anyhow::{anyhow, Result};
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::Artifact as CargoArtifact;
 use config::Quiet;
-use indicatif::TermLike;
-use metadata::{AllMetadata, TestMetadata};
+use indicatif::{ProgressBar, TermLike};
+use metadata::{AllMetadata, ContainerImage, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
@@ -211,10 +211,26 @@ where
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
 
+        let image_lookup = |image: &str| {
+            let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
+            let prog = self
+                .ind
+                .new_side_progress(format!("downloading image {image}"))
+                .unwrap_or_else(ProgressBar::hidden);
+            let mut client = self.client.lock().unwrap();
+            let container_image_depot = client.container_image_depot_mut();
+            let image = container_image_depot.get_container_image(image, version, prog)?;
+            Ok(ContainerImage {
+                layers: image.layers.clone(),
+                environment: image.env().cloned(),
+                working_directory: image.working_dir().map(PathBuf::from),
+            })
+        };
+
         let test_metadata = self
             .job_queuer
             .test_metadata
-            .get_metadata_for_test_with_env(&self.package_name, case, |_| Err(anyhow!("error")))?;
+            .get_metadata_for_test_with_env(&self.package_name, case, image_lookup)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail

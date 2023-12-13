@@ -176,6 +176,13 @@ impl ContainerImage {
     pub fn env(&self) -> Option<&Vec<String>> {
         self.config.config().as_ref().and_then(|c| c.env().as_ref())
     }
+
+    pub fn working_dir(&self) -> Option<&String> {
+        self.config
+            .config()
+            .as_ref()
+            .and_then(|c| c.working_dir().as_ref())
+    }
 }
 
 fn download_layer_on_task(

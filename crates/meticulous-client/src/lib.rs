@@ -452,6 +452,10 @@ impl Client {
         Ok(digests)
     }
 
+    pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
+        &mut self.container_image_depot
+    }
+
     fn maybe_add_container_environment(&mut self, spec: &mut JobSpec) {
         for (digests, env) in &self.digest_to_container_env {
             let container_digests: HashSet<_> = digests.iter().collect();
