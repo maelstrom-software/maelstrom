@@ -20,22 +20,24 @@ where
     Ok(devices.map(|d| d.iter().map(JobDevice::from).collect()))
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct TestDirective {
-    tests: Option<String>,
-    package: Option<String>,
-    include_shared_libraries: Option<bool>,
-    enable_loopback: Option<bool>,
-    enable_writable_file_system: Option<bool>,
-    working_directory: Option<PathBuf>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
-    layers: Option<Vec<String>>,
-    mounts: Option<Vec<JobMount>>,
-    #[serde(default, deserialize_with = "deserialize_devices")]
-    devices: Option<EnumSet<JobDevice>>,
-    environment: Option<BTreeMap<String, String>>,
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, untagged)]
+enum TestDirective {
+    Normal {
+        tests: Option<String>,
+        package: Option<String>,
+        include_shared_libraries: Option<bool>,
+        enable_loopback: Option<bool>,
+        enable_writable_file_system: Option<bool>,
+        working_directory: Option<PathBuf>,
+        user: Option<UserId>,
+        group: Option<GroupId>,
+        layers: Option<Vec<String>>,
+        mounts: Option<Vec<JobMount>>,
+        #[serde(default, deserialize_with = "deserialize_devices")]
+        devices: Option<EnumSet<JobDevice>>,
+        environment: Option<BTreeMap<String, String>>,
+    },
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -101,79 +103,77 @@ impl TestMetadata {
         directive: &TestDirective,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
     ) -> Result<Self> {
-        if directive.include_shared_libraries.is_some() {
-            self.include_shared_libraries = directive.include_shared_libraries;
+        match directive {
+            TestDirective::Normal {
+                tests: _tests,
+                package: _package,
+                include_shared_libraries,
+                enable_loopback,
+                enable_writable_file_system,
+                working_directory,
+                user,
+                group,
+                layers,
+                mounts,
+                devices,
+                environment,
+            } => {
+                if include_shared_libraries.is_some() {
+                    self.include_shared_libraries = *include_shared_libraries;
+                }
+                if let Some(enable_loopback) = enable_loopback {
+                    self.enable_loopback = *enable_loopback;
+                }
+                if let Some(enable_writable_file_system) = enable_writable_file_system {
+                    self.enable_writable_file_system = *enable_writable_file_system;
+                }
+                if let Some(working_directory) = &working_directory {
+                    self.working_directory = working_directory.clone();
+                }
+                if let Some(user) = user {
+                    self.user = *user;
+                }
+                if let Some(group) = group {
+                    self.group = *group;
+                }
+                if layers.as_ref().map(Vec::is_empty).unwrap_or(false) {
+                    self.layers.clear();
+                } else {
+                    self.layers.extend(layers.iter().flatten().cloned());
+                }
+                if mounts.as_ref().map(Vec::is_empty).unwrap_or(false) {
+                    self.mounts.clear();
+                } else {
+                    self.mounts.extend(mounts.iter().flatten().cloned());
+                }
+                if devices.as_ref().map(EnumSet::is_empty).unwrap_or(false) {
+                    self.devices.clear();
+                } else {
+                    self.devices = self.devices.union(devices.unwrap_or_default());
+                }
+                if environment
+                    .as_ref()
+                    .map(BTreeMap::is_empty)
+                    .unwrap_or(false)
+                {
+                    self.environment.clear();
+                } else {
+                    let to_insert = environment
+                        .iter()
+                        .flatten()
+                        .map(|(k, v)| {
+                            substitute::substitute(v, &env_lookup, |var| {
+                                self.environment.get(var).map(String::as_str)
+                            })
+                            .map(|v| (k.clone(), String::from(v)))
+                            .map_err(Error::new)
+                        })
+                        .collect::<Result<Vec<(String, String)>>>()?;
+                    self.environment.extend(to_insert);
+                }
+                Ok(self)
+            }
         }
-        if let Some(enable_loopback) = directive.enable_loopback {
-            self.enable_loopback = enable_loopback;
-        }
-        if let Some(enable_writable_file_system) = directive.enable_writable_file_system {
-            self.enable_writable_file_system = enable_writable_file_system;
-        }
-        if let Some(working_directory) = &directive.working_directory {
-            self.working_directory = working_directory.clone();
-        }
-        if let Some(user) = directive.user {
-            self.user = user;
-        }
-        if let Some(group) = directive.group {
-            self.group = group;
-        }
-        if directive
-            .layers
-            .as_ref()
-            .map(Vec::is_empty)
-            .unwrap_or(false)
-        {
-            self.layers.clear();
-        } else {
-            self.layers
-                .extend(directive.layers.iter().flatten().cloned());
-        }
-        if directive
-            .mounts
-            .as_ref()
-            .map(Vec::is_empty)
-            .unwrap_or(false)
-        {
-            self.mounts.clear();
-        } else {
-            self.mounts
-                .extend(directive.mounts.iter().flatten().cloned());
-        }
-        if directive
-            .devices
-            .as_ref()
-            .map(EnumSet::is_empty)
-            .unwrap_or(false)
-        {
-            self.devices.clear();
-        } else {
-            self.devices = self.devices.union(directive.devices.unwrap_or_default());
-        }
-        if directive
-            .environment
-            .as_ref()
-            .map(BTreeMap::is_empty)
-            .unwrap_or(false)
-        {
-            self.environment.clear();
-        } else {
-            let to_insert = directive
-                .environment
-                .iter()
-                .flatten()
-                .map(|(k, v)| {
-                    substitute::substitute(v, &env_lookup, |var| {
-                        self.environment.get(var).map(String::as_str)
-                    })
-                    .map(|v| (k.clone(), String::from(v)))
-                    .map_err(Error::new)
-                })
-                .collect::<Result<Vec<(String, String)>>>()?;
-            self.environment.extend(to_insert);
-        }
-        Ok(self)
     }
 }
 
@@ -194,13 +194,19 @@ impl AllMetadata {
     ) -> Result<TestMetadata> {
         self.directives
             .iter()
-            .filter(|directive| match &directive.tests {
-                Some(directive_tests) => test.contains(directive_tests.as_str()),
-                None => true,
+            .filter(|directive| match &directive {
+                TestDirective::Normal {
+                    tests: Some(directive_tests),
+                    ..
+                } => test.contains(directive_tests.as_str()),
+                TestDirective::Normal { tests: None, .. } => true,
             })
-            .filter(|directive| match &directive.package {
-                Some(directive_package) => package == directive_package,
-                None => true,
+            .filter(|directive| match &directive {
+                TestDirective::Normal {
+                    package: Some(directive_package),
+                    ..
+                } => package == directive_package,
+                TestDirective::Normal { package: None, .. } => true,
             })
             .try_fold(TestMetadata::default(), |m, d| m.fold(d, &env_lookup))
     }
@@ -728,7 +734,7 @@ mod test {
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(
-            message.starts_with("unknown field `not_a_field`, expected"),
+            message.starts_with("data did not match"),
             "message: {message}"
         );
     }
@@ -745,7 +751,7 @@ mod test {
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(
-            message.starts_with("unknown field `not_a_field`, expected"),
+            message.starts_with("data did not match"),
             "message: {message}"
         );
     }
@@ -762,7 +768,7 @@ mod test {
         let err = err.downcast_ref::<TomlError>().unwrap();
         let message = err.message();
         assert!(
-            message.starts_with("unknown variant `not_a_value`, expected one of"),
+            message.starts_with("data did not match"),
             "message: {message}"
         );
     }
