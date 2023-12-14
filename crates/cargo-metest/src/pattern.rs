@@ -6,24 +6,14 @@ use combine::{
     },
     satisfy, token, Parser, Stream,
 };
+use derive_more::From;
 
 #[cfg(test)]
 use crate::parse_str;
 
-#[derive(Debug, PartialEq)]
+#[derive(From, Debug, PartialEq)]
+#[from(forward)]
 pub struct MatcherParameter(pub String);
-
-impl From<String> for MatcherParameter {
-    fn from(s: String) -> Self {
-        Self(s)
-    }
-}
-
-impl From<&str> for MatcherParameter {
-    fn from(s: &str) -> Self {
-        Self(s.into())
-    }
-}
 
 impl MatcherParameter {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
@@ -159,7 +149,7 @@ impl CompoundSelector {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum SimpleSelectorName {
     All,
     Any,
@@ -167,13 +157,8 @@ pub enum SimpleSelectorName {
     None,
     False,
     Library,
+    #[from]
     Compound(CompoundSelectorName),
-}
-
-impl From<CompoundSelectorName> for SimpleSelectorName {
-    fn from(c: CompoundSelectorName) -> Self {
-        Self::Compound(c)
-    }
 }
 
 impl SimpleSelectorName {
@@ -190,15 +175,10 @@ impl SimpleSelectorName {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
+#[from(types(CompoundSelectorName))]
 pub struct SimpleSelector {
     pub name: SimpleSelectorName,
-}
-
-impl From<SimpleSelectorName> for SimpleSelector {
-    fn from(name: SimpleSelectorName) -> Self {
-        Self { name }
-    }
 }
 
 impl SimpleSelector {
@@ -209,46 +189,19 @@ impl SimpleSelector {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum SimpleExpression {
+    #[from(types(OrExpression))]
     Or(Box<OrExpression>),
+    #[from(types(SimpleSelectorName, CompoundSelectorName))]
     SimpleSelector(SimpleSelector),
+    #[from]
     CompoundSelector(CompoundSelector),
-}
-
-impl From<OrExpression> for SimpleExpression {
-    fn from(o: OrExpression) -> Self {
-        Self::Or(Box::new(o))
-    }
 }
 
 impl From<AndExpression> for SimpleExpression {
     fn from(a: AndExpression) -> Self {
         OrExpression::from(a).into()
-    }
-}
-
-impl From<SimpleSelector> for SimpleExpression {
-    fn from(s: SimpleSelector) -> Self {
-        Self::SimpleSelector(s)
-    }
-}
-
-impl From<SimpleSelectorName> for SimpleExpression {
-    fn from(s: SimpleSelectorName) -> Self {
-        Self::SimpleSelector(s.into())
-    }
-}
-
-impl From<CompoundSelector> for SimpleExpression {
-    fn from(s: CompoundSelector) -> Self {
-        Self::CompoundSelector(s)
-    }
-}
-
-impl From<CompoundSelectorName> for SimpleExpression {
-    fn from(s: CompoundSelectorName) -> Self {
-        Self::SimpleSelector(SimpleSelector { name: s.into() })
     }
 }
 
@@ -272,40 +225,11 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
     choice((string("!"), string("~"), string("not").skip(spaces1())))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
+    #[from(types(SimpleSelector, SimpleSelectorName, CompoundSelector, OrExpression))]
     Simple(SimpleExpression),
-}
-
-impl From<SimpleExpression> for NotExpression {
-    fn from(s: SimpleExpression) -> Self {
-        Self::Simple(s)
-    }
-}
-
-impl From<SimpleSelector> for NotExpression {
-    fn from(s: SimpleSelector) -> Self {
-        Self::Simple(s.into())
-    }
-}
-
-impl From<SimpleSelectorName> for NotExpression {
-    fn from(n: SimpleSelectorName) -> Self {
-        Self::Simple(n.into())
-    }
-}
-
-impl From<CompoundSelector> for NotExpression {
-    fn from(s: CompoundSelector) -> Self {
-        Self::Simple(s.into())
-    }
-}
-
-impl From<OrExpression> for NotExpression {
-    fn from(s: OrExpression) -> Self {
-        Self::Simple(s.into())
-    }
 }
 
 impl NotExpression {
@@ -340,41 +264,12 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
     .or(spaces1().with(string("minus")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
+    #[from(types(SimpleExpression, SimpleSelector, SimpleSelectorName, CompoundSelector))]
     Not(NotExpression),
-}
-
-impl From<NotExpression> for AndExpression {
-    fn from(n: NotExpression) -> Self {
-        Self::Not(n)
-    }
-}
-
-impl From<SimpleExpression> for AndExpression {
-    fn from(s: SimpleExpression) -> Self {
-        Self::Not(s.into())
-    }
-}
-
-impl From<SimpleSelector> for AndExpression {
-    fn from(s: SimpleSelector) -> Self {
-        Self::Not(s.into())
-    }
-}
-
-impl From<SimpleSelectorName> for AndExpression {
-    fn from(n: SimpleSelectorName) -> Self {
-        Self::Not(n.into())
-    }
-}
-
-impl From<CompoundSelector> for AndExpression {
-    fn from(s: CompoundSelector) -> Self {
-        Self::Not(s.into())
-    }
 }
 
 impl AndExpression {
@@ -399,40 +294,17 @@ fn or_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = &
     .or(spaces1().with(string("or")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
 pub enum OrExpression {
     Or(AndExpression, Box<OrExpression>),
+    #[from(types(
+        NotExpression,
+        SimpleExpression,
+        SimpleSelector,
+        SimpleSelectorName,
+        CompoundSelector
+    ))]
     And(AndExpression),
-}
-
-impl From<AndExpression> for OrExpression {
-    fn from(a: AndExpression) -> Self {
-        Self::And(a)
-    }
-}
-
-impl From<SimpleExpression> for OrExpression {
-    fn from(s: SimpleExpression) -> Self {
-        Self::And(s.into())
-    }
-}
-
-impl From<SimpleSelector> for OrExpression {
-    fn from(s: SimpleSelector) -> Self {
-        Self::And(s.into())
-    }
-}
-
-impl From<SimpleSelectorName> for OrExpression {
-    fn from(s: SimpleSelectorName) -> Self {
-        Self::And(s.into())
-    }
-}
-
-impl From<CompoundSelector> for OrExpression {
-    fn from(s: CompoundSelector) -> Self {
-        Self::And(s.into())
-    }
 }
 
 impl OrExpression {
@@ -446,26 +318,9 @@ impl OrExpression {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, From)]
+#[from(types(NotExpression, AndExpression))]
 pub struct Pattern(OrExpression);
-
-impl From<NotExpression> for Pattern {
-    fn from(n: NotExpression) -> Self {
-        AndExpression::from(n).into()
-    }
-}
-
-impl From<AndExpression> for Pattern {
-    fn from(a: AndExpression) -> Self {
-        OrExpression::And(a).into()
-    }
-}
-
-impl From<OrExpression> for Pattern {
-    fn from(o: OrExpression) -> Self {
-        Self(o)
-    }
-}
 
 impl Pattern {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {

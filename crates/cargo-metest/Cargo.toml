@@ -10,6 +10,7 @@ clap.workspace = true
 colored.workspace = true
 combine.workspace = true
 console.workspace = true
+derive_more.workspace = true
 enumset.workspace = true
 figment.workspace = true
 indicatif.workspace = true
