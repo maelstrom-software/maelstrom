@@ -657,6 +657,7 @@ dependencies = [
  "cargo_metadata",
  "clap",
  "colored",
+ "combine",
  "console",
  "enum-map",
  "enumset",

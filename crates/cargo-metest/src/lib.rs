@@ -1,3 +1,12 @@
+pub mod artifacts;
+pub mod cargo;
+pub mod config;
+pub mod metadata;
+pub mod pattern;
+pub mod progress;
+pub mod substitute;
+pub mod visitor;
+
 use anyhow::{anyhow, Result};
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::Artifact as CargoArtifact;
@@ -23,14 +32,6 @@ use std::{
     },
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
-
-pub mod artifacts;
-pub mod cargo;
-pub mod config;
-pub mod metadata;
-pub mod progress;
-pub mod substitute;
-pub mod visitor;
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]

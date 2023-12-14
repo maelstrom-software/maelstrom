@@ -8,6 +8,7 @@ anyhow.workspace = true
 cargo_metadata.workspace = true
 clap.workspace = true
 colored.workspace = true
+combine.workspace = true
 console.workspace = true
 enumset.workspace = true
 figment.workspace = true
