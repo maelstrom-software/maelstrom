@@ -44,7 +44,7 @@ enum ImageUse {
 #[derive(Deserialize)]
 struct DirectiveImage {
     name: String,
-    #[serde(rename="use")]
+    #[serde(rename = "use")]
     use_: EnumSet<ImageUse>,
 }
 
