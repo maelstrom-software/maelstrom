@@ -23,3 +23,6 @@ sha2.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
 toml.workspace = true
+
+[dev-dependencies]
+meticulous-test.workspace = true

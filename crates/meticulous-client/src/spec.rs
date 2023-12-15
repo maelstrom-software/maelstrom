@@ -54,6 +54,23 @@ struct Job {
 }
 
 impl Job {
+    #[cfg(test)]
+    fn new(program: String, layers: NonEmpty<String>) -> Self {
+        Job {
+            program,
+            layers,
+            arguments: None,
+            environment: None,
+            devices: None,
+            mounts: None,
+            enable_loopback: None,
+            enable_writable_file_system: None,
+            working_directory: None,
+            user: None,
+            group: None,
+        }
+    }
+
     fn into_job_spec(
         self,
         layer_mapper: impl Fn(String) -> anyhow::Result<NonEmpty<Sha256Digest>>,
@@ -76,5 +93,84 @@ impl Job {
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use meticulous_base::{enum_set, nonempty, JobMountFsType};
+    use meticulous_test::digest;
+
+    fn layer_mapper(layer: String) -> anyhow::Result<NonEmpty<Sha256Digest>> {
+        Ok(nonempty![Sha256Digest::from(layer.parse::<u64>()?)])
+    }
+
+    #[test]
+    fn minimum_into_job_spec() {
+        assert_eq!(
+            Job::new("program".to_string(), nonempty!["1".to_string()])
+                .into_job_spec(layer_mapper)
+                .unwrap(),
+            JobSpec::new("program", nonempty![digest!(1)]),
+        );
+    }
+
+    #[test]
+    fn most_into_job_spec() {
+        assert_eq!(
+            Job {
+                arguments: Some(vec!["arg1".to_string(), "arg2".to_string()]),
+                environment: Some(vec!["FOO=foo".to_string(), "BAR=bar".to_string()]),
+                devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
+                mounts: Some(vec![JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".into()
+                }]),
+                working_directory: Some("/working-directory".into()),
+                user: Some(UserId::from(101)),
+                group: Some(GroupId::from(202)),
+                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+            }
+            .into_job_spec(layer_mapper)
+            .unwrap(),
+            JobSpec::new("program", nonempty![digest!(1)])
+                .arguments(["arg1", "arg2"])
+                .environment(["FOO=foo", "BAR=bar"])
+                .devices(enum_set! {JobDevice::Null})
+                .mounts([JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".into()
+                }])
+                .working_directory("/working-directory")
+                .user(101)
+                .group(202),
+        );
+    }
+
+    #[test]
+    fn enable_loopback_into_job_spec() {
+        assert_eq!(
+            Job {
+                enable_loopback: Some(true),
+                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+            }
+            .into_job_spec(layer_mapper)
+            .unwrap(),
+            JobSpec::new("program", nonempty![digest!(1)]).enable_loopback(true),
+        );
+    }
+
+    #[test]
+    fn enable_writable_file_system_into_job_spec() {
+        assert_eq!(
+            Job {
+                enable_writable_file_system: Some(true),
+                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+            }
+            .into_job_spec(layer_mapper)
+            .unwrap(),
+            JobSpec::new("program", nonempty![digest!(1)]).enable_writable_file_system(true),
+        );
     }
 }

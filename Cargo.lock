@@ -2444,6 +2444,7 @@ dependencies = [
  "indicatif",
  "meticulous-base",
  "meticulous-container",
+ "meticulous-test",
  "meticulous-util",
  "regex",
  "serde",
