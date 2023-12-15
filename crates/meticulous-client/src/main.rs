@@ -6,18 +6,18 @@ use figment::{
     Figment,
 };
 use meticulous_base::{
-    ClientJobId, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobError, JobMount,
-    JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty, Sha256Digest, UserId,
+    ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess, NonEmpty,
+    Sha256Digest,
 };
-use meticulous_client::{Client, DefaultClientDriver};
+use meticulous_client::{spec, Client, DefaultClientDriver};
 use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
 };
 use serde::{Deserialize, Serialize};
-use serde_json::{self, Deserializer};
 use serde_with::skip_serializing_none;
 use std::{
+    cell::RefCell,
     io::{self, Read, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
@@ -68,22 +68,6 @@ pub struct Config {
 #[derive(Default, Serialize)]
 pub struct ConfigOptions {
     pub broker: Option<String>,
-}
-
-#[derive(Deserialize, Debug)]
-#[serde(deny_unknown_fields)]
-struct JobDescription {
-    program: String,
-    arguments: Option<Vec<String>>,
-    environment: Option<Vec<String>>,
-    layers: NonEmpty<String>,
-    devices: Option<EnumSet<JobDeviceListDeserialize>>,
-    mounts: Option<Vec<JobMount>>,
-    enable_loopback: Option<bool>,
-    enable_writable_file_system: Option<bool>,
-    working_directory: Option<PathBuf>,
-    user: Option<UserId>,
-    group: Option<GroupId>,
 }
 
 fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
@@ -180,44 +164,25 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let mut client = Client::new(
+    let client = Client::new(
         DefaultClientDriver::default(),
         config.broker,
         ".",
         cache_dir(),
     )?;
+    let client = RefCell::new(client);
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
-    let jobs = Deserializer::from_reader(reader).into_iter::<JobDescription>();
-    for job in jobs {
-        let job = job?;
-        let layers = NonEmpty::<Sha256Digest>::flatten(
-            job.layers
-                .try_map(|layer| add_artifact(&mut client, &layer))?,
-        );
+    let job_specs = spec::job_spec_iter_from_reader(reader, |layer| {
+        add_artifact(&mut client.borrow_mut(), layer.as_str())
+    });
+    for job_spec in job_specs {
         let accum_clone = accum.clone();
-        client.add_job(
-            JobSpec {
-                program: job.program,
-                arguments: job.arguments.unwrap_or(vec![]),
-                environment: job.environment.unwrap_or(vec![]),
-                layers,
-                devices: job
-                    .devices
-                    .unwrap_or(EnumSet::EMPTY)
-                    .into_iter()
-                    .map(JobDevice::from)
-                    .collect(),
-                mounts: job.mounts.unwrap_or(vec![]),
-                enable_loopback: job.enable_loopback.unwrap_or(false),
-                enable_writable_file_system: job.enable_writable_file_system.unwrap_or(false),
-                working_directory: job.working_directory.unwrap_or_else(|| PathBuf::from("/")),
-                user: job.user.unwrap_or(UserId::from(0)),
-                group: job.group.unwrap_or(GroupId::from(0)),
-            },
+        client.borrow_mut().add_job(
+            job_spec?,
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         );
     }
-    client.wait_for_outstanding_jobs()?;
+    client.into_inner().wait_for_outstanding_jobs()?;
     Ok(accum.get())
 }
 

@@ -1,3 +1,5 @@
+pub mod spec;
+
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use indicatif::ProgressBar;
