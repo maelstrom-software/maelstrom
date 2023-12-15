@@ -15,7 +15,7 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 [[directives]]
 package = "cargo-metest"
 image.name = "rust"
-image.include = ["layers", "environment"]
+image.use = ["layers", "environment"]
 enable_loopback = true
 include_shared_libraries = false
 added_layers = ["dev-null.tar"]

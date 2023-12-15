@@ -35,7 +35,7 @@ pub struct TestDirective {
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]
-enum ImageInclude {
+enum ImageUse {
     Layers,
     Environment,
     WorkingDirectory,
@@ -44,7 +44,8 @@ enum ImageInclude {
 #[derive(Deserialize)]
 struct DirectiveImage {
     name: String,
-    include: EnumSet<ImageInclude>,
+    #[serde(rename="use")]
+    use_: EnumSet<ImageUse>,
 }
 
 #[derive(Deserialize)]
@@ -149,47 +150,47 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                 DirectiveField::Image => {
                     let i = map.next_value::<DirectiveImage>()?;
                     image = Some(i.name);
-                    for include in i.include {
-                        match include {
-                            ImageInclude::WorkingDirectory => {
+                    for use_ in i.use_ {
+                        match use_ {
+                            ImageUse::WorkingDirectory => {
                                 if working_directory.is_some() {
                                     assert!(matches!(
                                         working_directory,
                                         Some(PossiblyImage::Explicit(_))
                                     ));
                                     return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot include `working_directory` if field `working_directory` is also set"
+                                        "field `image` cannot use `working_directory` if field `working_directory` is also set"
                                     )));
                                 }
                                 working_directory = Some(PossiblyImage::Image);
                             }
-                            ImageInclude::Layers => {
+                            ImageUse::Layers => {
                                 if layers.is_some() {
                                     assert!(matches!(layers, Some(PossiblyImage::Explicit(_))));
                                     return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot include `layers` if field `layers` is also set"
+                                        "field `image` cannot use `layers` if field `layers` is also set"
                                     )));
                                 }
                                 if added_layers.is_some() {
                                     return Err(de::Error::custom(format_args!(
-                                        "field `image` that includes `layers` cannot be set after `added_layers`"
+                                        "field `image` that uses `layers` cannot be set after `added_layers`"
                                     )));
                                 }
                                 layers = Some(PossiblyImage::Image);
                             }
-                            ImageInclude::Environment => {
+                            ImageUse::Environment => {
                                 if environment.is_some() {
                                     assert!(matches!(
                                         environment,
                                         Some(PossiblyImage::Explicit(_))
                                     ));
                                     return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot include `environment` if field `environment` is also set"
+                                        "field `image` cannot use `environment` if field `environment` is also set"
                                     )));
                                 }
                                 if added_environment.is_some() {
                                     return Err(de::Error::custom(format_args!(
-                                        "field `image` that includes `environment` cannot be set after `added_environment`"
+                                        "field `image` that uses `environment` cannot be set after `added_environment`"
                                     )));
                                 }
                                 environment = Some(PossiblyImage::Image);
@@ -201,7 +202,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     if working_directory.is_some() {
                         assert!(matches!(working_directory, Some(PossiblyImage::Image)));
                         return Err(de::Error::custom(format_args!(
-                            "field `working_directory` cannot be set after `image` field that includes `working_directory`"
+                            "field `working_directory` cannot be set after `image` field that uses `working_directory`"
                         )));
                     }
                     working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
@@ -210,7 +211,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     if layers.is_some() {
                         assert!(matches!(layers, Some(PossiblyImage::Image)));
                         return Err(de::Error::custom(format_args!(
-                            "field `layers` cannot be set after `image` field that includes `layers`"
+                            "field `layers` cannot be set after `image` field that uses `layers`"
                         )));
                     }
                     if added_layers.is_some() {
@@ -227,7 +228,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     if environment.is_some() {
                         assert!(matches!(environment, Some(PossiblyImage::Image)));
                         return Err(de::Error::custom(format_args!(
-                            "field `environment` cannot be set after `image` field that includes `environment`"
+                            "field `environment` cannot be set after `image` field that uses `environment`"
                         )));
                     }
                     if added_environment.is_some() {
@@ -550,7 +551,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers", "working_directory"] }
+                image = { name = "rust", use = ["layers", "working_directory"] }
                 "#
             )
             .unwrap(),
@@ -568,7 +569,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers"] }
+                image = { name = "rust", use = ["layers"] }
                 working_directory = "/foo"
                 "#
             )
@@ -588,7 +589,7 @@ mod test {
             parse_test_directive(
                 r#"
                 working_directory = "/foo"
-                image = { name = "rust", include = ["layers"] }
+                image = { name = "rust", use = ["layers"] }
                 "#
             )
             .unwrap(),
@@ -606,12 +607,12 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers", "working_directory"] }
+                image = { name = "rust", use = ["layers", "working_directory"] }
                 working_directory = "/foo"
                 "#
             )
             .unwrap_err(),
-            "field `working_directory` cannot be set after `image` field that includes `working_directory`"
+            "field `working_directory` cannot be set after `image` field that uses `working_directory`"
         );
     }
 
@@ -621,11 +622,11 @@ mod test {
             parse_test_directive(
                 r#"
                 working_directory = "/foo"
-                image = { name = "rust", include = ["layers", "working_directory"] }
-                "#
+                image = { name = "rust", use = ["layers", "working_directory"] }
+                "#,
             )
             .unwrap_err(),
-            "field `image` cannot include `working_directory` if field `working_directory` is also set"
+            "field `image` cannot use `working_directory` if field `working_directory` is also set",
         );
     }
 
@@ -650,7 +651,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers", "working_directory"] }
+                image = { name = "rust", use = ["layers", "working_directory"] }
                 "#
             )
             .unwrap(),
@@ -668,7 +669,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["working_directory"] }
+                image = { name = "rust", use = ["working_directory"] }
                 layers = ["foo.tar"]
                 "#
             )
@@ -688,7 +689,7 @@ mod test {
             parse_test_directive(
                 r#"
                 layers = ["foo.tar"]
-                image = { name = "rust", include = ["working_directory"] }
+                image = { name = "rust", use = ["working_directory"] }
                 "#
             )
             .unwrap(),
@@ -706,12 +707,12 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers", "working_directory"] }
+                image = { name = "rust", use = ["layers", "working_directory"] }
                 layers = ["foo.tar"]
                 "#,
             )
             .unwrap_err(),
-            "field `layers` cannot be set after `image` field that includes `layers`",
+            "field `layers` cannot be set after `image` field that uses `layers`",
         )
     }
 
@@ -721,11 +722,11 @@ mod test {
             parse_test_directive(
                 r#"
                 layers = ["foo.tar"]
-                image = { name = "rust", include = ["layers", "working_directory"] }
+                image = { name = "rust", use = ["layers", "working_directory"] }
                 "#,
             )
             .unwrap_err(),
-            "field `image` cannot include `layers` if field `layers` is also set",
+            "field `image` cannot use `layers` if field `layers` is also set",
         )
     }
 
@@ -768,7 +769,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["layers"] }
+                image = { name = "rust", use = ["layers"] }
                 added_layers = ["foo.tar"]
                 "#
             )
@@ -802,11 +803,11 @@ mod test {
             parse_test_directive(
                 r#"
                 added_layers = ["bar.tar"]
-                image = { name = "rust", include = ["layers"] }
+                image = { name = "rust", use = ["layers"] }
                 "#,
             )
             .unwrap_err(),
-            "field `image` that includes `layers` cannot be set after `added_layers`",
+            "field `image` that uses `layers` cannot be set after `added_layers`",
         );
     }
 
@@ -834,7 +835,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["environment", "working_directory"] }
+                image = { name = "rust", use = ["environment", "working_directory"] }
                 "#
             )
             .unwrap(),
@@ -852,7 +853,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["working_directory"] }
+                image = { name = "rust", use = ["working_directory"] }
                 environment = { FOO = "foo" }
                 "#
             )
@@ -875,7 +876,7 @@ mod test {
             parse_test_directive(
                 r#"
                 environment = { FOO = "foo" }
-                image = { name = "rust", include = ["working_directory"] }
+                image = { name = "rust", use = ["working_directory"] }
                 "#
             )
             .unwrap(),
@@ -896,12 +897,12 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["environment", "working_directory"] }
+                image = { name = "rust", use = ["environment", "working_directory"] }
                 environment = { FOO = "foo" }
                 "#,
             )
             .unwrap_err(),
-            "field `environment` cannot be set after `image` field that includes `environment`",
+            "field `environment` cannot be set after `image` field that uses `environment`",
         )
     }
 
@@ -911,11 +912,11 @@ mod test {
             parse_test_directive(
                 r#"
                 environment = { FOO = "foo" }
-                image = { name = "rust", include = ["environment", "working_directory"] }
+                image = { name = "rust", use = ["environment", "working_directory"] }
                 "#,
             )
             .unwrap_err(),
-            "field `image` cannot include `environment` if field `environment` is also set",
+            "field `image` cannot use `environment` if field `environment` is also set",
         )
     }
 
@@ -961,7 +962,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                image = { name = "rust", include = ["environment"] }
+                image = { name = "rust", use = ["environment"] }
                 added_environment = { BAR = "bar" }
                 "#
             )
@@ -995,11 +996,11 @@ mod test {
             parse_test_directive(
                 r#"
                 added_environment = { BAR = "bar" }
-                image = { name = "rust", include = ["environment"] }
+                image = { name = "rust", use = ["environment"] }
                 "#,
             )
             .unwrap_err(),
-            "field `image` that includes `environment` cannot be set after `added_environment`",
+            "field `image` that uses `environment` cannot be set after `added_environment`",
         );
     }
 }

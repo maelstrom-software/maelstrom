@@ -468,7 +468,7 @@ mod test {
             [[directives]]
             package = "package1"
             image.name = "rust"
-            image.include = ["working_directory"]
+            image.use = ["working_directory"]
 
             [[directives]]
             package = "package1"
@@ -478,7 +478,7 @@ mod test {
             [[directives]]
             package = "package3"
             image.name = "no-working-directory"
-            image.include = ["working_directory"]
+            image.use = ["working_directory"]
             "#,
         )
         .unwrap();
@@ -599,13 +599,13 @@ mod test {
             [[directives]]
             package = "package1"
             image.name = "image2"
-            image.include = [ "layers" ]
+            image.use = [ "layers" ]
 
             [[directives]]
             package = "package1"
             tests = "test1"
             image.name = "image1"
-            image.include = [ "layers" ]
+            image.use = [ "layers" ]
 
             [[directives]]
             package = "package1"
@@ -616,7 +616,7 @@ mod test {
             package = "package1"
             tests = "test3"
             image.name = "empty-layers"
-            image.include = [ "layers" ]
+            image.use = [ "layers" ]
             "#,
         )
         .unwrap();
@@ -735,7 +735,7 @@ mod test {
             [[directives]]
             package = "package1"
             image.name = "image1"
-            image.include = ["environment"]
+            image.use = ["environment"]
 
             [[directives]]
             package = "package1"
@@ -745,12 +745,12 @@ mod test {
             [[directives]]
             package = "package3"
             image.name = "no-environment"
-            image.include = ["environment"]
+            image.use = ["environment"]
 
             [[directives]]
             package = "package4"
             image.name = "bad-environment"
-            image.include = ["environment"]
+            image.use = ["environment"]
             "#,
         )
         .unwrap();
@@ -820,7 +820,7 @@ mod test {
             [[directives]]
             package = "package1"
             image.name = "image1"
-            image.include = ["environment"]
+            image.use = ["environment"]
             added_environment = { FOO = "$prev{FOO}", BAZ = "$prev{BAZ:-no-prev-baz}" }
 
             [[directives]]
