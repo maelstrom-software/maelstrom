@@ -1,6 +1,5 @@
 [[directives]]
 include_shared_libraries = true
-environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
 
 [[directives]]
 package = "meticulous-worker"
@@ -15,14 +14,11 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 package = "cargo-metest"
-image = "rust"
-include = ["layers", "environment"]
-
-[[directives]]
-package = "cargo-metest"
+image.name = "rust"
+image.include = ["layers", "environment"]
 enable_loopback = true
 include_shared_libraries = false
-layers = ["dev-null.tar"]
+added_layers = ["dev-null.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "tmp", mount_point = "/root" },
@@ -38,3 +34,6 @@ mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 package = "meticulous-client"
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+
+[[directives]]
+added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }

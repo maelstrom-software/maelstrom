@@ -1,10 +1,11 @@
+mod directive;
+
 use crate::substitute;
 use anyhow::{anyhow, Context as _, Error, Result};
-use enumset::EnumSetType;
-use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
+use directive::{PossiblyImage, TestDirective};
+use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
 use meticulous_util::fs::Fs;
-use serde::Serialize;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use std::{
     collections::BTreeMap,
     env::{self, VarError},
@@ -12,63 +13,16 @@ use std::{
     str,
 };
 
-fn deserialize_devices<'de, D>(
-    deserializer: D,
-) -> std::result::Result<Option<EnumSet<JobDevice>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let devices = Option::<EnumSet<JobDeviceListDeserialize>>::deserialize(deserializer)?;
-    Ok(devices.map(|d| d.iter().map(JobDevice::from).collect()))
-}
-
+#[derive(Default)]
 pub struct ContainerImage {
     pub layers: Vec<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub environment: Option<Vec<String>>,
 }
 
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
-#[serde(rename_all = "kebab-case")]
-#[enumset(serialize_repr = "list")]
-pub enum ImageInclude {
-    Layers,
-    Environment,
-    WorkingDirectory,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields, untagged)]
-enum TestDirective {
-    Normal {
-        tests: Option<String>,
-        package: Option<String>,
-        include_shared_libraries: Option<bool>,
-        enable_loopback: Option<bool>,
-        enable_writable_file_system: Option<bool>,
-        working_directory: Option<PathBuf>,
-        user: Option<UserId>,
-        group: Option<GroupId>,
-        layers: Option<Vec<String>>,
-        mounts: Option<Vec<JobMount>>,
-        #[serde(default, deserialize_with = "deserialize_devices")]
-        devices: Option<EnumSet<JobDevice>>,
-        environment: Option<BTreeMap<String, String>>,
-    },
-    Image {
-        tests: Option<String>,
-        package: Option<String>,
-        #[allow(dead_code)]
-        image: String,
-        #[allow(dead_code)]
-        include: EnumSet<ImageInclude>,
-    },
-}
-
-#[derive(Debug, Deserialize, Default)]
+#[derive(PartialEq, Eq, Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata {
-    #[serde(default)]
     directives: Vec<TestDirective>,
 }
 
@@ -78,12 +32,12 @@ pub struct TestMetadata {
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
     pub working_directory: PathBuf,
-    pub layers: Vec<String>,
-    pub mounts: Vec<JobMount>,
-    pub devices: EnumSet<JobDevice>,
-    environment: BTreeMap<String, String>,
     pub user: UserId,
     pub group: GroupId,
+    pub layers: Vec<String>,
+    environment: BTreeMap<String, String>,
+    pub mounts: Vec<JobMount>,
+    pub devices: EnumSet<JobDevice>,
 }
 
 impl Default for TestMetadata {
@@ -96,9 +50,9 @@ impl Default for TestMetadata {
             user: UserId::from(0),
             group: GroupId::from(0),
             layers: Default::default(),
+            environment: Default::default(),
             mounts: Default::default(),
             devices: Default::default(),
-            environment: Default::default(),
         }
     }
 }
@@ -127,129 +81,138 @@ impl TestMetadata {
         mut self,
         directive: &TestDirective,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
-        mut image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+        image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> Result<Self> {
-        match directive {
-            TestDirective::Normal {
-                tests: _tests,
-                package: _package,
-                include_shared_libraries,
-                enable_loopback,
-                enable_writable_file_system,
-                working_directory,
-                user,
-                group,
-                layers,
-                mounts,
-                devices,
-                environment,
-            } => {
-                if include_shared_libraries.is_some() {
-                    self.include_shared_libraries = *include_shared_libraries;
-                }
-                if let Some(enable_loopback) = enable_loopback {
-                    self.enable_loopback = *enable_loopback;
-                }
-                if let Some(enable_writable_file_system) = enable_writable_file_system {
-                    self.enable_writable_file_system = *enable_writable_file_system;
-                }
-                if let Some(working_directory) = &working_directory {
-                    self.working_directory = working_directory.clone();
-                }
-                if let Some(user) = user {
-                    self.user = *user;
-                }
-                if let Some(group) = group {
-                    self.group = *group;
-                }
-                if layers.as_ref().map(Vec::is_empty).unwrap_or(false) {
-                    self.layers.clear();
-                } else {
-                    self.layers.extend(layers.iter().flatten().cloned());
-                }
-                if mounts.as_ref().map(Vec::is_empty).unwrap_or(false) {
-                    self.mounts.clear();
-                } else {
-                    self.mounts.extend(mounts.iter().flatten().cloned());
-                }
-                if devices.as_ref().map(EnumSet::is_empty).unwrap_or(false) {
-                    self.devices.clear();
-                } else {
-                    self.devices = self.devices.union(devices.unwrap_or_default());
-                }
-                if environment
-                    .as_ref()
-                    .map(BTreeMap::is_empty)
-                    .unwrap_or(false)
-                {
-                    self.environment.clear();
-                } else {
-                    let to_insert = environment
-                        .iter()
-                        .flatten()
-                        .map(|(k, v)| {
-                            substitute::substitute(v, &env_lookup, |var| {
-                                self.environment.get(var).map(String::as_str)
-                            })
-                            .map(|v| (k.clone(), String::from(v)))
-                            .map_err(Error::new)
-                        })
-                        .collect::<Result<Vec<(String, String)>>>()?;
-                    self.environment.extend(to_insert);
-                }
-                Ok(self)
+        let image_name = directive.image.as_ref();
+        let image = image_name
+            .map(String::as_str)
+            .map(image_lookup)
+            .transpose()?;
+
+        if directive.include_shared_libraries.is_some() {
+            self.include_shared_libraries = directive.include_shared_libraries;
+        }
+
+        if let Some(enable_loopback) = directive.enable_loopback {
+            self.enable_loopback = enable_loopback;
+        }
+
+        if let Some(enable_writable_file_system) = directive.enable_writable_file_system {
+            self.enable_writable_file_system = enable_writable_file_system;
+        }
+
+        match &directive.working_directory {
+            Some(PossiblyImage::Explicit(working_directory)) => {
+                self.working_directory = working_directory.clone();
             }
-            TestDirective::Image {
-                image: image_name,
-                include,
-                ..
-            } => {
-                let image = image_lookup(image_name)?;
-                if include.contains(ImageInclude::Layers) {
-                    self.layers = image
-                        .layers
+            Some(PossiblyImage::Image) => {
+                let working_directory = image.as_ref().unwrap().working_directory.as_ref();
+                if working_directory.is_none() {
+                    return Err(anyhow!(
+                        "image {} doesn't have a working_directory to use",
+                        image_name.unwrap()
+                    ));
+                }
+                self.working_directory = working_directory.unwrap().clone();
+            }
+            None => {}
+        }
+
+        if let Some(user) = directive.user {
+            self.user = user;
+        }
+
+        if let Some(group) = directive.group {
+            self.group = group;
+        }
+
+        match &directive.layers {
+            Some(PossiblyImage::Explicit(layers)) => {
+                self.layers = layers.to_vec();
+            }
+            Some(PossiblyImage::Image) => {
+                self.layers = image
+                    .as_ref()
+                    .unwrap()
+                    .layers
+                    .iter()
+                    .map(|p| p.as_os_str().to_str().unwrap().to_string())
+                    .collect();
+            }
+            None => {}
+        }
+        self.layers.extend(directive.added_layers.iter().cloned());
+
+        fn substitute_environment(
+            env_lookup: impl Fn(&str) -> Result<Option<String>>,
+            prev: &BTreeMap<String, String>,
+            new: &BTreeMap<String, String>,
+        ) -> Result<Vec<(String, String)>> {
+            new.iter()
+                .map(|(k, v)| {
+                    substitute::substitute(v, &env_lookup, |var| prev.get(var).map(String::as_str))
+                        .map(|v| (k.clone(), String::from(v)))
+                        .map_err(Error::new)
+                })
+                .collect()
+        }
+
+        match &directive.environment {
+            Some(PossiblyImage::Explicit(environment)) => {
+                self.environment =
+                    substitute_environment(&env_lookup, &self.environment, environment)?
                         .into_iter()
-                        .map(|p| p.into_os_string().into_string().unwrap())
                         .collect();
-                }
-                if include.contains(ImageInclude::Environment) {
-                    let environment = image
-                        .environment
-                        .map_or_else(
-                            || {
-                                Err(anyhow!(
-                                    "image {image_name} doesn't have an environment to include"
-                                ))
-                            },
-                            Ok,
-                        )?
-                        .into_iter()
-                        .map(|var| {
-                            var.split_once('=').map_or_else(
-                                || {
-                                    Err(anyhow!(
-                                      "image {image_name}'s environment variable {var} is invalid"
-                                    ))
-                                },
-                                |(k, v)| Ok((k.to_string(), v.to_string())),
-                            )
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    self.environment = BTreeMap::from_iter(environment);
-                }
-                if include.contains(ImageInclude::WorkingDirectory) {
-                    self.working_directory = image.working_directory.map_or_else(
+            }
+            Some(PossiblyImage::Image) => {
+                let environment = image
+                    .as_ref()
+                    .unwrap()
+                    .environment
+                    .as_ref()
+                    .map_or_else(
                         || {
                             Err(anyhow!(
-                                "image {image_name} doesn't have a working_directory to include"
+                                "image {} doesn't have an environment to use",
+                                image_name.unwrap(),
                             ))
                         },
                         Ok,
-                    )?;
-                }
-                Ok(self)
+                    )?
+                    .iter()
+                    .map(|var| {
+                        var.split_once('=').map_or_else(
+                            || {
+                                Err(anyhow!(
+                                    "image {}'s environment variable {var} is invalid",
+                                    image_name.unwrap(),
+                                ))
+                            },
+                            |(k, v)| Ok((k.to_string(), v.to_string())),
+                        )
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                self.environment = BTreeMap::from_iter(environment);
             }
+            None => {}
         }
+        self.environment.extend(substitute_environment(
+            &env_lookup,
+            &self.environment,
+            &directive.added_environment,
+        )?);
+
+        if let Some(mounts) = &directive.mounts {
+            self.mounts = mounts.to_vec();
+        }
+        self.mounts.extend(directive.added_mounts.iter().cloned());
+
+        if let Some(devices) = directive.devices {
+            self.devices = devices;
+        }
+        self.devices = self.devices.union(directive.added_devices);
+
+        Ok(self)
     }
 }
 
@@ -272,28 +235,18 @@ impl AllMetadata {
         self.directives
             .iter()
             .filter(|directive| match directive {
-                TestDirective::Normal {
-                    tests: Some(directive_tests),
-                    ..
-                }
-                | TestDirective::Image {
+                TestDirective {
                     tests: Some(directive_tests),
                     ..
                 } => test.contains(directive_tests.as_str()),
-                TestDirective::Normal { tests: None, .. }
-                | TestDirective::Image { tests: None, .. } => true,
+                TestDirective { tests: None, .. } => true,
             })
             .filter(|directive| match directive {
-                TestDirective::Normal {
-                    package: Some(directive_package),
-                    ..
-                }
-                | TestDirective::Image {
+                TestDirective {
                     package: Some(directive_package),
                     ..
                 } => package == directive_package,
-                TestDirective::Normal { package: None, .. }
-                | TestDirective::Image { package: None, .. } => true,
+                TestDirective { package: None, .. } => true,
             })
             .try_fold(TestMetadata::default(), |m, d| {
                 m.try_fold(d, &env_lookup, &mut image_lookup)
@@ -346,6 +299,80 @@ mod test {
                 .get_metadata_for_test("mod", "test", empty_env, no_containers)
                 .unwrap(),
             TestMetadata::default(),
+        );
+    }
+
+    #[test]
+    fn include_shared_libraries_defaults() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            layers = ["layer1"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            layers = []
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            false
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            true
+        );
+    }
+
+    #[test]
+    fn include_shared_libraries() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            include_shared_libraries = false
+
+            [[directives]]
+            package = "package1"
+            include_shared_libraries = true
+            layers = ["layer1"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            layers = []
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            true
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .include_shared_libraries(),
+            false
         );
     }
 
@@ -419,43 +446,20 @@ mod test {
         );
     }
 
-    #[test]
-    fn include_shared_libraries_defaults() {
-        let all = AllMetadata::from_str(
-            r#"
-            [[directives]]
-            package = "package1"
-            layers = ["layer1"]
-
-            [[directives]]
-            package = "package1"
-            tests = "test1"
-            layers = []
-            "#,
-        )
-        .unwrap();
-        assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
-        assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            false
-        );
-        assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
+    fn assert_error_starts_with(err: Error, prefix: &str) {
+        assert!(format!("{err}").starts_with(prefix), "{err}")
     }
 
     #[test]
-    fn include_shared_libraries_can_be_set() {
+    fn working_directory() {
+        let image_lookup = |name: &_| match name {
+            "rust" => Ok(ContainerImage {
+                working_directory: Some(path_buf!("/foo")),
+                ..Default::default()
+            }),
+            "no-working-directory" => Ok(Default::default()),
+            _ => panic!(),
+        };
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
@@ -463,290 +467,432 @@ mod test {
 
             [[directives]]
             package = "package1"
-            include_shared_libraries = true
-            layers = ["layer1"]
+            image.name = "rust"
+            image.include = ["working_directory"]
 
             [[directives]]
             package = "package1"
             tests = "test1"
-            layers = []
+            working_directory = "/bar"
+
+            [[directives]]
+            package = "package3"
+            image.name = "no-working-directory"
+            image.include = ["working_directory"]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+            all.get_metadata_for_test("package1", "test1", empty_env, image_lookup)
                 .unwrap()
-                .include_shared_libraries(),
-            true
+                .working_directory,
+            path_buf!("/bar")
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+            all.get_metadata_for_test("package1", "test2", empty_env, image_lookup)
                 .unwrap()
-                .include_shared_libraries(),
-            true
+                .working_directory,
+            path_buf!("/foo")
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+            all.get_metadata_for_test("package2", "test1", empty_env, image_lookup)
                 .unwrap()
-                .include_shared_libraries(),
-            false
+                .working_directory,
+            path_buf!("/")
+        );
+        assert_error_starts_with(
+            all.get_metadata_for_test("package3", "test1", empty_env, image_lookup)
+                .unwrap_err(),
+            "image no-working-directory doesn't have a working_directory to use",
         );
     }
 
     #[test]
-    fn layers_are_appended_in_order_ignoring_unset_directives() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                layers = ["layer1", "layer2"]
-
-                [[directives]]
-                enable_loopback = true
-
-                [[directives]]
-                layers = ["layer3", "layer4"]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                enable_loopback: true,
-                layers: vec![
-                    "layer1".to_string(),
-                    "layer2".to_string(),
-                    "layer3".to_string(),
-                    "layer4".to_string()
-                ],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn layers_are_reset_with_empty_vec() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                layers = ["layer1", "layer2"]
-
-                [[directives]]
-                layers = []
-
-                [[directives]]
-                layers = ["layer3", "layer4"]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                layers: vec!["layer3".to_string(), "layer4".to_string()],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn mounts_are_appended_in_order_ignoring_unset_directives() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-
-                [[directives]]
-                enable_loopback = true
-
-                [[directives]]
-                mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                enable_loopback: true,
-                mounts: vec![
-                    JobMount {
-                        fs_type: JobMountFsType::Proc,
-                        mount_point: "/proc".to_string()
-                    },
-                    JobMount {
-                        fs_type: JobMountFsType::Tmp,
-                        mount_point: "/tmp".to_string()
-                    },
-                ],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn mounts_are_reset_with_empty_vec() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-
-                [[directives]]
-                mounts = []
-
-                [[directives]]
-                mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                mounts: vec![JobMount {
-                    fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string()
-                }],
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn devices_are_unioned_ignoring_unset_directives() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                devices = [ "full" ]
-
-                [[directives]]
-                enable_loopback = true
-
-                [[directives]]
-                devices = [ "null" ]
-
-                [[directives]]
-                devices = [ "null", "zero" ]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                enable_loopback: true,
-                devices: enum_set! {
-                    JobDevice::Full | JobDevice::Null | JobDevice::Zero
-                },
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn devices_are_reset_with_empty_set() {
-        assert_eq!(
-            AllMetadata::from_str(
-                r#"
-                [[directives]]
-                devices = [ "full" ]
-
-                [[directives]]
-                devices = [ "null", "zero" ]
-
-                [[directives]]
-                devices = []
-
-                [[directives]]
-                devices = [ "null" ]
-                "#
-            )
-            .unwrap()
-            .get_metadata_for_test("mod", "test", empty_env, no_containers)
-            .unwrap(),
-            TestMetadata {
-                devices: enum_set! {
-                    JobDevice::Null
-                },
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn environment() {
+    fn user() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
             package = "package1"
-            environment = { FOO = "foo", BAR = "bar" }
-
-            [[directives]]
-            package = "package1"
+            user = 101
 
             [[directives]]
             package = "package1"
             tests = "test1"
-            environment = { BAR = "baz", FROB = "frob" }
+            user = 202
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .user,
+            UserId::from(202)
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .user,
+            UserId::from(101)
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .user,
+            UserId::from(0)
+        );
+    }
+
+    #[test]
+    fn group() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            group = 101
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            group = 202
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .group,
+            GroupId::from(202)
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .group,
+            GroupId::from(101)
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .group,
+            GroupId::from(0)
+        );
+    }
+
+    #[test]
+    fn layers() {
+        let image_lookup = |name: &_| match name {
+            "image1" => Ok(ContainerImage {
+                layers: path_buf_vec!["layer11", "layer12"],
+                ..Default::default()
+            }),
+            "image2" => Ok(ContainerImage {
+                layers: path_buf_vec!["layer21", "layer22"],
+                ..Default::default()
+            }),
+            "empty-layers" => Ok(Default::default()),
+            _ => panic!(),
+        };
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            layers = ["layer1", "layer2"]
+
+            [[directives]]
+            package = "package1"
+            image.name = "image2"
+            image.include = [ "layers" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            image.name = "image1"
+            image.include = [ "layers" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test2"
+            layers = ["layer3", "layer4"]
 
             [[directives]]
             package = "package1"
             tests = "test3"
-            environment = {}
-
-            [[directives]]
-            package = "package1"
-            tests = "test31"
-            environment = { A = "a" }
+            image.name = "empty-layers"
+            image.include = [ "layers" ]
             "#,
         )
         .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, image_lookup)
+                .unwrap()
+                .layers,
+            vec!["layer11".to_string(), "layer12".to_string()],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, image_lookup)
+                .unwrap()
+                .layers,
+            vec!["layer3".to_string(), "layer4".to_string()],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test3", empty_env, image_lookup)
+                .unwrap()
+                .layers,
+            Vec::<String>::default(),
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test4", empty_env, image_lookup)
+                .unwrap()
+                .layers,
+            vec!["layer21".to_string(), "layer22".to_string()],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, image_lookup)
+                .unwrap()
+                .layers,
+            vec!["layer1".to_string(), "layer2".to_string()],
+        );
+    }
 
+    #[test]
+    fn added_layers() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            added_layers = ["added-layer1", "added-layer2"]
+
+            [[directives]]
+            package = "package1"
+            layers = ["layer1", "layer2"]
+            added_layers = ["added-layer3", "added-layer4"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            added_layers = ["added-layer5", "added-layer6"]
+            "#,
+        )
+        .unwrap();
         assert_eq!(
             all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
-                .environment(),
+                .layers,
             vec![
-                "BAR=baz".to_string(),
-                "FOO=foo".to_string(),
-                "FROB=frob".to_string(),
+                "layer1".to_string(),
+                "layer2".to_string(),
+                "added-layer3".to_string(),
+                "added-layer4".to_string(),
+                "added-layer5".to_string(),
+                "added-layer6".to_string()
             ],
         );
         assert_eq!(
             all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
-                .environment(),
-            vec!["BAR=bar".to_string(), "FOO=foo".to_string(),],
-        );
-        assert_eq!(
-            all.get_metadata_for_test("package1", "test3", empty_env, no_containers)
-                .unwrap()
-                .environment(),
-            Vec::<String>::default(),
-        );
-        assert_eq!(
-            all.get_metadata_for_test("package1", "test31", empty_env, no_containers)
-                .unwrap()
-                .environment(),
-            vec!["A=a".to_string()],
+                .layers,
+            vec![
+                "layer1".to_string(),
+                "layer2".to_string(),
+                "added-layer3".to_string(),
+                "added-layer4".to_string()
+            ],
         );
         assert_eq!(
             all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
                 .unwrap()
-                .environment(),
-            Vec::<String>::default(),
+                .layers,
+            vec!["added-layer1".to_string(), "added-layer2".to_string()],
         );
     }
 
     #[test]
-    fn environment_substitution_prev() {
+    fn environment() {
+        let env = |key: &_| {
+            Ok(Some(match key {
+                "FOO" => "env-foo".to_string(),
+                "BAR" => "env-bar".to_string(),
+                _ => panic!(),
+            }))
+        };
+        let images = |name: &_| match name {
+            "image1" => Ok(ContainerImage {
+                environment: Some(vec![
+                    "FOO=image-foo".to_string(),
+                    "FROB=image-frob".to_string(),
+                ]),
+                ..Default::default()
+            }),
+            "no-environment" => Ok(Default::default()),
+            "bad-environment" => Ok(ContainerImage {
+                environment: Some(vec!["FOO".to_string()]),
+                ..Default::default()
+            }),
+            _ => panic!(),
+        };
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            environment = { FOO = "$env{FOO}", BAR = "bar", BAZ = "$prev{FOO:-no-prev-foo}" }
+
+            [[directives]]
+            package = "package1"
+            image.name = "image1"
+            image.include = ["environment"]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            environment = { FOO = "$prev{FOO}", BAR = "$env{BAR}", BAZ = "$prev{BAZ:-no-prev-baz}" }
+
+            [[directives]]
+            package = "package3"
+            image.name = "no-environment"
+            image.include = ["environment"]
+
+            [[directives]]
+            package = "package4"
+            image.name = "bad-environment"
+            image.include = ["environment"]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=env-bar".to_string(),
+                "BAZ=no-prev-baz".to_string(),
+                "FOO=image-foo".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", env, images)
+                .unwrap()
+                .environment(),
+            vec!["FOO=image-foo".to_string(), "FROB=image-frob".to_string(),],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=bar".to_string(),
+                "BAZ=no-prev-foo".to_string(),
+                "FOO=env-foo".to_string(),
+            ],
+        );
+        assert_error_starts_with(
+            all.get_metadata_for_test("package3", "test1", env, images)
+                .unwrap_err(),
+            "image no-environment doesn't have an environment to use",
+        );
+        assert_error_starts_with(
+            all.get_metadata_for_test("package4", "test1", env, images)
+                .unwrap_err(),
+            "image bad-environment's environment variable FOO is invalid",
+        );
+    }
+
+    #[test]
+    fn added_environment() {
+        let env = |key: &_| {
+            Ok(Some(match key {
+                "FOO" => "env-foo".to_string(),
+                "BAR" => "env-bar".to_string(),
+                _ => panic!(),
+            }))
+        };
+        let images = |name: &_| match name {
+            "image1" => Ok(ContainerImage {
+                environment: Some(vec![
+                    "FOO=image-foo".to_string(),
+                    "FROB=image-frob".to_string(),
+                ]),
+                ..Default::default()
+            }),
+            _ => panic!(),
+        };
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
             environment = { FOO = "foo", BAR = "bar" }
+            added_environment = { FOO = "prev-$prev{FOO}", BAZ = "$prev{BAZ:-no-prev-baz}" }
 
             [[directives]]
-            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
+            package = "package1"
+            image.name = "image1"
+            image.include = ["environment"]
+            added_environment = { FOO = "$prev{FOO}", BAZ = "$prev{BAZ:-no-prev-baz}" }
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            added_environment = { FOO = "prev-$prev{FOO}", BAR = "bar" }
+
+            [[directives]]
+            package = "package1"
+            tests = "test2"
+            environment = { FOO = "prev-$prev{FOO}" }
+            added_environment = { FOO = "prev-$prev{FOO}", BAR = "$env{BAR}" }
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=bar".to_string(),
+                "BAZ=no-prev-baz".to_string(),
+                "FOO=prev-image-foo".to_string(),
+                "FROB=image-frob".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=env-bar".to_string(),
+                "FOO=prev-prev-image-foo".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test3", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAZ=no-prev-baz".to_string(),
+                "FOO=image-foo".to_string(),
+                "FROB=image-frob".to_string(),
+            ],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", env, images)
+                .unwrap()
+                .environment(),
+            vec![
+                "BAR=bar".to_string(),
+                "BAZ=no-prev-baz".to_string(),
+                "FOO=prev-foo".to_string(),
+            ],
+        );
+    }
+
+    #[test]
+    fn mounts() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            package = "package1"
+            mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            mounts = [
+                { fs_type = "tmp", mount_point = "/tmp" },
+                { fs_type = "sys", mount_point = "/sys" },
+            ]
             "#,
         )
         .unwrap();
@@ -754,251 +900,229 @@ mod test {
         assert_eq!(
             all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
                 .unwrap()
-                .environment(),
-            vec!["BAR=xfoox".to_string(), "FOO=ybary".to_string()],
+                .mounts,
+            vec![
+                JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                },
+            ],
         );
-    }
-
-    #[test]
-    fn environment_substitution_prev_error() {
-        let all = AllMetadata::from_str(
-            r#"
-            [[directives]]
-            environment = { FOO = "y$prev{BAR}y", BAR = "x$prev{FOO}x" }
-            "#,
-        )
-        .unwrap();
-        let err = all
-            .get_metadata_for_test("package1", "test1", empty_env, no_containers)
-            .unwrap_err();
-        assert_eq!(format!("{err}"), "unknown variable \"FOO\"");
-    }
-
-    #[test]
-    fn environment_substitution_env() {
-        let all = AllMetadata::from_str(
-            r#"
-            [[directives]]
-            environment = { BAR = "y$env{BAR}y", FOO = "x$env{FOO}x" }
-            "#,
-        )
-        .unwrap();
-
-        let env = |key: &_| {
-            Ok(Some(match key {
-                "FOO" => "foo".to_string(),
-                "BAR" => "bar".to_string(),
-                _ => panic!(),
-            }))
-        };
-
         assert_eq!(
-            all.get_metadata_for_test("package1", "test1", env, no_containers)
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
                 .unwrap()
-                .environment(),
-            vec!["BAR=ybary".to_string(), "FOO=xfoox".to_string()],
+                .mounts,
+            vec![JobMount {
+                fs_type: JobMountFsType::Proc,
+                mount_point: "/proc".to_string(),
+            },],
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .mounts,
+            vec![],
         );
     }
 
     #[test]
-    fn image() {
-        let layers_1 = path_buf_vec!["layer11.tar", "layer12.tar"];
-        let working_directory_1 = path_buf!("/1");
-        let environment_1 = vec!["FOO=1".to_string(), "BAR=1".to_string()];
-        let layers_2 = path_buf_vec!["layer21.tar", "layer22.tar"];
-        let working_directory_2 = path_buf!("/2");
-        let environment_2 = vec!["FOO=2".to_string(), "BAZ=2".to_string()];
-        let image_lookup = |name: &_| match name {
-            "image1" => Ok(ContainerImage {
-                layers: layers_1.clone(),
-                working_directory: Some(working_directory_1.clone()),
-                environment: Some(environment_1.clone()),
-            }),
-            "image2" => Ok(ContainerImage {
-                layers: layers_2.clone(),
-                working_directory: Some(working_directory_2.clone()),
-                environment: Some(environment_2.clone()),
-            }),
-            _ => panic!(),
-        };
-
+    fn added_mounts() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            layers = ["base"]
-            environment = { FOO = "base", BAR = "base", BAZ = "base" }
-            working_directory = "/base"
+            added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
             [[directives]]
             package = "package1"
-            image = "image1"
-            include = ["layers", "environment", "working-directory"]
+            mounts = [
+                { fs_type = "proc", mount_point = "/proc" },
+            ]
+            added_mounts = [
+                { fs_type = "sys", mount_point = "/sys" },
+            ]
 
             [[directives]]
             package = "package1"
             tests = "test1"
-            image = "image2"
-            include = ["layers"]
+            added_mounts = [
+                { fs_type = "tmp", mount_point = "/tmp" },
+            ]
 
             [[directives]]
             package = "package1"
             tests = "test2"
-            image = "image2"
-            include = ["environment"]
+            added_mounts = [
+                { fs_type = "tmp", mount_point = "/tmp" },
+                { fs_type = "proc", mount_point = "/proc" },
+            ]
 
             [[directives]]
             package = "package1"
             tests = "test3"
-            image = "image2"
-            include = ["working-directory"]
+            mounts = []
+            added_mounts = [
+                { fs_type = "tmp", mount_point = "/tmp" },
+            ]
             "#,
         )
         .unwrap();
 
-        let metadata = all
-            .get_metadata_for_test("package0", "test1", empty_env, image_lookup)
-            .unwrap();
-        assert_eq!(metadata.layers, vec!["base".to_string()]);
         assert_eq!(
-            metadata.environment,
-            BTreeMap::from([
-                ("FOO".to_string(), "base".to_string()),
-                ("BAR".to_string(), "base".to_string()),
-                ("BAZ".to_string(), "base".to_string()),
-            ])
-        );
-        assert_eq!(metadata.working_directory, path_buf!("/base"));
-
-        let metadata = all
-            .get_metadata_for_test("package1", "test0", empty_env, image_lookup)
-            .unwrap();
-        assert_eq!(
-            metadata.layers,
-            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .mounts,
+            vec![
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".to_string(),
+                },
+            ],
         );
         assert_eq!(
-            metadata.environment,
-            BTreeMap::from([
-                ("FOO".to_string(), "1".to_string()),
-                ("BAR".to_string(), "1".to_string()),
-            ])
-        );
-        assert_eq!(metadata.working_directory, path_buf!("/1"));
-
-        let metadata = all
-            .get_metadata_for_test("package1", "test1", empty_env, image_lookup)
-            .unwrap();
-        assert_eq!(
-            metadata.layers,
-            vec!["layer21.tar".to_string(), "layer22.tar".to_string()]
-        );
-        assert_eq!(
-            metadata.environment,
-            BTreeMap::from([
-                ("FOO".to_string(), "1".to_string()),
-                ("BAR".to_string(), "1".to_string()),
-            ])
-        );
-        assert_eq!(metadata.working_directory, path_buf!("/1"));
-
-        let metadata = all
-            .get_metadata_for_test("package1", "test2", empty_env, image_lookup)
-            .unwrap();
-        assert_eq!(
-            metadata.layers,
-            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .mounts,
+            vec![
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".to_string(),
+                },
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".to_string(),
+                },
+            ],
         );
         assert_eq!(
-            metadata.environment,
-            BTreeMap::from([
-                ("FOO".to_string(), "2".to_string()),
-                ("BAZ".to_string(), "2".to_string()),
-            ])
-        );
-        assert_eq!(metadata.working_directory, path_buf!("/1"));
-
-        let metadata = all
-            .get_metadata_for_test("package1", "test3", empty_env, image_lookup)
-            .unwrap();
-        assert_eq!(
-            metadata.layers,
-            vec!["layer11.tar".to_string(), "layer12.tar".to_string()]
+            all.get_metadata_for_test("package1", "test3", empty_env, no_containers)
+                .unwrap()
+                .mounts,
+            vec![JobMount {
+                fs_type: JobMountFsType::Tmp,
+                mount_point: "/tmp".to_string(),
+            },],
         );
         assert_eq!(
-            metadata.environment,
-            BTreeMap::from([
-                ("FOO".to_string(), "1".to_string()),
-                ("BAR".to_string(), "1".to_string()),
-            ])
-        );
-        assert_eq!(metadata.working_directory, path_buf!("/2"));
-    }
-
-    #[test]
-    fn bad_field_in_all_metadata() {
-        let err = AllMetadata::from_str(
-            r#"
-            [not_a_field]
-            foo = "three"
-            "#,
-        )
-        .unwrap_err();
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(
-            message.starts_with("unknown field `not_a_field`, expected `directives`"),
-            "message: {message}"
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .mounts,
+            vec![JobMount {
+                fs_type: JobMountFsType::Tmp,
+                mount_point: "/tmp".to_string(),
+            },],
         );
     }
 
     #[test]
-    fn bad_field_in_test_directive() {
-        let err = AllMetadata::from_str(
+    fn devices() {
+        let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            not_a_field = "three"
+            package = "package1"
+            devices = [ "null" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            devices = [ "zero", "tty" ]
             "#,
         )
-        .unwrap_err();
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(
-            message.starts_with("data did not match"),
-            "message: {message}"
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Zero | JobDevice::Tty},
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Null},
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            EnumSet::EMPTY,
         );
     }
 
     #[test]
-    fn bad_field_in_job_mount() {
-        let err = AllMetadata::from_str(
+    fn added_devices() {
+        let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            mounts = [ { not_a_field = "foo" } ]
-            "#,
-        )
-        .unwrap_err();
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(
-            message.starts_with("data did not match"),
-            "message: {message}"
-        );
-    }
+            added_devices = [ "tty" ]
 
-    #[test]
-    fn bad_devices_field() {
-        let err = AllMetadata::from_str(
-            r#"
             [[directives]]
-            devices = ["not_a_value"]
+            package = "package1"
+            devices = [ "zero", "null" ]
+            added_devices = [ "full" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test1"
+            added_devices = [ "random" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test2"
+            added_devices = [ "urandom" ]
+
+            [[directives]]
+            package = "package1"
+            tests = "test3"
+            devices = []
+            added_devices = [ "zero" ]
             "#,
         )
-        .unwrap_err();
-        let err = err.downcast_ref::<TomlError>().unwrap();
-        let message = err.message();
-        assert!(
-            message.starts_with("data did not match"),
-            "message: {message}"
+        .unwrap();
+
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test1", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Random},
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test2", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Urandom},
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package1", "test3", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Zero},
+        );
+        assert_eq!(
+            all.get_metadata_for_test("package2", "test1", empty_env, no_containers)
+                .unwrap()
+                .devices,
+            enum_set! {JobDevice::Tty},
         );
     }
 
@@ -1025,6 +1149,26 @@ mod test {
         assert_eq!(
             format!("{}", std_env_lookup(var).unwrap_err()),
             r#"environment variable was not valid unicode: "\xFF""#
+        );
+    }
+
+    fn assert_toml_error(err: Error, expected: &str) {
+        let err = err.downcast_ref::<TomlError>().unwrap();
+        let message = err.message();
+        assert!(message.starts_with(expected), "message: {message}");
+    }
+
+    #[test]
+    fn bad_field_in_all_metadata() {
+        assert_toml_error(
+            AllMetadata::from_str(
+                r#"
+                [not_a_field]
+                foo = "three"
+                "#,
+            )
+            .unwrap_err(),
+            "unknown field `not_a_field`, expected `directives`",
         );
     }
 }
