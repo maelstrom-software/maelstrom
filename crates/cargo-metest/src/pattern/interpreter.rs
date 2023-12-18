@@ -423,13 +423,23 @@ fn and_or_not_diff_maybe_expressions() {
         None,
     );
     test_it("package.equals(foo) && test.equals(foo_test)", None);
-    test_it("package.equals(foo) || test.equals(foo_test)", Some(true));
-    test_it("package.equals(foo) || test.equals(bar_test)", Some(true));
-    test_it("package.equals(foo) && !test.equals(bar_test)", None);
-    test_it("package.equals(foo) - test.equals(bar_test)", None);
-
+    test_it("test.equals(foo_test) && test.equals(bar_test)", None);
+    test_it("test.equals(foo_test) && package.equals(foo)", None);
     test_it("package.equals(foo) && test.equals(bar_test)", None);
+    test_it("package.equals(foo) && !test.equals(bar_test)", None);
+
+    test_it("test.equals(foo_test) && package.equals(bar)", Some(false));
+    test_it("package.equals(bar) && test.equals(foo_test)", Some(false));
+
+    test_it("test.equals(foo_test) || test.equals(bar_test)", None);
+    test_it("test.equals(foo_test) || package.equals(bar)", None);
     test_it("package.equals(bar) || test.equals(bar_test)", None);
     test_it("package.equals(bar) || !test.equals(foo_test)", None);
+
+    test_it("test.equals(foo_test) || package.equals(foo)", Some(true));
+    test_it("package.equals(foo) || test.equals(foo_test)", Some(true));
+    test_it("package.equals(foo) || test.equals(bar_test)", Some(true));
+
+    test_it("package.equals(foo) - test.equals(bar_test)", None);
     test_it("package.equals(foo) - test.equals(foo_test)", None);
 }
