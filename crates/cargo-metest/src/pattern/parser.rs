@@ -16,7 +16,7 @@ use std::str::FromStr;
 #[cfg(test)]
 use regex_macro::regex;
 
-#[derive(From, Debug, PartialEq)]
+#[derive(From, Debug, PartialEq, Eq)]
 #[from(forward)]
 pub struct MatcherParameter(pub String);
 
@@ -123,6 +123,8 @@ impl PartialEq for GlobMatcherParameter {
     }
 }
 
+impl Eq for GlobMatcherParameter {}
+
 impl GlobMatcherParameter {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         err_construct(MatcherParameter::parser().map(|v| v.0), Glob::new)
@@ -145,6 +147,8 @@ impl PartialEq for RegexMatcherParameter {
     }
 }
 
+impl Eq for RegexMatcherParameter {}
+
 impl RegexMatcherParameter {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         err_construct(MatcherParameter::parser().map(|v| v.0), Regex::new).map(Self)
@@ -157,7 +161,7 @@ fn regex_parser_test() {
     parse_str!(RegexMatcherParameter, "/*/").unwrap_err();
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Matcher {
     Equals(MatcherParameter),
     Contains(MatcherParameter),
@@ -183,7 +187,7 @@ impl Matcher {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
     Name,
     Binary,
@@ -213,7 +217,7 @@ impl CompoundSelectorName {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct CompoundSelector {
     pub name: CompoundSelectorName,
     pub matcher: Matcher,
@@ -229,7 +233,7 @@ impl CompoundSelector {
     }
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 pub enum SimpleSelectorName {
     All,
     Any,
@@ -255,7 +259,7 @@ impl SimpleSelectorName {
     }
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 #[from(types(CompoundSelectorName))]
 pub struct SimpleSelector {
     pub name: SimpleSelectorName,
@@ -269,7 +273,7 @@ impl SimpleSelector {
     }
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 pub enum SimpleExpression {
     #[from(types(OrExpression))]
     Or(Box<OrExpression>),
@@ -305,7 +309,7 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
     choice((string("!"), string("~"), string("not").skip(spaces1())))
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
     #[from(types(SimpleSelector, SimpleSelectorName, CompoundSelector, OrExpression))]
@@ -344,7 +348,7 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
     .or(spaces1().with(string("minus")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
@@ -374,7 +378,7 @@ fn or_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = &
     .or(spaces1().with(string("or")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 pub enum OrExpression {
     Or(AndExpression, Box<OrExpression>),
     #[from(types(
@@ -398,7 +402,7 @@ impl OrExpression {
     }
 }
 
-#[derive(Debug, PartialEq, From)]
+#[derive(Debug, PartialEq, Eq, From)]
 #[from(types(NotExpression, AndExpression))]
 pub struct Pattern(pub OrExpression);
 

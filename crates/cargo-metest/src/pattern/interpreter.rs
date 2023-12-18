@@ -76,7 +76,7 @@ pub fn maybe_or(a: Option<bool>, b: Option<bool>) -> Option<bool> {
     }
 }
 
-pub fn interpret_simple_selector(s: SimpleSelector, c: &Context) -> Option<bool> {
+pub fn interpret_simple_selector(s: &SimpleSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     use SimpleSelectorName::*;
     Some(match s.name {
@@ -92,7 +92,7 @@ pub fn interpret_simple_selector(s: SimpleSelector, c: &Context) -> Option<bool>
     })
 }
 
-fn interpret_matcher(s: &str, matcher: Matcher) -> bool {
+fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
     use Matcher::*;
     match matcher {
         Equals(a) => s == a.0,
@@ -104,75 +104,75 @@ fn interpret_matcher(s: &str, matcher: Matcher) -> bool {
     }
 }
 
-pub fn interpret_compound_selector(s: CompoundSelector, c: &Context) -> Option<bool> {
+pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     Some(match s.name {
-        Name => interpret_matcher(&c.case()?.name, s.matcher),
-        Package => interpret_matcher(&c.artifact.package, s.matcher),
+        Name => interpret_matcher(&c.case()?.name, &s.matcher),
+        Package => interpret_matcher(&c.artifact.package, &s.matcher),
         Binary => {
             matches!(&c.artifact.kind, ArtifactKind::Binary)
-                && interpret_matcher(&c.artifact.name, s.matcher)
+                && interpret_matcher(&c.artifact.name, &s.matcher)
         }
         Benchmark => {
             matches!(&c.case()?.kind, CaseKind::Benchmark)
-                && interpret_matcher(&c.case()?.name, s.matcher)
+                && interpret_matcher(&c.case()?.name, &s.matcher)
         }
         Example => {
             matches!(&c.case()?.kind, CaseKind::Example)
-                && interpret_matcher(&c.case()?.name, s.matcher)
+                && interpret_matcher(&c.case()?.name, &s.matcher)
         }
         Test => {
             matches!(&c.case()?.kind, CaseKind::Test)
-                && interpret_matcher(&c.case()?.name, s.matcher)
+                && interpret_matcher(&c.case()?.name, &s.matcher)
         }
     })
 }
 
-fn interpret_not_expression(n: NotExpression, c: &Context) -> Option<bool> {
+fn interpret_not_expression(n: &NotExpression, c: &Context) -> Option<bool> {
     use NotExpression::*;
     match n {
-        Not(n) => maybe_not(interpret_not_expression(*n, c)),
+        Not(n) => maybe_not(interpret_not_expression(&*n, c)),
         Simple(s) => interpret_simple_expression(s, c),
     }
 }
 
-fn interpret_and_expression(a: AndExpression, c: &Context) -> Option<bool> {
+fn interpret_and_expression(a: &AndExpression, c: &Context) -> Option<bool> {
     use AndExpression::*;
     match a {
         And(n, a) => maybe_and(
             interpret_not_expression(n, c),
-            interpret_and_expression(*a, c),
+            interpret_and_expression(&*a, c),
         ),
         Diff(n, a) => maybe_and(
             interpret_not_expression(n, c),
-            maybe_not(interpret_and_expression(*a, c)),
+            maybe_not(interpret_and_expression(&*a, c)),
         ),
         Not(n) => interpret_not_expression(n, c),
     }
 }
 
-fn interpret_or_expression(o: OrExpression, c: &Context) -> Option<bool> {
+fn interpret_or_expression(o: &OrExpression, c: &Context) -> Option<bool> {
     use OrExpression::*;
     match o {
         Or(a, o) => maybe_or(
             interpret_and_expression(a, c),
-            interpret_or_expression(*o, c),
+            interpret_or_expression(&*o, c),
         ),
         And(a) => interpret_and_expression(a, c),
     }
 }
 
-pub fn interpret_simple_expression(s: SimpleExpression, c: &Context) -> Option<bool> {
+pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<bool> {
     use SimpleExpression::*;
     match s {
-        Or(o) => interpret_or_expression(*o, c),
+        Or(o) => interpret_or_expression(&*o, c),
         SimpleSelector(s) => interpret_simple_selector(s, c),
         CompoundSelector(s) => interpret_compound_selector(s, c),
     }
 }
 
-pub fn interpret_pattern(s: Pattern, c: &Context) -> Option<bool> {
-    interpret_or_expression(s.0, c)
+pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
+    interpret_or_expression(&s.0, c)
 }
 
 #[test]
@@ -192,7 +192,7 @@ fn simple_expression_simple_selector() {
                 kind,
             }),
         };
-        let actual = interpret_simple_expression(parse_str!(SimpleExpression, s).unwrap(), &c);
+        let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
         assert_eq!(actual, expected);
     }
 
@@ -258,7 +258,7 @@ fn test_compound_sel(
         },
         case: None,
     };
-    let actual = interpret_simple_expression(parse_str!(SimpleExpression, s).unwrap(), &c);
+    let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
     assert_eq!(actual, expected);
 }
 
@@ -334,7 +334,7 @@ fn test_compound_sel_case(
             kind: case_kind,
         }),
     };
-    let actual = interpret_simple_expression(parse_str!(SimpleExpression, s).unwrap(), &c);
+    let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
     assert_eq!(actual, expected);
 }
 
@@ -383,7 +383,7 @@ fn and_or_not_diff_expressions() {
                 kind: CaseKind::Test,
             }),
         };
-        let actual = interpret_pattern(parse_str!(Pattern, s).unwrap(), &c);
+        let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);
         assert_eq!(actual, expected);
     }
 
@@ -414,7 +414,7 @@ fn and_or_not_diff_maybe_expressions() {
             },
             case: None,
         };
-        let actual = interpret_pattern(parse_str!(Pattern, s).unwrap(), &c);
+        let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);
         assert_eq!(actual, expected);
     }
 
