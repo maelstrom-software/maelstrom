@@ -1,3 +1,5 @@
+use crate::parse_str;
+use anyhow::{anyhow, Error, Result};
 use combine::{
     attempt, between, choice, many, many1, optional, parser,
     parser::{
@@ -7,9 +9,12 @@ use combine::{
     satisfy, token, Parser, Stream,
 };
 use derive_more::From;
+use globset::{Glob, GlobMatcher};
+use regex::Regex;
+use std::str::FromStr;
 
 #[cfg(test)]
-use crate::parse_str;
+use regex_macro::regex;
 
 #[derive(From, Debug, PartialEq)]
 #[from(forward)]
@@ -83,25 +88,97 @@ fn matcher_parameter_test() {
     test_err("(((hello))");
 }
 
-#[derive(Debug, PartialEq)]
-pub enum MatcherName {
-    Equals,
-    Contains,
-    StartsWith,
-    EndsWith,
-    Matches,
-    Globs,
+pub fn err_construct<
+    RetT,
+    ErrorT: std::error::Error + Send + Sync + 'static,
+    InputT: Stream<Token = char>,
+>(
+    mut inner: impl Parser<InputT, Output = String>,
+    mut con: impl FnMut(&str) -> std::result::Result<RetT, ErrorT>,
+) -> impl Parser<InputT, Output = RetT> {
+    use combine::{
+        error::{Commit, StreamError},
+        ParseError,
+    };
+    parser(move |input: &mut InputT| {
+        let position = input.position();
+        let (s, committed) = inner.parse_stream(input).into_result()?;
+        match con(&s) {
+            Ok(r) => Ok((r, committed)),
+            Err(e) => {
+                let mut parse_error = InputT::Error::empty(position);
+                parse_error.add(StreamError::other(e));
+                Err(Commit::Commit(parse_error.into()))
+            }
+        }
+    })
 }
 
-impl MatcherName {
+#[derive(Debug)]
+pub struct GlobMatcherParameter(pub GlobMatcher);
+
+impl PartialEq for GlobMatcherParameter {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.glob() == other.0.glob()
+    }
+}
+
+impl GlobMatcherParameter {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        err_construct(MatcherParameter::parser().map(|v| v.0), Glob::new)
+            .map(|g| Self(g.compile_matcher()))
+    }
+}
+
+#[derive(Debug)]
+pub struct RegexMatcherParameter(pub Regex);
+
+impl From<&Regex> for RegexMatcherParameter {
+    fn from(r: &Regex) -> Self {
+        Self(r.clone())
+    }
+}
+
+impl PartialEq for RegexMatcherParameter {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.as_str() == other.0.as_str()
+    }
+}
+
+impl RegexMatcherParameter {
+    pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        err_construct(MatcherParameter::parser().map(|v| v.0), Regex::new).map(Self)
+    }
+}
+
+#[test]
+fn regex_parser_test() {
+    parse_str!(RegexMatcherParameter, "/[a-z]/").unwrap();
+    parse_str!(RegexMatcherParameter, "/*/").unwrap_err();
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Matcher {
+    Equals(MatcherParameter),
+    Contains(MatcherParameter),
+    StartsWith(MatcherParameter),
+    EndsWith(MatcherParameter),
+    Matches(RegexMatcherParameter),
+    Globs(GlobMatcherParameter),
+}
+
+impl Matcher {
+    pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        let arg = || MatcherParameter::parser();
+        let regex = || RegexMatcherParameter::parser();
+        let glob = || GlobMatcherParameter::parser();
         choice((
-            attempt(string("equals")).map(|_| Self::Equals),
-            attempt(string("contains")).map(|_| Self::Contains),
-            attempt(string("starts_with")).map(|_| Self::StartsWith),
-            attempt(string("ends_with")).map(|_| Self::EndsWith),
-            attempt(string("matches")).map(|_| Self::Matches),
-            string("globs").map(|_| Self::Globs),
+            attempt(string("equals").with(arg())).map(Self::Equals),
+            attempt(string("contains").with(arg())).map(Self::Contains),
+            attempt(string("starts_with").with(arg())).map(Self::StartsWith),
+            attempt(string("ends_with").with(arg())).map(Self::EndsWith),
+            attempt(string("matches").with(regex())).map(Self::Matches),
+            string("globs").with(glob()).map(Self::Globs),
         ))
     }
 }
@@ -113,12 +190,21 @@ pub enum CompoundSelectorName {
     Benchmark,
     Example,
     Test,
+    Package,
 }
 
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
             attempt(string("name")).map(|_| Self::Name),
+            attempt(string("package")).map(|_| Self::Package),
+            Self::parser_for_simple_selector(),
+        ))
+    }
+
+    pub fn parser_for_simple_selector<InputT: Stream<Token = char>>(
+    ) -> impl Parser<InputT, Output = Self> {
+        choice((
             attempt(string("binary")).map(|_| Self::Binary),
             attempt(string("benchmark")).map(|_| Self::Benchmark),
             attempt(string("example")).map(|_| Self::Example),
@@ -130,22 +216,16 @@ impl CompoundSelectorName {
 #[derive(Debug, PartialEq)]
 pub struct CompoundSelector {
     pub name: CompoundSelectorName,
-    pub matcher_name: MatcherName,
-    pub matcher_parameter: MatcherParameter,
+    pub matcher: Matcher,
 }
 
 impl CompoundSelector {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         (
             CompoundSelectorName::parser().skip(token('.')),
-            MatcherName::parser(),
-            MatcherParameter::parser(),
+            Matcher::parser(),
         )
-            .map(|(name, matcher_name, matcher_parameter)| Self {
-                name,
-                matcher_name,
-                matcher_parameter,
-            })
+            .map(|(name, matcher)| Self { name, matcher })
     }
 }
 
@@ -170,7 +250,7 @@ impl SimpleSelectorName {
             attempt(string("none")).map(|_| Self::None),
             attempt(string("false")).map(|_| Self::False),
             attempt(string("library")).map(|_| Self::Library),
-            CompoundSelectorName::parser().map(Self::Compound),
+            CompoundSelectorName::parser_for_simple_selector().map(Self::Compound),
         ))
     }
 }
@@ -320,11 +400,18 @@ impl OrExpression {
 
 #[derive(Debug, PartialEq, From)]
 #[from(types(NotExpression, AndExpression))]
-pub struct Pattern(OrExpression);
+pub struct Pattern(pub OrExpression);
 
 impl Pattern {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         OrExpression::parser().map(Self)
+    }
+}
+
+impl FromStr for Pattern {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self> {
+        parse_str!(Self, s).map_err(|e| anyhow!("Failed to parse pattern: {e}"))
     }
 }
 
@@ -360,8 +447,6 @@ fn simple_expr() {
     test_it("library", Library);
     test_it("library()", Library);
 
-    test_it("name", Name);
-    test_it("name()", Name);
     test_it("binary", Binary);
     test_it("binary()", Binary);
     test_it("benchmark", Benchmark);
@@ -370,34 +455,44 @@ fn simple_expr() {
     test_it("example()", Example);
     test_it("test", Test);
     test_it("test()", Test);
+
+    fn test_it_err(a: &str) {
+        assert!(parse_str!(SimpleExpression, a).is_err());
+    }
+    test_it_err("name");
+    test_it_err("name()");
+    test_it_err("package");
+    test_it_err("package()");
 }
 
 #[test]
 fn simple_expr_compound() {
     use CompoundSelectorName::*;
-    use MatcherName::*;
+    use Matcher::*;
 
-    fn test_it(
-        a: &str,
-        name: CompoundSelectorName,
-        matcher_name: MatcherName,
-        matcher_parameter: impl Into<MatcherParameter>,
-    ) {
+    fn test_it(a: &str, name: CompoundSelectorName, matcher: Matcher) {
         assert_eq!(
             parse_str!(SimpleExpression, a),
-            Ok(CompoundSelector {
-                name,
-                matcher_name,
-                matcher_parameter: matcher_parameter.into()
-            }
-            .into())
+            Ok(CompoundSelector { name, matcher }.into())
         );
     }
-    test_it("name.matches<foo>", Name, Matches, "foo");
-    test_it("test.equals([a-z].*)", Test, Equals, "[a-z].*");
-    test_it("binary.starts_with<(hi)>", Binary, StartsWith, "(hi)");
-    test_it("benchmark.ends_with[hey?]", Benchmark, EndsWith, "hey?");
-    test_it("example.contains{s(oi)l}", Example, Contains, "s(oi)l");
+    test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
+    test_it("test.equals([a-z].*)", Test, Equals("[a-z].*".into()));
+    test_it(
+        "binary.starts_with<(hi)>",
+        Binary,
+        StartsWith("(hi)".into()),
+    );
+    test_it(
+        "benchmark.ends_with[hey?]",
+        Benchmark,
+        EndsWith("hey?".into()),
+    );
+    test_it(
+        "example.contains{s(oi)l}",
+        Example,
+        Contains("s(oi)l".into()),
+    );
 }
 
 #[test]
@@ -530,15 +625,13 @@ fn pattern_complicated_boolean_expr_compound() {
         AndExpression::And(
             CompoundSelector {
                 name: CompoundSelectorName::Binary,
-                matcher_name: MatcherName::StartsWith,
-                matcher_parameter: "hi".into(),
+                matcher: Matcher::StartsWith("hi".into()),
             }
             .into(),
             Box::new(
                 CompoundSelector {
                     name: CompoundSelectorName::Name,
-                    matcher_name: MatcherName::Matches,
-                    matcher_parameter: "([a-z]+::)*[a-z]+".into(),
+                    matcher: Matcher::Matches(regex!("([a-z]+::)*[a-z]+").into()),
                 }
                 .into(),
             ),
@@ -552,15 +645,13 @@ fn pattern_complicated_boolean_expr_compound() {
                 AndExpression::And(
                     CompoundSelector {
                         name: CompoundSelectorName::Binary,
-                        matcher_name: MatcherName::StartsWith,
-                        matcher_parameter: "hi".into(),
+                        matcher: Matcher::StartsWith("hi".into()),
                     }
                     .into(),
                     Box::new(
                         CompoundSelector {
                             name: CompoundSelectorName::Name,
-                            matcher_name: MatcherName::Matches,
-                            matcher_parameter: "([a-z]+::)*[a-z]+".into(),
+                            matcher: Matcher::Matches(regex!("([a-z]+::)*[a-z]+").into()),
                         }
                         .into(),
                     ),
@@ -571,8 +662,7 @@ fn pattern_complicated_boolean_expr_compound() {
             Box::new(
                 CompoundSelector {
                     name: CompoundSelectorName::Benchmark,
-                    matcher_name: MatcherName::EndsWith,
-                    matcher_parameter: "jo".into(),
+                    matcher: Matcher::EndsWith("jo".into()),
                 }
                 .into(),
             ),

@@ -46,6 +46,7 @@ figment = { version = "0.10.10", features = ["env", "toml"] }
 fs2 = "0.4"
 futures = "0.3"
 gethostname = "0.4.2"
+globset = "0.4"
 gloo-net = "0.4"
 gloo-utils = "0.2"
 hyper-tungstenite = "0.11"
@@ -73,6 +74,7 @@ num_cpus = "1.15.0"
 oci-spec = "0.6"
 rand = "0.8.5"
 regex = "1.8.3"
+regex-macro = "0.2"
 reqwest = { version = "0.11", features = [ "stream", "json" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.107" }
