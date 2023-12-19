@@ -5,6 +5,7 @@ pub mod metadata;
 pub mod pattern;
 pub mod progress;
 pub mod substitute;
+pub mod test_listing;
 pub mod visitor;
 
 use anyhow::{anyhow, Result};
@@ -15,14 +16,12 @@ use indicatif::{ProgressBar, TermLike};
 use metadata::{AllMetadata, ContainerImage, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
 use meticulous_client::{Client, ClientDriver};
-use meticulous_util::{config::BrokerAddr, fs::Fs, process::ExitCode};
+use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
 };
-use serde::{Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::HashSet,
     io,
     path::{Path, PathBuf},
     str,
@@ -31,46 +30,8 @@ use std::{
         Arc, Mutex,
     },
 };
+use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
-
-#[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
-#[repr(u32)]
-pub enum TestListingVersion {
-    #[default]
-    V0 = 0,
-}
-
-#[derive(Default, Serialize, Deserialize)]
-struct TestListing {
-    version: TestListingVersion,
-    #[serde(flatten)]
-    package_to_cases: BTreeMap<String, Vec<String>>,
-}
-
-impl TestListing {
-    fn add_cases(&mut self, package: &str, cases: &[String]) {
-        self.package_to_cases
-            .entry(package.into())
-            .or_default()
-            .extend(cases.iter().cloned())
-    }
-
-    fn remove_package(&mut self, package: &str) {
-        self.package_to_cases.remove(package);
-    }
-
-    fn expected_job_count(&self, package: &Option<String>, filter: &Option<String>) -> u64 {
-        self.package_to_cases
-            .iter()
-            .filter_map(|(p, cases)| {
-                (package.is_none() || package.as_ref().is_some_and(|exp_p| exp_p == p))
-                    .then_some(cases)
-            })
-            .flatten()
-            .filter(|c| filter.is_none() || filter.as_ref().is_some_and(|exp_c| c.contains(exp_c)))
-            .count() as u64
-    }
-}
 
 struct JobQueuer<StdErrT> {
     cargo: String,
@@ -148,7 +109,7 @@ where
         package_name: String,
     ) -> Result<Self> {
         ind.update_enqueue_status(format!("processing {package_name}"));
-        let binary = PathBuf::from(artifact.executable.unwrap());
+        let binary = PathBuf::from(artifact.executable.clone().unwrap());
         let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
             .into_iter()
             .collect();
@@ -161,7 +122,7 @@ where
         let mut cases = get_cases_from_binary(&binary, &None)?;
 
         let mut listing = job_queuer.test_listing.lock().unwrap();
-        listing.add_cases(&package_name, &cases[..]);
+        listing.add_cases(&artifact, &cases[..]);
 
         if let Some(filter) = &job_queuer.filter {
             cases.retain(|c| c.contains(filter));
@@ -382,23 +343,6 @@ where
 
         Ok(res)
     }
-}
-
-const LAST_TEST_LISTING_NAME: &str = "meticulous-test-listing.toml";
-
-fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
-    let fs = Fs::new();
-    if let Some(contents) = fs.read_to_string_if_exists(path)? {
-        Ok(toml::from_str(&contents)?)
-    } else {
-        Ok(None)
-    }
-}
-
-fn write_test_listing(path: &Path, job_listing: &TestListing) -> Result<()> {
-    let fs = Fs::new();
-    fs.write(path, toml::to_string_pretty(job_listing)?)?;
-    Ok(())
 }
 
 pub struct MainAppDeps<StdErrT> {

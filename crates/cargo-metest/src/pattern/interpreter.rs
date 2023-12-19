@@ -1,15 +1,33 @@
 use crate::pattern::parser::*;
+use cargo_metadata::Target;
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 use crate::parse_str;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ArtifactKind {
     Library,
     Binary,
     Test,
     Benchmark,
     Example,
+}
+
+impl ArtifactKind {
+    pub fn from_target(t: &Target) -> Self {
+        if t.is_bin() {
+            Self::Binary
+        } else if t.is_test() {
+            Self::Test
+        } else if t.is_example() {
+            Self::Example
+        } else if t.is_bench() {
+            Self::Benchmark
+        } else {
+            Self::Library
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
