@@ -41,6 +41,7 @@ rustPlatform.buildRustPackage {
 
   postInstall = ''
     rm $out/lib/libmeticulous_web.so
+    rmdir $out/lib
   '';
 
   doCheck = false;
