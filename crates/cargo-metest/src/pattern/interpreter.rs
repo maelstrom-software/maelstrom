@@ -7,6 +7,9 @@ use crate::parse_str;
 pub enum ArtifactKind {
     Library,
     Binary,
+    Test,
+    Benchmark,
+    Example,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -16,17 +19,9 @@ pub struct Artifact {
     pub package: String,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum CaseKind {
-    Test,
-    Benchmark,
-    Example,
-}
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Case {
     pub name: String,
-    pub kind: CaseKind,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -76,20 +71,20 @@ pub fn maybe_or(a: Option<bool>, b: Option<bool>) -> Option<bool> {
     }
 }
 
-pub fn interpret_simple_selector(s: &SimpleSelector, c: &Context) -> Option<bool> {
+pub fn interpret_simple_selector(s: &SimpleSelector, c: &Context) -> bool {
     use CompoundSelectorName::*;
     use SimpleSelectorName::*;
-    Some(match s.name {
+    match s.name {
         All | Any | True => true,
         None | False => false,
         Library => matches!(c.artifact.kind, ArtifactKind::Library),
         Compound(Binary) => matches!(c.artifact.kind, ArtifactKind::Binary),
-        Compound(Benchmark) => matches!(c.case()?.kind, CaseKind::Benchmark),
-        Compound(Test) => matches!(c.case()?.kind, CaseKind::Test),
-        Compound(Example) => matches!(c.case()?.kind, CaseKind::Example),
+        Compound(Benchmark) => matches!(c.artifact.kind, ArtifactKind::Benchmark),
+        Compound(Test) => matches!(c.artifact.kind, ArtifactKind::Test),
+        Compound(Example) => matches!(c.artifact.kind, ArtifactKind::Example),
         Compound(Name) => unreachable!("should be parser error"),
         Compound(Package) => unreachable!("should be parser error"),
-    })
+    }
 }
 
 fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
@@ -114,16 +109,16 @@ pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<
                 && interpret_matcher(&c.artifact.name, &s.matcher)
         }
         Benchmark => {
-            matches!(&c.case()?.kind, CaseKind::Benchmark)
-                && interpret_matcher(&c.case()?.name, &s.matcher)
+            matches!(&c.artifact.kind, ArtifactKind::Benchmark)
+                && interpret_matcher(&c.artifact.name, &s.matcher)
         }
         Example => {
-            matches!(&c.case()?.kind, CaseKind::Example)
-                && interpret_matcher(&c.case()?.name, &s.matcher)
+            matches!(&c.artifact.kind, ArtifactKind::Example)
+                && interpret_matcher(&c.artifact.name, &s.matcher)
         }
         Test => {
-            matches!(&c.case()?.kind, CaseKind::Test)
-                && interpret_matcher(&c.case()?.name, &s.matcher)
+            matches!(&c.artifact.kind, ArtifactKind::Test)
+                && interpret_matcher(&c.artifact.name, &s.matcher)
         }
     })
 }
@@ -166,7 +161,7 @@ pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<
     use SimpleExpression::*;
     match s {
         Or(o) => interpret_or_expression(&*o, c),
-        SimpleSelector(s) => interpret_simple_selector(s, c),
+        SimpleSelector(s) => Some(interpret_simple_selector(s, c)),
         CompoundSelector(s) => interpret_compound_selector(s, c),
     }
 }
@@ -178,78 +173,52 @@ pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
 #[test]
 fn simple_expression_simple_selector() {
     use ArtifactKind::*;
-    use CaseKind::*;
 
-    fn test_it(s: &str, artifact: ArtifactKind, case: Option<CaseKind>, expected: Option<bool>) {
+    fn test_it(s: &str, artifact: ArtifactKind, expected: bool) {
         let c = Context {
             artifact: Artifact {
                 kind: artifact,
                 name: "foo.bin".into(),
                 package: "foo".into(),
             },
-            case: case.map(|kind| Case {
-                name: "foo_test".into(),
-                kind,
-            }),
+            case: None,
         };
         let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
-        assert_eq!(actual, expected);
+        assert_eq!(actual, Some(expected));
     }
 
     // for all inputs, these expression evaluate as true
     for w in ["all", "any", "true"] {
-        for a in [Library, Binary] {
-            for c in [None, Some(Test), Some(Benchmark), Some(Example)] {
-                test_it(w, a, c, Some(true));
-            }
+        for a in [Library, Binary, Test, Benchmark, Example] {
+            test_it(w, a, true);
         }
     }
 
     // for all inputs, these expression evaluate as false
     for w in ["none", "false"] {
-        for a in [Library, Binary] {
-            for c in [None, Some(Test), Some(Benchmark), Some(Example)] {
-                test_it(w, a, c, Some(false));
-            }
+        for a in [Library, Binary, Test, Benchmark, Example] {
+            test_it(w, a, false);
         }
     }
 
-    test_it("library", Library, None, Some(true));
-    test_it("library", Library, Some(Test), Some(true));
-    test_it("library", Binary, None, Some(false));
-    test_it("library", Binary, Some(Test), Some(false));
+    test_it("library", Library, true);
+    test_it("library", Binary, false);
 
-    test_it("binary", Library, None, Some(false));
-    test_it("binary", Library, Some(Test), Some(false));
-    test_it("binary", Binary, None, Some(true));
-    test_it("binary", Binary, Some(Test), Some(true));
+    test_it("binary", Library, false);
+    test_it("binary", Binary, true);
 
-    for a in [Library, Binary] {
-        test_it("benchmark", a, None, None);
-        test_it("benchmark", a, Some(Test), Some(false));
-        test_it("benchmark", a, Some(Benchmark), Some(true));
-    }
+    test_it("benchmark", Library, false);
+    test_it("benchmark", Benchmark, true);
 
-    for a in [Library, Binary] {
-        test_it("test", a, None, None);
-        test_it("test", a, Some(Benchmark), Some(false));
-        test_it("test", a, Some(Test), Some(true));
-    }
+    test_it("test", Library, false);
+    test_it("test", Test, true);
 
-    for a in [Library, Binary] {
-        test_it("example", a, None, None);
-        test_it("example", a, Some(Benchmark), Some(false));
-        test_it("example", a, Some(Example), Some(true));
-    }
+    test_it("example", Library, false);
+    test_it("example", Example, true);
 }
 
 #[cfg(test)]
-fn test_compound_sel(
-    s: &str,
-    artifact: ArtifactKind,
-    name: impl Into<String>,
-    expected: Option<bool>,
-) {
+fn test_compound_sel(s: &str, artifact: ArtifactKind, name: impl Into<String>, expected: bool) {
     let c = Context {
         artifact: Artifact {
             kind: artifact,
@@ -259,7 +228,7 @@ fn test_compound_sel(
         case: None,
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
-    assert_eq!(actual, expected);
+    assert_eq!(actual, Some(expected));
 }
 
 #[test]
@@ -267,8 +236,8 @@ fn simple_expression_compound_selector_starts_with() {
     use ArtifactKind::*;
 
     let p = "binary.starts_with(bar)";
-    test_compound_sel(p, Binary, "barbaz", Some(true));
-    test_compound_sel(p, Binary, "bazbar", Some(false));
+    test_compound_sel(p, Binary, "barbaz", true);
+    test_compound_sel(p, Binary, "bazbar", false);
 }
 
 #[test]
@@ -276,8 +245,8 @@ fn simple_expression_compound_selector_ends_with() {
     use ArtifactKind::*;
 
     let p = "binary.ends_with(bar)";
-    test_compound_sel(p, Binary, "bazbar", Some(true));
-    test_compound_sel(p, Binary, "barbaz", Some(false));
+    test_compound_sel(p, Binary, "bazbar", true);
+    test_compound_sel(p, Binary, "barbaz", false);
 }
 
 #[test]
@@ -285,8 +254,8 @@ fn simple_expression_compound_selector_equals() {
     use ArtifactKind::*;
 
     let p = "binary.equals(bar)";
-    test_compound_sel(p, Binary, "bar", Some(true));
-    test_compound_sel(p, Binary, "baz", Some(false));
+    test_compound_sel(p, Binary, "bar", true);
+    test_compound_sel(p, Binary, "baz", false);
 }
 
 #[test]
@@ -294,8 +263,8 @@ fn simple_expression_compound_selector_contains() {
     use ArtifactKind::*;
 
     let p = "binary.contains(bar)";
-    test_compound_sel(p, Binary, "bazbarbin", Some(true));
-    test_compound_sel(p, Binary, "bazbin", Some(false));
+    test_compound_sel(p, Binary, "bazbarbin", true);
+    test_compound_sel(p, Binary, "bazbin", false);
 }
 
 #[test]
@@ -303,8 +272,8 @@ fn simple_expression_compound_selector_matches() {
     use ArtifactKind::*;
 
     let p = "binary.matches(^[a-z]*$)";
-    test_compound_sel(p, Binary, "bazbarbin", Some(true));
-    test_compound_sel(p, Binary, "baz-bin", Some(false));
+    test_compound_sel(p, Binary, "bazbarbin", true);
+    test_compound_sel(p, Binary, "baz-bin", false);
 }
 
 #[test]
@@ -312,66 +281,86 @@ fn simple_expression_compound_selector_globs() {
     use ArtifactKind::*;
 
     let p = "binary.globs(baz*)";
-    test_compound_sel(p, Binary, "bazbarbin", Some(true));
-    test_compound_sel(p, Binary, "binbaz", Some(false));
+    test_compound_sel(p, Binary, "bazbarbin", true);
+    test_compound_sel(p, Binary, "binbaz", false);
 }
 
 #[cfg(test)]
 fn test_compound_sel_case(
     s: &str,
-    case_kind: CaseKind,
-    name: impl Into<String>,
-    expected: Option<bool>,
+    kind: ArtifactKind,
+    artifact_name: impl Into<String>,
+    case_name: impl Into<String>,
+    expected: bool,
 ) {
     let c = Context {
         artifact: Artifact {
-            kind: ArtifactKind::Library,
-            name: "foo_bin".into(),
+            kind,
+            name: artifact_name.into(),
             package: "foo".into(),
         },
         case: Some(Case {
-            name: name.into(),
-            kind: case_kind,
+            name: case_name.into(),
         }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
-    assert_eq!(actual, expected);
+    assert_eq!(actual, Some(expected));
 }
 
 #[test]
 fn simple_expression_compound_selector_name() {
-    use CaseKind::*;
+    use ArtifactKind::*;
 
     let p = "name.matches(^[a-z]*$)";
-    for k in [Test, Benchmark, Example] {
-        test_compound_sel_case(p, k, "bazbarbin", Some(true));
-        test_compound_sel_case(p, k, "baz-bin", Some(false));
+    for k in [Library, Binary, Test, Benchmark, Example] {
+        test_compound_sel_case(p, k, "", "bazbarbin", true);
+        test_compound_sel_case(p, k, "", "baz-bin", false);
     }
 }
 
 #[test]
+fn simple_expression_compound_selector_binary() {
+    use ArtifactKind::*;
+
+    let p = "binary.matches(^[a-z]*$)";
+    test_compound_sel_case(p, Binary, "bazbarbin", "", true);
+    test_compound_sel_case(p, Binary, "baz-bin", "", false);
+    test_compound_sel_case(p, Test, "bazbarbin", "", false);
+}
+
+#[test]
 fn simple_expression_compound_selector_benchmark() {
-    use CaseKind::*;
+    use ArtifactKind::*;
 
     let p = "benchmark.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Benchmark, "bazbarbin", Some(true));
-    test_compound_sel_case(p, Benchmark, "baz-bin", Some(false));
-    test_compound_sel_case(p, Test, "bazbarbin", Some(false));
+    test_compound_sel_case(p, Benchmark, "bazbarbin", "", true);
+    test_compound_sel_case(p, Benchmark, "baz-bin", "", false);
+    test_compound_sel_case(p, Test, "bazbarbin", "", false);
 }
 
 #[test]
 fn simple_expression_compound_selector_example() {
-    use CaseKind::*;
+    use ArtifactKind::*;
 
     let p = "example.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Example, "bazbarbin", Some(true));
-    test_compound_sel_case(p, Example, "baz-bin", Some(false));
-    test_compound_sel_case(p, Test, "bazbarbin", Some(false));
+    test_compound_sel_case(p, Example, "bazbarbin", "", true);
+    test_compound_sel_case(p, Example, "baz-bin", "", false);
+    test_compound_sel_case(p, Test, "bazbarbin", "", false);
+}
+
+#[test]
+fn simple_expression_compound_selector_test() {
+    use ArtifactKind::*;
+
+    let p = "test.matches(^[a-z]*$)";
+    test_compound_sel_case(p, Test, "bazbarbin", "", true);
+    test_compound_sel_case(p, Test, "baz-bin", "", false);
+    test_compound_sel_case(p, Binary, "bazbarbin", "", false);
 }
 
 #[test]
 fn and_or_not_diff_expressions() {
-    fn test_it(s: &str, expected: Option<bool>) {
+    fn test_it(s: &str, expected: bool) {
         let c = Context {
             artifact: Artifact {
                 kind: ArtifactKind::Library,
@@ -380,27 +369,26 @@ fn and_or_not_diff_expressions() {
             },
             case: Some(Case {
                 name: "foo_test".into(),
-                kind: CaseKind::Test,
             }),
         };
         let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);
-        assert_eq!(actual, expected);
+        assert_eq!(actual, Some(expected));
     }
 
     test_it(
-        "(package.equals(foo) || package.equals(bar)) && test.equals(foo_test)",
-        Some(true),
+        "(package.equals(foo) || package.equals(bar)) && name.equals(foo_test)",
+        true,
     );
-    test_it("package.equals(foo) && test.equals(foo_test)", Some(true));
-    test_it("package.equals(foo) || test.equals(foo_test)", Some(true));
-    test_it("package.equals(foo) || test.equals(bar_test)", Some(true));
-    test_it("package.equals(foo) && !test.equals(bar_test)", Some(true));
-    test_it("package.equals(foo) - test.equals(bar_test)", Some(true));
+    test_it("package.equals(foo) && name.equals(foo_test)", true);
+    test_it("package.equals(foo) || name.equals(foo_test)", true);
+    test_it("package.equals(foo) || name.equals(bar_test)", true);
+    test_it("package.equals(foo) && !name.equals(bar_test)", true);
+    test_it("package.equals(foo) - name.equals(bar_test)", true);
 
-    test_it("package.equals(foo) && test.equals(bar_test)", Some(false));
-    test_it("package.equals(bar) || test.equals(bar_test)", Some(false));
-    test_it("package.equals(bar) || !test.equals(foo_test)", Some(false));
-    test_it("package.equals(foo) - test.equals(foo_test)", Some(false));
+    test_it("package.equals(foo) && name.equals(bar_test)", false);
+    test_it("package.equals(bar) || name.equals(bar_test)", false);
+    test_it("package.equals(bar) || !name.equals(foo_test)", false);
+    test_it("package.equals(foo) - name.equals(foo_test)", false);
 }
 
 #[test]
@@ -419,27 +407,27 @@ fn and_or_not_diff_maybe_expressions() {
     }
 
     test_it(
-        "(package.equals(foo) || package.equals(bar)) && test.equals(foo_test)",
+        "(package.equals(foo) || package.equals(bar)) && name.equals(foo_test)",
         None,
     );
-    test_it("package.equals(foo) && test.equals(foo_test)", None);
-    test_it("test.equals(foo_test) && test.equals(bar_test)", None);
-    test_it("test.equals(foo_test) && package.equals(foo)", None);
-    test_it("package.equals(foo) && test.equals(bar_test)", None);
-    test_it("package.equals(foo) && !test.equals(bar_test)", None);
+    test_it("package.equals(foo) && name.equals(foo_test)", None);
+    test_it("name.equals(foo_test) && name.equals(bar_test)", None);
+    test_it("name.equals(foo_test) && package.equals(foo)", None);
+    test_it("package.equals(foo) && name.equals(bar_test)", None);
+    test_it("package.equals(foo) && !name.equals(bar_test)", None);
 
-    test_it("test.equals(foo_test) && package.equals(bar)", Some(false));
-    test_it("package.equals(bar) && test.equals(foo_test)", Some(false));
+    test_it("name.equals(foo_test) && package.equals(bar)", Some(false));
+    test_it("package.equals(bar) && name.equals(foo_test)", Some(false));
 
-    test_it("test.equals(foo_test) || test.equals(bar_test)", None);
-    test_it("test.equals(foo_test) || package.equals(bar)", None);
-    test_it("package.equals(bar) || test.equals(bar_test)", None);
-    test_it("package.equals(bar) || !test.equals(foo_test)", None);
+    test_it("name.equals(foo_test) || name.equals(bar_test)", None);
+    test_it("name.equals(foo_test) || package.equals(bar)", None);
+    test_it("package.equals(bar) || name.equals(bar_test)", None);
+    test_it("package.equals(bar) || !name.equals(foo_test)", None);
 
-    test_it("test.equals(foo_test) || package.equals(foo)", Some(true));
-    test_it("package.equals(foo) || test.equals(foo_test)", Some(true));
-    test_it("package.equals(foo) || test.equals(bar_test)", Some(true));
+    test_it("name.equals(foo_test) || package.equals(foo)", Some(true));
+    test_it("package.equals(foo) || name.equals(foo_test)", Some(true));
+    test_it("package.equals(foo) || name.equals(bar_test)", Some(true));
 
-    test_it("package.equals(foo) - test.equals(bar_test)", None);
-    test_it("package.equals(foo) - test.equals(foo_test)", None);
+    test_it("package.equals(foo) - name.equals(bar_test)", None);
+    test_it("package.equals(foo) - name.equals(foo_test)", None);
 }
