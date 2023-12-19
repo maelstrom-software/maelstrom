@@ -126,7 +126,7 @@ pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<
 fn interpret_not_expression(n: &NotExpression, c: &Context) -> Option<bool> {
     use NotExpression::*;
     match n {
-        Not(n) => maybe_not(interpret_not_expression(&*n, c)),
+        Not(n) => maybe_not(interpret_not_expression(n, c)),
         Simple(s) => interpret_simple_expression(s, c),
     }
 }
@@ -136,11 +136,11 @@ fn interpret_and_expression(a: &AndExpression, c: &Context) -> Option<bool> {
     match a {
         And(n, a) => maybe_and(
             interpret_not_expression(n, c),
-            interpret_and_expression(&*a, c),
+            interpret_and_expression(a, c),
         ),
         Diff(n, a) => maybe_and(
             interpret_not_expression(n, c),
-            maybe_not(interpret_and_expression(&*a, c)),
+            maybe_not(interpret_and_expression(a, c)),
         ),
         Not(n) => interpret_not_expression(n, c),
     }
@@ -151,7 +151,7 @@ fn interpret_or_expression(o: &OrExpression, c: &Context) -> Option<bool> {
     match o {
         Or(a, o) => maybe_or(
             interpret_and_expression(a, c),
-            interpret_or_expression(&*o, c),
+            interpret_or_expression(o, c),
         ),
         And(a) => interpret_and_expression(a, c),
     }
@@ -160,7 +160,7 @@ fn interpret_or_expression(o: &OrExpression, c: &Context) -> Option<bool> {
 pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<bool> {
     use SimpleExpression::*;
     match s {
-        Or(o) => interpret_or_expression(&*o, c),
+        Or(o) => interpret_or_expression(o, c),
         SimpleSelector(s) => Some(interpret_simple_selector(s, c)),
         CompoundSelector(s) => interpret_compound_selector(s, c),
     }
