@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use cargo_metadata::Metadata as CargoMetadata;
 use cargo_metest::{
     config::{Config, ConfigOptions},
     main_app_new,
@@ -14,7 +15,6 @@ use figment::{
 };
 use meticulous_client::DefaultClientDriver;
 use meticulous_util::process::ExitCode;
-use serde::Deserialize;
 use std::{io::IsTerminal as _, path::PathBuf, process::Command, str};
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
@@ -75,11 +75,6 @@ impl CliOptions {
     }
 }
 
-#[derive(Deserialize)]
-struct CargoMetadata {
-    workspace_root: PathBuf,
-}
-
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -102,7 +97,8 @@ pub fn main() -> Result<ExitCode> {
         None => cargo_metadata
             .workspace_root
             .join(".config")
-            .join("cargo-metest.toml"),
+            .join("cargo-metest.toml")
+            .into(),
     };
 
     let config: Config = Figment::new()
