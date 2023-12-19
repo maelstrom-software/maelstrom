@@ -104,7 +104,7 @@ macro_rules! path_buf {
 #[macro_export]
 macro_rules! path_buf_vec {
     [$($e:expr),*] => {
-        vec![$(path_buf!($e)),*]
+        vec![$($crate::path_buf!($e)),*]
     };
 }
 

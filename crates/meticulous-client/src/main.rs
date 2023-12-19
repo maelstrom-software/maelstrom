@@ -1,15 +1,19 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Error, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use indicatif::ProgressBar;
 use meticulous_base::{
     ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess, NonEmpty,
     Sha256Digest,
 };
-use meticulous_client::{spec, Client, DefaultClientDriver};
+use meticulous_client::{
+    spec::{self, ContainerImage},
+    Client, DefaultClientDriver,
+};
 use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
@@ -18,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::{
     cell::RefCell,
+    env::{self, VarError},
     io::{self, Read, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
@@ -140,6 +145,14 @@ fn cache_dir() -> PathBuf {
         .join("meticulous")
 }
 
+fn std_env_lookup(var: &str) -> Result<Option<String>> {
+    match env::var(var) {
+        Ok(val) => Ok(Some(val)),
+        Err(VarError::NotPresent) => Ok(None),
+        Err(err) => Err(Error::new(err)),
+    }
+}
+
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
@@ -172,9 +185,24 @@ fn main() -> Result<ExitCode> {
     )?;
     let client = RefCell::new(client);
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
-    let job_specs = spec::job_spec_iter_from_reader(reader, |layer| {
-        add_artifact(&mut client.borrow_mut(), layer.as_str())
-    });
+    let image_lookup = |image: &str| {
+        let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
+        let prog = ProgressBar::hidden();
+        let mut client = client.borrow_mut();
+        let container_image_depot = client.container_image_depot_mut();
+        let image = container_image_depot.get_container_image(image, version, prog)?;
+        Ok(ContainerImage {
+            layers: image.layers.clone(),
+            environment: image.env().cloned(),
+            working_directory: image.working_dir().map(PathBuf::from),
+        })
+    };
+    let job_specs = spec::job_spec_iter_from_reader(
+        reader,
+        |layer| add_artifact(&mut client.borrow_mut(), layer.as_str()),
+        std_env_lookup,
+        image_lookup,
+    );
     for job_spec in job_specs {
         let accum_clone = accum.clone();
         client.borrow_mut().add_job(
