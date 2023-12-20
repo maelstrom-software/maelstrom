@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use crate::parse_str;
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialOrd, Ord, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum ArtifactKind {
     Library,
     Binary,
