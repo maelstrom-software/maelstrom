@@ -129,6 +129,7 @@ pub fn main() -> Result<ExitCode> {
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
+        &cargo_metadata.workspace_packages(),
         config.broker,
         DefaultClientDriver::default(),
     )?;

@@ -10,7 +10,7 @@ pub mod visitor;
 
 use anyhow::{anyhow, Result};
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
-use cargo_metadata::Artifact as CargoArtifact;
+use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use metadata::{AllMetadata, ContainerImage, TestMetadata};
@@ -42,7 +42,7 @@ struct JobQueuer<StdErrT> {
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
-    expected_job_count: Option<u64>,
+    expected_job_count: u64,
     test_listing: Mutex<TestListing>,
 }
 
@@ -54,19 +54,9 @@ impl<StdErrT> JobQueuer<StdErrT> {
         stderr: StdErrT,
         stderr_color: bool,
         test_metadata: AllMetadata,
-        last_test_listing: Option<TestListing>,
+        test_listing: TestListing,
     ) -> Self {
-        let expected_job_count = last_test_listing
-            .as_ref()
-            .map(|l| l.expected_job_count(&package, &filter));
-
-        let test_listing = if let Some(package) = &package {
-            let mut listing = last_test_listing.unwrap_or_default();
-            listing.remove_package(package);
-            listing
-        } else {
-            Default::default()
-        };
+        let expected_job_count = test_listing.expected_job_count(&package, &filter);
 
         Self {
             cargo,
@@ -197,10 +187,8 @@ where
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
         let count = self.job_queuer.jobs_queued.fetch_add(1, Ordering::AcqRel);
-        self.ind.update_length(std::cmp::max(
-            self.job_queuer.expected_job_count.unwrap_or(0),
-            count + 1,
-        ));
+        self.ind
+            .update_length(std::cmp::max(self.job_queuer.expected_job_count, count + 1));
 
         let visitor = JobStatusVisitor::new(
             self.job_queuer.tracker.clone(),
@@ -360,6 +348,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
+        workspace_packages: &[&CargoPackage],
         broker_addr: BrokerAddr,
         client_driver: impl ClientDriver + Send + Sync + 'static,
     ) -> Result<Self> {
@@ -371,7 +360,9 @@ impl<StdErrT> MainAppDeps<StdErrT> {
             cache_dir.clone(),
         )?);
         let test_metadata = AllMetadata::load(workspace_root)?;
-        let last_test_listing = load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?;
+        let mut test_listing =
+            load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
+        test_listing.retain_packages(workspace_packages);
 
         Ok(Self {
             client,
@@ -382,7 +373,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 stderr,
                 stderr_color,
                 test_metadata,
-                last_test_listing,
+                test_listing,
             ),
             cache_dir,
         })
@@ -500,10 +491,7 @@ where
     let prog = prog_factory(term.clone());
 
     prog_driver.drive(&deps.client, prog.clone());
-
-    if let Some(len) = &deps.queuer.expected_job_count {
-        prog.update_length(*len);
-    }
+    prog.update_length(deps.queuer.expected_job_count);
 
     let queing = JobQueing::new(&deps.queuer, &deps.client, width, prog.clone())?;
     Ok(Box::new(MainAppImpl::new(

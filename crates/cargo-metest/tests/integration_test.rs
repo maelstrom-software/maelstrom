@@ -1,5 +1,9 @@
 use anyhow::Result;
 use assert_matches::assert_matches;
+use cargo_metest::test_listing::{
+    load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
+    LAST_TEST_LISTING_NAME,
+};
 use cargo_metest::{
     config::Quiet,
     main_app_new,
@@ -229,6 +233,7 @@ struct BrokerState {
     job_states: JobStateCounts,
 }
 
+#[derive(Clone)]
 struct FakeTestCase {
     name: String,
     ignored: bool,
@@ -245,14 +250,45 @@ impl Default for FakeTestCase {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct FakeTestBinary {
     name: String,
     tests: Vec<FakeTestCase>,
 }
 
+#[derive(Clone)]
 struct FakeTests {
     test_binaries: Vec<FakeTestBinary>,
+}
+
+impl FakeTests {
+    fn listing(&self) -> TestListing {
+        TestListing {
+            version: Default::default(),
+            packages: self
+                .test_binaries
+                .iter()
+                .map(|b| {
+                    (
+                        b.name.clone(),
+                        Package {
+                            artifacts: [(
+                                ArtifactKey {
+                                    name: b.name.clone(),
+                                    kind: ArtifactKind::Library,
+                                },
+                                ArtifactCases {
+                                    cases: b.tests.iter().map(|t| t.name.clone()).collect(),
+                                },
+                            )]
+                            .into_iter()
+                            .collect(),
+                        },
+                    )
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
@@ -355,6 +391,7 @@ impl<'scope> TestProgressDriver<'scope> {
 fn run_app(
     term: InMemoryTerm,
     fake_tests: FakeTests,
+    workspace_root: &Path,
     state: BrokerState,
     cargo: String,
     stdout_tty: bool,
@@ -363,18 +400,23 @@ fn run_app(
     filter: Option<String>,
     finish: bool,
 ) -> String {
-    let tmp_dir = tempdir().unwrap();
+    let cargo_metadata = cargo_metadata::MetadataCommand::new()
+        .manifest_path(workspace_root.join("Cargo.toml"))
+        .exec()
+        .unwrap();
 
     let mut stderr = vec![];
     let mut b = FakeBroker::new(state);
     let client_driver = TestClientDriver::default();
+
     let deps = MainAppDeps::new(
         cargo,
         package,
         filter,
         &mut stderr,
         false,
-        &tmp_dir,
+        &workspace_root,
+        &cargo_metadata.workspace_packages(),
         b.address.clone(),
         client_driver.clone(),
     )
@@ -427,13 +469,12 @@ fn run_app(
 }
 
 fn run_all_tests_sync(
+    tmp_dir: &TempDir,
     fake_tests: FakeTests,
     quiet: Quiet,
     package: Option<String>,
     filter: Option<String>,
 ) -> String {
-    let tmp_dir = tempdir().unwrap();
-
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
@@ -446,11 +487,17 @@ fn run_all_tests_sync(
         );
     }
 
-    let cargo = generate_cargo_project(&tmp_dir, &fake_tests);
+    let workspace = tmp_dir.path().join("workspace");
+    if !workspace.exists() {
+        generate_cargo_project(tmp_dir, &fake_tests);
+    }
+    let cargo = workspace.join("cargo").to_str().unwrap().into();
+
     let term = InMemoryTerm::new(50, 50);
     run_app(
         term.clone(),
         fake_tests,
+        &workspace,
         state,
         cargo,
         false,
@@ -463,6 +510,7 @@ fn run_all_tests_sync(
 
 #[test]
 fn no_tests_all_tests_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
@@ -470,7 +518,7 @@ fn no_tests_all_tests_sync() {
         }],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
         "\
         all jobs completed\n\
         \n\
@@ -483,6 +531,7 @@ fn no_tests_all_tests_sync() {
 
 #[test]
 fn two_tests_all_tests_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -502,7 +551,7 @@ fn two_tests_all_tests_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -517,6 +566,7 @@ fn two_tests_all_tests_sync() {
 
 #[test]
 fn three_tests_filtered_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -543,7 +593,13 @@ fn three_tests_filtered_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false.into(), None, Some("test_it".into())),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            None,
+            Some("test_it".into())
+        ),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -558,6 +614,7 @@ fn three_tests_filtered_sync() {
 
 #[test]
 fn three_tests_single_package_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -584,7 +641,7 @@ fn three_tests_single_package_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false.into(), Some("foo".into()), None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), Some("foo".into()), None),
         "\
         foo test_it.....................................OK\n\
         all jobs completed\n\
@@ -598,6 +655,7 @@ fn three_tests_single_package_sync() {
 
 #[test]
 fn three_tests_single_package_filtered_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -631,6 +689,7 @@ fn three_tests_single_package_filtered_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
+            &tmp_dir,
             fake_tests,
             false.into(),
             Some("foo".into()),
@@ -649,6 +708,7 @@ fn three_tests_single_package_filtered_sync() {
 
 #[test]
 fn ignored_test_sync() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -676,7 +736,7 @@ fn ignored_test_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
         "\
         bar test_it.....................................OK\n\
         baz test_it.....................................OK\n\
@@ -694,6 +754,7 @@ fn ignored_test_sync() {
 
 #[test]
 fn two_tests_all_tests_sync_quiet() {
+    let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -713,7 +774,7 @@ fn two_tests_all_tests_sync_quiet() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(fake_tests, true.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, true.into(), None, None),
         "\
         all jobs completed\n\
         \n\
@@ -744,6 +805,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     run_app(
         term.clone(),
         fake_tests,
+        &tmp_dir.path().join("workspace"),
         state,
         cargo,
         false,
@@ -818,7 +880,16 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
     let contents = run_app(
-        term_clone, fake_tests, state, cargo, true, quiet, None, None, false,
+        term_clone,
+        fake_tests,
+        &tmp_dir.path().join("workspace"),
+        state,
+        cargo,
+        true,
+        quiet,
+        None,
+        None,
+        false,
     );
     assert_eq!(contents, expected_output);
 }
@@ -987,4 +1058,94 @@ fn complete_quiet() {
         true.into(),
         "#####################-------------------- 1/2 jobs",
     );
+}
+
+#[test]
+fn expected_count_updates_packages() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+
+    let path = tmp_dir
+        .path()
+        .join("workspace/target")
+        .join(LAST_TEST_LISTING_NAME);
+    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    assert_eq!(listing, fake_tests.listing());
+
+    // remove bar
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![FakeTestCase {
+                name: "test_it".into(),
+                ..Default::default()
+            }],
+        }],
+    };
+    let fs = Fs::new();
+    fs.remove_dir_all(tmp_dir.path().join("workspace/crates/bar"))
+        .unwrap();
+
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+
+    // new listing should match
+    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    assert_eq!(listing, fake_tests.listing());
+}
+
+#[test]
+fn expected_count_updates_cases() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![FakeTestCase {
+                name: "test_it".into(),
+                ..Default::default()
+            }],
+        }],
+    };
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+
+    let path = tmp_dir
+        .path()
+        .join("workspace/target")
+        .join(LAST_TEST_LISTING_NAME);
+    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    assert_eq!(listing, fake_tests.listing());
+
+    // remove the test
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![],
+        }],
+    };
+    let fs = Fs::new();
+    fs.write(tmp_dir.path().join("workspace/crates/foo/src/lib.rs"), "")
+        .unwrap();
+
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+
+    // new listing should match
+    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    assert_eq!(listing, fake_tests.listing());
 }

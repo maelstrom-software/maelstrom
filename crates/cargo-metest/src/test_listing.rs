@@ -1,12 +1,13 @@
-use crate::pattern::ArtifactKind;
 use anyhow::{anyhow, Result};
-use cargo_metadata::Artifact as CargoArtifact;
+use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Target as CargoTarget};
 use meticulous_util::fs::Fs;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, FromInto};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+
+pub use crate::pattern::ArtifactKind;
 
 #[derive(Default, Copy, Clone, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
@@ -16,15 +17,24 @@ pub enum TestListingVersion {
     V1 = 1,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-struct ArtifactKey {
-    name: String,
-    kind: ArtifactKind,
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct ArtifactKey {
+    pub name: String,
+    pub kind: ArtifactKind,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-struct ArtifactCases {
-    cases: Vec<String>,
+impl ArtifactKey {
+    fn from_target(target: &CargoTarget) -> Self {
+        Self {
+            name: target.name.clone(),
+            kind: ArtifactKind::from_target(target),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct ArtifactCases {
+    pub cases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,26 +66,23 @@ impl From<BTreeMap<ArtifactKey, ArtifactCases>> for ArtifactVec {
 }
 
 #[serde_as]
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct Package {
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Package {
     #[serde_as(as = "FromInto<ArtifactVec>")]
-    artifacts: BTreeMap<ArtifactKey, ArtifactCases>,
+    pub artifacts: BTreeMap<ArtifactKey, ArtifactCases>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TestListing {
-    version: TestListingVersion,
+    pub version: TestListingVersion,
     #[serde(flatten)]
-    packages: BTreeMap<String, Package>,
+    pub packages: BTreeMap<String, Package>,
 }
 
 impl TestListing {
     pub fn add_cases(&mut self, artifact: &CargoArtifact, cases: &[String]) {
         let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
-        let artifact_key = ArtifactKey {
-            name: artifact.target.name.clone(),
-            kind: ArtifactKind::from_target(&artifact.target),
-        };
+        let artifact_key = ArtifactKey::from_target(&artifact.target);
         let package = self.packages.entry(package_name).or_default();
         package.artifacts.insert(
             artifact_key,
@@ -99,6 +106,28 @@ impl TestListing {
             .flatten()
             .filter(|c| filter.is_none() || filter.as_ref().is_some_and(|exp_c| c.contains(exp_c)))
             .count() as u64
+    }
+
+    pub fn retain_packages(&mut self, existing_packages_slice: &[&CargoPackage]) {
+        let existing_packages: HashMap<&String, &CargoPackage> = existing_packages_slice
+            .iter()
+            .map(|p| (&p.name, *p))
+            .collect();
+        let mut new_packages = BTreeMap::new();
+        for (name, mut pkg) in std::mem::take(&mut self.packages).into_iter() {
+            let Some(existing_package) = existing_packages.get(&name) else {
+                continue;
+            };
+            let artifact_keys: HashSet<_> = existing_package
+                .targets
+                .iter()
+                .map(ArtifactKey::from_target)
+                .collect();
+            pkg.artifacts.retain(|key, _| artifact_keys.contains(key));
+            new_packages.insert(name, pkg);
+        }
+
+        self.packages = new_packages;
     }
 }
 
