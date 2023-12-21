@@ -4,7 +4,6 @@ pub mod config;
 pub mod metadata;
 pub mod pattern;
 pub mod progress;
-pub mod substitute;
 pub mod test_listing;
 pub mod visitor;
 
