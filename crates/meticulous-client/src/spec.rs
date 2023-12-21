@@ -1,3 +1,4 @@
+use crate::substitute;
 use anyhow::{anyhow, Result};
 use enumset::EnumSetType;
 use meticulous_base::{
@@ -57,6 +58,7 @@ struct Job {
     program: String,
     arguments: Option<Vec<String>>,
     environment: Option<PossiblyImage<BTreeMap<String, String>>>,
+    added_environment: BTreeMap<String, String>,
     layers: PossiblyImage<NonEmpty<String>>,
     added_layers: Vec<String>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
@@ -75,9 +77,10 @@ impl Job {
         Job {
             program,
             layers: PossiblyImage::Explicit(layers),
-            added_layers: vec![],
+            added_layers: Default::default(),
             arguments: None,
             environment: None,
+            added_environment: Default::default(),
             devices: None,
             mounts: None,
             enable_loopback: None,
@@ -92,7 +95,7 @@ impl Job {
     fn into_job_spec(
         self,
         layer_mapper: impl Fn(String) -> anyhow::Result<NonEmpty<Sha256Digest>>,
-        _env_lookup: impl Fn(&str) -> Result<Option<String>>,
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> anyhow::Result<JobSpec> {
         let (image_layers, image_environment, image_working_directory) =
@@ -105,9 +108,18 @@ impl Job {
                  }| { (Some(layers), Some(environment), Some(working_directory)) },
             );
         let image_name = self.image.as_deref().unwrap_or("");
-        let environment = match self.environment {
+        let mut environment = match self.environment {
             None => BTreeMap::default(),
-            Some(PossiblyImage::Explicit(environment)) => environment,
+            Some(PossiblyImage::Explicit(environment)) => environment
+                .into_iter()
+                .map(|(k, v)| -> Result<_> {
+                    Ok((
+                        k,
+                        substitute::substitute(&v, &env_lookup, |_| Option::<String>::None)?
+                            .into_owned(),
+                    ))
+                })
+                .collect::<Result<BTreeMap<_, _>>>()?,
             Some(PossiblyImage::Image) => {
                 let image_environment = image_environment
                     .unwrap()
@@ -128,6 +140,20 @@ impl Job {
                 environment
             }
         };
+        let added_environment = self
+            .added_environment
+            .into_iter()
+            .map(|(k, v)| -> Result<_> {
+                Ok((
+                    k,
+                    substitute::substitute(&v, &env_lookup, |var| {
+                        environment.get(var).map(|v| v.as_str())
+                    })?
+                    .into_owned(),
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        environment.extend(added_environment);
         let environment = Vec::from_iter(environment.into_iter().map(|(k, v)| k + "=" + &v));
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers,
@@ -178,6 +204,7 @@ enum JobField {
     Program,
     Arguments,
     Environment,
+    AddedEnvironment,
     Layers,
     AddedLayers,
     Devices,
@@ -228,6 +255,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
         let mut program = None;
         let mut arguments = None;
         let mut environment = None;
+        let mut added_environment = None;
         let mut layers = None;
         let mut added_layers = None;
         let mut devices = None;
@@ -247,8 +275,30 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     arguments = Some(map.next_value()?);
                 }
                 JobField::Environment => {
+                    if environment.is_some() {
+                        assert!(matches!(environment, Some(PossiblyImage::Image)));
+                        return Err(de::Error::custom(format_args!(concat!(
+                            "field `environment` cannot be set if `image` with a `use` of ",
+                            "`environment` is also set (try `added_environment` instead)"
+                        ))));
+                    }
                     environment = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
+                JobField::AddedEnvironment => match &environment {
+                    None => {
+                        return Err(de::Error::custom(format_args!(
+                                        "field `added_environment` set before `image` with a `use` of `environment`"
+                            )));
+                    }
+                    Some(PossiblyImage::Explicit(_)) => {
+                        return Err(de::Error::custom(format_args!(
+                            "field `added_environment` cannot be set with `environment` field"
+                        )));
+                    }
+                    Some(PossiblyImage::Image) => {
+                        added_environment = Some(map.next_value()?);
+                    }
+                },
                 JobField::Layers => {
                     if layers.is_some() {
                         assert!(matches!(layers, Some(PossiblyImage::Image)));
@@ -353,6 +403,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
             program: program.ok_or_else(|| de::Error::missing_field("program"))?,
             arguments,
             environment,
+            added_environment: added_environment.unwrap_or_default(),
             layers: layers.ok_or_else(|| de::Error::missing_field("layers"))?,
             added_layers: added_layers.unwrap_or_default(),
             devices,
@@ -387,8 +438,12 @@ mod test {
         Ok(nonempty![Sha256Digest::from(layer.parse::<u64>()?)])
     }
 
-    fn no_env(var: &str) -> Result<Option<String>> {
-        Err(anyhow!("no variable named {var} found"))
+    fn env(var: &str) -> Result<Option<String>> {
+        match var {
+            "FOO" => Ok(Some("foo-env".to_string())),
+            "err" => Err(anyhow!("error converting value to UTF-8")),
+            _ => Ok(None),
+        }
     }
 
     fn images(name: &str) -> Result<ContainerImage> {
@@ -396,6 +451,13 @@ mod test {
             "image1" => Ok(ContainerImage {
                 layers: path_buf_vec!["42", "43"],
                 working_directory: Some("/foo".into()),
+                environment: Some(vec![
+                    "FOO=image-foo".to_string(),
+                    "BAZ=image-baz".to_string(),
+                ]),
+            }),
+            "image-with-env-substitutions" => Ok(ContainerImage {
+                environment: Some(vec!["PATH=$env{PATH}".to_string()]),
                 ..Default::default()
             }),
             "empty" => Ok(Default::default()),
@@ -407,7 +469,7 @@ mod test {
     fn minimum_into_job_spec() {
         assert_eq!(
             Job::new("program".to_string(), nonempty!["1".to_string()])
-                .into_job_spec(layer_mapper, no_env, images)
+                .into_job_spec(layer_mapper, env, images)
                 .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)]),
         );
@@ -432,7 +494,7 @@ mod test {
                 group: Some(GroupId::from(202)),
                 ..Job::new("program".to_string(), nonempty!["1".to_string()])
             }
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)])
                 .arguments(["arg1", "arg2"])
@@ -455,7 +517,7 @@ mod test {
                 enable_loopback: Some(true),
                 ..Job::new("program".to_string(), nonempty!["1".to_string()])
             }
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)]).enable_loopback(true),
         );
@@ -468,7 +530,7 @@ mod test {
                 enable_writable_file_system: Some(true),
                 ..Job::new("program".to_string(), nonempty!["1".to_string()])
             }
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)]).enable_writable_file_system(true),
         );
@@ -504,7 +566,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]),
         );
@@ -563,7 +625,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(42), digest!(43)]),
         );
@@ -582,7 +644,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap_err(),
             "image empty has no layers to use",
         );
@@ -638,7 +700,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new(
                 "/bin/sh".to_string(),
@@ -717,7 +779,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
                 .arguments(["-e", "echo foo"]),
@@ -735,10 +797,242 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
                 .environment(["BAR=bar", "FOO=foo"]),
+        )
+    }
+
+    #[test]
+    fn environment_with_env_substitution() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "environment": { "FOO": "pre-$env{FOO}-post", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+                .environment(["BAR=bar", "FOO=pre-foo-env-post"]),
+        )
+    }
+
+    #[test]
+    fn environment_with_prev_substitution() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "environment": { "FOO": "pre-$prev{FOO:-no-prev}-post", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+                .environment(["BAR=bar", "FOO=pre-no-prev-post"]),
+        )
+    }
+
+    #[test]
+    fn environment_from_image() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "image1", "use": [ "environment" ] }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+                .environment(["BAZ=image-baz", "FOO=image-foo"]),
+        )
+    }
+
+    #[test]
+    fn environment_from_image_ignores_env_substitutions() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "image-with-env-substitutions", "use": [ "environment" ] }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+                .environment(["PATH=$env{PATH}"]),
+        )
+    }
+
+    #[test]
+    fn environment_from_image_with_no_environment() {
+        assert_anyhow_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "empty", "use": [ "environment" ] }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap_err(),
+            "image empty has no environment to use",
+        )
+    }
+
+    #[test]
+    fn environment_from_image_after_environment() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "environment": { "FOO": "foo", "BAR": "bar" },
+                    "image": { "name": "image1", "use": [ "environment" ] }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `image` cannot use `environment` if field `environment` is also set",
+        )
+    }
+
+    #[test]
+    fn environment_after_environment_from_image() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "image1", "use": [ "environment" ] },
+                    "environment": { "FOO": "foo", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `environment` cannot be set if `image` with a `use` of `environment` is also set",
+        )
+    }
+
+    #[test]
+    fn added_environment_after_environment_from_image() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "image1", "use": [ "environment" ] },
+                    "added_environment": { "FOO": "foo", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).environment([
+                "BAR=bar",
+                "BAZ=image-baz",
+                "FOO=foo"
+            ]),
+        )
+    }
+
+    #[test]
+    fn added_environment_after_environment_from_image_with_substitutions() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "image": { "name": "image1", "use": [ "environment" ] },
+                    "added_environment": {
+                        "FOO": "$env{FOO:-no-env-foo}:$prev{FOO:-no-prev-foo}",
+                        "BAR": "$env{BAR:-no-env-bar}:$prev{BAR:-no-prev-bar}",
+                        "BAZ": "$env{BAZ:-no-env-baz}:$prev{BAZ:-no-prev-baz}"
+                    }
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).environment([
+                "BAR=no-env-bar:no-prev-bar",
+                "BAZ=no-env-baz:image-baz",
+                "FOO=foo-env:image-foo"
+            ]),
+        )
+    }
+
+    #[test]
+    fn added_environment_without_environment_from_image() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "added_environment": { "FOO": "foo", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_environment` set before `image` with a `use` of `environment`",
+        )
+    }
+
+    #[test]
+    fn added_environment_before_environment_from_image() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "added_environment": { "FOO": "foo", "BAR": "bar" },
+                    "image": { "name": "image1", "use": [ "environment" ] }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_environment` set before `image` with a `use` of `environment`",
+        )
+    }
+
+    #[test]
+    fn added_environment_before_environment() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "added_environment": { "FOO": "foo", "BAR": "bar" },
+                    "environment": { "FOO": "foo", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_environment` set before `image` with a `use` of `environment`",
+        )
+    }
+
+    #[test]
+    fn added_environment_after_environment() {
+        assert_error(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ "1" ],
+                    "environment": { "FOO": "foo", "BAR": "bar" },
+                    "added_environment": { "FOO": "foo", "BAR": "bar" }
+                }"#,
+            )
+            .unwrap_err(),
+            "field `added_environment` cannot be set with `environment` field",
         )
     }
 
@@ -753,7 +1047,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
                 .devices(enum_set! {JobDevice::Null | JobDevice::Zero}),
@@ -773,7 +1067,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).mounts([JobMount {
                 fs_type: JobMountFsType::Tmp,
@@ -793,7 +1087,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).enable_loopback(true),
         )
@@ -810,7 +1104,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
                 .enable_writable_file_system(true),
@@ -828,7 +1122,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
                 .working_directory("/foo/bar"),
@@ -849,7 +1143,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).working_directory("/foo"),
         )
@@ -869,7 +1163,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap_err(),
             "image empty has no working_directory to use",
         )
@@ -924,7 +1218,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).user(1234),
         )
@@ -941,7 +1235,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper, no_env, images)
+            .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).group(4321),
         )
