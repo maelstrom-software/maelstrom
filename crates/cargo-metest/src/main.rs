@@ -59,11 +59,7 @@ struct CliOptions {
     #[arg(short = 'q', long)]
     quiet: bool,
 
-    /// Only run tests from the given package
-    #[arg(short = 'p', long)]
-    package: Option<String>,
-
-    /// Only run tests whose names contain the given string
+    /// Only run tests which match the given filter
     filter: Option<String>,
 }
 
@@ -124,7 +120,6 @@ pub fn main() -> Result<ExitCode> {
 
     let deps = MainAppDeps::new(
         "cargo".into(),
-        cli_options.package,
         cli_options.filter,
         std::io::stderr(),
         std::io::stderr().is_terminal(),

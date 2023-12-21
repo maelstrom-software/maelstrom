@@ -1,3 +1,4 @@
+use crate::pattern;
 use anyhow::Result;
 use enumset::EnumSetType;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
@@ -12,8 +13,7 @@ pub enum PossiblyImage<T> {
 
 #[derive(PartialEq, Eq, Debug, Default)]
 pub struct TestDirective {
-    pub tests: Option<String>,
-    pub package: Option<String>,
+    pub filter: Option<pattern::Pattern>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
     pub image: Option<String>,
     pub include_shared_libraries: Option<bool>,
@@ -51,8 +51,7 @@ struct DirectiveImage {
 #[derive(Deserialize)]
 #[serde(field_identifier, rename_all = "snake_case")]
 enum DirectiveField {
-    Package,
-    Tests,
+    Filter,
     IncludeSharedLibraries,
     EnableLoopback,
     EnableWritableFileSystem,
@@ -83,8 +82,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
     where
         A: de::MapAccess<'de>,
     {
-        let mut package = None;
-        let mut tests = None;
+        let mut filter = None;
         let mut include_shared_libraries = None;
         let mut enable_loopback = None;
         let mut enable_writable_file_system = None;
@@ -102,11 +100,12 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
         let mut added_environment = None;
         while let Some(key) = map.next_key()? {
             match key {
-                DirectiveField::Package => {
-                    package = Some(map.next_value()?);
-                }
-                DirectiveField::Tests => {
-                    tests = Some(map.next_value()?);
+                DirectiveField::Filter => {
+                    filter = Some(
+                        map.next_value::<String>()?
+                            .parse()
+                            .map_err(serde::de::Error::custom)?,
+                    );
                 }
                 DirectiveField::IncludeSharedLibraries => {
                     include_shared_libraries = Some(map.next_value()?);
@@ -244,8 +243,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
             }
         }
         Ok(TestDirective {
-            package,
-            tests,
+            filter,
             include_shared_libraries,
             enable_loopback,
             enable_writable_file_system,
@@ -314,12 +312,12 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                package = "package1"
-                package = "package2"
+                filter = "all"
+                filter = "any"
                 "#,
             )
             .unwrap_err(),
-            "duplicate key `package`",
+            "duplicate key `filter`",
         );
     }
 
@@ -328,8 +326,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                package = "package1"
-                tests = "test1"
+                filter = "package.equals(package1) && test.equals(test1)"
                 include_shared_libraries = true
                 enable_loopback = false
                 enable_writable_file_system = true
@@ -339,8 +336,11 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                package: Some("package1".to_string()),
-                tests: Some("test1".to_string()),
+                filter: Some(
+                    "package.equals(package1) && test.equals(test1)"
+                        .parse()
+                        .unwrap()
+                ),
                 include_shared_libraries: Some(true),
                 enable_loopback: Some(false),
                 enable_writable_file_system: Some(true),

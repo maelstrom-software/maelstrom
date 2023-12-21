@@ -396,7 +396,6 @@ fn run_app(
     cargo: String,
     stdout_tty: bool,
     quiet: Quiet,
-    package: Option<String>,
     filter: Option<String>,
     finish: bool,
 ) -> String {
@@ -411,7 +410,6 @@ fn run_app(
 
     let deps = MainAppDeps::new(
         cargo,
-        package,
         filter,
         &mut stderr,
         false,
@@ -472,7 +470,6 @@ fn run_all_tests_sync(
     tmp_dir: &TempDir,
     fake_tests: FakeTests,
     quiet: Quiet,
-    package: Option<String>,
     filter: Option<String>,
 ) -> String {
     let mut state = BrokerState::default();
@@ -502,7 +499,6 @@ fn run_all_tests_sync(
         cargo,
         false,
         quiet,
-        package,
         filter,
         true,
     )
@@ -518,7 +514,7 @@ fn no_tests_all_tests_sync() {
         }],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None),
         "\
         all jobs completed\n\
         \n\
@@ -551,7 +547,7 @@ fn two_tests_all_tests_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -597,8 +593,7 @@ fn three_tests_filtered_sync() {
             &tmp_dir,
             fake_tests,
             false.into(),
-            None,
-            Some("test_it".into())
+            Some("name.equals(test_it)".into())
         ),
         "\
         bar test_it.....................................OK\n\
@@ -641,7 +636,12 @@ fn three_tests_single_package_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), Some("foo".into()), None),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            Some("package.equals(foo)".into())
+        ),
         "\
         foo test_it.....................................OK\n\
         all jobs completed\n\
@@ -692,8 +692,7 @@ fn three_tests_single_package_filtered_sync() {
             &tmp_dir,
             fake_tests,
             false.into(),
-            Some("foo".into()),
-            Some("test_it".into())
+            Some("package.equals(foo) && name.equals(test_it)".into())
         ),
         "\
         foo test_it.....................................OK\n\
@@ -736,7 +735,7 @@ fn ignored_test_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), None),
         "\
         bar test_it.....................................OK\n\
         baz test_it.....................................OK\n\
@@ -774,7 +773,7 @@ fn two_tests_all_tests_sync_quiet() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, true.into(), None, None),
+        run_all_tests_sync(&tmp_dir, fake_tests, true.into(), None),
         "\
         all jobs completed\n\
         \n\
@@ -810,7 +809,6 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         cargo,
         false,
         Quiet::from(false),
-        None,
         None,
         true,
     );
@@ -887,7 +885,6 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         cargo,
         true,
         quiet,
-        None,
         None,
         false,
     );
@@ -1081,7 +1078,7 @@ fn expected_count_updates_packages() {
             },
         ],
     };
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None);
 
     let path = tmp_dir
         .path()
@@ -1104,7 +1101,7 @@ fn expected_count_updates_packages() {
     fs.remove_dir_all(tmp_dir.path().join("workspace/crates/bar"))
         .unwrap();
 
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None);
 
     // new listing should match
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
@@ -1123,7 +1120,7 @@ fn expected_count_updates_cases() {
             }],
         }],
     };
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None);
 
     let path = tmp_dir
         .path()
@@ -1143,7 +1140,7 @@ fn expected_count_updates_cases() {
     fs.write(tmp_dir.path().join("workspace/crates/foo/src/lib.rs"), "")
         .unwrap();
 
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None, None);
+    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), None);
 
     // new listing should match
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();

@@ -2,8 +2,7 @@
 include_shared_libraries = true
 
 [[directives]]
-package = "meticulous-worker"
-tests = "executor::"
+filter = "package.equals(meticulous-worker) && name.starts_with(executor::)"
 layers = ["proc-and-tmp.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
@@ -13,7 +12,7 @@ mounts = [
 devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
-package = "cargo-metest"
+filter = "package.equals(cargo-metest)"
 image.name = "rust"
 image.use = ["layers", "environment"]
 enable_loopback = true
@@ -26,12 +25,12 @@ mounts = [
 ]
 
 [[directives]]
-package = "meticulous-container"
+filter = "package.equals(meticulous-container)"
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-package = "meticulous-client"
+filter = "package.equals(meticulous-client)"
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 

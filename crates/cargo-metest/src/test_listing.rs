@@ -1,3 +1,4 @@
+use crate::pattern;
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Target as CargoTarget};
 use meticulous_util::fs::Fs;
@@ -79,6 +80,23 @@ pub struct TestListing {
     pub packages: BTreeMap<String, Package>,
 }
 
+fn filter_case(
+    package: &str,
+    artifact: &ArtifactKey,
+    case: &str,
+    filter: &pattern::Pattern,
+) -> bool {
+    let c = pattern::Context {
+        package: package.into(),
+        artifact: Some(pattern::Artifact {
+            name: artifact.name.clone(),
+            kind: artifact.kind,
+        }),
+        case: Some(pattern::Case { name: case.into() }),
+    };
+    pattern::interpret_pattern(filter, &c).expect("case is provided")
+}
+
 impl TestListing {
     pub fn add_cases(&mut self, artifact: &CargoArtifact, cases: &[String]) {
         let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
@@ -96,15 +114,15 @@ impl TestListing {
         self.packages.remove(package);
     }
 
-    pub fn expected_job_count(&self, package_f: &Option<String>, filter: &Option<String>) -> u64 {
+    pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
         self.packages
             .iter()
-            .filter_map(|(p, package)| {
-                (package_f.is_none() || package_f.as_ref().is_some_and(|exp_p| exp_p == p))
-                    .then_some(package.artifacts.iter().flat_map(|(_, a)| a.cases.iter()))
+            .flat_map(|(p, a)| {
+                a.artifacts
+                    .iter()
+                    .flat_map(move |(a, c)| c.cases.iter().map(move |c| (p, a, c)))
             })
-            .flatten()
-            .filter(|c| filter.is_none() || filter.as_ref().is_some_and(|exp_c| c.contains(exp_c)))
+            .filter(|(p, a, c)| filter_case(p, a, c, filter))
             .count() as u64
     }
 

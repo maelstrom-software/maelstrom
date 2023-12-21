@@ -1,5 +1,5 @@
 use crate::pattern::parser::*;
-use cargo_metadata::Target;
+use cargo_metadata::Target as CargoTarget;
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -15,7 +15,7 @@ pub enum ArtifactKind {
 }
 
 impl ArtifactKind {
-    pub fn from_target(t: &Target) -> Self {
+    pub fn from_target(t: &CargoTarget) -> Self {
         if t.is_bin() {
             Self::Binary
         } else if t.is_test() {
@@ -34,6 +34,15 @@ impl ArtifactKind {
 pub struct Artifact {
     pub kind: ArtifactKind,
     pub name: String,
+}
+
+impl Artifact {
+    pub fn from_target(t: &CargoTarget) -> Self {
+        Self {
+            name: t.name.clone(),
+            kind: ArtifactKind::from_target(t),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]

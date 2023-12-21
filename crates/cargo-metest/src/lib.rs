@@ -8,7 +8,7 @@ pub mod substitute;
 pub mod test_listing;
 pub mod visitor;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
@@ -33,10 +33,29 @@ use std::{
 use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
+fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
+    let c = pattern::Context {
+        package: package.name.clone(),
+        artifact: None,
+        case: None,
+    };
+    pattern::interpret_pattern(p, &c).unwrap_or(true)
+}
+
+fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bool {
+    let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+    let c = pattern::Context {
+        package: package_name,
+        artifact: Some(pattern::Artifact::from_target(&artifact.target)),
+        case: Some(pattern::Case { name: case.into() }),
+    };
+    pattern::interpret_pattern(p, &c).expect("case is provided")
+}
+
 struct JobQueuer<StdErrT> {
     cargo: String,
-    package: Option<String>,
-    filter: Option<String>,
+    packages: Vec<String>,
+    filter: pattern::Pattern,
     stderr: Mutex<StdErrT>,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
@@ -49,18 +68,18 @@ struct JobQueuer<StdErrT> {
 impl<StdErrT> JobQueuer<StdErrT> {
     fn new(
         cargo: String,
-        package: Option<String>,
-        filter: Option<String>,
+        packages: Vec<String>,
+        filter: pattern::Pattern,
         stderr: StdErrT,
         stderr_color: bool,
         test_metadata: AllMetadata,
         test_listing: TestListing,
     ) -> Self {
-        let expected_job_count = test_listing.expected_job_count(&package, &filter);
+        let expected_job_count = test_listing.expected_job_count(&filter);
 
         Self {
             cargo,
-            package,
+            packages,
             filter,
             stderr: Mutex::new(stderr),
             stderr_color,
@@ -78,6 +97,7 @@ struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
+    artifact: CargoArtifact,
     binary: PathBuf,
     binary_artifact: Sha256Digest,
     deps_artifact: Sha256Digest,
@@ -114,15 +134,14 @@ where
         let mut listing = job_queuer.test_listing.lock().unwrap();
         listing.add_cases(&artifact, &cases[..]);
 
-        if let Some(filter) = &job_queuer.filter {
-            cases.retain(|c| c.contains(filter));
-        }
+        cases.retain(|c| filter_case(&artifact, c, &job_queuer.filter));
 
         Ok(Self {
             job_queuer,
             client,
             width,
             ind,
+            artifact,
             binary,
             binary_artifact,
             deps_artifact,
@@ -179,10 +198,16 @@ where
             })
         };
 
+        let filter_context = pattern::Context {
+            package: self.package_name.clone(),
+            artifact: Some(pattern::Artifact::from_target(&self.artifact.target)),
+            case: Some(pattern::Case { name: case.into() }),
+        };
+
         let test_metadata = self
             .job_queuer
             .test_metadata
-            .get_metadata_for_test_with_env(&self.package_name, case, image_lookup)?;
+            .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
@@ -259,7 +284,7 @@ where
         let mut cargo_build = CargoBuild::new(
             &job_queuer.cargo,
             job_queuer.stderr_color,
-            job_queuer.package.clone(),
+            job_queuer.packages.clone(),
         )?;
         Ok(Self {
             job_queuer,
@@ -276,15 +301,7 @@ where
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
         self.ind.update_enqueue_status("building artifacts...");
 
-        let mut stream = (&mut self.artifacts).filter(|artifact_res: &Result<CargoArtifact>| {
-            artifact_res.is_err()
-                || artifact_res.as_ref().is_ok_and(|artifact| {
-                    let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
-                    let filtered_package = self.job_queuer.package.as_ref();
-                    filtered_package.is_none() || Some(&package_name) == filtered_package
-                })
-        });
-        let Some(artifact) = stream.next() else {
+        let Some(artifact) = self.artifacts.next() else {
             return Ok(false);
         };
         let artifact = artifact?;
@@ -308,11 +325,6 @@ where
             .unwrap()
             .check_status(&mut *self.job_queuer.stderr.lock().unwrap())?;
 
-        if let Some(package) = &self.job_queuer.package {
-            if !self.package_match {
-                return Err(anyhow!("package {package:?} unknown"));
-            }
-        }
         Ok(())
     }
 
@@ -343,7 +355,6 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cargo: String,
-        package: Option<String>,
         filter: Option<String>,
         stderr: StdErrT,
         stderr_color: bool,
@@ -364,11 +375,18 @@ impl<StdErrT> MainAppDeps<StdErrT> {
             load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
         test_listing.retain_packages(workspace_packages);
 
+        let filter = filter.unwrap_or("all".into()).parse()?;
+        let selected_packages = workspace_packages
+            .iter()
+            .filter(|p| filter_package(p, &filter))
+            .map(|p| p.name.clone())
+            .collect();
+
         Ok(Self {
             client,
             queuer: JobQueuer::new(
                 cargo,
-                package,
+                selected_packages,
                 filter,
                 stderr,
                 stderr_color,

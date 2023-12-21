@@ -16,7 +16,7 @@ pub struct CargoBuild {
 }
 
 impl CargoBuild {
-    pub fn new(program: &str, color: bool, package: Option<String>) -> Result<Self> {
+    pub fn new(program: &str, color: bool, packages: Vec<String>) -> Result<Self> {
         let mut cmd = Command::new(program);
         cmd.arg("test")
             .arg("--no-run")
@@ -28,7 +28,7 @@ impl CargoBuild {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        if let Some(package) = package {
+        for package in packages {
             cmd.arg("--package").arg(package);
         }
 
