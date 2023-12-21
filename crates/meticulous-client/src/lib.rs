@@ -3,13 +3,12 @@ pub mod substitute;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
-use indicatif::ProgressBar;
 use meticulous_base::{
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobResult, JobSpec, NonEmpty, Sha256Digest,
+    ClientJobId, JobResult, JobSpec, Sha256Digest,
 };
 use meticulous_container::ContainerImageDepot;
 use meticulous_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
@@ -392,7 +391,6 @@ pub struct Client {
     driver: Box<dyn ClientDriver + Send + Sync>,
     digest_repo: DigestRespository,
     container_image_depot: ContainerImageDepot,
-    digest_to_container_env: HashMap<NonEmpty<Sha256Digest>, Vec<String>>,
     processed_artifact_paths: HashSet<PathBuf>,
 }
 
@@ -412,7 +410,6 @@ impl Client {
             driver: Box::new(driver),
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
-            digest_to_container_env: HashMap::default(),
             processed_artifact_paths: HashSet::default(),
         })
     }
@@ -435,43 +432,11 @@ impl Client {
         Ok(digest)
     }
 
-    pub fn add_container(
-        &mut self,
-        pkg: &str,
-        version: &str,
-        prog: Option<ProgressBar>,
-    ) -> Result<NonEmpty<Sha256Digest>> {
-        let prog = prog.unwrap_or_else(ProgressBar::hidden);
-        let img = self
-            .container_image_depot
-            .get_container_image(pkg, version, prog)?;
-        let env = img.env().cloned();
-        let digests = NonEmpty::<PathBuf>::try_from(img.layers)
-            .map_err(|_| anyhow!("empty layer vector for {pkg}:{version}"))?
-            .try_map(|layer| self.add_artifact(&layer))?;
-        if let Some(env) = env {
-            self.digest_to_container_env.insert(digests.clone(), env);
-        }
-        Ok(digests)
-    }
-
     pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
         &mut self.container_image_depot
     }
 
-    fn maybe_add_container_environment(&mut self, spec: &mut JobSpec) {
-        for (digests, env) in &self.digest_to_container_env {
-            let container_digests: HashSet<_> = digests.iter().collect();
-            let job_digests: HashSet<_> = spec.layers.iter().collect();
-            if job_digests.is_superset(&container_digests) {
-                spec.environment.extend(env.iter().cloned());
-            }
-        }
-    }
-
-    pub fn add_job(&mut self, mut spec: JobSpec, handler: JobResponseHandler) {
-        self.maybe_add_container_environment(&mut spec);
-
+    pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.

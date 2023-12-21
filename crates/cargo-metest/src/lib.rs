@@ -154,20 +154,16 @@ where
         &mut self,
         test_metadata: &TestMetadata,
     ) -> Result<NonEmpty<Sha256Digest>> {
-        let mut layers = vec![];
-        for layer in &test_metadata.layers {
-            let mut client = self.client.lock().unwrap();
-            if layer.starts_with("docker:") {
-                let pkg = layer.split(':').nth(1).unwrap();
-                let prog = self
-                    .ind
-                    .new_side_progress(format!("downloading image {pkg}:latest"));
-                layers.extend(client.add_container(pkg, "latest", prog)?);
-            } else {
-                layers.push(client.add_artifact(PathBuf::from(layer).as_path())?);
-            }
-        }
-
+        let mut layers = test_metadata
+            .layers
+            .iter()
+            .map(|layer| {
+                self.client
+                    .lock()
+                    .unwrap()
+                    .add_artifact(PathBuf::from(layer).as_path())
+            })
+            .collect::<Result<Vec<_>>>()?;
         if test_metadata.include_shared_libraries() {
             layers.push(self.deps_artifact.clone());
         }
