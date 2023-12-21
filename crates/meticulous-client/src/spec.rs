@@ -5,7 +5,7 @@ use meticulous_base::{
     Sha256Digest, UserId,
 };
 use serde::{de, Deserialize, Deserializer, Serialize};
-use std::{io::Read, path::PathBuf};
+use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
     inner: InnerT,
@@ -56,7 +56,7 @@ pub fn job_spec_iter_from_reader(
 struct Job {
     program: String,
     arguments: Option<Vec<String>>,
-    environment: Option<PossiblyImage<Vec<String>>>,
+    environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     layers: PossiblyImage<NonEmpty<String>>,
     added_layers: Vec<String>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
@@ -95,12 +95,8 @@ impl Job {
         _env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> anyhow::Result<JobSpec> {
-        let (image_layers, image_environment, image_working_directory) = self
-            .image
-            .as_deref()
-            .map(image_lookup)
-            .transpose()?
-            .map_or(
+        let (image_layers, image_environment, image_working_directory) =
+            self.image.as_deref().map(image_lookup).transpose()?.map_or(
                 (None, None, None),
                 |ContainerImage {
                      layers,
@@ -110,12 +106,29 @@ impl Job {
             );
         let image_name = self.image.as_deref().unwrap_or("");
         let environment = match self.environment {
-            None => vec![],
+            None => BTreeMap::default(),
             Some(PossiblyImage::Explicit(environment)) => environment,
-            Some(PossiblyImage::Image) => image_environment
-                .unwrap()
-                .ok_or_else(|| anyhow!("image {image_name} has no environment to use"))?,
+            Some(PossiblyImage::Image) => {
+                let image_environment = image_environment
+                    .unwrap()
+                    .ok_or_else(|| anyhow!("image {image_name} has no environment to use"))?;
+                let mut environment = BTreeMap::default();
+                for var in image_environment {
+                    match var.split_once('=') {
+                        None => {
+                            return Err(anyhow!(
+                                "image {image_name} has an invalid environment variable {var}"
+                            ));
+                        }
+                        Some((left, right)) => {
+                            environment.insert(left.into(), right.into());
+                        }
+                    }
+                }
+                environment
+            }
         };
+        let environment = Vec::from_iter(environment.into_iter().map(|(k, v)| k + "=" + &v));
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers,
             PossiblyImage::Image => NonEmpty::from_vec(image_layers.unwrap())
@@ -405,10 +418,10 @@ mod test {
         assert_eq!(
             Job {
                 arguments: Some(vec!["arg1".to_string(), "arg2".to_string()]),
-                environment: Some(PossiblyImage::Explicit(vec![
-                    "FOO=foo".to_string(),
-                    "BAR=bar".to_string()
-                ])),
+                environment: Some(PossiblyImage::Explicit(BTreeMap::from([
+                    ("FOO".to_string(), "foo".to_string()),
+                    ("BAR".to_string(), "bar".to_string()),
+                ]))),
                 devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -423,7 +436,7 @@ mod test {
             .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)])
                 .arguments(["arg1", "arg2"])
-                .environment(["FOO=foo", "BAR=bar"])
+                .environment(["BAR=bar", "FOO=foo"])
                 .devices(enum_set! {JobDevice::Null})
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -718,14 +731,14 @@ mod test {
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ "1" ],
-                    "environment": [ "FOO=foo", "BAR=bar" ]
+                    "environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
             )
             .unwrap()
             .into_job_spec(layer_mapper, no_env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
-                .environment(["FOO=foo", "BAR=bar"]),
+                .environment(["BAR=bar", "FOO=foo"]),
         )
     }
 
