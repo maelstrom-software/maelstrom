@@ -30,7 +30,7 @@ impl From<u32> for ClientId {
 
 impl Display for ClientId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}", self.0))
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -46,7 +46,7 @@ impl From<u32> for ClientJobId {
 
 impl Display for ClientJobId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}", self.0))
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -120,7 +120,7 @@ impl From<u32> for UserId {
 
 impl Display for UserId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}", self.0))
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -136,7 +136,7 @@ impl From<u32> for GroupId {
 
 impl Display for GroupId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}", self.0))
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -332,7 +332,7 @@ impl From<u32> for WorkerId {
 
 impl Display for WorkerId {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_fmt(format_args!("{}", self.0))
+        Display::fmt(&self.0, f)
     }
 }
 
@@ -455,6 +455,46 @@ impl Error for Sha256DigestVerificationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn client_id_display() {
+        assert_eq!(format!("{}", ClientId::from(100)), "100");
+        assert_eq!(format!("{}", ClientId::from(0)), "0");
+        assert_eq!(format!("{:03}", ClientId::from(0)), "000");
+        assert_eq!(format!("{:3}", ClientId::from(43)), " 43");
+    }
+
+    #[test]
+    fn client_job_id_display() {
+        assert_eq!(format!("{}", ClientJobId::from(100)), "100");
+        assert_eq!(format!("{}", ClientJobId::from(0)), "0");
+        assert_eq!(format!("{:03}", ClientJobId::from(0)), "000");
+        assert_eq!(format!("{:3}", ClientJobId::from(43)), " 43");
+    }
+
+    #[test]
+    fn user_id_display() {
+        assert_eq!(format!("{}", UserId::from(100)), "100");
+        assert_eq!(format!("{}", UserId::from(0)), "0");
+        assert_eq!(format!("{:03}", UserId::from(0)), "000");
+        assert_eq!(format!("{:3}", UserId::from(43)), " 43");
+    }
+
+    #[test]
+    fn group_id_display() {
+        assert_eq!(format!("{}", GroupId::from(100)), "100");
+        assert_eq!(format!("{}", GroupId::from(0)), "0");
+        assert_eq!(format!("{:03}", GroupId::from(0)), "000");
+        assert_eq!(format!("{:3}", GroupId::from(43)), " 43");
+    }
+
+    #[test]
+    fn worker_id_display() {
+        assert_eq!(format!("{}", WorkerId::from(100)), "100");
+        assert_eq!(format!("{}", WorkerId::from(0)), "0");
+        assert_eq!(format!("{:03}", WorkerId::from(0)), "000");
+        assert_eq!(format!("{:3}", WorkerId::from(43)), " 43");
+    }
 
     #[test]
     fn from_u32() {
