@@ -3,7 +3,9 @@ use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::spec::{substitute, Image, ImageConfig, ImageUse, PossiblyImage};
+use meticulous_client::spec::{
+    incompatible, substitute, Image, ImageConfig, ImageUse, PossiblyImage,
+};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
@@ -245,13 +247,13 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     arguments = Some(map.next_value()?);
                 }
                 JobField::Environment => {
-                    if environment.is_some() {
-                        assert!(matches!(environment, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(concat!(
+                    incompatible(
+                        &environment,
+                        concat!(
                             "field `environment` cannot be set if `image` with a `use` of ",
                             "`environment` is also set (try `added_environment` instead)"
-                        ))));
-                    }
+                        ),
+                    )?;
                     environment = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 JobField::AddedEnvironment => match &environment {
@@ -270,13 +272,13 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     }
                 },
                 JobField::Layers => {
-                    if layers.is_some() {
-                        assert!(matches!(layers, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(concat!(
+                    incompatible(
+                        &layers,
+                        concat!(
                             "field `layers` cannot be set if `image` with a `use` of ",
                             "`layers` is also set (try `added_layers` instead)"
-                        ))));
-                    }
+                        ),
+                    )?;
                     layers = Some(PossiblyImage::Explicit(
                         NonEmpty::from_vec(map.next_value()?).ok_or_else(|| {
                             de::Error::custom(format_args!("field `layers` cannot be empty"))
@@ -311,13 +313,13 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     enable_writable_file_system = Some(map.next_value()?);
                 }
                 JobField::WorkingDirectory => {
-                    if working_directory.is_some() {
-                        assert!(matches!(working_directory, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(concat!(
+                    incompatible(
+                        &working_directory,
+                        concat!(
                             "field `working_directory` cannot be set if `image` with a `use` of ",
                             "`working_directory` is also set"
-                        ))));
-                    }
+                        ),
+                    )?;
                     working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 JobField::User => {
@@ -332,36 +334,24 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     for use_ in i.use_ {
                         match use_ {
                             ImageUse::WorkingDirectory => {
-                                if working_directory.is_some() {
-                                    assert!(matches!(
-                                        working_directory,
-                                        Some(PossiblyImage::Explicit(_))
-                                    ));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `working_directory` if field `working_directory` is also set"
-                                    )));
-                                }
+                                incompatible(
+                                    &working_directory,
+                                    "field `image` cannot use `working_directory` if field `working_directory` is also set",
+                                )?;
                                 working_directory = Some(PossiblyImage::Image);
                             }
                             ImageUse::Layers => {
-                                if layers.is_some() {
-                                    assert!(matches!(layers, Some(PossiblyImage::Explicit(_))));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `layers` if field `layers` is also set"
-                                    )));
-                                }
+                                incompatible(
+                                    &layers,
+                                    "field `image` cannot use `layers` if field `layers` is also set",
+                                )?;
                                 layers = Some(PossiblyImage::Image);
                             }
                             ImageUse::Environment => {
-                                if environment.is_some() {
-                                    assert!(matches!(
-                                        environment,
-                                        Some(PossiblyImage::Explicit(_))
-                                    ));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `environment` if field `environment` is also set"
-                                    )));
-                                }
+                                incompatible(
+                                    &environment,
+                                    "field `image` cannot use `environment` if field `environment` is also set",
+                                )?;
                                 environment = Some(PossiblyImage::Image);
                             }
                         }

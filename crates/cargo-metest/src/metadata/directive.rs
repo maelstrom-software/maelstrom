@@ -1,7 +1,7 @@
 use crate::pattern;
 use anyhow::Result;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
-use meticulous_client::spec::{Image, ImageUse, PossiblyImage};
+use meticulous_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, path::PathBuf, str};
 
@@ -101,22 +101,20 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     group = Some(map.next_value()?);
                 }
                 DirectiveField::Mounts => {
-                    if added_mounts.is_some() {
-                        return Err(de::Error::custom(format_args!(
-                            "field `mounts` cannot be set after `added_mounts`"
-                        )));
-                    }
+                    incompatible(
+                        &added_mounts,
+                        "field `mounts` cannot be set after `added_mounts`",
+                    )?;
                     mounts = Some(map.next_value()?);
                 }
                 DirectiveField::AddedMounts => {
                     added_mounts = Some(map.next_value()?);
                 }
                 DirectiveField::Devices => {
-                    if added_devices.is_some() {
-                        return Err(de::Error::custom(format_args!(
-                            "field `devices` cannot be set after `added_devices`"
-                        )));
-                    }
+                    incompatible(
+                        &added_devices,
+                        "field `devices` cannot be set after `added_devices`",
+                    )?;
                     let d = map.next_value::<EnumSet<JobDeviceListDeserialize>>()?;
                     devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
@@ -130,89 +128,67 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     for use_ in i.use_ {
                         match use_ {
                             ImageUse::WorkingDirectory => {
-                                if working_directory.is_some() {
-                                    assert!(matches!(
-                                        working_directory,
-                                        Some(PossiblyImage::Explicit(_))
-                                    ));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `working_directory` if field `working_directory` is also set"
-                                    )));
-                                }
+                                incompatible(
+                                    &working_directory,
+                                    "field `image` cannot use `working_directory` if field `working_directory` is also set",
+                                )?;
                                 working_directory = Some(PossiblyImage::Image);
                             }
                             ImageUse::Layers => {
-                                if layers.is_some() {
-                                    assert!(matches!(layers, Some(PossiblyImage::Explicit(_))));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `layers` if field `layers` is also set"
-                                    )));
-                                }
-                                if added_layers.is_some() {
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` that uses `layers` cannot be set after `added_layers`"
-                                    )));
-                                }
+                                incompatible(
+                                    &layers,
+                                    "field `image` cannot use `layers` if field `layers` is also set",
+                                )?;
+                                incompatible(
+                                    &added_layers,
+                                    "field `image` that uses `layers` cannot be set after `added_layers`",
+                                )?;
                                 layers = Some(PossiblyImage::Image);
                             }
                             ImageUse::Environment => {
-                                if environment.is_some() {
-                                    assert!(matches!(
-                                        environment,
-                                        Some(PossiblyImage::Explicit(_))
-                                    ));
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` cannot use `environment` if field `environment` is also set"
-                                    )));
-                                }
-                                if added_environment.is_some() {
-                                    return Err(de::Error::custom(format_args!(
-                                        "field `image` that uses `environment` cannot be set after `added_environment`"
-                                    )));
-                                }
+                                incompatible(
+                                    &environment,
+                                    "field `image` cannot use `environment` if field `environment` is also set",
+                                )?;
+                                incompatible(
+                                    &added_environment,
+                                    "field `image` that uses `environment` cannot be set after `added_environment`",
+                                )?;
                                 environment = Some(PossiblyImage::Image);
                             }
                         }
                     }
                 }
                 DirectiveField::WorkingDirectory => {
-                    if working_directory.is_some() {
-                        assert!(matches!(working_directory, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(
-                            "field `working_directory` cannot be set after `image` field that uses `working_directory`"
-                        )));
-                    }
+                    incompatible(
+                        &working_directory,
+                        "field `working_directory` cannot be set after `image` field that uses `working_directory`",
+                    )?;
                     working_directory = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 DirectiveField::Layers => {
-                    if layers.is_some() {
-                        assert!(matches!(layers, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(
-                            "field `layers` cannot be set after `image` field that uses `layers`"
-                        )));
-                    }
-                    if added_layers.is_some() {
-                        return Err(de::Error::custom(format_args!(
-                            "field `layers` cannot be set after `added_layers`"
-                        )));
-                    }
+                    incompatible(
+                        &layers,
+                        "field `layers` cannot be set after `image` field that uses `layers`",
+                    )?;
+                    incompatible(
+                        &added_layers,
+                        "field `layers` cannot be set after `added_layers`",
+                    )?;
                     layers = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 DirectiveField::AddedLayers => {
                     added_layers = Some(map.next_value()?);
                 }
                 DirectiveField::Environment => {
-                    if environment.is_some() {
-                        assert!(matches!(environment, Some(PossiblyImage::Image)));
-                        return Err(de::Error::custom(format_args!(
-                            "field `environment` cannot be set after `image` field that uses `environment`"
-                        )));
-                    }
-                    if added_environment.is_some() {
-                        return Err(de::Error::custom(format_args!(
-                            "field `environment` cannot be set after `added_environment`"
-                        )));
-                    }
+                    incompatible(
+                        &environment,
+                        "field `environment` cannot be set after `image` field that uses `environment`",
+                    )?;
+                    incompatible(
+                        &added_environment,
+                        "field `environment` cannot be set after `added_environment`",
+                    )?;
                     environment = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 DirectiveField::AddedEnvironment => {

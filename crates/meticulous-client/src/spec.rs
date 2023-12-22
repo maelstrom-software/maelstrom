@@ -2,7 +2,7 @@ pub mod substitute;
 
 use anyhow::{Error, Result};
 use enumset::{EnumSet, EnumSetType};
-use serde::{Deserialize, Serialize};
+use serde::{de, Deserialize, Serialize};
 use std::{
     env::{self, VarError},
     path::PathBuf,
@@ -43,6 +43,17 @@ pub struct Image {
 pub enum PossiblyImage<T> {
     Image,
     Explicit(T),
+}
+
+pub fn incompatible<T, E>(field: &Option<T>, msg: &str) -> std::result::Result<(), E>
+where
+    E: de::Error,
+{
+    if field.is_some() {
+        Err(E::custom(format_args!("{}", msg)))
+    } else {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
