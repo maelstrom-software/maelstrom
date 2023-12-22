@@ -1,3 +1,5 @@
+pub mod substitute;
+
 use anyhow::{Error, Result};
 use std::env::{self, VarError};
 

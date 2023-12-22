@@ -4,7 +4,7 @@ use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::substitute;
+use meticulous_client::spec::substitute;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
