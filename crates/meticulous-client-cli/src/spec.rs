@@ -213,6 +213,21 @@ enum JobField {
 
 struct JobVisitor;
 
+fn must_be_image<T, E>(
+    var: &Option<PossiblyImage<T>>,
+    if_none: &str,
+    if_explicit: &str,
+) -> std::result::Result<(), E>
+where
+    E: de::Error,
+{
+    match var {
+        None => Err(E::custom(format_args!("{}", if_none))),
+        Some(PossiblyImage::Explicit(_)) => Err(E::custom(format_args!("{}", if_explicit))),
+        Some(PossiblyImage::Image) => Ok(()),
+    }
+}
+
 impl<'de> de::Visitor<'de> for JobVisitor {
     type Value = Job;
 
@@ -256,21 +271,14 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     )?;
                     environment = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
-                JobField::AddedEnvironment => match &environment {
-                    None => {
-                        return Err(de::Error::custom(format_args!(
-                            "field `added_environment` set before `image` with a `use` of `environment`"
-                        )));
-                    }
-                    Some(PossiblyImage::Explicit(_)) => {
-                        return Err(de::Error::custom(format_args!(
-                            "field `added_environment` cannot be set with `environment` field"
-                        )));
-                    }
-                    Some(PossiblyImage::Image) => {
-                        added_environment = Some(map.next_value()?);
-                    }
-                },
+                JobField::AddedEnvironment => {
+                    must_be_image(
+                        &environment,
+                        "field `added_environment` set before `image` with a `use` of `environment`",
+                        "field `added_environment` cannot be set with `environment` field",
+                    )?;
+                    added_environment = Some(map.next_value()?);
+                }
                 JobField::Layers => {
                     incompatible(
                         &layers,
@@ -285,21 +293,14 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                         })?,
                     ));
                 }
-                JobField::AddedLayers => match &layers {
-                    None => {
-                        return Err(de::Error::custom(format_args!(
-                            "field `added_layers` set before `image` with a `use` of `layers`"
-                        )));
-                    }
-                    Some(PossiblyImage::Explicit(_)) => {
-                        return Err(de::Error::custom(format_args!(
-                            "field `added_layers` cannot be set with `layer` field"
-                        )));
-                    }
-                    Some(PossiblyImage::Image) => {
-                        added_layers = Some(map.next_value()?);
-                    }
-                },
+                JobField::AddedLayers => {
+                    must_be_image(
+                        &layers,
+                        "field `added_layers` set before `image` with a `use` of `layers`",
+                        "field `added_layers` cannot be set with `layer` field",
+                    )?;
+                    added_layers = Some(map.next_value()?);
+                }
                 JobField::Devices => {
                     devices = Some(map.next_value()?);
                 }
