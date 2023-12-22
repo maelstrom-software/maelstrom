@@ -2465,12 +2465,15 @@ dependencies = [
  "anyhow",
  "clap",
  "directories",
+ "enumset",
  "figment",
  "indicatif",
  "meticulous-base",
  "meticulous-client",
+ "meticulous-test",
  "meticulous-util",
  "serde",
+ "serde_json",
  "serde_with",
 ]
 

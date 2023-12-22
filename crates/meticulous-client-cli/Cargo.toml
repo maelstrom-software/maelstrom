@@ -7,10 +7,15 @@ edition.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 directories.workspace = true
+enumset.workspace = true
 figment.workspace = true
 indicatif.workspace = true
 meticulous-base.workspace = true
 meticulous-client.workspace = true
 meticulous-util.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 serde_with.workspace = true
+
+[dev-dependencies]
+meticulous-test.workspace = true
