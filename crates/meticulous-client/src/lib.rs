@@ -1,3 +1,4 @@
+pub mod spec;
 pub mod substitute;
 
 use anyhow::{anyhow, Result};

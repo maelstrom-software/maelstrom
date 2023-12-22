@@ -4,12 +4,11 @@ use crate::pattern;
 use anyhow::{anyhow, Context as _, Error, Result};
 use directive::{PossiblyImage, TestDirective};
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
-use meticulous_client::substitute;
+use meticulous_client::{spec, substitute};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{
     collections::BTreeMap,
-    env::{self, VarError},
     path::{Path, PathBuf},
     str,
 };
@@ -217,14 +216,6 @@ impl TestMetadata {
     }
 }
 
-fn std_env_lookup(var: &str) -> Result<Option<String>> {
-    match env::var(var) {
-        Ok(val) => Ok(Some(val)),
-        Err(VarError::NotPresent) => Ok(None),
-        Err(err) => Err(Error::new(err)),
-    }
-}
-
 fn pattern_match(filter: &pattern::Pattern, context: &pattern::Context) -> bool {
     pattern::interpret_pattern(filter, context).expect("context should have case")
 }
@@ -255,7 +246,7 @@ impl AllMetadata {
         context: &pattern::Context,
         image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> Result<TestMetadata> {
-        self.get_metadata_for_test(context, std_env_lookup, image_lookup)
+        self.get_metadata_for_test(context, spec::std_env_lookup, image_lookup)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -1108,32 +1099,6 @@ mod test {
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Tty},
-        );
-    }
-
-    #[test]
-    fn std_env_lookup_good() {
-        let var = "AN_ENVIRONMENT_VARIABLE_1";
-        let val = "foobar";
-        env::set_var(var, val);
-        assert_eq!(std_env_lookup(var).unwrap(), Some(val.to_string()));
-    }
-
-    #[test]
-    fn std_env_lookup_missing() {
-        let var = "AN_ENVIRONMENT_VARIABLE_TO_DELETE";
-        env::remove_var(var);
-        assert_eq!(std_env_lookup(var).unwrap(), None);
-    }
-
-    #[test]
-    fn std_env_lookup_error() {
-        let var = "AN_ENVIRONMENT_VARIABLE_2";
-        let val = unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(vec![0xff]) };
-        env::set_var(var, &val);
-        assert_eq!(
-            format!("{}", std_env_lookup(var).unwrap_err()),
-            r#"environment variable was not valid unicode: "\xFF""#
         );
     }
 

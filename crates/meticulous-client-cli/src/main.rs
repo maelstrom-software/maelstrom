@@ -1,4 +1,4 @@
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
@@ -7,8 +7,8 @@ use figment::{
 };
 use indicatif::ProgressBar;
 use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
-use meticulous_client::{Client, DefaultClientDriver};
-use meticulous_client_cli::spec::{self, ContainerImage};
+use meticulous_client::{spec::std_env_lookup, Client, DefaultClientDriver};
+use meticulous_client_cli::spec::{job_spec_iter_from_reader, ContainerImage};
 use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
@@ -17,7 +17,6 @@ use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::{
     cell::RefCell,
-    env::{self, VarError},
     io::{self, Read, Write as _},
     path::{Path, PathBuf},
     sync::Arc,
@@ -131,14 +130,6 @@ fn cache_dir() -> PathBuf {
         .join("meticulous")
 }
 
-fn std_env_lookup(var: &str) -> Result<Option<String>> {
-    match env::var(var) {
-        Ok(val) => Ok(Some(val)),
-        Err(VarError::NotPresent) => Ok(None),
-        Err(err) => Err(Error::new(err)),
-    }
-}
-
 fn main() -> Result<ExitCode> {
     let cli_options = CliOptions::parse();
     let print_config = cli_options.print_config;
@@ -183,7 +174,7 @@ fn main() -> Result<ExitCode> {
             working_directory: image.working_dir().map(PathBuf::from),
         })
     };
-    let job_specs = spec::job_spec_iter_from_reader(
+    let job_specs = job_spec_iter_from_reader(
         reader,
         |layer| client.borrow_mut().add_artifact(Path::new(&layer)),
         std_env_lookup,
