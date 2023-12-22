@@ -3,7 +3,7 @@ use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::spec::{substitute, ImageConfig, ImageUse, PossiblyImage};
+use meticulous_client::spec::{substitute, Image, ImageConfig, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
@@ -211,13 +211,6 @@ enum JobField {
 
 struct JobVisitor;
 
-#[derive(Deserialize)]
-struct DirectiveImage {
-    name: String,
-    #[serde(rename = "use")]
-    use_: EnumSet<ImageUse>,
-}
-
 impl<'de> de::Visitor<'de> for JobVisitor {
     type Value = Job;
 
@@ -334,7 +327,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                     group = Some(map.next_value()?);
                 }
                 JobField::Image => {
-                    let i = map.next_value::<DirectiveImage>()?;
+                    let i = map.next_value::<Image>()?;
                     image = Some(i.name);
                     for use_ in i.use_ {
                         match use_ {

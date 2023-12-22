@@ -1,7 +1,7 @@
 pub mod substitute;
 
 use anyhow::{Error, Result};
-use enumset::EnumSetType;
+use enumset::{EnumSet, EnumSetType};
 use serde::{Deserialize, Serialize};
 use std::{
     env::{self, VarError},
@@ -30,6 +30,13 @@ pub enum ImageUse {
     Layers,
     Environment,
     WorkingDirectory,
+}
+
+#[derive(Deserialize)]
+pub struct Image {
+    pub name: String,
+    #[serde(rename = "use")]
+    pub use_: EnumSet<ImageUse>,
 }
 
 #[derive(PartialEq, Eq, Debug, Deserialize)]

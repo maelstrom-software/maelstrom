@@ -1,7 +1,7 @@
 use crate::pattern;
 use anyhow::Result;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
-use meticulous_client::spec::{ImageUse, PossiblyImage};
+use meticulous_client::spec::{Image, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, path::PathBuf, str};
 
@@ -24,13 +24,6 @@ pub struct TestDirective {
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<PossiblyImage<PathBuf>>,
-}
-
-#[derive(Deserialize)]
-struct DirectiveImage {
-    name: String,
-    #[serde(rename = "use")]
-    use_: EnumSet<ImageUse>,
 }
 
 #[derive(Deserialize)]
@@ -132,7 +125,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     added_devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
                 DirectiveField::Image => {
-                    let i = map.next_value::<DirectiveImage>()?;
+                    let i = map.next_value::<Image>()?;
                     image = Some(i.name);
                     for use_ in i.use_ {
                         match use_ {
