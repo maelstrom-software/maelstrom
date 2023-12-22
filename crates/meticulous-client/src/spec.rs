@@ -1,6 +1,8 @@
 pub mod substitute;
 
 use anyhow::{Error, Result};
+use enumset::EnumSetType;
+use serde::{Deserialize, Serialize};
 use std::{
     env::{self, VarError},
     path::PathBuf,
@@ -19,6 +21,21 @@ pub struct ContainerImage {
     pub layers: Vec<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub environment: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[serde(rename_all = "snake_case")]
+#[enumset(serialize_repr = "list")]
+pub enum ImageUse {
+    Layers,
+    Environment,
+    WorkingDirectory,
+}
+
+#[derive(PartialEq, Eq, Debug, Deserialize)]
+pub enum PossiblyImage<T> {
+    Image,
+    Explicit(T),
 }
 
 #[cfg(test)]

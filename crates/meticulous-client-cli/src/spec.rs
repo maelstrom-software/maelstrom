@@ -1,11 +1,10 @@
 use anyhow::{anyhow, Result};
-use enumset::EnumSetType;
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::spec::{substitute, ContainerImage};
-use serde::{de, Deserialize, Deserializer, Serialize};
+use meticulous_client::spec::{substitute, ContainerImage, ImageUse, PossiblyImage};
+use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
@@ -212,26 +211,11 @@ enum JobField {
 
 struct JobVisitor;
 
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[enumset(serialize_repr = "list")]
-enum ImageUse {
-    Layers,
-    Environment,
-    WorkingDirectory,
-}
-
 #[derive(Deserialize)]
 struct DirectiveImage {
     name: String,
     #[serde(rename = "use")]
     use_: EnumSet<ImageUse>,
-}
-
-#[derive(PartialEq, Eq, Debug, Deserialize)]
-pub enum PossiblyImage<T> {
-    Image,
-    Explicit(T),
 }
 
 impl<'de> de::Visitor<'de> for JobVisitor {

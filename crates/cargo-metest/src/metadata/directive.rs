@@ -1,15 +1,9 @@
 use crate::pattern;
 use anyhow::Result;
-use enumset::EnumSetType;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
-use serde::{de, Deserialize, Deserializer, Serialize};
+use meticulous_client::spec::{ImageUse, PossiblyImage};
+use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, path::PathBuf, str};
-
-#[derive(PartialEq, Eq, Debug, Deserialize)]
-pub enum PossiblyImage<T> {
-    Image,
-    Explicit(T),
-}
 
 #[derive(PartialEq, Eq, Debug, Default)]
 pub struct TestDirective {
@@ -30,15 +24,6 @@ pub struct TestDirective {
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<PossiblyImage<PathBuf>>,
-}
-
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
-#[serde(rename_all = "snake_case")]
-#[enumset(serialize_repr = "list")]
-enum ImageUse {
-    Layers,
-    Environment,
-    WorkingDirectory,
 }
 
 #[derive(Deserialize)]

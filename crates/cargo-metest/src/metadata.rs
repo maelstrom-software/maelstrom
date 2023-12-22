@@ -2,9 +2,9 @@ mod directive;
 
 use crate::pattern;
 use anyhow::{anyhow, Context as _, Error, Result};
-use directive::{PossiblyImage, TestDirective};
+use directive::TestDirective;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
-use meticulous_client::spec::{self, substitute, ContainerImage};
+use meticulous_client::spec::{self, substitute, ContainerImage, PossiblyImage};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{
