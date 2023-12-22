@@ -1,7 +1,7 @@
-# Example config for meticulous-client.
+# Example config for meticulous-client-cli.
 #
-# Save this as .cache/meticulous-client.toml or wherever you specify the config
-# file using the --config-file or -c option.
+# Save this as .cache/meticulous-client-cli.toml or wherever you specify the
+# config file using the --config-file or -c option.
 
 # The host and port of the broker.
 #

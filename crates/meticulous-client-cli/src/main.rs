@@ -39,7 +39,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-client.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-client-cli.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit

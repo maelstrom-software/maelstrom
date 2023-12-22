@@ -1,0 +1,16 @@
+[package]
+name = "meticulous-client-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+directories.workspace = true
+figment.workspace = true
+indicatif.workspace = true
+meticulous-base.workspace = true
+meticulous-client.workspace = true
+meticulous-util.workspace = true
+serde.workspace = true
+serde_with.workspace = true

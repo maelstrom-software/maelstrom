@@ -2459,6 +2459,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "meticulous-client-cli"
+version = "0.3.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "directories",
+ "figment",
+ "indicatif",
+ "meticulous-base",
+ "meticulous-client",
+ "meticulous-util",
+ "serde",
+ "serde_with",
+]
+
+[[package]]
 name = "meticulous-container"
 version = "0.3.0-dev"
 dependencies = [
