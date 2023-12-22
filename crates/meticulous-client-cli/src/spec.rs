@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
@@ -18,16 +18,16 @@ impl<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> Iterator
     for JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT>
 where
     InnerT: Iterator<Item = serde_json::Result<Job>>,
-    LayerMapperT: Fn(String) -> anyhow::Result<Sha256Digest>,
+    LayerMapperT: Fn(String) -> Result<Sha256Digest>,
     EnvLookupT: Fn(&str) -> Result<Option<String>>,
     ImageLookupT: FnMut(&str) -> Result<ImageConfig>,
 {
-    type Item = anyhow::Result<JobSpec>;
+    type Item = Result<JobSpec>;
 
     fn next(&mut self) -> Option<Self::Item> {
         match self.inner.next() {
             None => None,
-            Some(Err(err)) => Some(Err(anyhow::Error::new(err))),
+            Some(Err(err)) => Some(Err(Error::new(err))),
             Some(Ok(job)) => Some(job.into_job_spec(
                 &self.layer_mapper,
                 &self.env_lookup,
@@ -39,10 +39,10 @@ where
 
 pub fn job_spec_iter_from_reader(
     reader: impl Read,
-    layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
+    layer_mapper: impl Fn(String) -> Result<Sha256Digest>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
     image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
-) -> impl Iterator<Item = anyhow::Result<JobSpec>> {
+) -> impl Iterator<Item = Result<JobSpec>> {
     let inner = serde_json::Deserializer::from_reader(reader).into_iter::<Job>();
     JobSpecIterator {
         inner,
@@ -93,10 +93,10 @@ impl Job {
 
     fn into_job_spec(
         self,
-        layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
+        layer_mapper: impl Fn(String) -> Result<Sha256Digest>,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
-    ) -> anyhow::Result<JobSpec> {
+    ) -> Result<JobSpec> {
         let (image_layers, image_environment, image_working_directory) =
             self.image.as_deref().map(image_lookup).transpose()?.map_or(
                 (None, None, None),
@@ -257,8 +257,8 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                 JobField::AddedEnvironment => match &environment {
                     None => {
                         return Err(de::Error::custom(format_args!(
-                                        "field `added_environment` set before `image` with a `use` of `environment`"
-                            )));
+                            "field `added_environment` set before `image` with a `use` of `environment`"
+                        )));
                     }
                     Some(PossiblyImage::Explicit(_)) => {
                         return Err(de::Error::custom(format_args!(
@@ -400,11 +400,10 @@ impl<'de> de::Deserialize<'de> for Job {
 #[cfg(test)]
 mod test {
     use super::*;
-    use anyhow::anyhow;
     use meticulous_base::{enum_set, nonempty, JobMountFsType};
     use meticulous_test::{digest, path_buf_vec};
 
-    fn layer_mapper(layer: String) -> anyhow::Result<Sha256Digest> {
+    fn layer_mapper(layer: String) -> Result<Sha256Digest> {
         Ok(Sha256Digest::from(layer.parse::<u64>()?))
     }
 
@@ -518,7 +517,7 @@ mod test {
         );
     }
 
-    fn assert_anyhow_error(err: anyhow::Error, expected: &str) {
+    fn assert_anyhow_error(err: Error, expected: &str) {
         let message = format!("{err}");
         assert!(
             message.starts_with(expected),
