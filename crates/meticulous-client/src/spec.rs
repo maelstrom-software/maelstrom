@@ -19,7 +19,7 @@ impl<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> Iterator
     for JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT>
 where
     InnerT: Iterator<Item = serde_json::Result<Job>>,
-    LayerMapperT: Fn(String) -> anyhow::Result<NonEmpty<Sha256Digest>>,
+    LayerMapperT: Fn(String) -> anyhow::Result<Sha256Digest>,
     EnvLookupT: Fn(&str) -> Result<Option<String>>,
     ImageLookupT: FnMut(&str) -> Result<ContainerImage>,
 {
@@ -40,7 +40,7 @@ where
 
 pub fn job_spec_iter_from_reader(
     reader: impl Read,
-    layer_mapper: impl Fn(String) -> anyhow::Result<NonEmpty<Sha256Digest>>,
+    layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
     image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
 ) -> impl Iterator<Item = anyhow::Result<JobSpec>> {
@@ -94,7 +94,7 @@ impl Job {
 
     fn into_job_spec(
         self,
-        layer_mapper: impl Fn(String) -> anyhow::Result<NonEmpty<Sha256Digest>>,
+        layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
     ) -> anyhow::Result<JobSpec> {
@@ -162,7 +162,7 @@ impl Job {
                 .map(|pb| pb.into_os_string().into_string().unwrap()),
         };
         layers.extend(self.added_layers);
-        let layers = NonEmpty::<Sha256Digest>::flatten(layers.try_map(layer_mapper)?);
+        let layers = layers.try_map(layer_mapper)?;
         let working_directory = match self.working_directory {
             None => PathBuf::from("/"),
             Some(PossiblyImage::Explicit(working_directory)) => working_directory,
@@ -434,8 +434,8 @@ mod test {
     use meticulous_base::{enum_set, nonempty, JobMountFsType};
     use meticulous_test::{digest, path_buf_vec};
 
-    fn layer_mapper(layer: String) -> anyhow::Result<NonEmpty<Sha256Digest>> {
-        Ok(nonempty![Sha256Digest::from(layer.parse::<u64>()?)])
+    fn layer_mapper(layer: String) -> anyhow::Result<Sha256Digest> {
+        Ok(Sha256Digest::from(layer.parse::<u64>()?))
     }
 
     fn env(var: &str) -> Result<Option<String>> {

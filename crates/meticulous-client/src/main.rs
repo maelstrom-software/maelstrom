@@ -6,10 +6,7 @@ use figment::{
     Figment,
 };
 use indicatif::ProgressBar;
-use meticulous_base::{
-    ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess, NonEmpty,
-    Sha256Digest,
-};
+use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
 use meticulous_client::{
     spec::{self, ContainerImage},
     Client, DefaultClientDriver,
@@ -129,10 +126,6 @@ fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>
     Ok(())
 }
 
-fn add_artifact(client: &mut Client, layer: &str) -> Result<NonEmpty<Sha256Digest>> {
-    Ok(NonEmpty::singleton(client.add_artifact(Path::new(layer))?))
-}
-
 fn cache_dir() -> PathBuf {
     directories::BaseDirs::new()
         .expect("failed to find cache dir")
@@ -194,7 +187,7 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = spec::job_spec_iter_from_reader(
         reader,
-        |layer| add_artifact(&mut client.borrow_mut(), layer.as_str()),
+        |layer| client.borrow_mut().add_artifact(Path::new(&layer)),
         std_env_lookup,
         image_lookup,
     );
