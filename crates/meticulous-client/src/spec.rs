@@ -1,7 +1,10 @@
 pub mod substitute;
 
 use anyhow::{Error, Result};
-use std::env::{self, VarError};
+use std::{
+    env::{self, VarError},
+    path::PathBuf,
+};
 
 pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
     match env::var(var) {
@@ -9,6 +12,13 @@ pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
         Err(VarError::NotPresent) => Ok(None),
         Err(err) => Err(Error::new(err)),
     }
+}
+
+#[derive(Default)]
+pub struct ContainerImage {
+    pub layers: Vec<PathBuf>,
+    pub working_directory: Option<PathBuf>,
+    pub environment: Option<Vec<String>>,
 }
 
 #[cfg(test)]

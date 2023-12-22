@@ -4,7 +4,7 @@ use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::spec::substitute;
+use meticulous_client::spec::{substitute, ContainerImage};
 use serde::{de, Deserialize, Deserializer, Serialize};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
@@ -189,13 +189,6 @@ impl Job {
             group: self.group.unwrap_or(GroupId::from(0)),
         })
     }
-}
-
-#[derive(Default)]
-pub struct ContainerImage {
-    pub layers: Vec<PathBuf>,
-    pub working_directory: Option<PathBuf>,
-    pub environment: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]

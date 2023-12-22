@@ -7,8 +7,11 @@ use figment::{
 };
 use indicatif::ProgressBar;
 use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
-use meticulous_client::{spec::std_env_lookup, Client, DefaultClientDriver};
-use meticulous_client_cli::spec::{job_spec_iter_from_reader, ContainerImage};
+use meticulous_client::{
+    spec::{std_env_lookup, ContainerImage},
+    Client, DefaultClientDriver,
+};
+use meticulous_client_cli::spec::job_spec_iter_from_reader;
 use meticulous_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},

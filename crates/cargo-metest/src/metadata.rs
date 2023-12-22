@@ -4,7 +4,7 @@ use crate::pattern;
 use anyhow::{anyhow, Context as _, Error, Result};
 use directive::{PossiblyImage, TestDirective};
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
-use meticulous_client::spec::{self, substitute};
+use meticulous_client::spec::{self, substitute, ContainerImage};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{
@@ -12,13 +12,6 @@ use std::{
     path::{Path, PathBuf},
     str,
 };
-
-#[derive(Default)]
-pub struct ContainerImage {
-    pub layers: Vec<PathBuf>,
-    pub working_directory: Option<PathBuf>,
-    pub environment: Option<Vec<String>>,
-}
 
 #[derive(PartialEq, Eq, Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]

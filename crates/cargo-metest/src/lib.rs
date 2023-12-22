@@ -12,9 +12,9 @@ use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
-use metadata::{AllMetadata, ContainerImage, TestMetadata};
+use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
-use meticulous_client::{Client, ClientDriver};
+use meticulous_client::{spec::ContainerImage, Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
