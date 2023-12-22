@@ -37,9 +37,7 @@ where
     LookupT: Fn(&'b str) -> anyhow::Result<Option<VarT>>,
     VarT: Borrow<str>,
 {
-    let (var, rest) = input
-        .split_once('}')
-        .map_or_else(|| Err(Error::UnterminatedBrace), Ok)?;
+    let (var, rest) = input.split_once('}').ok_or(Error::UnterminatedBrace)?;
 
     let (var, default) = if let Some((head, tail)) = var.split_once(":-") {
         (head, Some(tail))

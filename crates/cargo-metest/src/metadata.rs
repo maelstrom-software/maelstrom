@@ -1,10 +1,10 @@
 mod directive;
 
 use crate::pattern;
-use anyhow::{anyhow, Context as _, Error, Result};
+use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
-use meticulous_client::spec::{self, substitute, ImageConfig, PossiblyImage};
+use meticulous_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{
@@ -76,11 +76,7 @@ impl TestMetadata {
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<Self> {
-        let image_name = directive.image.as_ref();
-        let image = image_name
-            .map(String::as_str)
-            .map(image_lookup)
-            .transpose()?;
+        let image = ImageOption::new(&directive.image, image_lookup)?;
 
         if directive.include_shared_libraries.is_some() {
             self.include_shared_libraries = directive.include_shared_libraries;
@@ -99,14 +95,7 @@ impl TestMetadata {
                 self.working_directory = working_directory.clone();
             }
             Some(PossiblyImage::Image) => {
-                let working_directory = image.as_ref().unwrap().working_directory.as_ref();
-                if working_directory.is_none() {
-                    return Err(anyhow!(
-                        "image {} doesn't have a working_directory to use",
-                        image_name.unwrap()
-                    ));
-                }
-                self.working_directory = working_directory.unwrap().clone();
+                self.working_directory = image.working_directory()?;
             }
             None => {}
         }
@@ -124,13 +113,7 @@ impl TestMetadata {
                 self.layers = layers.to_vec();
             }
             Some(PossiblyImage::Image) => {
-                self.layers = image
-                    .as_ref()
-                    .unwrap()
-                    .layers
-                    .iter()
-                    .map(|p| p.as_os_str().to_str().unwrap().to_string())
-                    .collect();
+                self.layers = image.layers()?.collect();
             }
             None => {}
         }
@@ -158,34 +141,7 @@ impl TestMetadata {
                         .collect();
             }
             Some(PossiblyImage::Image) => {
-                let environment = image
-                    .as_ref()
-                    .unwrap()
-                    .environment
-                    .as_ref()
-                    .map_or_else(
-                        || {
-                            Err(anyhow!(
-                                "image {} doesn't have an environment to use",
-                                image_name.unwrap(),
-                            ))
-                        },
-                        Ok,
-                    )?
-                    .iter()
-                    .map(|var| {
-                        var.split_once('=').map_or_else(
-                            || {
-                                Err(anyhow!(
-                                    "image {}'s environment variable {var} is invalid",
-                                    image_name.unwrap(),
-                                ))
-                            },
-                            |(k, v)| Ok((k.to_string(), v.to_string())),
-                        )
-                    })
-                    .collect::<Result<Vec<_>>>()?;
-                self.environment = BTreeMap::from_iter(environment);
+                self.environment = image.environment()?;
             }
             None => {}
         }
@@ -433,10 +389,6 @@ mod test {
         );
     }
 
-    fn assert_error_starts_with(err: Error, prefix: &str) {
-        assert!(format!("{err}").starts_with(prefix), "{err}")
-    }
-
     #[test]
     fn working_directory() {
         let image_lookup = |name: &_| match name {
@@ -485,11 +437,6 @@ mod test {
                 .unwrap()
                 .working_directory,
             path_buf!("/")
-        );
-        assert_error_starts_with(
-            all.get_metadata_for_test(&test_ctx("package3", "test1"), empty_env, image_lookup)
-                .unwrap_err(),
-            "image no-working-directory doesn't have a working_directory to use",
         );
     }
 
@@ -758,16 +705,6 @@ mod test {
                 "BAZ=no-prev-foo".to_string(),
                 "FOO=env-foo".to_string(),
             ],
-        );
-        assert_error_starts_with(
-            all.get_metadata_for_test(&test_ctx("package3", "test1"), env, images)
-                .unwrap_err(),
-            "image no-environment doesn't have an environment to use",
-        );
-        assert_error_starts_with(
-            all.get_metadata_for_test(&test_ctx("package4", "test1"), env, images)
-                .unwrap_err(),
-            "image bad-environment's environment variable FOO is invalid",
         );
     }
 

@@ -4,7 +4,7 @@ use meticulous_base::{
     Sha256Digest, UserId,
 };
 use meticulous_client::spec::{
-    incompatible, substitute, Image, ImageConfig, ImageUse, PossiblyImage,
+    incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
@@ -99,16 +99,7 @@ impl Job {
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<JobSpec> {
-        let (image_layers, image_environment, image_working_directory) =
-            self.image.as_deref().map(image_lookup).transpose()?.map_or(
-                (None, None, None),
-                |ImageConfig {
-                     layers,
-                     environment,
-                     working_directory,
-                 }| { (Some(layers), Some(environment), Some(working_directory)) },
-            );
-        let image_name = self.image.as_deref().unwrap_or("");
+        let image = ImageOption::new(&self.image, image_lookup)?;
         let mut environment = match self.environment {
             None => BTreeMap::default(),
             Some(PossiblyImage::Explicit(environment)) => environment
@@ -121,25 +112,7 @@ impl Job {
                     ))
                 })
                 .collect::<Result<BTreeMap<_, _>>>()?,
-            Some(PossiblyImage::Image) => {
-                let image_environment = image_environment
-                    .unwrap()
-                    .ok_or_else(|| anyhow!("image {image_name} has no environment to use"))?;
-                let mut environment = BTreeMap::default();
-                for var in image_environment {
-                    match var.split_once('=') {
-                        None => {
-                            return Err(anyhow!(
-                                "image {image_name} has an invalid environment variable {var}"
-                            ));
-                        }
-                        Some((left, right)) => {
-                            environment.insert(left.into(), right.into());
-                        }
-                    }
-                }
-                environment
-            }
+            Some(PossiblyImage::Image) => image.environment()?,
         };
         let added_environment = self
             .added_environment
@@ -158,18 +131,15 @@ impl Job {
         let environment = Vec::from_iter(environment.into_iter().map(|(k, v)| k + "=" + &v));
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers,
-            PossiblyImage::Image => NonEmpty::from_vec(image_layers.unwrap())
-                .ok_or_else(|| anyhow!("image {image_name} has no layers to use"))?
-                .map(|pb| pb.into_os_string().into_string().unwrap()),
+            PossiblyImage::Image => NonEmpty::from_vec(image.layers()?.collect())
+                .ok_or_else(|| anyhow!("image {} has no layers to use", image.name()))?,
         };
         layers.extend(self.added_layers);
         let layers = layers.try_map(layer_mapper)?;
         let working_directory = match self.working_directory {
             None => PathBuf::from("/"),
             Some(PossiblyImage::Explicit(working_directory)) => working_directory,
-            Some(PossiblyImage::Image) => image_working_directory
-                .unwrap()
-                .ok_or_else(|| anyhow!("image {image_name} has no working_directory to use"))?,
+            Some(PossiblyImage::Image) => image.working_directory()?,
         };
         Ok(JobSpec {
             program: self.program,
@@ -511,7 +481,7 @@ mod test {
     fn assert_anyhow_error(err: Error, expected: &str) {
         let message = format!("{err}");
         assert!(
-            message.starts_with(expected),
+            message == expected,
             "message: {message:?}, expected: {expected:?}"
         );
     }
@@ -837,23 +807,6 @@ mod test {
     }
 
     #[test]
-    fn environment_from_image_with_no_environment() {
-        assert_anyhow_error(
-            parse_job(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ "1" ],
-                    "image": { "name": "empty", "use": [ "environment" ] }
-                }"#,
-            )
-            .unwrap()
-            .into_job_spec(layer_mapper, env, images)
-            .unwrap_err(),
-            "image empty has no environment to use",
-        )
-    }
-
-    #[test]
     fn environment_from_image_after_environment() {
         assert_error(
             parse_job(
@@ -1106,26 +1059,6 @@ mod test {
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).working_directory("/foo"),
-        )
-    }
-
-    #[test]
-    fn working_directory_from_image_with_no_working_directory() {
-        assert_anyhow_error(
-            parse_job(
-                r#"{
-                    "program": "/bin/sh",
-                    "layers": [ "1" ],
-                    "image": {
-                        "name": "empty",
-                        "use": [ "working_directory" ]
-                    }
-                }"#,
-            )
-            .unwrap()
-            .into_job_spec(layer_mapper, env, images)
-            .unwrap_err(),
-            "image empty has no working_directory to use",
         )
     }
 
