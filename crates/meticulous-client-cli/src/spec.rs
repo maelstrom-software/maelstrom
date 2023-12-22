@@ -3,7 +3,7 @@ use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId,
 };
-use meticulous_client::spec::{substitute, ContainerImage, ImageUse, PossiblyImage};
+use meticulous_client::spec::{substitute, ImageConfig, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read, path::PathBuf};
 
@@ -20,7 +20,7 @@ where
     InnerT: Iterator<Item = serde_json::Result<Job>>,
     LayerMapperT: Fn(String) -> anyhow::Result<Sha256Digest>,
     EnvLookupT: Fn(&str) -> Result<Option<String>>,
-    ImageLookupT: FnMut(&str) -> Result<ContainerImage>,
+    ImageLookupT: FnMut(&str) -> Result<ImageConfig>,
 {
     type Item = anyhow::Result<JobSpec>;
 
@@ -41,7 +41,7 @@ pub fn job_spec_iter_from_reader(
     reader: impl Read,
     layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
-    image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+    image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
 ) -> impl Iterator<Item = anyhow::Result<JobSpec>> {
     let inner = serde_json::Deserializer::from_reader(reader).into_iter::<Job>();
     JobSpecIterator {
@@ -95,12 +95,12 @@ impl Job {
         self,
         layer_mapper: impl Fn(String) -> anyhow::Result<Sha256Digest>,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
-        image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> anyhow::Result<JobSpec> {
         let (image_layers, image_environment, image_working_directory) =
             self.image.as_deref().map(image_lookup).transpose()?.map_or(
                 (None, None, None),
-                |ContainerImage {
+                |ImageConfig {
                      layers,
                      environment,
                      working_directory,
@@ -423,9 +423,9 @@ mod test {
         }
     }
 
-    fn images(name: &str) -> Result<ContainerImage> {
+    fn images(name: &str) -> Result<ImageConfig> {
         match name {
-            "image1" => Ok(ContainerImage {
+            "image1" => Ok(ImageConfig {
                 layers: path_buf_vec!["42", "43"],
                 working_directory: Some("/foo".into()),
                 environment: Some(vec![
@@ -433,7 +433,7 @@ mod test {
                     "BAZ=image-baz".to_string(),
                 ]),
             }),
-            "image-with-env-substitutions" => Ok(ContainerImage {
+            "image-with-env-substitutions" => Ok(ImageConfig {
                 environment: Some(vec!["PATH=$env{PATH}".to_string()]),
                 ..Default::default()
             }),

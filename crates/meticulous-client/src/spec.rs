@@ -17,7 +17,7 @@ pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
 }
 
 #[derive(Default)]
-pub struct ContainerImage {
+pub struct ImageConfig {
     pub layers: Vec<PathBuf>,
     pub working_directory: Option<PathBuf>,
     pub environment: Option<Vec<String>>,

@@ -4,7 +4,7 @@ use crate::pattern;
 use anyhow::{anyhow, Context as _, Error, Result};
 use directive::TestDirective;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
-use meticulous_client::spec::{self, substitute, ContainerImage, PossiblyImage};
+use meticulous_client::spec::{self, substitute, ImageConfig, PossiblyImage};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{
@@ -74,7 +74,7 @@ impl TestMetadata {
         mut self,
         directive: &TestDirective,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
-        image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<Self> {
         let image_name = directive.image.as_ref();
         let image = image_name
@@ -218,7 +218,7 @@ impl AllMetadata {
         &self,
         context: &pattern::Context,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
-        mut image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+        mut image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<TestMetadata> {
         self.directives
             .iter()
@@ -237,7 +237,7 @@ impl AllMetadata {
     pub fn get_metadata_for_test_with_env(
         &self,
         context: &pattern::Context,
-        image_lookup: impl FnMut(&str) -> Result<ContainerImage>,
+        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<TestMetadata> {
         self.get_metadata_for_test(context, spec::std_env_lookup, image_lookup)
     }
@@ -279,7 +279,7 @@ mod test {
         Ok(None)
     }
 
-    fn no_containers(_: &str) -> Result<ContainerImage> {
+    fn no_containers(_: &str) -> Result<ImageConfig> {
         panic!()
     }
 
@@ -440,7 +440,7 @@ mod test {
     #[test]
     fn working_directory() {
         let image_lookup = |name: &_| match name {
-            "rust" => Ok(ContainerImage {
+            "rust" => Ok(ImageConfig {
                 working_directory: Some(path_buf!("/foo")),
                 ..Default::default()
             }),
@@ -564,11 +564,11 @@ mod test {
     #[test]
     fn layers() {
         let image_lookup = |name: &_| match name {
-            "image1" => Ok(ContainerImage {
+            "image1" => Ok(ImageConfig {
                 layers: path_buf_vec!["layer11", "layer12"],
                 ..Default::default()
             }),
-            "image2" => Ok(ContainerImage {
+            "image2" => Ok(ImageConfig {
                 layers: path_buf_vec!["layer21", "layer22"],
                 ..Default::default()
             }),
@@ -693,7 +693,7 @@ mod test {
             }))
         };
         let images = |name: &_| match name {
-            "image1" => Ok(ContainerImage {
+            "image1" => Ok(ImageConfig {
                 environment: Some(vec![
                     "FOO=image-foo".to_string(),
                     "FROB=image-frob".to_string(),
@@ -701,7 +701,7 @@ mod test {
                 ..Default::default()
             }),
             "no-environment" => Ok(Default::default()),
-            "bad-environment" => Ok(ContainerImage {
+            "bad-environment" => Ok(ImageConfig {
                 environment: Some(vec!["FOO".to_string()]),
                 ..Default::default()
             }),
@@ -781,7 +781,7 @@ mod test {
             }))
         };
         let images = |name: &_| match name {
-            "image1" => Ok(ContainerImage {
+            "image1" => Ok(ImageConfig {
                 environment: Some(vec![
                     "FOO=image-foo".to_string(),
                     "FROB=image-frob".to_string(),

@@ -14,7 +14,7 @@ use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
-use meticulous_client::{spec::ContainerImage, Client, ClientDriver};
+use meticulous_client::{spec::ImageConfig, Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
@@ -186,7 +186,7 @@ where
             let mut client = self.client.lock().unwrap();
             let container_image_depot = client.container_image_depot_mut();
             let image = container_image_depot.get_container_image(image, version, prog)?;
-            Ok(ContainerImage {
+            Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
                 working_directory: image.working_dir().map(PathBuf::from),

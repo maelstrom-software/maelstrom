@@ -8,7 +8,7 @@ use figment::{
 use indicatif::ProgressBar;
 use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
 use meticulous_client::{
-    spec::{std_env_lookup, ContainerImage},
+    spec::{std_env_lookup, ImageConfig},
     Client, DefaultClientDriver,
 };
 use meticulous_client_cli::spec::job_spec_iter_from_reader;
@@ -171,7 +171,7 @@ fn main() -> Result<ExitCode> {
         let mut client = client.borrow_mut();
         let container_image_depot = client.container_image_depot_mut();
         let image = container_image_depot.get_container_image(image, version, prog)?;
-        Ok(ContainerImage {
+        Ok(ImageConfig {
             layers: image.layers.clone(),
             environment: image.env().cloned(),
             working_directory: image.working_dir().map(PathBuf::from),
