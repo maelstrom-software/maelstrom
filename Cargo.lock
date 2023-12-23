@@ -2395,6 +2395,7 @@ dependencies = [
 name = "meticulous-base"
 version = "0.3.0-dev"
 dependencies = [
+ "derive_more",
  "enum-map",
  "enumset",
  "hex",

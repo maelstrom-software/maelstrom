@@ -5,6 +5,7 @@ pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
 
+use derive_more::{Constructor, Display, From};
 use enumset::EnumSetType;
 pub use enumset::{enum_set, EnumSet};
 use hex::{self, FromHexError};
@@ -12,7 +13,7 @@ pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,
-    fmt::{self, Debug, Display, Formatter},
+    fmt::{self, Debug, Formatter},
     hash::Hash,
     path::PathBuf,
     result::Result,
@@ -20,36 +21,16 @@ use std::{
 };
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct ClientId(u32);
 
-impl From<u32> for ClientId {
-    fn from(input: u32) -> Self {
-        ClientId(input)
-    }
-}
-
-impl Display for ClientId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
 /// A client-relative job ID. Clients can assign these however they like.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct ClientJobId(u32);
-
-impl From<u32> for ClientJobId {
-    fn from(input: u32) -> Self {
-        ClientJobId(input)
-    }
-}
-
-impl Display for ClientJobId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
 
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -110,36 +91,16 @@ pub struct JobMount {
 }
 
 /// ID of a user. This should be compatible with uid_t.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct UserId(u32);
 
-impl From<u32> for UserId {
-    fn from(input: u32) -> Self {
-        UserId(input)
-    }
-}
-
-impl Display for UserId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
 /// ID of a group. This should be compatible with gid_t.
-#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(
+    Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
 pub struct GroupId(u32);
-
-impl From<u32> for GroupId {
-    fn from(input: u32) -> Self {
-        GroupId(input)
-    }
-}
-
-impl Display for GroupId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
 
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -259,7 +220,7 @@ pub enum JobOutputResult {
 impl Debug for JobOutputResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            JobOutputResult::None => write!(f, "None"),
+            JobOutputResult::None => f.debug_tuple("None").finish(),
             JobOutputResult::Inline(bytes) => {
                 let pretty_bytes = String::from_utf8_lossy(bytes);
                 f.debug_tuple("Inline").field(&pretty_bytes).finish()
@@ -321,31 +282,27 @@ pub type JobResult = JobErrorResult<JobSuccess, String>;
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Display,
+    Eq,
+    From,
+    Hash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
 )]
 pub struct WorkerId(u32);
 
-impl From<u32> for WorkerId {
-    fn from(input: u32) -> Self {
-        WorkerId(input)
-    }
-}
-
-impl Display for WorkerId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Display::fmt(&self.0, f)
-    }
-}
-
 /// A SHA-256 digest.
-#[derive(Clone, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Constructor, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct Sha256Digest([u8; 32]);
 
 impl Sha256Digest {
-    pub fn new(input: [u8; 32]) -> Self {
-        Sha256Digest(input)
-    }
-
     /// Verify that two digests match. If not, return a [`Sha256DigestVerificationError`].
     pub fn verify(&self, expected: &Self) -> Result<(), Sha256DigestVerificationError> {
         if *self != *expected {
@@ -392,7 +349,7 @@ impl FromStr for Sha256Digest {
     }
 }
 
-impl Display for Sha256Digest {
+impl fmt::Display for Sha256Digest {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let mut bytes = [0; 64];
         hex::encode_to_slice(self.0, &mut bytes).unwrap();
@@ -423,7 +380,7 @@ impl Sha256DigestVerificationError {
     }
 }
 
-impl Display for Sha256DigestVerificationError {
+impl fmt::Display for Sha256DigestVerificationError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
