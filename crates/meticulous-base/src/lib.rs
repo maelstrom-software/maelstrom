@@ -316,19 +316,17 @@ impl Sha256Digest {
     }
 }
 
-impl From<u32> for Sha256Digest {
-    fn from(input: u32) -> Self {
-        let mut bytes = [0; 32];
-        bytes[28..].copy_from_slice(&input.to_be_bytes());
-        Sha256Digest(bytes)
-    }
-}
-
 impl From<u64> for Sha256Digest {
     fn from(input: u64) -> Self {
         let mut bytes = [0; 32];
         bytes[24..].copy_from_slice(&input.to_be_bytes());
         Sha256Digest(bytes)
+    }
+}
+
+impl From<u32> for Sha256Digest {
+    fn from(input: u32) -> Self {
+        Sha256Digest::from(u64::from(input))
     }
 }
 
