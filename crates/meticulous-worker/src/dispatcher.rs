@@ -449,7 +449,7 @@ mod tests {
             let digest_layers = spec.layers.clone();
             mut_ref
                 .messages
-                .push(StartJob(jid, spec, layers.into_iter().collect::<Vec<_>>()));
+                .push(StartJob(jid, spec, Vec::from_iter(layers)));
             (mut_ref.start_job_returns.remove(0), digest_layers)
         }
 

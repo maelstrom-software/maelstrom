@@ -94,12 +94,15 @@ fn create_artifact_for_binary_deps(
     let tar_file = fs.create_file(&tar_path)?;
     let mut a = tar::Builder::new(tar_file);
 
-    let files: Vec<_> = paths
+    let files = paths
         .iter()
         .map(|p| fs.open_file(p))
-        .collect::<Result<_>>()?;
+        .collect::<Result<Vec<_>>>()?;
 
-    let metas: Vec<_> = files.iter().map(|f| f.metadata()).collect::<Result<_>>()?;
+    let metas = files
+        .iter()
+        .map(|f| f.metadata())
+        .collect::<Result<Vec<_>>>()?;
 
     let total_size = metas.iter().map(|m| m.len()).sum();
     prog.set_length(total_size);

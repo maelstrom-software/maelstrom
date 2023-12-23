@@ -328,7 +328,7 @@ impl<'a> Simulation<'a> {
     /// let mut simex = meticulous_simex::SimulationExplorer::default();
     /// let mut combinations = vec![];
     /// while let Some(mut simulation) = simex.next_simulation() {
-    ///     combinations.push(simulation.choose_n(3, 1..6).collect::<Vec<_>>());
+    ///     combinations.push(Vec::from_iter(simulation.choose_n(3, 1..6)));
     /// }
     /// assert_eq!(
     ///     combinations,
@@ -418,7 +418,7 @@ impl<'a> Simulation<'a> {
     /// let mut simex = meticulous_simex::SimulationExplorer::default();
     /// let mut combinations = vec![];
     /// while let Some(mut simulation) = simex.next_simulation() {
-    ///     combinations.push(simulation.choose_n(3, 1..6).collect::<Vec<_>>());
+    ///     combinations.push(Vec::from_iter(simulation.choose_n(3, 1..6)));
     /// }
     /// assert_eq!(
     ///     combinations,
@@ -773,7 +773,7 @@ mod tests {
                     .unwrap(),
             );
         }
-        assert_eq!(actual, (0..10).collect::<Vec<_>>());
+        assert_eq!(actual, Vec::from_iter(0..10));
     }
 
     #[test]
@@ -796,9 +796,7 @@ mod tests {
     #[test]
     fn choose_bool() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_bool())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_bool())),
             vec![false, true],
         );
     }
@@ -806,11 +804,9 @@ mod tests {
     #[test]
     fn choose_n() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(3, FusedAssertingIterator::from(0..5))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(3, FusedAssertingIterator::from(0..5))
+            ))),
             vec![
                 vec![0, 1, 2],
                 vec![0, 1, 3],
@@ -829,11 +825,9 @@ mod tests {
     #[test]
     fn choose_n_too_small() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(3, FusedAssertingIterator::from(0..2))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(3, FusedAssertingIterator::from(0..2))
+            ))),
             vec![vec![0, 1]],
         );
     }
@@ -841,11 +835,9 @@ mod tests {
     #[test]
     fn choose_n_from_empty() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(3, FusedAssertingIterator::from(0..0))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(3, FusedAssertingIterator::from(0..0))
+            ))),
             vec![vec![]],
         );
     }
@@ -853,11 +845,9 @@ mod tests {
     #[test]
     fn choose_n_exact() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(3, FusedAssertingIterator::from(0..3))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(3, FusedAssertingIterator::from(0..3))
+            ))),
             vec![vec![0, 1, 2]],
         );
     }
@@ -865,11 +855,9 @@ mod tests {
     #[test]
     fn choose_0_from_some() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(0, FusedAssertingIterator::from(0..5))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(0, FusedAssertingIterator::from(0..5))
+            ))),
             vec![vec![]],
         );
     }
@@ -877,11 +865,9 @@ mod tests {
     #[test]
     fn choose_0_from_none() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n(0, FusedAssertingIterator::from(0..0))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n(0, FusedAssertingIterator::from(0..0))
+            ))),
             vec![vec![]],
         );
     }
@@ -938,11 +924,10 @@ mod tests {
     #[test]
     fn choose_unknown_size_from_single_element() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_unknown_size(FusedAssertingIterator::from(0..1))
-                    .unwrap())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| {
+                sim.choose_unknown_size(FusedAssertingIterator::from(0..1))
+                    .unwrap()
+            })),
             vec![0],
         );
     }
@@ -950,11 +935,10 @@ mod tests {
     #[test]
     fn choose_unknown_size() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_unknown_size(FusedAssertingIterator::from(0..10))
-                    .unwrap())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| {
+                sim.choose_unknown_size(FusedAssertingIterator::from(0..10))
+                    .unwrap()
+            })),
             vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
         );
     }
@@ -962,11 +946,9 @@ mod tests {
     #[test]
     fn choose_n_unknown_size() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(3, FusedAssertingIterator::from(0..5))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(3, FusedAssertingIterator::from(0..5))
+            ))),
             vec![
                 vec![0, 1, 2],
                 vec![0, 1, 3],
@@ -985,11 +967,9 @@ mod tests {
     #[test]
     fn choose_n_unknown_size_too_small() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(3, FusedAssertingIterator::from(0..2))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(3, FusedAssertingIterator::from(0..2))
+            ))),
             vec![vec![0, 1]],
         );
     }
@@ -997,11 +977,9 @@ mod tests {
     #[test]
     fn choose_n_unknown_size_from_empty() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(3, FusedAssertingIterator::from(0..0))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(3, FusedAssertingIterator::from(0..0))
+            ))),
             vec![vec![]],
         );
     }
@@ -1009,11 +987,9 @@ mod tests {
     #[test]
     fn choose_n_unknown_size_exact() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(3, FusedAssertingIterator::from(0..3))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(3, FusedAssertingIterator::from(0..3))
+            ))),
             vec![vec![0, 1, 2]],
         );
     }
@@ -1021,11 +997,9 @@ mod tests {
     #[test]
     fn choose_0_unknown_size_from_some() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(0, FusedAssertingIterator::from(0..5))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(0, FusedAssertingIterator::from(0..5))
+            ))),
             vec![vec![]],
         );
     }
@@ -1033,11 +1007,9 @@ mod tests {
     #[test]
     fn choose_0_unknown_size_from_none() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim
-                    .choose_n_unknown_size(0, FusedAssertingIterator::from(0..0))
-                    .collect::<Vec<_>>())
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| Vec::from_iter(
+                sim.choose_n_unknown_size(0, FusedAssertingIterator::from(0..0))
+            ))),
             vec![vec![]],
         );
     }
@@ -1200,9 +1172,7 @@ mod tests {
     #[test]
     fn choose_integer_0() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 0))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(0, 0))),
             vec![0],
         );
     }
@@ -1210,9 +1180,10 @@ mod tests {
     #[test]
     fn choose_integer_max() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(usize::MAX, usize::MAX))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(
+                SimulationExplorer::default()
+                    .map(|mut sim| sim.choose_integer(usize::MAX, usize::MAX))
+            ),
             vec![usize::MAX],
         );
     }
@@ -1220,9 +1191,7 @@ mod tests {
     #[test]
     fn choose_integer_0_to_1() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 1))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(0, 1))),
             vec![0, 1],
         );
     }
@@ -1230,9 +1199,7 @@ mod tests {
     #[test]
     fn choose_integer_1_to_2() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 2))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(1, 2))),
             vec![1, 2],
         );
     }
@@ -1240,9 +1207,7 @@ mod tests {
     #[test]
     fn choose_integer_0_to_2() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(0, 2))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(0, 2))),
             vec![0, 1, 2],
         );
     }
@@ -1250,9 +1215,7 @@ mod tests {
     #[test]
     fn choose_integer_1_to_3() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 3))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(1, 3))),
             vec![1, 2, 3],
         );
     }
@@ -1260,9 +1223,7 @@ mod tests {
     #[test]
     fn choose_integer_1_to_13() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 13))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(1, 13))),
             vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13],
         );
     }
@@ -1270,9 +1231,7 @@ mod tests {
     #[test]
     fn choose_integer_neg_1_to_0() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-1, 0))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(-1, 0))),
             vec![-1, 0],
         );
     }
@@ -1280,9 +1239,7 @@ mod tests {
     #[test]
     fn choose_integer_neg_2_to_neg_1() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-2, -1))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(-2, -1))),
             vec![-2, -1],
         );
     }
@@ -1290,9 +1247,7 @@ mod tests {
     #[test]
     fn choose_integer_neg_2_to_0() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-2, 0))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(-2, 0))),
             vec![-2, -1, 0],
         );
     }
@@ -1300,9 +1255,7 @@ mod tests {
     #[test]
     fn choose_integer_neg_3_to_neg_1() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-3, -1))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(-3, -1))),
             vec![-3, -2, -1],
         );
     }
@@ -1310,9 +1263,9 @@ mod tests {
     #[test]
     fn choose_integer_neg_13_to_neg_1() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(-13, -1))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(
+                SimulationExplorer::default().map(|mut sim| sim.choose_integer(-13, -1))
+            ),
             vec![-13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3, -2, -1],
         );
     }
@@ -1328,9 +1281,7 @@ mod tests {
     #[should_panic(expected = "min <= max")]
     fn choose_integer_1_to_0() {
         assert_eq!(
-            SimulationExplorer::default()
-                .map(|mut sim| sim.choose_integer(1, 0))
-                .collect::<Vec<_>>(),
+            Vec::from_iter(SimulationExplorer::default().map(|mut sim| sim.choose_integer(1, 0))),
             vec![1, 0],
         );
     }
