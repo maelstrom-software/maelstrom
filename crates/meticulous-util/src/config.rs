@@ -1,5 +1,6 @@
 use bytesize::ByteSize;
 use clap::ValueEnum;
+use derive_more::From;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt::{self, Debug, Formatter},
@@ -43,7 +44,7 @@ impl Debug for BrokerAddr {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, From)]
 #[serde(from = "PathBuf")]
 pub struct CacheRoot(PathBuf);
 
@@ -57,31 +58,19 @@ impl CacheRoot {
     }
 }
 
-impl From<PathBuf> for CacheRoot {
-    fn from(value: PathBuf) -> Self {
-        CacheRoot(value)
-    }
-}
-
 impl Debug for CacheRoot {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, From)]
 #[serde(from = "u64")]
 pub struct CacheBytesUsedTarget(u64);
 
 impl CacheBytesUsedTarget {
     pub fn into_inner(self) -> u64 {
         self.0
-    }
-}
-
-impl From<u64> for CacheBytesUsedTarget {
-    fn from(value: u64) -> Self {
-        CacheBytesUsedTarget(value)
     }
 }
 

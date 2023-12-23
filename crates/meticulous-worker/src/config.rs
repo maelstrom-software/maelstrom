@@ -1,4 +1,5 @@
 use bytesize::ByteSize;
+use derive_more::From;
 use meticulous_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -41,19 +42,13 @@ impl Debug for Slots {
     }
 }
 
-#[derive(Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize, From)]
 #[serde(from = "u64")]
 pub struct InlineLimit(u64);
 
 impl InlineLimit {
     pub fn into_inner(self) -> u64 {
         self.0
-    }
-}
-
-impl From<u64> for InlineLimit {
-    fn from(value: u64) -> Self {
-        InlineLimit(value)
     }
 }
 

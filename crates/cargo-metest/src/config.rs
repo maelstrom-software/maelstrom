@@ -1,21 +1,16 @@
+use derive_more::From;
 use meticulous_util::config::BrokerAddr;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::fmt::{self, Debug, Formatter};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, From)]
 #[serde(transparent)]
 pub struct Quiet(bool);
 
 impl Quiet {
     pub fn into_inner(self) -> bool {
         self.0
-    }
-}
-
-impl From<bool> for Quiet {
-    fn from(value: bool) -> Self {
-        Quiet(value)
     }
 }
 

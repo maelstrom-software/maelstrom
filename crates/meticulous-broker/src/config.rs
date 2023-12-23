@@ -1,4 +1,5 @@
 use anyhow::Result;
+use derive_more::From;
 use meticulous_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
@@ -7,7 +8,7 @@ use std::{
     path::PathBuf,
 };
 
-#[derive(Deserialize)]
+#[derive(Deserialize, From)]
 #[serde(from = "u16")]
 pub struct BrokerPort(u16);
 
@@ -21,19 +22,13 @@ impl BrokerPort {
     }
 }
 
-impl From<u16> for BrokerPort {
-    fn from(value: u16) -> Self {
-        BrokerPort(value)
-    }
-}
-
 impl Debug for BrokerPort {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
         self.0.fmt(f)
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, From)]
 #[serde(from = "u16")]
 pub struct HttpPort(u16);
 
@@ -44,12 +39,6 @@ impl HttpPort {
 
     pub fn into_inner(self) -> u16 {
         self.0
-    }
-}
-
-impl From<u16> for HttpPort {
-    fn from(value: u16) -> Self {
-        HttpPort(value)
     }
 }
 
