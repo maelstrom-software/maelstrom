@@ -331,19 +331,11 @@ impl From<u32> for Sha256Digest {
 }
 
 impl FromStr for Sha256Digest {
-    type Err = &'static str;
+    type Err = FromHexError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         let mut bytes = [0; 32];
-        match hex::decode_to_slice(value, &mut bytes) {
-            Ok(()) => Ok(Sha256Digest(bytes)),
-            Err(FromHexError::OddLength) | Err(FromHexError::InvalidStringLength) => {
-                Err("Input string must be exactly 64 hexadecimal digits long")
-            }
-            Err(FromHexError::InvalidHexCharacter { .. }) => {
-                Err("Input string must consist of only hexadecimal digits")
-            }
-        }
+        hex::decode_to_slice(value, &mut bytes).map(|_| Sha256Digest(bytes))
     }
 }
 
@@ -472,35 +464,40 @@ mod tests {
 
     #[test]
     fn from_str_wrong_length() {
-        let wrong_length_strs = [
-            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0",
-            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2",
-            "",
-            "1",
-            "10",
-        ];
-
-        for s in wrong_length_strs {
-            match s.parse::<Sha256Digest>() {
-                Err(s) => assert_eq!(s, "Input string must be exactly 64 hexadecimal digits long"),
-                Ok(_) => panic!("expected error with input {s}"),
-            }
-        }
+        assert_eq!(
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0"
+                .parse::<Sha256Digest>()
+                .unwrap_err(),
+            FromHexError::OddLength
+        );
+        assert_eq!(
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f0f"
+                .parse::<Sha256Digest>()
+                .unwrap_err(),
+            FromHexError::InvalidStringLength
+        );
+        assert_eq!(
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e"
+                .parse::<Sha256Digest>()
+                .unwrap_err(),
+            FromHexError::InvalidStringLength
+        );
     }
 
     #[test]
     fn from_str_bad_chars() {
-        let bad_chars_strs = [
-            " 01112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
-            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2g",
-        ];
-
-        for s in bad_chars_strs {
-            match s.parse::<Sha256Digest>() {
-                Err(s) => assert_eq!(s, "Input string must consist of only hexadecimal digits"),
-                Ok(_) => panic!("expected error with input {s}"),
-            }
-        }
+        assert_eq!(
+            " 01112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+                .parse::<Sha256Digest>()
+                .unwrap_err(),
+            FromHexError::InvalidHexCharacter { c: ' ', index: 0 }
+        );
+        assert_eq!(
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2g"
+                .parse::<Sha256Digest>()
+                .unwrap_err(),
+            FromHexError::InvalidHexCharacter { c: 'g', index: 63 }
+        );
     }
 
     #[test]
