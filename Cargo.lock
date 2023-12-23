@@ -2397,6 +2397,7 @@ version = "0.3.0-dev"
 dependencies = [
  "enum-map",
  "enumset",
+ "hex",
  "nonempty",
  "serde",
  "serde_test",

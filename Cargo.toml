@@ -49,6 +49,7 @@ gethostname = "0.4.2"
 globset = "0.4"
 gloo-net = "0.4"
 gloo-utils = "0.2"
+hex = "0.4.3"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 indicatif = { version = "0.17", features = ["in_memory", "tokio"] }

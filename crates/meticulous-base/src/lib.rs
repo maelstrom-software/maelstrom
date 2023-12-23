@@ -7,6 +7,7 @@ pub mod stats;
 
 use enumset::EnumSetType;
 pub use enumset::{enum_set, EnumSet};
+use hex::{self, FromHexError};
 pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -15,7 +16,7 @@ use std::{
     hash::Hash,
     path::PathBuf,
     result::Result,
-    str::FromStr,
+    str::{self, FromStr},
 };
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
@@ -378,23 +379,14 @@ impl FromStr for Sha256Digest {
     type Err = &'static str;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let digits: Option<Vec<_>> = value
-            .chars()
-            .map(|c| c.to_digit(16).and_then(|x| x.try_into().ok()))
-            .collect();
-        match digits {
-            None => Err("Input string must consist of only hexadecimal digits"),
-            Some(ref digits) if digits.len() != 64 => {
+        let mut bytes = [0; 32];
+        match hex::decode_to_slice(value, &mut bytes) {
+            Ok(()) => Ok(Sha256Digest(bytes)),
+            Err(FromHexError::OddLength) | Err(FromHexError::InvalidStringLength) => {
                 Err("Input string must be exactly 64 hexadecimal digits long")
             }
-            Some(mut digits) => {
-                digits = digits
-                    .chunks(2)
-                    .map(|chunk| chunk[0] * 16 + chunk[1])
-                    .collect();
-                let mut bytes = [0; 32];
-                bytes.clone_from_slice(&digits);
-                Ok(Sha256Digest(bytes))
+            Err(FromHexError::InvalidHexCharacter { .. }) => {
+                Err("Input string must consist of only hexadecimal digits")
             }
         }
     }
@@ -402,18 +394,9 @@ impl FromStr for Sha256Digest {
 
 impl Display for Sha256Digest {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.pad(
-            &self
-                .0
-                .iter()
-                .flat_map(|byte| {
-                    [
-                        char::from_digit((byte / 16).into(), 16).unwrap(),
-                        char::from_digit((byte % 16).into(), 16).unwrap(),
-                    ]
-                })
-                .collect::<String>(),
-        )
+        let mut bytes = [0; 64];
+        hex::encode_to_slice(self.0, &mut bytes).unwrap();
+        f.pad(unsafe { str::from_utf8_unchecked(&bytes) })
     }
 }
 
@@ -422,7 +405,7 @@ impl Debug for Sha256Digest {
         if f.alternate() {
             f.debug_tuple("Sha256Digest").field(&self.0).finish()
         } else {
-            write!(f, "Sha256Digest({})", self)
+            f.pad(&format!("Sha256Digest({})", self))
         }
     }
 }
@@ -553,7 +536,7 @@ mod tests {
     #[test]
     fn from_str_bad_chars() {
         let bad_chars_strs = [
-            " 101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
+            " 01112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f",
             "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2g",
         ];
 
@@ -594,6 +577,10 @@ mod tests {
         assert_eq!(
             format!("{d:?}"),
             "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)"
+        );
+        assert_eq!(
+            format!("{d:80?}"),
+            "Sha256Digest(101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f)  "
         );
         assert_eq!(
             format!("{d:#?}"),
