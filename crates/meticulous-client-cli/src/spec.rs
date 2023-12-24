@@ -362,7 +362,7 @@ impl<'de> de::Deserialize<'de> for Job {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, nonempty, JobMountFsType};
-    use meticulous_test::{digest, path_buf_vec};
+    use meticulous_test::{digest, path_buf_vec, string, string_nonempty, string_vec};
 
     fn layer_mapper(layer: String) -> Result<Sha256Digest> {
         Ok(Sha256Digest::from(layer.parse::<u64>()?))
@@ -370,7 +370,7 @@ mod test {
 
     fn env(var: &str) -> Result<Option<String>> {
         match var {
-            "FOO" => Ok(Some("foo-env".to_string())),
+            "FOO" => Ok(Some(string!("foo-env"))),
             "err" => Err(anyhow!("error converting value to UTF-8")),
             _ => Ok(None),
         }
@@ -381,13 +381,10 @@ mod test {
             "image1" => Ok(ImageConfig {
                 layers: path_buf_vec!["42", "43"],
                 working_directory: Some("/foo".into()),
-                environment: Some(vec![
-                    "FOO=image-foo".to_string(),
-                    "BAZ=image-baz".to_string(),
-                ]),
+                environment: Some(string_vec!["FOO=image-foo", "BAZ=image-baz",]),
             }),
             "image-with-env-substitutions" => Ok(ImageConfig {
-                environment: Some(vec!["PATH=$env{PATH}".to_string()]),
+                environment: Some(string_vec!["PATH=$env{PATH}"]),
                 ..Default::default()
             }),
             "empty" => Ok(Default::default()),
@@ -398,7 +395,7 @@ mod test {
     #[test]
     fn minimum_into_job_spec() {
         assert_eq!(
-            Job::new("program".to_string(), nonempty!["1".to_string()])
+            Job::new(string!("program"), string_nonempty!["1"])
                 .into_job_spec(layer_mapper, env, images)
                 .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)]),

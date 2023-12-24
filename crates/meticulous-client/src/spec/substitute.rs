@@ -112,12 +112,13 @@ where
 mod tests {
     use super::*;
     use anyhow::anyhow;
+    use meticulous_test::string;
 
     fn env_lookup(key: &str) -> anyhow::Result<Option<String>> {
         match key {
-            "FOO" => Ok(Some("foo".to_string())),
-            "BAR" => Ok(Some("bar".to_string())),
-            "EMPTY" => Ok(Some("".to_string())),
+            "FOO" => Ok(Some(string!("foo"))),
+            "BAR" => Ok(Some(string!("bar"))),
+            "EMPTY" => Ok(Some(string!(""))),
             "ERROR" => Err(anyhow!("an error occurred")),
             _ => Ok(None),
         }
@@ -279,7 +280,7 @@ mod tests {
     fn unknown_variable() {
         assert_eq!(
             substitute("$env{UNKNOWN}", env_lookup, prev_lookup).unwrap_err(),
-            Error::UnknownVariable("UNKNOWN".to_string()),
+            Error::UnknownVariable(string!("UNKNOWN")),
         );
     }
 
@@ -287,7 +288,7 @@ mod tests {
     fn lookup_error() {
         assert_eq!(
             substitute("$env{ERROR}", env_lookup, prev_lookup).unwrap_err(),
-            Error::LookupError("ERROR".to_string(), "an error occurred".to_string()),
+            Error::LookupError(string!("ERROR"), string!("an error occurred")),
         );
     }
 }

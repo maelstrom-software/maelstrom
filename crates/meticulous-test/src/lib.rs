@@ -134,3 +134,30 @@ macro_rules! boxed_u8 {
         $n.to_vec().into_boxed_slice()
     };
 }
+
+#[macro_export]
+macro_rules! string {
+    ($e:expr) => {
+        $e.to_string()
+    };
+}
+
+#[macro_export]
+macro_rules! string_vec {
+    [$($e:expr),*] => {
+        vec![$($e.to_string()),*]
+    };
+    [$($e:expr),*,] => {
+        vec![$($e.to_string()),*]
+    };
+}
+
+#[macro_export]
+macro_rules! string_nonempty {
+    [$($e:expr),*] => {
+        nonempty![$($e.to_string()),*]
+    };
+    [$($e:expr),*,] => {
+        nonempty![$($e.to_string()),*]
+    };
+}

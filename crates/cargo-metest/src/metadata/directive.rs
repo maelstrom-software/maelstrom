@@ -231,6 +231,7 @@ mod test {
     use super::*;
     use anyhow::Error;
     use meticulous_base::{enum_set, JobMountFsType};
+    use meticulous_test::{string, string_vec};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {
@@ -317,7 +318,7 @@ mod test {
             TestDirective {
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string()
+                    mount_point: string!("/proc"),
                 }]),
                 ..Default::default()
             }
@@ -336,7 +337,7 @@ mod test {
             TestDirective {
                 added_mounts: vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string()
+                    mount_point: string!("/proc"),
                 }],
                 ..Default::default()
             }
@@ -356,11 +357,11 @@ mod test {
             TestDirective {
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string()
+                    mount_point: string!("/proc"),
                 }]),
                 added_mounts: vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string()
+                    mount_point: string!("/tmp"),
                 }],
                 ..Default::default()
             }
@@ -510,7 +511,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
                 layers: Some(PossiblyImage::Image),
                 ..Default::default()
@@ -529,7 +530,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Explicit("/foo".into())),
                 layers: Some(PossiblyImage::Image),
                 ..Default::default()
@@ -548,7 +549,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Explicit("/foo".into())),
                 layers: Some(PossiblyImage::Image),
                 ..Default::default()
@@ -594,7 +595,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec!["foo.tar".to_string()])),
+                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
                 ..Default::default()
             }
         );
@@ -610,7 +611,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
                 layers: Some(PossiblyImage::Image),
                 ..Default::default()
@@ -629,9 +630,9 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(vec!["foo.tar".to_string()])),
+                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
                 ..Default::default()
             }
         );
@@ -648,9 +649,9 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(vec!["foo.tar".to_string()])),
+                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
                 ..Default::default()
             }
         );
@@ -694,7 +695,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                added_layers: vec!["foo.tar".to_string()],
+                added_layers: string_vec!["foo.tar"],
                 ..Default::default()
             }
         );
@@ -711,8 +712,8 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(vec!["foo.tar".to_string()])),
-                added_layers: vec!["bar.tar".to_string()],
+                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
+                added_layers: string_vec!["bar.tar"],
                 ..Default::default()
             }
         );
@@ -729,9 +730,9 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 layers: Some(PossiblyImage::Image),
-                added_layers: vec!["foo.tar".to_string()],
+                added_layers: string_vec!["foo.tar"],
                 ..Default::default()
             }
         );
@@ -776,8 +777,8 @@ mod test {
             .unwrap(),
             TestDirective {
                 environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    "FOO".to_string(),
-                    "foo".to_string()
+                    string!("FOO"),
+                    string!("foo")
                 )]))),
                 ..Default::default()
             }
@@ -794,7 +795,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
                 environment: Some(PossiblyImage::Image),
                 ..Default::default()
@@ -813,11 +814,11 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
                 environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    "FOO".to_string(),
-                    "foo".to_string()
+                    string!("FOO"),
+                    string!("foo")
                 )]))),
                 ..Default::default()
             }
@@ -835,11 +836,11 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
                 environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    "FOO".to_string(),
-                    "foo".to_string()
+                    string!("FOO"),
+                    string!("foo")
                 )]))),
                 ..Default::default()
             }
@@ -884,7 +885,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                added_environment: BTreeMap::from([("BAR".to_string(), "bar".to_string())]),
+                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
                 ..Default::default()
             }
         );
@@ -902,10 +903,10 @@ mod test {
             .unwrap(),
             TestDirective {
                 environment: Some(PossiblyImage::Explicit(BTreeMap::from([(
-                    "FOO".to_string(),
-                    "foo".to_string()
+                    string!("FOO"),
+                    string!("foo")
                 )]))),
-                added_environment: BTreeMap::from([("BAR".to_string(), "bar".to_string())]),
+                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
                 ..Default::default()
             }
         );
@@ -922,9 +923,9 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                image: Some("rust".to_string()),
+                image: Some(string!("rust")),
                 environment: Some(PossiblyImage::Image),
-                added_environment: BTreeMap::from([("BAR".to_string(), "bar".to_string())]),
+                added_environment: BTreeMap::from([(string!("BAR"), string!("bar"))]),
                 ..Default::default()
             }
         );

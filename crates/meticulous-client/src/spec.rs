@@ -136,7 +136,7 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use meticulous_test::path_buf_vec;
+    use meticulous_test::{path_buf_vec, string, string_vec};
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
     #[test]
@@ -170,14 +170,11 @@ mod test {
             "image1" => Ok(ImageConfig {
                 layers: path_buf_vec!["42", "43"],
                 working_directory: Some("/foo".into()),
-                environment: Some(vec![
-                    "FOO=image-foo".to_string(),
-                    "BAZ=image-baz".to_string(),
-                ]),
+                environment: Some(string_vec!["FOO=image-foo", "BAZ=image-baz",]),
             }),
             "empty" => Ok(Default::default()),
             "invalid-env" => Ok(ImageConfig {
-                environment: Some(vec!["FOO".to_string()]),
+                environment: Some(string_vec!["FOO"]),
                 ..Default::default()
             }),
             "invalid-layer-path" => Ok(ImageConfig {
@@ -198,18 +195,18 @@ mod test {
 
     #[test]
     fn good_image_option() {
-        let image_name = Some("image1".to_string());
+        let image_name = Some(string!("image1"));
         let io = ImageOption::new(&image_name, images).unwrap();
         assert_eq!(io.name(), "image1");
         assert_eq!(
             Vec::from_iter(io.layers().unwrap()),
-            vec!["42".to_string(), "43".to_string()]
+            string_vec!["42", "43"],
         );
         assert_eq!(
             io.environment().unwrap(),
             BTreeMap::from([
-                ("BAZ".to_string(), "image-baz".to_string()),
-                ("FOO".to_string(), "image-foo".to_string()),
+                (string!("BAZ"), string!("image-baz")),
+                (string!("FOO"), string!("image-foo")),
             ]),
         );
         assert_eq!(io.working_directory().unwrap(), PathBuf::from("/foo"));
@@ -217,7 +214,7 @@ mod test {
 
     #[test]
     fn image_option_no_environment_and_no_working_directory() {
-        let image_name = Some("empty".to_string());
+        let image_name = Some(string!("empty"));
         let io = ImageOption::new(&image_name, images).unwrap();
         assert_error(
             io.environment().unwrap_err(),
@@ -231,7 +228,7 @@ mod test {
 
     #[test]
     fn image_option_invalid_environment_variable() {
-        let image_name = Some("invalid-env".to_string());
+        let image_name = Some(string!("invalid-env"));
         let io = ImageOption::new(&image_name, images).unwrap();
         assert_error(
             io.environment().unwrap_err(),
@@ -241,7 +238,7 @@ mod test {
 
     #[test]
     fn image_option_invalid_layer_path() {
-        let image_name = Some("invalid-layer-path".to_string());
+        let image_name = Some(string!("invalid-layer-path"));
         let io = ImageOption::new(&image_name, images).unwrap();
         let Err(err) = io.layers() else {
             panic!("");

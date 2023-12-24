@@ -217,7 +217,7 @@ impl AllMetadata {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, JobMountFsType};
-    use meticulous_test::{path_buf, path_buf_vec};
+    use meticulous_test::{path_buf, path_buf_vec, string, string_vec};
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -552,13 +552,13 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            vec!["layer11".to_string(), "layer12".to_string()],
+            string_vec!["layer11", "layer12"],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            vec!["layer3".to_string(), "layer4".to_string()],
+            string_vec!["layer3", "layer4"],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test3"), empty_env, image_lookup)
@@ -570,13 +570,13 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test4"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            vec!["layer21".to_string(), "layer22".to_string()],
+            string_vec!["layer21", "layer22"],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            vec!["layer1".to_string(), "layer2".to_string()],
+            string_vec!["layer1", "layer2"],
         );
     }
 
@@ -602,31 +602,26 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            vec![
-                "layer1".to_string(),
-                "layer2".to_string(),
-                "added-layer3".to_string(),
-                "added-layer4".to_string(),
-                "added-layer5".to_string(),
-                "added-layer6".to_string()
+            string_vec![
+                "layer1",
+                "layer2",
+                "added-layer3",
+                "added-layer4",
+                "added-layer5",
+                "added-layer6",
             ],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            vec![
-                "layer1".to_string(),
-                "layer2".to_string(),
-                "added-layer3".to_string(),
-                "added-layer4".to_string()
-            ],
+            string_vec!["layer1", "layer2", "added-layer3", "added-layer4",],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            vec!["added-layer1".to_string(), "added-layer2".to_string()],
+            string_vec!["added-layer1", "added-layer2"],
         );
     }
 
@@ -634,22 +629,19 @@ mod test {
     fn environment() {
         let env = |key: &_| {
             Ok(Some(match key {
-                "FOO" => "env-foo".to_string(),
-                "BAR" => "env-bar".to_string(),
+                "FOO" => string!("env-foo"),
+                "BAR" => string!("env-bar"),
                 _ => panic!(),
             }))
         };
         let images = |name: &_| match name {
             "image1" => Ok(ImageConfig {
-                environment: Some(vec![
-                    "FOO=image-foo".to_string(),
-                    "FROB=image-frob".to_string(),
-                ]),
+                environment: Some(vec![string!("FOO=image-foo"), string!("FROB=image-frob")]),
                 ..Default::default()
             }),
             "no-environment" => Ok(Default::default()),
             "bad-environment" => Ok(ImageConfig {
-                environment: Some(vec!["FOO".to_string()]),
+                environment: Some(string_vec!["FOO"]),
                 ..Default::default()
             }),
             _ => panic!(),
@@ -684,27 +676,19 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAR=env-bar".to_string(),
-                "BAZ=no-prev-baz".to_string(),
-                "FOO=image-foo".to_string(),
-            ],
+            string_vec!["BAR=env-bar", "BAZ=no-prev-baz", "FOO=image-foo",],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), env, images)
                 .unwrap()
                 .environment(),
-            vec!["FOO=image-foo".to_string(), "FROB=image-frob".to_string(),],
+            string_vec!["FOO=image-foo", "FROB=image-frob"],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAR=bar".to_string(),
-                "BAZ=no-prev-foo".to_string(),
-                "FOO=env-foo".to_string(),
-            ],
+            string_vec!["BAR=bar", "BAZ=no-prev-foo", "FOO=env-foo",],
         );
     }
 
@@ -712,17 +696,14 @@ mod test {
     fn added_environment() {
         let env = |key: &_| {
             Ok(Some(match key {
-                "FOO" => "env-foo".to_string(),
-                "BAR" => "env-bar".to_string(),
+                "FOO" => string!("env-foo"),
+                "BAR" => string!("env-bar"),
                 _ => panic!(),
             }))
         };
         let images = |name: &_| match name {
             "image1" => Ok(ImageConfig {
-                environment: Some(vec![
-                    "FOO=image-foo".to_string(),
-                    "FROB=image-frob".to_string(),
-                ]),
+                environment: Some(string_vec!["FOO=image-foo", "FROB=image-frob",]),
                 ..Default::default()
             }),
             _ => panic!(),
@@ -754,41 +735,30 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAR=bar".to_string(),
-                "BAZ=no-prev-baz".to_string(),
-                "FOO=prev-image-foo".to_string(),
-                "FROB=image-frob".to_string(),
+            string_vec![
+                "BAR=bar",
+                "BAZ=no-prev-baz",
+                "FOO=prev-image-foo",
+                "FROB=image-frob",
             ],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAR=env-bar".to_string(),
-                "FOO=prev-prev-image-foo".to_string(),
-            ],
+            string_vec!["BAR=env-bar", "FOO=prev-prev-image-foo",],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test3"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAZ=no-prev-baz".to_string(),
-                "FOO=image-foo".to_string(),
-                "FROB=image-frob".to_string(),
-            ],
+            string_vec!["BAZ=no-prev-baz", "FOO=image-foo", "FROB=image-frob",],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), env, images)
                 .unwrap()
                 .environment(),
-            vec![
-                "BAR=bar".to_string(),
-                "BAZ=no-prev-baz".to_string(),
-                "FOO=prev-foo".to_string(),
-            ],
+            string_vec!["BAR=bar", "BAZ=no-prev-baz", "FOO=prev-foo",],
         );
     }
 
@@ -817,11 +787,11 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string(),
+                    mount_point: string!("/tmp"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
+                    mount_point: string!("/sys"),
                 },
             ],
         );
@@ -831,7 +801,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Proc,
-                mount_point: "/proc".to_string(),
+                mount_point: string!("/proc"),
             },],
         );
         assert_eq!(
@@ -888,15 +858,15 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
+                    mount_point: string!("/sys"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string(),
+                    mount_point: string!("/tmp"),
                 },
             ],
         );
@@ -907,19 +877,19 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
+                    mount_point: string!("/sys"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".to_string(),
+                    mount_point: string!("/tmp"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 },
             ],
         );
@@ -929,7 +899,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Tmp,
-                mount_point: "/tmp".to_string(),
+                mount_point: string!("/tmp"),
             },],
         );
         assert_eq!(
@@ -938,7 +908,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Tmp,
-                mount_point: "/tmp".to_string(),
+                mount_point: string!("/tmp"),
             },],
         );
     }
