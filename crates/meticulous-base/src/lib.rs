@@ -272,13 +272,12 @@ impl<T> JobError<T> {
     }
 }
 
-/// A common Result type in the worker. We don't go with [`JobResult`] because that name is already
-/// taken to refer to something more common.
-pub type JobErrorResult<T, E> = Result<T, JobError<E>>;
+/// A common Result type in the worker.
+pub type JobResult<T, E> = Result<T, JobError<E>>;
 
 /// All relevant information about the outcome of a job. This is what's sent around between the
 /// Worker, Broker, and Client.
-pub type JobResult = JobErrorResult<JobSuccess, String>;
+pub type JobStringResult = JobResult<JobSuccess, String>;
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(

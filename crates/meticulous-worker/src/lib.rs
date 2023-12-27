@@ -14,7 +14,7 @@ use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use meticulous_base::{
     proto::{Hello, WorkerToBroker},
-    JobErrorResult, JobId, JobSpec, JobStatus, NonEmpty, Sha256Digest,
+    JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
 use meticulous_util::{
     config::{BrokerAddr, CacheRoot},
@@ -80,7 +80,7 @@ impl DispatcherDeps for DispatcherAdapter {
         jid: JobId,
         spec: JobSpec,
         layers: NonEmpty<PathBuf>,
-    ) -> (JobErrorResult<Pid, String>, NonEmpty<Sha256Digest>) {
+    ) -> (JobResult<Pid, String>, NonEmpty<Sha256Digest>) {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self

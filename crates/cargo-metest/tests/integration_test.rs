@@ -14,7 +14,7 @@ use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
-    JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
+    JobOutputResult, JobSpec, JobStatus, JobStringResult, JobSuccess,
 };
 use meticulous_client::{Client, ClientDeps, ClientDriver};
 use meticulous_util::{config::BrokerAddr, fs::Fs};
@@ -224,7 +224,7 @@ impl FakeBrokerConnection {
 #[derive(Clone)]
 enum JobAction {
     Ignore,
-    Respond(JobResult),
+    Respond(JobStringResult),
 }
 
 #[derive(Default, Clone)]

@@ -9,8 +9,8 @@ use bumpalo::{
 use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
-    EnumSet, GroupId, JobDevice, JobError, JobErrorResult, JobMount, JobMountFsType,
-    JobOutputResult, NonEmpty, Sha256Digest, UserId,
+    EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
+    NonEmpty, Sha256Digest, UserId,
 };
 use meticulous_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -200,7 +200,7 @@ impl Executor {
     /// This function is designed to be callable in an async context, even though it temporarily
     /// blocks the calling thread while the child is starting up.
     ///
-    /// If this function returns [`JobErrorResult::Ok`], then the child process obviously will be
+    /// If this function returns [`JobResult::Ok`], then the child process obviously will be
     /// started and the caller will need to waitid(2) on the child eventually. However, if this
     /// function returns an error result, it's still possible that a child was spawned (and has now
     /// terminated). It is assumed that the caller will be reaping all children, not just those
@@ -212,7 +212,7 @@ impl Executor {
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> JobErrorResult<Pid, Error> {
+    ) -> JobResult<Pid, Error> {
         self.start_inner(spec, inline_limit, stdout_done, stderr_done)
     }
 }
@@ -321,7 +321,7 @@ impl Executor {
         inline_limit: InlineLimit,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> JobErrorResult<Pid, Error> {
+    ) -> JobResult<Pid, Error> {
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.

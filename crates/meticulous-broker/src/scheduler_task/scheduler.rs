@@ -8,7 +8,7 @@ use meticulous_base::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ClientId, ClientJobId, JobId, JobResult, JobSpec, Sha256Digest, WorkerId,
+    ClientId, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest, WorkerId,
 };
 use meticulous_util::{
     ext::{BoolExt as _, OptionExt as _},
@@ -462,7 +462,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         deps: &mut DepsT,
         wid: WorkerId,
         jid: JobId,
-        result: JobResult,
+        result: JobStringResult,
     ) {
         let worker = self.workers.0.get_mut(&wid).unwrap();
 

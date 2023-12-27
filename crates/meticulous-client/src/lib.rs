@@ -7,7 +7,7 @@ use meticulous_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobResult, JobSpec, Sha256Digest,
+    ClientJobId, JobSpec, JobStringResult, Sha256Digest,
 };
 use meticulous_container::ContainerImageDepot;
 use meticulous_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
@@ -383,7 +383,8 @@ impl ClientDriver for DefaultClientDriver {
     }
 }
 
-pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobResult) -> Result<()> + Send + Sync>;
+pub type JobResponseHandler =
+    Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,

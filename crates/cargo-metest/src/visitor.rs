@@ -2,7 +2,9 @@ use crate::ProgressIndicator;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
-use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
+use meticulous_base::{
+    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+};
 use meticulous_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Mutex};
 use unicode_truncate::UnicodeTruncateStr as _;
@@ -149,7 +151,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         }
     }
 
-    pub fn job_finished(&self, cjid: ClientJobId, result: JobResult) -> Result<()> {
+    pub fn job_finished(&self, cjid: ClientJobId, result: JobStringResult) -> Result<()> {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
         let mut test_output_lines: Vec<String> = vec![];

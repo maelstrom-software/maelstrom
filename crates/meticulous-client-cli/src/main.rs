@@ -6,7 +6,9 @@ use figment::{
     Figment,
 };
 use indicatif::ProgressBar;
-use meticulous_base::{ClientJobId, JobError, JobOutputResult, JobResult, JobStatus, JobSuccess};
+use meticulous_base::{
+    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+};
 use meticulous_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, DefaultClientDriver,
@@ -72,7 +74,11 @@ pub struct ConfigOptions {
     pub broker: Option<String>,
 }
 
-fn visitor(cjid: ClientJobId, result: JobResult, accum: Arc<ExitCodeAccumulator>) -> Result<()> {
+fn visitor(
+    cjid: ClientJobId,
+    result: JobStringResult,
+    accum: Arc<ExitCodeAccumulator>,
+) -> Result<()> {
     match result {
         Ok(JobSuccess {
             status,
