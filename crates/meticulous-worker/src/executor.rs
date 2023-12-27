@@ -772,7 +772,7 @@ mod tests {
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
     use meticulous_base::{nonempty, JobStatus};
-    use meticulous_test::{boxed_u8, digest};
+    use meticulous_test::{boxed_u8, digest, string};
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
     use std::ops::ControlFlow;
@@ -1085,7 +1085,7 @@ mod tests {
                 .arguments(["/sys/class/net/lo/carrier"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
+                    mount_point: string!("/sys"),
                 }]),
         )
         .expected_status(JobStatus::Exited(1))
@@ -1104,7 +1104,7 @@ mod tests {
                 .arguments(["/sys/class/net/lo/carrier"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: "/sys".to_string(),
+                    mount_point: string!("/sys"),
                 }])
                 .enable_loopback(true),
         )
@@ -1151,7 +1151,7 @@ mod tests {
                 .arguments(["/proc/self/fd"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")))
@@ -1407,7 +1407,7 @@ mod tests {
                 .arguments(["^tmpfs /tmp", "/proc/self/mounts"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 }]),
         )
         .expected_status(JobStatus::Exited(1))
@@ -1424,11 +1424,11 @@ mod tests {
                 .mounts([
                     JobMount {
                         fs_type: JobMountFsType::Proc,
-                        mount_point: "/proc".to_string(),
+                        mount_point: string!("/proc"),
                     },
                     JobMount {
                         fs_type: JobMountFsType::Tmp,
-                        mount_point: "/tmp".to_string(),
+                        mount_point: string!("/tmp"),
                     },
                 ]),
         )
@@ -1445,7 +1445,7 @@ mod tests {
                 .arguments(["^sysfs /sys", "/proc/self/mounts"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 }]),
         )
         .expected_status(JobStatus::Exited(1))
@@ -1462,11 +1462,11 @@ mod tests {
                 .mounts([
                     JobMount {
                         fs_type: JobMountFsType::Proc,
-                        mount_point: "/proc".to_string(),
+                        mount_point: string!("/proc"),
                     },
                     JobMount {
                         fs_type: JobMountFsType::Sys,
-                        mount_point: "/sys".to_string(),
+                        mount_point: string!("/sys"),
                     },
                 ]),
         )
@@ -1491,7 +1491,7 @@ mod tests {
                 .arguments(["proc", "/proc/self/mounts"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
@@ -1509,7 +1509,7 @@ mod tests {
                 .arguments(["-l", "/proc/self/mounts"])
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: "/proc".to_string(),
+                    mount_point: string!("/proc"),
                 }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")))
