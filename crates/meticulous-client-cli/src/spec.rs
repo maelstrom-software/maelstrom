@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Error, Result};
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
-    Sha256Digest, UserId,
+    Sha256Digest, UserId, Utf8PathBuf,
 };
 use meticulous_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, io::Read, path::PathBuf};
+use std::{collections::BTreeMap, io::Read};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
     inner: InnerT,
@@ -66,7 +66,7 @@ struct Job {
     mounts: Option<Vec<JobMount>>,
     enable_loopback: Option<bool>,
     enable_writable_file_system: Option<bool>,
-    working_directory: Option<PossiblyImage<PathBuf>>,
+    working_directory: Option<PossiblyImage<Utf8PathBuf>>,
     user: Option<UserId>,
     group: Option<GroupId>,
     image: Option<String>,
@@ -137,7 +137,7 @@ impl Job {
         layers.extend(self.added_layers);
         let layers = layers.try_map(layer_mapper)?;
         let working_directory = match self.working_directory {
-            None => PathBuf::from("/"),
+            None => Utf8PathBuf::from("/"),
             Some(PossiblyImage::Explicit(working_directory)) => working_directory,
             Some(PossiblyImage::Image) => image.working_directory()?,
         };

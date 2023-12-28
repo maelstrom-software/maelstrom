@@ -8,6 +8,7 @@ pub mod substitute;
 
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
+use meticulous_base::Utf8PathBuf;
 use serde::{de, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -71,7 +72,7 @@ pub struct ImageConfig {
     pub layers: Vec<PathBuf>,
 
     /// Optional `PathBuf` in the container's namespace for the working directory.
-    pub working_directory: Option<PathBuf>,
+    pub working_directory: Option<Utf8PathBuf>,
 
     /// Optional environment variables for the container, assumed to be in `VAR=value` format.
     pub environment: Option<Vec<String>>,
@@ -94,7 +95,7 @@ pub struct ImageOption<'a> {
     name: Option<&'a str>,
     layers: Vec<PathBuf>,
     environment: Option<Vec<String>>,
-    working_directory: Option<PathBuf>,
+    working_directory: Option<Utf8PathBuf>,
 }
 
 impl<'a> ImageOption<'a> {
@@ -124,7 +125,8 @@ impl<'a> ImageOption<'a> {
     /// Return the image name. A non-`None` image name must have been specified when this struct
     /// was created, or this function will panic.
     pub fn name(&self) -> &str {
-        self.name.expect("name() called on an ImageOption that has no image name")
+        self.name
+            .expect("name() called on an ImageOption that has no image name")
     }
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
@@ -166,10 +168,10 @@ impl<'a> ImageOption<'a> {
 
     /// Return the working directory for the image. If the image doesn't have a working directory,
     /// this will return an error.
-    pub fn working_directory(&self) -> Result<PathBuf> {
+    pub fn working_directory(&self) -> Result<Utf8PathBuf> {
         self.working_directory
             .as_ref()
-            .map(PathBuf::clone)
+            .map(Clone::clone)
             .ok_or_else(|| anyhow!("image {} has no working directory to use", self.name()))
     }
 }

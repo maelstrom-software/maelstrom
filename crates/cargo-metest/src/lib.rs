@@ -189,7 +189,7 @@ where
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
-                working_directory: image.working_dir().map(PathBuf::from),
+                working_directory: image.working_dir().map(From::from),
             })
         };
 

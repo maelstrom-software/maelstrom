@@ -1,9 +1,11 @@
 use crate::pattern;
 use anyhow::Result;
-use meticulous_base::{EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId};
+use meticulous_base::{
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
+};
 use meticulous_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, path::PathBuf, str};
+use std::{collections::BTreeMap, str};
 
 #[derive(PartialEq, Eq, Debug, Default)]
 pub struct TestDirective {
@@ -23,7 +25,7 @@ pub struct TestDirective {
     pub added_devices: EnumSet<JobDevice>,
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
-    pub working_directory: Option<PossiblyImage<PathBuf>>,
+    pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
 }
 
 #[derive(Deserialize)]

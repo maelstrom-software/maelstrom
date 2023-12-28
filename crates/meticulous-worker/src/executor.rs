@@ -10,7 +10,7 @@ use c_str_macro::c_str;
 use futures::ready;
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
-    NonEmpty, Sha256Digest, UserId,
+    NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use meticulous_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -59,7 +59,7 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
-    pub working_directory: PathBuf,
+    pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
 }

@@ -5,6 +5,7 @@ pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
 
+pub use camino::Utf8PathBuf;
 use derive_more::{Constructor, Display, From};
 use enumset::EnumSetType;
 pub use enumset::{enum_set, EnumSet};
@@ -15,7 +16,6 @@ use std::{
     error::Error,
     fmt::{self, Debug, Formatter},
     hash::Hash,
-    path::PathBuf,
     result::Result,
     str::{self, FromStr},
 };
@@ -113,7 +113,7 @@ pub struct JobSpec {
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
-    pub working_directory: PathBuf,
+    pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
 }
@@ -129,7 +129,7 @@ impl JobSpec {
             mounts: Default::default(),
             enable_loopback: false,
             enable_writable_file_system: Default::default(),
-            working_directory: PathBuf::from("/"),
+            working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
         }
@@ -173,7 +173,7 @@ impl JobSpec {
         self
     }
 
-    pub fn working_directory(mut self, working_directory: impl Into<PathBuf>) -> Self {
+    pub fn working_directory(mut self, working_directory: impl Into<Utf8PathBuf>) -> Self {
         self.working_directory = working_directory.into();
         self
     }

@@ -109,6 +109,20 @@ macro_rules! path_buf_vec {
 }
 
 #[macro_export]
+macro_rules! utf8_path_buf {
+    ($e:expr) => {
+        meticulous_base::Utf8PathBuf::from($e)
+    };
+}
+
+#[macro_export]
+macro_rules! utf8_path_buf_vec {
+    [$($e:expr),*] => {
+        vec![$($crate::utf8_path_buf!($e)),*]
+    };
+}
+
+#[macro_export]
 macro_rules! long_path {
     ($prefix:expr, $n:expr) => {
         format!("{}/{:0>64x}", $prefix, $n).into()

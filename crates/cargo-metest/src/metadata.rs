@@ -3,15 +3,12 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
+use meticulous_base::Utf8PathBuf;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
 use meticulous_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use meticulous_util::fs::Fs;
 use serde::Deserialize;
-use std::{
-    collections::BTreeMap,
-    path::{Path, PathBuf},
-    str,
-};
+use std::{collections::BTreeMap, path::Path, str};
 
 #[derive(PartialEq, Eq, Debug, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
@@ -24,7 +21,7 @@ pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
-    pub working_directory: PathBuf,
+    pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
     pub layers: Vec<String>,
@@ -39,7 +36,7 @@ impl Default for TestMetadata {
             include_shared_libraries: Default::default(),
             enable_loopback: Default::default(),
             enable_writable_file_system: Default::default(),
-            working_directory: PathBuf::from("/"),
+            working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
             layers: Default::default(),
@@ -217,7 +214,7 @@ impl AllMetadata {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, JobMountFsType};
-    use meticulous_test::{path_buf, path_buf_vec, string, string_vec};
+    use meticulous_test::{path_buf_vec, string, string_vec, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -393,7 +390,7 @@ mod test {
     fn working_directory() {
         let image_lookup = |name: &_| match name {
             "rust" => Ok(ImageConfig {
-                working_directory: Some(path_buf!("/foo")),
+                working_directory: Some(utf8_path_buf!("/foo")),
                 ..Default::default()
             }),
             "no-working-directory" => Ok(Default::default()),
@@ -424,19 +421,19 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .working_directory,
-            path_buf!("/bar")
+            utf8_path_buf!("/bar")
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, image_lookup)
                 .unwrap()
                 .working_directory,
-            path_buf!("/foo")
+            utf8_path_buf!("/foo")
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .working_directory,
-            path_buf!("/")
+            utf8_path_buf!("/")
         );
     }
 

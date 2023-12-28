@@ -180,7 +180,7 @@ fn main() -> Result<ExitCode> {
         Ok(ImageConfig {
             layers: image.layers.clone(),
             environment: image.env().cloned(),
-            working_directory: image.working_dir().map(PathBuf::from),
+            working_directory: image.working_dir().map(From::from),
         })
     };
     let job_specs = job_spec_iter_from_reader(
