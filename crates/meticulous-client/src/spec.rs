@@ -1,3 +1,9 @@
+//! Provide utilities for evaluating job specification directives.
+//!
+//! The job specification directives for `cargo-metest` and the CLI differ in a number of ways, but
+//! also have a number of similar constructs. This module includes utilities for those similar
+//! constructs.
+
 pub mod substitute;
 
 use anyhow::{anyhow, Error, Result};
@@ -7,9 +13,12 @@ use std::{
     collections::BTreeMap,
     env::{self, VarError},
     path::PathBuf,
+    result,
 };
 use tuple::Map as _;
 
+/// A function that can passed to [`substitute::substitute`] as the `env_lookup` closure that will
+/// resolve variables from the program's environment.
 pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
     match env::var(var) {
         Ok(val) => Ok(Some(val)),
@@ -18,13 +27,24 @@ pub fn std_env_lookup(var: &str) -> Result<Option<String>> {
     }
 }
 
-#[derive(Default)]
-pub struct ImageConfig {
-    pub layers: Vec<PathBuf>,
-    pub working_directory: Option<PathBuf>,
-    pub environment: Option<Vec<String>>,
+/// A function used when writing customer deserializers for job specification directives to
+/// indicate that two fields are incompatible.
+pub fn incompatible<T, E>(field: &Option<T>, msg: &str) -> result::Result<(), E>
+where
+    E: de::Error,
+{
+    if field.is_some() {
+        Err(E::custom(format_args!("{}", msg)))
+    } else {
+        Ok(())
+    }
 }
 
+/// An enum and struct (`EnumSet<ImageUse>`) used for deserializing "image use" statements in JSON,
+/// TOML, or other similar formats. This allows users to specify things like
+/// `use = ["layers", "environment"]` in TOML, or the equivalent in JSON.
+///
+/// See [`Image`].
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
 #[serde(rename_all = "snake_case")]
 #[enumset(serialize_repr = "list")]
@@ -34,6 +54,8 @@ pub enum ImageUse {
     WorkingDirectory,
 }
 
+/// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.
+/// This allows the user to specify an image name and the parts of the image they want to use.
 #[derive(Deserialize)]
 pub struct Image {
     pub name: String,
@@ -41,12 +63,33 @@ pub struct Image {
     pub use_: EnumSet<ImageUse>,
 }
 
+/// A simple wrapper struct for the config of a local OCI image. This is used for dependency
+/// injection for the other functions in this module.
+#[derive(Default)]
+pub struct ImageConfig {
+    /// Local `PathBuf`s pointing to the various layer artifacts.
+    pub layers: Vec<PathBuf>,
+
+    /// Optional `PathBuf` in the container's namespace for the working directory.
+    pub working_directory: Option<PathBuf>,
+
+    /// Optional environment variables for the container, assumed to be in `VAR=value` format.
+    pub environment: Option<Vec<String>>,
+}
+
+/// An enum that indicates whether a value is explicitly specified, or implicitly defined to be the
+/// value inherited from an image.
 #[derive(PartialEq, Eq, Debug, Deserialize)]
 pub enum PossiblyImage<T> {
+    /// The value comes from the corresponding value in the image.
     Image,
+
+    /// The value is explicitly set, and doesn't come from the image.
     Explicit(T),
 }
 
+/// A convenience struct for extracting parts of an OCI image for use in a
+/// [`meticulous_base::JobSpec`].
 pub struct ImageOption<'a> {
     name: Option<&'a str>,
     layers: Vec<PathBuf>,
@@ -55,6 +98,7 @@ pub struct ImageOption<'a> {
 }
 
 impl<'a> ImageOption<'a> {
+    /// Create a new [`ImageOption`].
     pub fn new(
         image_name: &'a Option<String>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
@@ -77,10 +121,14 @@ impl<'a> ImageOption<'a> {
         })
     }
 
+    /// Return the image name. A non-`None` image name must have been specified when this struct
+    /// was created, or this function will panic.
     pub fn name(&self) -> &str {
-        self.name.unwrap()
+        self.name.expect("name() called on an ImageOption that has no image name")
     }
 
+    /// Return an iterator of layers for the image. If there is no image, the iterator will be
+    /// empty.
     pub fn layers(&self) -> Result<impl Iterator<Item = String>> {
         Ok(self
             .layers
@@ -94,6 +142,8 @@ impl<'a> ImageOption<'a> {
             .into_iter())
     }
 
+    /// Return a [`BTreeMap`] of environment variables for the image. If the image doesn't have any
+    /// environment variables, this will return an error.
     pub fn environment(&self) -> Result<BTreeMap<String, String>> {
         Ok(BTreeMap::from_iter(
             self.environment
@@ -114,22 +164,13 @@ impl<'a> ImageOption<'a> {
         ))
     }
 
+    /// Return the working directory for the image. If the image doesn't have a working directory,
+    /// this will return an error.
     pub fn working_directory(&self) -> Result<PathBuf> {
         self.working_directory
             .as_ref()
             .map(PathBuf::clone)
             .ok_or_else(|| anyhow!("image {} has no working directory to use", self.name()))
-    }
-}
-
-pub fn incompatible<T, E>(field: &Option<T>, msg: &str) -> std::result::Result<(), E>
-where
-    E: de::Error,
-{
-    if field.is_some() {
-        Err(E::custom(format_args!("{}", msg)))
-    } else {
-        Ok(())
     }
 }
 
