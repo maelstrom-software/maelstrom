@@ -16,7 +16,7 @@ use std::str::FromStr;
 #[cfg(test)]
 use regex_macro::regex;
 
-#[derive(From, Debug, PartialEq, Eq)]
+#[derive(From, Clone, Debug, PartialEq, Eq)]
 #[from(forward)]
 pub struct MatcherParameter(pub String);
 
@@ -114,7 +114,7 @@ pub fn err_construct<
     })
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GlobMatcherParameter(pub GlobMatcher);
 
 impl PartialEq for GlobMatcherParameter {
@@ -132,7 +132,7 @@ impl GlobMatcherParameter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RegexMatcherParameter(pub Regex);
 
 impl From<&Regex> for RegexMatcherParameter {
@@ -161,7 +161,7 @@ fn regex_parser_test() {
     parse_str!(RegexMatcherParameter, "/*/").unwrap_err();
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Matcher {
     Equals(MatcherParameter),
     Contains(MatcherParameter),
@@ -171,23 +171,37 @@ pub enum Matcher {
     Globs(GlobMatcherParameter),
 }
 
+fn prefix<InputT: Stream<Token = char>>(
+    s: &'static str,
+    min_len: usize,
+) -> impl Parser<InputT, Output = &'static str> {
+    if s.len() == min_len {
+        no_partial(lazy(move || string(s))).boxed()
+    } else {
+        no_partial(lazy(move || {
+            attempt(string(s)).or(prefix(&s[..s.len() - 1], min_len))
+        }))
+        .boxed()
+    }
+}
+
 impl Matcher {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         let arg = || MatcherParameter::parser();
         let regex = || RegexMatcherParameter::parser();
         let glob = || GlobMatcherParameter::parser();
         choice((
-            attempt(string("equals").with(arg())).map(Self::Equals),
-            attempt(string("contains").with(arg())).map(Self::Contains),
-            attempt(string("starts_with").with(arg())).map(Self::StartsWith),
-            attempt(string("ends_with").with(arg())).map(Self::EndsWith),
-            attempt(string("matches").with(regex())).map(Self::Matches),
-            string("globs").with(glob()).map(Self::Globs),
+            attempt(prefix("equals", 2).with(arg())).map(Self::Equals),
+            attempt(prefix("contains", 1).with(arg())).map(Self::Contains),
+            attempt(prefix("starts_with", 1).with(arg())).map(Self::StartsWith),
+            attempt(prefix("ends_with", 2).with(arg())).map(Self::EndsWith),
+            attempt(prefix("matches", 1).with(regex())).map(Self::Matches),
+            prefix("globs", 1).with(glob()).map(Self::Globs),
         ))
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
     Name,
     Binary,
@@ -200,8 +214,8 @@ pub enum CompoundSelectorName {
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(string("name")).map(|_| Self::Name),
-            attempt(string("package")).map(|_| Self::Package),
+            attempt(prefix("name", 1)).map(|_| Self::Name),
+            attempt(prefix("package", 1)).map(|_| Self::Package),
             Self::parser_for_simple_selector(),
         ))
     }
@@ -209,15 +223,15 @@ impl CompoundSelectorName {
     pub fn parser_for_simple_selector<InputT: Stream<Token = char>>(
     ) -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(string("binary")).map(|_| Self::Binary),
-            attempt(string("benchmark")).map(|_| Self::Benchmark),
-            attempt(string("example")).map(|_| Self::Example),
-            string("test").map(|_| Self::Test),
+            attempt(prefix("binary", 2)).map(|_| Self::Binary),
+            attempt(prefix("benchmark", 2)).map(|_| Self::Benchmark),
+            attempt(prefix("example", 1)).map(|_| Self::Example),
+            prefix("test", 2).map(|_| Self::Test),
         ))
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CompoundSelector {
     pub name: CompoundSelectorName,
     pub matcher: Matcher,
@@ -233,7 +247,7 @@ impl CompoundSelector {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum SimpleSelectorName {
     All,
     Any,
@@ -248,18 +262,18 @@ pub enum SimpleSelectorName {
 impl SimpleSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(string("all")).map(|_| Self::All),
-            attempt(string("any")).map(|_| Self::Any),
-            attempt(string("true")).map(|_| Self::True),
-            attempt(string("none")).map(|_| Self::None),
-            attempt(string("false")).map(|_| Self::False),
-            attempt(string("library")).map(|_| Self::Library),
+            attempt(prefix("all", 2)).map(|_| Self::All),
+            attempt(prefix("any", 2)).map(|_| Self::Any),
+            attempt(prefix("true", 2)).map(|_| Self::True),
+            attempt(prefix("none", 1)).map(|_| Self::None),
+            attempt(prefix("false", 1)).map(|_| Self::False),
+            attempt(prefix("library", 1)).map(|_| Self::Library),
             CompoundSelectorName::parser_for_simple_selector().map(Self::Compound),
         ))
     }
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 #[from(types(CompoundSelectorName))]
 pub struct SimpleSelector {
     pub name: SimpleSelectorName,
@@ -273,7 +287,7 @@ impl SimpleSelector {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum SimpleExpression {
     #[from(types(OrExpression))]
     Or(Box<OrExpression>),
@@ -309,7 +323,7 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
     choice((string("!"), string("~"), string("not").skip(spaces1())))
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
     #[from(types(SimpleSelector, SimpleSelectorName, CompoundSelector, OrExpression))]
@@ -348,7 +362,7 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
     .or(spaces1().with(string("minus")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
@@ -378,7 +392,7 @@ fn or_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = &
     .or(spaces1().with(string("or")).skip(spaces1()))
 }
 
-#[derive(Debug, PartialEq, Eq, From)]
+#[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum OrExpression {
     Or(AndExpression, Box<OrExpression>),
     #[from(types(
@@ -470,6 +484,31 @@ fn simple_expr() {
 }
 
 #[test]
+fn simple_expr_prefix() {
+    use CompoundSelectorName::*;
+    use SimpleSelectorName::*;
+
+    fn test_it(a: &str, min: usize, s: impl Into<SimpleExpression>) {
+        let expected = s.into();
+        for i in min..=a.len() {
+            assert_eq!(parse_str!(SimpleExpression, &a[..i]), Ok(expected.clone()));
+        }
+    }
+
+    test_it("all", 2, All);
+    test_it("any", 2, Any);
+    test_it("true", 2, True);
+    test_it("none", 1, None);
+    test_it("false", 1, False);
+    test_it("library", 1, Library);
+
+    test_it("binary", 2, Binary);
+    test_it("benchmark", 2, Benchmark);
+    test_it("example", 1, Example);
+    test_it("test", 2, Test);
+}
+
+#[test]
 fn simple_expr_compound() {
     use CompoundSelectorName::*;
     use Matcher::*;
@@ -497,6 +536,32 @@ fn simple_expr_compound() {
         Example,
         Contains("s(oi)l".into()),
     );
+}
+
+#[test]
+fn matcher_prefixes() {
+    use CompoundSelectorName::*;
+    use Matcher::*;
+
+    fn test_it(matcher_name: &str, min: usize, matcher: Matcher) {
+        for i in min..=matcher_name.len() {
+            let e = format!("name.{}<foo>", &matcher_name[..i]);
+            assert_eq!(
+                parse_str!(SimpleExpression, e.as_str()),
+                Ok(CompoundSelector {
+                    name: Name,
+                    matcher: matcher.clone()
+                }
+                .into())
+            );
+        }
+    }
+
+    test_it("matches", 1, Matches(regex!("foo").into()));
+    test_it("equals", 2, Equals("foo".into()));
+    test_it("starts_with", 1, StartsWith("foo".into()));
+    test_it("ends_with", 2, EndsWith("foo".into()));
+    test_it("contains", 1, Contains("foo".into()));
 }
 
 #[test]
