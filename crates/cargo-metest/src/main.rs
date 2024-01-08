@@ -60,7 +60,8 @@ struct CliOptions {
     quiet: bool,
 
     /// Only run tests which match the given filter
-    filter: Option<String>,
+    #[arg(default_value = "all")]
+    filter: String,
 }
 
 impl CliOptions {

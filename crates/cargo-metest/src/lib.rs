@@ -350,7 +350,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cargo: String,
-        filter: Option<String>,
+        filter: String,
         stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
@@ -370,7 +370,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
             load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
         test_listing.retain_packages(workspace_packages);
 
-        let filter = filter.unwrap_or("all".into()).parse()?;
+        let filter = filter.parse()?;
         let selected_packages = workspace_packages
             .iter()
             .filter(|p| filter_package(p, &filter))
