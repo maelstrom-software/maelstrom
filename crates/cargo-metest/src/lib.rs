@@ -32,6 +32,7 @@ use std::{
 use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
+/// Returns `true` if the given `CargoPackage` matches the given pattern
 fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
     let c = pattern::Context {
         package: package.name.clone(),
@@ -41,6 +42,7 @@ fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
     pattern::interpret_pattern(p, &c).unwrap_or(true)
 }
 
+/// Returns `true` if the given `CargoArtifact` and case matches the given pattern
 fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bool {
     let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
     let c = pattern::Context {
@@ -51,6 +53,10 @@ fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bo
     pattern::interpret_pattern(p, &c).expect("case is provided")
 }
 
+/// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
+/// since it can contain things which live longer than scoped thread and thus shared among them.
+///
+/// This object is separate from `MainAppDeps` because it is lent to `JobQueing`
 struct JobQueingDeps<StdErrT> {
     cargo: String,
     packages: Vec<String>,
@@ -91,6 +97,13 @@ impl<StdErrT> JobQueingDeps<StdErrT> {
     }
 }
 
+/// Enqueues test cases as jobs in the given client from the given `CargoArtifact`
+///
+/// This object is like an iterator, it maintains a position in the test listing and enqueues the
+/// next thing when asked.
+///
+/// This object is stored inside `JobQueing` and is used to keep track of which artifact it is
+/// currently enqueuing from.
 struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
     queing_deps: &'a JobQueingDeps<StdErrT>,
     client: &'a Mutex<Client>,
@@ -248,6 +261,10 @@ where
         })
     }
 
+    /// Attempt to enqueue the next test as a job in the client
+    ///
+    /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
+    /// `EnqueueResult::Done`
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
         let Some(case) = self.cases.next() else {
             return Ok(EnqueueResult::Done);
@@ -256,6 +273,10 @@ where
     }
 }
 
+/// Enqueues tests as jobs in the given client.
+///
+/// This object is like an iterator, it maintains a position in the test listing and enqueues the
+/// next thing when asked.
 struct JobQueing<'a, StdErrT, ProgressIndicatorT> {
     queing_deps: &'a JobQueingDeps<StdErrT>,
     client: &'a Mutex<Client>,
@@ -316,6 +337,8 @@ where
         Ok(true)
     }
 
+    /// Meant to be called when the user has enqueued all the jobs they want. Checks for deferred
+    /// errors from cargo or otherwise
     fn finish(&mut self) -> Result<()> {
         self.cargo_build
             .take()
@@ -325,6 +348,10 @@ where
         Ok(())
     }
 
+    /// Attempt to enqueue the next test as a job in the client
+    ///
+    /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
+    /// `EnqueueResult::Done`
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
         if self.artifact_queing.is_none() && !self.start_queuing_from_artifact()? {
             self.finish()?;
@@ -342,6 +369,8 @@ where
     }
 }
 
+/// A collection of objects that are used to run the MainApp. This is useful as a separate object
+/// since it can contain things which live longer than scoped thread and thus shared among them.
 pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
     queing_deps: JobQueingDeps<StdErrT>,
@@ -349,6 +378,17 @@ pub struct MainAppDeps<StdErrT> {
 }
 
 impl<StdErrT> MainAppDeps<StdErrT> {
+    /// Creates a new `MainAppDeps`
+    ///
+    /// `cargo`: the command to run when invoking cargo
+    /// `include_filter`: test which match any of the patterns in this filter are run
+    /// `exclude_filter`: test which match any of the patterns in this filter are not run
+    /// `stderr`: this object is written to for error output
+    /// `stderr_color`: should terminal color codes be written to `stderr` or not
+    /// `workspace_root`: the path to the root of the workspace
+    /// `workspace_packages`: a listing of the packages in the workspace
+    /// `broker_addr`: the network address of the broker which we connect to
+    /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         cargo: String,
@@ -396,26 +436,41 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     }
 }
 
+/// The `MainApp` basically just enqueues tests as jobs, and which each attempted job enqueued this
+/// object describes what happened.
 pub enum EnqueueResult {
+    /// A job successfully enqueued with the following information
     Enqueued { package_name: String, case: String },
+    /// No job was enqueued, instead the test that would have been enqueued has been ignored
+    /// because it has been marked as `#[ignored]`
     Ignored,
+    /// No job was enqueued, we have run out of tests to run
     Done,
 }
 
 impl EnqueueResult {
+    /// This is `EnqueueResult` the `Done` variant
     pub fn is_done(&self) -> bool {
         matches!(self, Self::Done)
     }
 
+    /// This is `EnqueueResult` the `Ignored` variant
     pub fn is_ignored(&self) -> bool {
         matches!(self, Self::Ignored)
     }
 }
 
-// This trait exists only for type-erasure purposes
+/// This is the public API for the MainApp
+///
+/// N.B. This API is a trait only for type-erasure purposes
 pub trait MainApp {
+    /// Enqueue one test as a job on the Client
     fn enqueue_one(&mut self) -> Result<EnqueueResult>;
+
+    /// Indicates that we have finished enqueing jobs and starts tearing things down
     fn drain(&mut self) -> Result<()>;
+
+    /// Wait for all outstanding jobs to finish, display a summary, and obtain an `ExitCode`
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
@@ -519,6 +574,13 @@ where
     )))
 }
 
+/// Construct a `MainApp`
+///
+/// `deps`: a collection of dependencies
+/// `stdout_tty`: should terminal color codes be printed to stdout (provided via `term`)
+/// `quiet`: this indicated whether quiet mode should be used or not
+/// `term`: this object represent the terminal
+/// `driver`: this object drives the background work needed for updating the progress bars
 pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     deps: &'deps MainAppDeps<StdErrT>,
     stdout_tty: bool,
