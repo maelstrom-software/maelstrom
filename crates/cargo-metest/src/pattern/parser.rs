@@ -366,7 +366,13 @@ fn diff_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output =
 pub enum AndExpression {
     And(NotExpression, Box<AndExpression>),
     Diff(NotExpression, Box<AndExpression>),
-    #[from(types(SimpleExpression, SimpleSelector, SimpleSelectorName, CompoundSelector))]
+    #[from(types(
+        OrExpression,
+        SimpleExpression,
+        SimpleSelector,
+        SimpleSelectorName,
+        CompoundSelector
+    ))]
     Not(NotExpression),
 }
 
@@ -442,6 +448,23 @@ macro_rules! parse_str {
             .easy_parse(combine::stream::position::Stream::new($input))
             .map(|x| x.0)
     }};
+}
+
+fn compile_filter_or(filters: &[String]) -> Result<OrExpression> {
+    filters
+        .iter()
+        .try_fold(SimpleSelectorName::False.into(), |e, item| {
+            Ok(OrExpression::Or(
+                AndExpression::from(e),
+                Box::new(Pattern::from_str(item.as_str())?.0),
+            ))
+        })
+}
+
+pub fn compile_filter(include_filter: &[String], exclude_filter: &[String]) -> Result<Pattern> {
+    let include = compile_filter_or(include_filter)?;
+    let exclude = compile_filter_or(exclude_filter)?;
+    Ok(AndExpression::Diff(include.into(), Box::new(exclude.into())).into())
 }
 
 #[test]

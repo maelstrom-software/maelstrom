@@ -397,7 +397,8 @@ fn run_app(
     cargo: String,
     stdout_tty: bool,
     quiet: Quiet,
-    filter: String,
+    include_filter: Vec<String>,
+    exclude_filter: Vec<String>,
     finish: bool,
 ) -> String {
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
@@ -411,7 +412,8 @@ fn run_app(
 
     let deps = MainAppDeps::new(
         cargo,
-        filter,
+        include_filter,
+        exclude_filter,
         &mut stderr,
         false,
         &workspace_root,
@@ -471,7 +473,8 @@ fn run_all_tests_sync(
     tmp_dir: &TempDir,
     fake_tests: FakeTests,
     quiet: Quiet,
-    filter: String,
+    include_filter: Vec<String>,
+    exclude_filter: Vec<String>,
 ) -> String {
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
@@ -500,7 +503,8 @@ fn run_all_tests_sync(
         cargo,
         false,
         quiet,
-        filter,
+        include_filter,
+        exclude_filter,
         true,
     )
 }
@@ -515,7 +519,13 @@ fn no_tests_all_tests_sync() {
         }],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), "all".into()),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![]
+        ),
         "\
         all jobs completed\n\
         \n\
@@ -548,7 +558,13 @@ fn two_tests_all_tests_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), "all".into()),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![]
+        ),
         "\
         bar test_it.....................................OK\n\
         foo test_it.....................................OK\n\
@@ -562,7 +578,7 @@ fn two_tests_all_tests_sync() {
 }
 
 #[test]
-fn three_tests_filtered_sync() {
+fn four_tests_filtered_sync() {
     let tmp_dir = tempdir().unwrap();
     let fake_tests = FakeTests {
         test_binaries: vec![
@@ -576,7 +592,7 @@ fn three_tests_filtered_sync() {
             FakeTestBinary {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
-                    name: "test_it".into(),
+                    name: "test_it2".into(),
                     ..Default::default()
                 }],
             },
@@ -587,6 +603,13 @@ fn three_tests_filtered_sync() {
                     ..Default::default()
                 }],
             },
+            FakeTestBinary {
+                name: "bin".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
         ],
     };
     assert_eq!(
@@ -594,10 +617,14 @@ fn three_tests_filtered_sync() {
             &tmp_dir,
             fake_tests,
             false.into(),
-            "name.equals(test_it)".into()
+            vec![
+                "name.equals(test_it)".into(),
+                "name.equals(test_it2)".into()
+            ],
+            vec!["package.equals(bin)".into()]
         ),
         "\
-        bar test_it.....................................OK\n\
+        bar test_it2....................................OK\n\
         foo test_it.....................................OK\n\
         all jobs completed\n\
         \n\
@@ -641,7 +668,8 @@ fn three_tests_single_package_sync() {
             &tmp_dir,
             fake_tests,
             false.into(),
-            "package.equals(foo)".into()
+            vec!["package.equals(foo)".into()],
+            vec![]
         ),
         "\
         foo test_it.....................................OK\n\
@@ -693,7 +721,8 @@ fn three_tests_single_package_filtered_sync() {
             &tmp_dir,
             fake_tests,
             false.into(),
-            "package.equals(foo) && name.equals(test_it)".into()
+            vec!["package.equals(foo) && name.equals(test_it)".into()],
+            vec![]
         ),
         "\
         foo test_it.....................................OK\n\
@@ -736,7 +765,13 @@ fn ignored_test_sync() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, false.into(), "all".into()),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![]
+        ),
         "\
         bar test_it.....................................OK\n\
         baz test_it.....................................OK\n\
@@ -774,7 +809,13 @@ fn two_tests_all_tests_sync_quiet() {
         ],
     };
     assert_eq!(
-        run_all_tests_sync(&tmp_dir, fake_tests, true.into(), "all".into()),
+        run_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            true.into(),
+            vec!["all".into()],
+            vec![]
+        ),
         "\
         all jobs completed\n\
         \n\
@@ -810,7 +851,8 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         cargo,
         false,
         Quiet::from(false),
-        "all".into(),
+        vec!["all".into()],
+        vec![],
         true,
     );
 
@@ -886,7 +928,8 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         cargo,
         true,
         quiet,
-        "all".into(),
+        vec!["all".into()],
+        vec![],
         false,
     );
     assert_eq!(contents, expected_output);
@@ -1079,7 +1122,13 @@ fn expected_count_updates_packages() {
             },
         ],
     };
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), "all".into());
+    run_all_tests_sync(
+        &tmp_dir,
+        fake_tests.clone(),
+        false.into(),
+        vec!["all".into()],
+        vec![],
+    );
 
     let path = tmp_dir
         .path()
@@ -1102,7 +1151,13 @@ fn expected_count_updates_packages() {
     fs.remove_dir_all(tmp_dir.path().join("workspace/crates/bar"))
         .unwrap();
 
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), "all".into());
+    run_all_tests_sync(
+        &tmp_dir,
+        fake_tests.clone(),
+        false.into(),
+        vec!["all".into()],
+        vec![],
+    );
 
     // new listing should match
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
@@ -1121,7 +1176,13 @@ fn expected_count_updates_cases() {
             }],
         }],
     };
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), "all".into());
+    run_all_tests_sync(
+        &tmp_dir,
+        fake_tests.clone(),
+        false.into(),
+        vec!["all".into()],
+        vec![],
+    );
 
     let path = tmp_dir
         .path()
@@ -1141,7 +1202,13 @@ fn expected_count_updates_cases() {
     fs.write(tmp_dir.path().join("workspace/crates/foo/src/lib.rs"), "")
         .unwrap();
 
-    run_all_tests_sync(&tmp_dir, fake_tests.clone(), false.into(), "all".into());
+    run_all_tests_sync(
+        &tmp_dir,
+        fake_tests.clone(),
+        false.into(),
+        vec!["all".into()],
+        vec![],
+    );
 
     // new listing should match
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();

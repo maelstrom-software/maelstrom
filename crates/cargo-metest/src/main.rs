@@ -121,7 +121,8 @@ pub fn main() -> Result<ExitCode> {
 
     let deps = MainAppDeps::new(
         "cargo".into(),
-        cli_options.filter,
+        vec![cli_options.filter],
+        vec![],
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
