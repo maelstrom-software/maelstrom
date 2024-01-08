@@ -51,7 +51,7 @@ fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bo
     pattern::interpret_pattern(p, &c).expect("case is provided")
 }
 
-struct JobQueuer<StdErrT> {
+struct JobQueingDeps<StdErrT> {
     cargo: String,
     packages: Vec<String>,
     filter: pattern::Pattern,
@@ -64,7 +64,7 @@ struct JobQueuer<StdErrT> {
     test_listing: Mutex<TestListing>,
 }
 
-impl<StdErrT> JobQueuer<StdErrT> {
+impl<StdErrT> JobQueingDeps<StdErrT> {
     fn new(
         cargo: String,
         packages: Vec<String>,
@@ -92,7 +92,7 @@ impl<StdErrT> JobQueuer<StdErrT> {
 }
 
 struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
-    job_queuer: &'a JobQueuer<StdErrT>,
+    queing_deps: &'a JobQueingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
@@ -110,7 +110,7 @@ where
     ProgressIndicatorT: ProgressIndicator,
 {
     fn new(
-        job_queuer: &'a JobQueuer<StdErrT>,
+        queing_deps: &'a JobQueingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
@@ -130,13 +130,13 @@ where
         ind.update_enqueue_status(format!("processing {package_name}"));
         let mut cases = get_cases_from_binary(&binary, &None)?;
 
-        let mut listing = job_queuer.test_listing.lock().unwrap();
+        let mut listing = queing_deps.test_listing.lock().unwrap();
         listing.add_cases(&artifact, &cases[..]);
 
-        cases.retain(|c| filter_case(&artifact, c, &job_queuer.filter));
+        cases.retain(|c| filter_case(&artifact, c, &queing_deps.filter));
 
         Ok(Self {
-            job_queuer,
+            queing_deps,
             client,
             width,
             ind,
@@ -200,18 +200,20 @@ where
         };
 
         let test_metadata = self
-            .job_queuer
+            .queing_deps
             .test_metadata
             .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
-        let count = self.job_queuer.jobs_queued.fetch_add(1, Ordering::AcqRel);
-        self.ind
-            .update_length(std::cmp::max(self.job_queuer.expected_job_count, count + 1));
+        let count = self.queing_deps.jobs_queued.fetch_add(1, Ordering::AcqRel);
+        self.ind.update_length(std::cmp::max(
+            self.queing_deps.expected_job_count,
+            count + 1,
+        ));
 
         let visitor = JobStatusVisitor::new(
-            self.job_queuer.tracker.clone(),
+            self.queing_deps.tracker.clone(),
             case_str,
             self.width,
             self.ind.clone(),
@@ -255,7 +257,7 @@ where
 }
 
 struct JobQueing<'a, StdErrT, ProgressIndicatorT> {
-    job_queuer: &'a JobQueuer<StdErrT>,
+    queing_deps: &'a JobQueingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
@@ -271,18 +273,18 @@ where
     StdErrT: io::Write,
 {
     fn new(
-        job_queuer: &'a JobQueuer<StdErrT>,
+        queing_deps: &'a JobQueingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Result<Self> {
         let mut cargo_build = CargoBuild::new(
-            &job_queuer.cargo,
-            job_queuer.stderr_color,
-            job_queuer.packages.clone(),
+            &queing_deps.cargo,
+            queing_deps.stderr_color,
+            queing_deps.packages.clone(),
         )?;
         Ok(Self {
-            job_queuer,
+            queing_deps,
             client,
             width,
             ind,
@@ -303,7 +305,7 @@ where
 
         let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
         self.artifact_queing = Some(ArtifactQueing::new(
-            self.job_queuer,
+            self.queing_deps,
             self.client,
             self.width,
             self.ind.clone(),
@@ -318,7 +320,7 @@ where
         self.cargo_build
             .take()
             .unwrap()
-            .check_status(&mut *self.job_queuer.stderr.lock().unwrap())?;
+            .check_status(&mut *self.queing_deps.stderr.lock().unwrap())?;
 
         Ok(())
     }
@@ -342,7 +344,7 @@ where
 
 pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
-    queuer: JobQueuer<StdErrT>,
+    queing_deps: JobQueingDeps<StdErrT>,
     cache_dir: PathBuf,
 }
 
@@ -380,7 +382,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
 
         Ok(Self {
             client,
-            queuer: JobQueuer::new(
+            queing_deps: JobQueingDeps::new(
                 cargo,
                 selected_packages,
                 filter,
@@ -459,7 +461,7 @@ where
 
     fn drain(&mut self) -> Result<()> {
         self.prog
-            .update_length(self.deps.queuer.jobs_queued.load(Ordering::Acquire));
+            .update_length(self.deps.queing_deps.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
         self.deps.client.lock().unwrap().stop_accepting()?;
@@ -476,16 +478,16 @@ where
 
         let width = self.term.width() as usize;
         self.deps
-            .queuer
+            .queing_deps
             .tracker
             .print_summary(width, self.term.clone())?;
 
         write_test_listing(
             &self.deps.cache_dir.join(LAST_TEST_LISTING_NAME),
-            &self.deps.queuer.test_listing.lock().unwrap(),
+            &self.deps.queing_deps.test_listing.lock().unwrap(),
         )?;
 
-        Ok(self.deps.queuer.tracker.exit_code())
+        Ok(self.deps.queing_deps.tracker.exit_code())
     }
 }
 
@@ -505,9 +507,9 @@ where
     let prog = prog_factory(term.clone());
 
     prog_driver.drive(&deps.client, prog.clone());
-    prog.update_length(deps.queuer.expected_job_count);
+    prog.update_length(deps.queing_deps.expected_job_count);
 
-    let queing = JobQueing::new(&deps.queuer, &deps.client, width, prog.clone())?;
+    let queing = JobQueing::new(&deps.queing_deps, &deps.client, width, prog.clone())?;
     Ok(Box::new(MainAppImpl::new(
         deps,
         queing,
