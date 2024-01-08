@@ -408,10 +408,10 @@ mod test {
     fn most_into_job_spec() {
         assert_eq!(
             Job {
-                arguments: Some(vec!["arg1".to_string(), "arg2".to_string()]),
+                arguments: Some(string_vec!["arg1", "arg2"]),
                 environment: Some(PossiblyImage::Explicit(BTreeMap::from([
-                    ("FOO".to_string(), "foo".to_string()),
-                    ("BAR".to_string(), "bar".to_string()),
+                    (string!("FOO"), string!("foo")),
+                    (string!("BAR"), string!("bar")),
                 ]))),
                 devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
                 mounts: Some(vec![JobMount {
@@ -421,7 +421,7 @@ mod test {
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
-                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -444,7 +444,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_loopback: Some(true),
-                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -457,7 +457,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_writable_file_system: Some(true),
-                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -497,7 +497,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]),
         );
     }
 
@@ -556,7 +556,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(42), digest!(43)]),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(42), digest!(43)]),
         );
     }
 
@@ -632,7 +632,7 @@ mod test {
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
             JobSpec::new(
-                "/bin/sh".to_string(),
+                string!("/bin/sh"),
                 nonempty![digest!(42), digest!(43), digest!(1)]
             ),
         );
@@ -710,8 +710,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
-                .arguments(["-e", "echo foo"]),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).arguments(["-e", "echo foo"]),
         )
     }
 
@@ -728,7 +727,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .environment(["BAR=bar", "FOO=foo"]),
         )
     }
@@ -746,7 +745,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .environment(["BAR=bar", "FOO=pre-foo-env-post"]),
         )
     }
@@ -764,7 +763,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .environment(["BAR=bar", "FOO=pre-no-prev-post"]),
         )
     }
@@ -782,7 +781,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .environment(["BAZ=image-baz", "FOO=image-foo"]),
         )
     }
@@ -800,7 +799,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .environment(["PATH=$env{PATH}"]),
         )
     }
@@ -851,7 +850,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).environment([
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).environment([
                 "BAR=bar",
                 "BAZ=image-baz",
                 "FOO=foo"
@@ -877,7 +876,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).environment([
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).environment([
                 "BAR=no-env-bar:no-prev-bar",
                 "BAZ=no-env-baz:image-baz",
                 "FOO=foo-env:image-foo"
@@ -961,7 +960,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .devices(enum_set! {JobDevice::Null | JobDevice::Zero}),
         )
     }
@@ -981,7 +980,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).mounts([JobMount {
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).mounts([JobMount {
                 fs_type: JobMountFsType::Tmp,
                 mount_point: utf8_path_buf!("/tmp"),
             }])
@@ -1001,7 +1000,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).enable_loopback(true),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).enable_loopback(true),
         )
     }
 
@@ -1018,7 +1017,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
                 .enable_writable_file_system(true),
         )
     }
@@ -1036,8 +1035,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)])
-                .working_directory("/foo/bar"),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).working_directory("/foo/bar"),
         )
     }
 
@@ -1057,7 +1055,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).working_directory("/foo"),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).working_directory("/foo"),
         )
     }
 
@@ -1112,7 +1110,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).user(1234),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).user(1234),
         )
     }
 
@@ -1129,7 +1127,7 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).group(4321),
+            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).group(4321),
         )
     }
 }
