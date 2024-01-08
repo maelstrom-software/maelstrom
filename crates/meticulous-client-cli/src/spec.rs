@@ -56,7 +56,7 @@ pub fn job_spec_iter_from_reader(
 
 #[derive(Debug, Eq, PartialEq)]
 struct Job {
-    program: String,
+    program: Utf8PathBuf,
     arguments: Option<Vec<String>>,
     environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     added_environment: BTreeMap<String, String>,
@@ -74,7 +74,7 @@ struct Job {
 
 impl Job {
     #[cfg(test)]
-    fn new(program: String, layers: NonEmpty<String>) -> Self {
+    fn new(program: Utf8PathBuf, layers: NonEmpty<String>) -> Self {
         Job {
             program,
             layers: PossiblyImage::Explicit(layers),
@@ -397,7 +397,7 @@ mod test {
     #[test]
     fn minimum_into_job_spec() {
         assert_eq!(
-            Job::new(string!("program"), string_nonempty!["1"])
+            Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
                 .into_job_spec(layer_mapper, env, images)
                 .unwrap(),
             JobSpec::new("program", nonempty![digest!(1)]),
@@ -421,7 +421,7 @@ mod test {
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
-                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -444,7 +444,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_loopback: Some(true),
-                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -457,7 +457,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_writable_file_system: Some(true),
-                ..Job::new("program".to_string(), nonempty!["1".to_string()])
+                ..Job::new(utf8_path_buf!("program"), nonempty!["1".to_string()])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),

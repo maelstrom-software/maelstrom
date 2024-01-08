@@ -139,6 +139,7 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
 fn test_path(spec: &JobSpec) -> TestPath {
     let binary = spec
         .program
+        .as_str()
         .split("/")
         .last()
         .unwrap()

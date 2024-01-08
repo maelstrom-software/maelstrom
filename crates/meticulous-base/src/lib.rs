@@ -105,7 +105,7 @@ pub struct GroupId(u32);
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobSpec {
-    pub program: String,
+    pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub layers: NonEmpty<Sha256Digest>,
@@ -121,7 +121,7 @@ pub struct JobSpec {
 impl JobSpec {
     pub fn new(program: impl Into<String>, layers: impl Into<NonEmpty<Sha256Digest>>) -> Self {
         JobSpec {
-            program: program.into(),
+            program: program.into().into(),
             layers: layers.into(),
             arguments: Default::default(),
             environment: Default::default(),

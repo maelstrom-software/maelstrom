@@ -225,7 +225,7 @@ where
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
         self.client.lock().unwrap().add_job(
             JobSpec {
-                program: format!("/{binary_name}"),
+                program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 environment: test_metadata.environment(),
                 layers,

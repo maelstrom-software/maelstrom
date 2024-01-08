@@ -51,7 +51,7 @@ use tuple::Map as _;
 
 /// All necessary information for the worker to execute a job.
 pub struct JobSpec {
-    pub program: String,
+    pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub layers: NonEmpty<PathBuf>,
