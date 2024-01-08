@@ -362,7 +362,9 @@ impl<'de> de::Deserialize<'de> for Job {
 mod test {
     use super::*;
     use meticulous_base::{enum_set, nonempty, JobMountFsType};
-    use meticulous_test::{digest, path_buf_vec, string, string_nonempty, string_vec};
+    use meticulous_test::{
+        digest, path_buf_vec, string, string_nonempty, string_vec, utf8_path_buf,
+    };
 
     fn layer_mapper(layer: String) -> Result<Sha256Digest> {
         Ok(Sha256Digest::from(layer.parse::<u64>()?))
@@ -414,7 +416,7 @@ mod test {
                 devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".into()
+                    mount_point: utf8_path_buf!("/tmp"),
                 }]),
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
@@ -429,7 +431,7 @@ mod test {
                 .devices(enum_set! {JobDevice::Null})
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: "/tmp".into()
+                    mount_point: utf8_path_buf!("/tmp"),
                 }])
                 .working_directory("/working-directory")
                 .user(101)
@@ -981,7 +983,7 @@ mod test {
             .unwrap(),
             JobSpec::new("/bin/sh".to_string(), nonempty![digest!(1)]).mounts([JobMount {
                 fs_type: JobMountFsType::Tmp,
-                mount_point: "/tmp".to_string()
+                mount_point: utf8_path_buf!("/tmp"),
             }])
         )
     }

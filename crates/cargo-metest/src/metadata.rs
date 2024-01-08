@@ -784,11 +784,11 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: string!("/tmp"),
+                    mount_point: utf8_path_buf!("/tmp"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: string!("/sys"),
+                    mount_point: utf8_path_buf!("/sys"),
                 },
             ],
         );
@@ -798,7 +798,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Proc,
-                mount_point: string!("/proc"),
+                mount_point: utf8_path_buf!("/proc"),
             },],
         );
         assert_eq!(
@@ -855,15 +855,15 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: string!("/sys"),
+                    mount_point: utf8_path_buf!("/sys"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: string!("/tmp"),
+                    mount_point: utf8_path_buf!("/tmp"),
                 },
             ],
         );
@@ -874,19 +874,19 @@ mod test {
             vec![
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Sys,
-                    mount_point: string!("/sys"),
+                    mount_point: utf8_path_buf!("/sys"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: string!("/tmp"),
+                    mount_point: utf8_path_buf!("/tmp"),
                 },
                 JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 },
             ],
         );
@@ -896,7 +896,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Tmp,
-                mount_point: string!("/tmp"),
+                mount_point: utf8_path_buf!("/tmp"),
             },],
         );
         assert_eq!(
@@ -905,7 +905,7 @@ mod test {
                 .mounts,
             vec![JobMount {
                 fs_type: JobMountFsType::Tmp,
-                mount_point: string!("/tmp"),
+                mount_point: utf8_path_buf!("/tmp"),
             },],
         );
     }

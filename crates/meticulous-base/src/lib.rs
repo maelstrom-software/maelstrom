@@ -87,7 +87,7 @@ pub enum JobMountFsType {
 #[serde(deny_unknown_fields)]
 pub struct JobMount {
     pub fs_type: JobMountFsType,
-    pub mount_point: String,
+    pub mount_point: Utf8PathBuf,
 }
 
 /// ID of a user. This should be compatible with uid_t.

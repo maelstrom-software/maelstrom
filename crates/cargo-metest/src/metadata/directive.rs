@@ -233,7 +233,7 @@ mod test {
     use super::*;
     use anyhow::Error;
     use meticulous_base::{enum_set, JobMountFsType};
-    use meticulous_test::{string, string_vec};
+    use meticulous_test::{string, string_vec, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {
@@ -320,7 +320,7 @@ mod test {
             TestDirective {
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 }]),
                 ..Default::default()
             }
@@ -339,7 +339,7 @@ mod test {
             TestDirective {
                 added_mounts: vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 }],
                 ..Default::default()
             }
@@ -359,11 +359,11 @@ mod test {
             TestDirective {
                 mounts: Some(vec![JobMount {
                     fs_type: JobMountFsType::Proc,
-                    mount_point: string!("/proc"),
+                    mount_point: utf8_path_buf!("/proc"),
                 }]),
                 added_mounts: vec![JobMount {
                     fs_type: JobMountFsType::Tmp,
-                    mount_point: string!("/tmp"),
+                    mount_point: utf8_path_buf!("/tmp"),
                 }],
                 ..Default::default()
             }
