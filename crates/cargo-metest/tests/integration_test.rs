@@ -399,6 +399,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
+    list: bool,
     finish: bool,
 ) -> String {
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
@@ -414,8 +415,9 @@ fn run_app(
         cargo,
         include_filter,
         exclude_filter,
+        list,
         &mut stderr,
-        false,
+        false, // stderr_color
         &workspace_root,
         &cargo_metadata.workspace_packages(),
         b.address.clone(),
@@ -432,7 +434,7 @@ fn run_app(
         let res = app.enqueue_one().unwrap();
         let (package_name, case) = match res {
             EnqueueResult::Done => break,
-            EnqueueResult::Ignored => continue,
+            EnqueueResult::Ignored | EnqueueResult::Listed => continue,
             EnqueueResult::Enqueued { package_name, case } => (package_name, case),
         };
         let test = fake_tests.get(&package_name, &case);
@@ -469,12 +471,13 @@ fn run_app(
     term.contents()
 }
 
-fn run_all_tests_sync(
+fn run_or_list_all_tests_sync(
     tmp_dir: &TempDir,
     fake_tests: FakeTests,
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
+    list: bool,
 ) -> String {
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
@@ -501,11 +504,46 @@ fn run_all_tests_sync(
         &workspace,
         state,
         cargo,
-        false,
+        false, // stdout_tty
         quiet,
         include_filter,
         exclude_filter,
-        true,
+        list,
+        true, // finish
+    )
+}
+
+fn run_all_tests_sync(
+    tmp_dir: &TempDir,
+    fake_tests: FakeTests,
+    quiet: Quiet,
+    include_filter: Vec<String>,
+    exclude_filter: Vec<String>,
+) -> String {
+    run_or_list_all_tests_sync(
+        tmp_dir,
+        fake_tests,
+        quiet,
+        include_filter,
+        exclude_filter,
+        false, /* list */
+    )
+}
+
+fn list_all_tests_sync(
+    tmp_dir: &TempDir,
+    fake_tests: FakeTests,
+    quiet: Quiet,
+    include_filter: Vec<String>,
+    exclude_filter: Vec<String>,
+) -> String {
+    run_or_list_all_tests_sync(
+        tmp_dir,
+        fake_tests,
+        quiet,
+        include_filter,
+        exclude_filter,
+        true, /* list */
     )
 }
 
@@ -533,6 +571,27 @@ fn no_tests_all_tests_sync() {
         Successful Tests:         0\n\
         Failed Tests    :         0\
         "
+    );
+}
+
+#[test]
+fn no_tests_all_tests_sync_listing() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![],
+        }],
+    };
+    assert_eq!(
+        list_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![]
+        ),
+        ""
     );
 }
 
@@ -573,6 +632,42 @@ fn two_tests_all_tests_sync() {
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
         Failed Tests    :         0\
+        "
+    );
+}
+
+#[test]
+fn two_tests_all_tests_sync_listing() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    assert_eq!(
+        list_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec!["all".into()],
+            vec![]
+        ),
+        "\
+        bar test_it\n\
+        foo test_it\
         "
     );
 }
@@ -631,6 +726,59 @@ fn four_tests_filtered_sync() {
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
         Failed Tests    :         0\
+        "
+    );
+}
+
+#[test]
+fn four_tests_filtered_sync_listing() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![
+            FakeTestBinary {
+                name: "foo".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bar".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it2".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "baz".into(),
+                tests: vec![FakeTestCase {
+                    name: "testy".into(),
+                    ..Default::default()
+                }],
+            },
+            FakeTestBinary {
+                name: "bin".into(),
+                tests: vec![FakeTestCase {
+                    name: "test_it".into(),
+                    ..Default::default()
+                }],
+            },
+        ],
+    };
+    assert_eq!(
+        list_all_tests_sync(
+            &tmp_dir,
+            fake_tests,
+            false.into(),
+            vec![
+                "name.equals(test_it)".into(),
+                "name.equals(test_it2)".into()
+            ],
+            vec!["package.equals(bin)".into()]
+        ),
+        "\
+        bar test_it2\n\
+        foo test_it\
         "
     );
 }
@@ -849,11 +997,12 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         &tmp_dir.path().join("workspace"),
         state,
         cargo,
-        false,
+        false, // stdout_tty
         Quiet::from(false),
         vec!["all".into()],
         vec![],
-        true,
+        false, // list
+        true,  // finish
     );
 
     term.contents()
@@ -926,11 +1075,12 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         &tmp_dir.path().join("workspace"),
         state,
         cargo,
-        true,
+        true, // stdout_tty
         quiet,
         vec!["all".into()],
         vec![],
-        false,
+        false, // list
+        false, // finish
     );
     assert_eq!(contents, expected_output);
 }

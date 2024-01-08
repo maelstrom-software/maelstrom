@@ -18,6 +18,7 @@ use meticulous_client::{spec::ImageConfig, Client, ClientDriver};
 use meticulous_util::{config::BrokerAddr, process::ExitCode};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
+    TestListingProgress, TestListingProgressNoSpinner,
 };
 use std::{
     collections::HashSet,
@@ -69,9 +70,11 @@ struct JobQueuingDeps<StdErrT> {
     test_metadata: AllMetadata,
     expected_job_count: u64,
     test_listing: Mutex<TestListing>,
+    list: bool,
 }
 
 impl<StdErrT> JobQueuingDeps<StdErrT> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         cargo: String,
         packages: Vec<String>,
@@ -80,6 +83,7 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
         stderr_color: bool,
         test_metadata: AllMetadata,
         test_listing: TestListing,
+        list: bool,
     ) -> Self {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -94,6 +98,7 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
             test_metadata,
             expected_job_count,
             test_listing: Mutex::new(test_listing),
+            list,
         }
     }
 }
@@ -137,9 +142,12 @@ where
             .into_iter()
             .collect();
 
-        ind.update_enqueue_status(format!("tar {package_name}"));
-        let (binary_artifact, deps_artifact) =
-            artifacts::add_generated_artifacts(client, &binary, &ind)?;
+        let (binary_artifact, deps_artifact) = if !queuing_deps.list {
+            ind.update_enqueue_status(format!("tar {package_name}"));
+            artifacts::add_generated_artifacts(client, &binary, &ind)?
+        } else {
+            (0u64.into(), 0u64.into())
+        };
 
         ind.update_enqueue_status(format!("processing {package_name}"));
         let mut cases = get_cases_from_binary(&binary, &None)?;
@@ -190,6 +198,11 @@ where
         let case_str = format!("{} {case}", &self.package_name);
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
+
+        if self.queuing_deps.list {
+            self.queuing_deps.tracker.job_listed(case_str);
+            return Ok(EnqueueResult::Listed);
+        }
 
         let image_lookup = |image: &str| {
             let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
@@ -384,6 +397,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     /// `cargo`: the command to run when invoking cargo
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
+    /// `list`: if true, don't actually run any tests, just list them instead
     /// `stderr`: is written to for error output
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
     /// `workspace_root`: the path to the root of the workspace
@@ -395,6 +409,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         cargo: String,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
+        list: bool,
         stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
@@ -431,6 +446,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 stderr_color,
                 test_metadata,
                 test_listing,
+                list,
             ),
             cache_dir,
         })
@@ -447,6 +463,8 @@ pub enum EnqueueResult {
     Ignored,
     /// No job was enqueued, we have run out of tests to run
     Done,
+    /// No job was enqueued, we listed the test case instead
+    Listed,
 }
 
 impl EnqueueResult {
@@ -533,11 +551,18 @@ where
             .wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
-        let width = self.term.width() as usize;
-        self.deps
-            .queuing_deps
-            .tracker
-            .print_summary(width, self.term.clone())?;
+        if self.deps.queuing_deps.list {
+            self.deps
+                .queuing_deps
+                .tracker
+                .print_listing(self.term.clone())?;
+        } else {
+            let width = self.term.width() as usize;
+            self.deps
+                .queuing_deps
+                .tracker
+                .print_summary(width, self.term.clone())?;
+        }
 
         write_test_listing(
             &self.deps.cache_dir.join(LAST_TEST_LISTING_NAME),
@@ -595,6 +620,19 @@ where
     TermT: TermLike + Clone + Send + Sync + 'static,
     'deps: 'scope,
 {
+    if deps.queuing_deps.list {
+        return if stdout_tty {
+            Ok(new_helper(deps, TestListingProgress::new, term, driver)?)
+        } else {
+            Ok(new_helper(
+                deps,
+                TestListingProgressNoSpinner::new,
+                term,
+                driver,
+            )?)
+        };
+    }
+
     match (stdout_tty, quiet.into_inner()) {
         (true, true) => Ok(new_helper(deps, QuietProgressBar::new, term, driver)?),
         (true, false) => Ok(new_helper(deps, MultipleProgressBars::new, term, driver)?),

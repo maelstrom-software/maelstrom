@@ -66,6 +66,10 @@ struct CliOptions {
     /// Only run tests which don't match the given filter
     #[arg(short = 'x')]
     exclude_filters: Vec<String>,
+
+    /// Only list the tests that would be run, don't actually run them
+    #[arg(long)]
+    list: bool,
 }
 
 impl CliOptions {
@@ -127,6 +131,7 @@ pub fn main() -> Result<ExitCode> {
         "cargo".into(),
         cli_options.include_filters,
         cli_options.exclude_filters,
+        cli_options.list,
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,

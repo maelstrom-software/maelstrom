@@ -3,6 +3,7 @@ mod multiple_progress_bars;
 mod no_bar;
 mod quiet_no_bar;
 mod quiet_progress_bar;
+mod test_listing;
 
 use anyhow::Result;
 use colored::Colorize as _;
@@ -13,6 +14,7 @@ pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
 pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
+pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
 pub trait ProgressIndicator: Clone + Send + Sync + 'static {
     /// Prints a line to stdout while not interfering with any progress bars
