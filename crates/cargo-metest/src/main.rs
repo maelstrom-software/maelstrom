@@ -60,8 +60,12 @@ struct CliOptions {
     quiet: bool,
 
     /// Only run tests which match the given filter
-    #[arg(default_value = "all")]
-    filter: String,
+    #[arg(short = 'i', default_value = "all")]
+    include_filters: Vec<String>,
+
+    /// Only run tests which don't match the given filter
+    #[arg(short = 'x')]
+    exclude_filters: Vec<String>,
 }
 
 impl CliOptions {
@@ -121,8 +125,8 @@ pub fn main() -> Result<ExitCode> {
 
     let deps = MainAppDeps::new(
         "cargo".into(),
-        vec![cli_options.filter],
-        vec![],
+        cli_options.include_filters,
+        cli_options.exclude_filters,
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
