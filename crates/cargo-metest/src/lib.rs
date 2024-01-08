@@ -57,8 +57,8 @@ fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bo
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
 ///
-/// This object is separate from `MainAppDeps` because it is lent to `JobQueing`
-struct JobQueingDeps<StdErrT> {
+/// This object is separate from `MainAppDeps` because it is lent to `JobQueuing`
+struct JobQueuingDeps<StdErrT> {
     cargo: String,
     packages: Vec<String>,
     filter: pattern::Pattern,
@@ -71,7 +71,7 @@ struct JobQueingDeps<StdErrT> {
     test_listing: Mutex<TestListing>,
 }
 
-impl<StdErrT> JobQueingDeps<StdErrT> {
+impl<StdErrT> JobQueuingDeps<StdErrT> {
     fn new(
         cargo: String,
         packages: Vec<String>,
@@ -103,10 +103,10 @@ impl<StdErrT> JobQueingDeps<StdErrT> {
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
 ///
-/// This object is stored inside `JobQueing` and is used to keep track of which artifact it is
+/// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
-    queing_deps: &'a JobQueingDeps<StdErrT>,
+struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
+    queuing_deps: &'a JobQueuingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
@@ -119,12 +119,12 @@ struct ArtifactQueing<'a, StdErrT, ProgressIndicatorT> {
     cases: <Vec<String> as IntoIterator>::IntoIter,
 }
 
-impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueing<'a, StdErrT, ProgressIndicatorT>
+impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
     fn new(
-        queing_deps: &'a JobQueingDeps<StdErrT>,
+        queuing_deps: &'a JobQueuingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
@@ -144,13 +144,13 @@ where
         ind.update_enqueue_status(format!("processing {package_name}"));
         let mut cases = get_cases_from_binary(&binary, &None)?;
 
-        let mut listing = queing_deps.test_listing.lock().unwrap();
+        let mut listing = queuing_deps.test_listing.lock().unwrap();
         listing.add_cases(&artifact, &cases[..]);
 
-        cases.retain(|c| filter_case(&artifact, c, &queing_deps.filter));
+        cases.retain(|c| filter_case(&artifact, c, &queuing_deps.filter));
 
         Ok(Self {
-            queing_deps,
+            queuing_deps,
             client,
             width,
             ind,
@@ -214,20 +214,20 @@ where
         };
 
         let test_metadata = self
-            .queing_deps
+            .queuing_deps
             .test_metadata
             .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
-        let count = self.queing_deps.jobs_queued.fetch_add(1, Ordering::AcqRel);
+        let count = self.queuing_deps.jobs_queued.fetch_add(1, Ordering::AcqRel);
         self.ind.update_length(std::cmp::max(
-            self.queing_deps.expected_job_count,
+            self.queuing_deps.expected_job_count,
             count + 1,
         ));
 
         let visitor = JobStatusVisitor::new(
-            self.queing_deps.tracker.clone(),
+            self.queuing_deps.tracker.clone(),
             case_str,
             self.width,
             self.ind.clone(),
@@ -278,41 +278,41 @@ where
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
-struct JobQueing<'a, StdErrT, ProgressIndicatorT> {
-    queing_deps: &'a JobQueingDeps<StdErrT>,
+struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
+    queuing_deps: &'a JobQueuingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
     cargo_build: Option<CargoBuild>,
     package_match: bool,
     artifacts: TestArtifactStream,
-    artifact_queing: Option<ArtifactQueing<'a, StdErrT, ProgressIndicatorT>>,
+    artifact_queuing: Option<ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>>,
 }
 
-impl<'a, StdErrT, ProgressIndicatorT: ProgressIndicator> JobQueing<'a, StdErrT, ProgressIndicatorT>
+impl<'a, StdErrT, ProgressIndicatorT: ProgressIndicator> JobQueuing<'a, StdErrT, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
     StdErrT: io::Write,
 {
     fn new(
-        queing_deps: &'a JobQueingDeps<StdErrT>,
+        queuing_deps: &'a JobQueuingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Result<Self> {
         let mut cargo_build = CargoBuild::new(
-            &queing_deps.cargo,
-            queing_deps.stderr_color,
-            queing_deps.packages.clone(),
+            &queuing_deps.cargo,
+            queuing_deps.stderr_color,
+            queuing_deps.packages.clone(),
         )?;
         Ok(Self {
-            queing_deps,
+            queuing_deps,
             client,
             width,
             ind,
             package_match: false,
             artifacts: cargo_build.artifact_stream(),
-            artifact_queing: None,
+            artifact_queuing: None,
             cargo_build: Some(cargo_build),
         })
     }
@@ -326,8 +326,8 @@ where
         let artifact = artifact?;
 
         let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
-        self.artifact_queing = Some(ArtifactQueing::new(
-            self.queing_deps,
+        self.artifact_queuing = Some(ArtifactQueuing::new(
+            self.queuing_deps,
             self.client,
             self.width,
             self.ind.clone(),
@@ -344,7 +344,7 @@ where
         self.cargo_build
             .take()
             .unwrap()
-            .check_status(&mut *self.queing_deps.stderr.lock().unwrap())?;
+            .check_status(&mut *self.queuing_deps.stderr.lock().unwrap())?;
 
         Ok(())
     }
@@ -354,15 +354,15 @@ where
     /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
     /// `EnqueueResult::Done`
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        if self.artifact_queing.is_none() && !self.start_queuing_from_artifact()? {
+        if self.artifact_queuing.is_none() && !self.start_queuing_from_artifact()? {
             self.finish()?;
             return Ok(EnqueueResult::Done);
         }
         self.package_match = true;
 
-        let res = self.artifact_queing.as_mut().unwrap().enqueue_one()?;
+        let res = self.artifact_queuing.as_mut().unwrap().enqueue_one()?;
         if res.is_done() {
-            self.artifact_queing = None;
+            self.artifact_queuing = None;
             return self.enqueue_one();
         }
 
@@ -374,7 +374,7 @@ where
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
-    queing_deps: JobQueingDeps<StdErrT>,
+    queuing_deps: JobQueuingDeps<StdErrT>,
     cache_dir: PathBuf,
 }
 
@@ -423,7 +423,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
 
         Ok(Self {
             client,
-            queing_deps: JobQueingDeps::new(
+            queuing_deps: JobQueuingDeps::new(
                 cargo,
                 selected_packages,
                 filter,
@@ -478,7 +478,7 @@ pub trait MainApp {
 
 struct MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT> {
     deps: &'deps MainAppDeps<StdErrT>,
-    queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
+    queuing: JobQueuing<'deps, StdErrT, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: TermT,
@@ -489,14 +489,14 @@ impl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
         deps: &'deps MainAppDeps<StdErrT>,
-        queing: JobQueing<'deps, StdErrT, ProgressIndicatorT>,
+        queuing: JobQueuing<'deps, StdErrT, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: TermT,
     ) -> Self {
         Self {
             deps,
-            queing,
+            queuing,
             prog_driver,
             prog,
             term,
@@ -513,12 +513,12 @@ where
     ProgressDriverT: ProgressDriver<'scope>,
 {
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        self.queing.enqueue_one()
+        self.queuing.enqueue_one()
     }
 
     fn drain(&mut self) -> Result<()> {
         self.prog
-            .update_length(self.deps.queing_deps.jobs_queued.load(Ordering::Acquire));
+            .update_length(self.deps.queuing_deps.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
         self.deps.client.lock().unwrap().stop_accepting()?;
@@ -535,16 +535,16 @@ where
 
         let width = self.term.width() as usize;
         self.deps
-            .queing_deps
+            .queuing_deps
             .tracker
             .print_summary(width, self.term.clone())?;
 
         write_test_listing(
             &self.deps.cache_dir.join(LAST_TEST_LISTING_NAME),
-            &self.deps.queing_deps.test_listing.lock().unwrap(),
+            &self.deps.queuing_deps.test_listing.lock().unwrap(),
         )?;
 
-        Ok(self.deps.queing_deps.tracker.exit_code())
+        Ok(self.deps.queuing_deps.tracker.exit_code())
     }
 }
 
@@ -564,12 +564,12 @@ where
     let prog = prog_factory(term.clone());
 
     prog_driver.drive(&deps.client, prog.clone());
-    prog.update_length(deps.queing_deps.expected_job_count);
+    prog.update_length(deps.queuing_deps.expected_job_count);
 
-    let queing = JobQueing::new(&deps.queing_deps, &deps.client, width, prog.clone())?;
+    let queuing = JobQueuing::new(&deps.queuing_deps, &deps.client, width, prog.clone())?;
     Ok(Box::new(MainAppImpl::new(
         deps,
-        queing,
+        queuing,
         prog_driver,
         prog,
         term,
