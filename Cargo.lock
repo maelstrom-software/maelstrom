@@ -659,7 +659,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-metest"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2393,7 +2393,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-base"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "camino",
  "derive_more",
@@ -2408,7 +2408,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-broker"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2437,7 +2437,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-client"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2465,7 +2465,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-client-cli"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2484,7 +2484,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-container"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -2507,25 +2507,25 @@ dependencies = [
 
 [[package]]
 name = "meticulous-plot"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "meticulous-simex"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "num",
 ]
 
 [[package]]
 name = "meticulous-test"
-version = "0.3.0-dev"
+version = "0.3.0"
 
 [[package]]
 name = "meticulous-util"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-web"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2565,7 +2565,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-worker"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2603,7 +2603,7 @@ dependencies = [
 
 [[package]]
 name = "meticulous-worker-child"
-version = "0.3.0-dev"
+version = "0.3.0"
 dependencies = [
  "nc",
 ]
