@@ -538,6 +538,7 @@ fn list_all_tests_sync(
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     expected_packages: &str,
+    expected_binaries: &str,
     expected_tests: &str,
 ) {
     let listing = run_or_list_all_tests_sync(
@@ -558,6 +559,16 @@ fn list_all_tests_sync(
         exclude_filter.clone(),
         enum_set!(ListAction::ListBinaries),
     );
+    assert_eq!(listing, expected_binaries);
+
+    let listing = run_or_list_all_tests_sync(
+        tmp_dir,
+        fake_tests.clone(),
+        quiet.clone(),
+        include_filter.clone(),
+        exclude_filter.clone(),
+        enum_set!(ListAction::ListPackages),
+    );
     assert_eq!(listing, expected_packages);
 
     let listing = run_or_list_all_tests_sync(
@@ -566,10 +577,13 @@ fn list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        enum_set!(ListAction::ListTests | ListAction::ListBinaries),
+        enum_set!(ListAction::ListTests | ListAction::ListBinaries | ListAction::ListPackages),
     );
 
     let mut combined = expected_packages.to_owned();
+    combined += "\n";
+    combined += expected_binaries;
+
     if !expected_tests.is_empty() {
         combined += "\n";
         combined += expected_tests;
@@ -619,6 +633,7 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
+        "package foo",
         "binary foo (library)",
         "",
     );
@@ -692,6 +707,10 @@ fn two_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
+        "\
+        package bar\n\
+        package foo\
+        ",
         "\
         binary bar (library)\n\
         binary foo (library)\
@@ -805,6 +824,11 @@ fn four_tests_filtered_sync_listing() {
             "name.equals(test_it2)".into(),
         ],
         vec!["package.equals(bin)".into()],
+        "\
+        package bar\n\
+        package baz\n\
+        package foo\
+        ",
         "\
         binary bar (library)\n\
         binary baz (library)\n\

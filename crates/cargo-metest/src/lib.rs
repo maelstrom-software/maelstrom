@@ -39,16 +39,24 @@ use visitor::{JobStatusTracker, JobStatusVisitor};
 pub enum ListAction {
     ListTests,
     ListBinaries,
+    ListPackages,
 }
 
 impl ListAction {
-    pub fn from_cli_bools(list_tests: bool, list_binaries: bool) -> EnumSet<Self> {
+    pub fn from_cli_bools(
+        list_tests: bool,
+        list_binaries: bool,
+        list_packages: bool,
+    ) -> EnumSet<Self> {
         let mut set = EnumSet::new();
         if list_tests {
             set.insert(Self::ListTests);
         }
         if list_binaries {
             set.insert(Self::ListBinaries);
+        }
+        if list_packages {
+            set.insert(Self::ListPackages);
         }
         set
     }
@@ -641,6 +649,15 @@ where
     }
 }
 
+fn list_packages<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    for pkg in packages {
+        ind.println(format!("package {}", &pkg.name));
+    }
+}
+
 fn list_binaries<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
 where
     ProgressIndicatorT: ProgressIndicator,
@@ -680,6 +697,14 @@ where
 
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
+
+    if deps
+        .queuing_deps
+        .list_actions
+        .contains(ListAction::ListPackages)
+    {
+        list_packages(&prog, &deps.queuing_deps.packages)
+    }
 
     if deps
         .queuing_deps
