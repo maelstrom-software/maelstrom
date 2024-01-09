@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2024-01-09
+
+### General
+
+#### Added
+
+- Ability to create a build environment using [`nix`](https://nixos.org).
+- Renamed `meticulous-client` binary to `meticulous-client-cli`.
+
+### `cargo-metest`
+
+### Added
+
+- A new test pattern language. The language can be used to select which test
+  cases to run and which test binaries to build.
+  [Issue #91](https://github.com/meticulous-software/meticulous/issues/91)
+- New `-i` and `-x` options to specify include and exclude filters.
+  [Issue #92](https://github.com/meticulous-software/meticulous/issues/92)
+- New `--list-tests` option to list which tests would be run without actually
+  running them. This may cause some test binaries to be built.
+  [Issue #93](https://github.com/meticulous-software/meticulous/issues/93)
+- New `--list-packages` option to list which packages match the given filters.
+  This will not build any test binaries.
+
+### Removed
+
+- The `--package` option. This can be specified using the filter language now.
+- The positional filter argument. Filters now have to be specified with `-i` or
+  `-x`.
+
+### `meticulous-client-cli`
+
+#### Changed
+
+- The JSON language used to specify jobs. This now has all of the features of
+  the language used by `cargo-metest`, including specifying parts of an image
+  to use.
+  [Issue #103](https://github.com/meticulous-software/meticulous/issues/103)
+
 ## [0.2.0] - 2023-12-15
 
 ### General
@@ -66,6 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Rust test runner that uses the clustered job runner: `cargo-metest`.
 - A bunch of other library packages that are used internally.
 
-[unreleased]: https://github.com/meticulous-software/meticulous/compare/v0.2.0...HEAD
+[unreleased]: https://github.com/meticulous-software/meticulous/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/meticulous-software/meticulous/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/meticulous-software/meticulous/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/meticulous-software/meticulous/releases/tag/v0.1.0
