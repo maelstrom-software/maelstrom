@@ -555,7 +555,7 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        ListAction::ListPackages,
+        ListAction::ListBinaries,
     );
     assert_eq!(listing, expected_packages);
 
@@ -565,7 +565,7 @@ fn list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        ListAction::ListPackagesAndTests,
+        ListAction::ListBinariesAndTests,
     );
 
     let mut combined = expected_packages.to_owned();
@@ -618,7 +618,7 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        "package foo (library)",
+        "binary foo (library)",
         "",
     );
 }
@@ -692,8 +692,8 @@ fn two_tests_all_tests_sync_listing() {
         vec!["all".into()],
         vec![],
         "\
-        package bar (library)\n\
-        package foo (library)\
+        binary bar (library)\n\
+        binary foo (library)\
         ",
         "\
         bar test_it\n\
@@ -805,9 +805,9 @@ fn four_tests_filtered_sync_listing() {
         ],
         vec!["package.equals(bin)".into()],
         "\
-        package bar (library)\n\
-        package baz (library)\n\
-        package foo (library)\
+        binary bar (library)\n\
+        binary baz (library)\n\
+        binary foo (library)\
         ",
         "\
         bar test_it2\n\

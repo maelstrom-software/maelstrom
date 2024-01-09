@@ -37,15 +37,15 @@ use visitor::{JobStatusTracker, JobStatusVisitor};
 pub enum ListAction {
     None,
     ListTests,
-    ListPackages,
-    ListPackagesAndTests,
+    ListBinaries,
+    ListBinariesAndTests,
 }
 
 impl ListAction {
-    pub fn from_cli_bools(list_tests: bool, list_packages: bool) -> Self {
-        match (list_tests, list_packages) {
-            (true, true) => Self::ListPackagesAndTests,
-            (false, true) => Self::ListPackages,
+    pub fn from_cli_bools(list_tests: bool, list_binaries: bool) -> Self {
+        match (list_tests, list_binaries) {
+            (true, true) => Self::ListBinariesAndTests,
+            (false, true) => Self::ListBinaries,
             (true, false) => Self::ListTests,
             (false, false) => Self::None,
         }
@@ -56,11 +56,11 @@ impl ListAction {
     }
 
     fn has_test_listing(&self) -> bool {
-        matches!(self, Self::ListTests | Self::ListPackagesAndTests)
+        matches!(self, Self::ListTests | Self::ListBinariesAndTests)
     }
 
-    fn has_package_listing(&self) -> bool {
-        matches!(self, Self::ListPackages | Self::ListPackagesAndTests)
+    fn has_binary_listing(&self) -> bool {
+        matches!(self, Self::ListBinaries | Self::ListBinariesAndTests)
     }
 }
 
@@ -650,14 +650,24 @@ where
     }
 }
 
-fn list_packages<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
+fn list_binaries<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
 where
     ProgressIndicatorT: ProgressIndicator,
 {
     for pkg in packages {
         for tgt in &pkg.targets {
-            let pkg_kind = pattern::ArtifactKind::from_target(tgt);
-            ind.println(format!("package {} ({})", &pkg.name, pkg_kind));
+            if tgt.test {
+                let pkg_kind = pattern::ArtifactKind::from_target(tgt);
+                let mut binary_name = String::new();
+                if tgt.name != pkg.name {
+                    binary_name += " ";
+                    binary_name += &tgt.name;
+                }
+                ind.println(format!(
+                    "binary {}{} ({})",
+                    &pkg.name, binary_name, pkg_kind
+                ));
+            }
         }
     }
 }
@@ -680,8 +690,8 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
-    if deps.queuing_deps.list_action.has_package_listing() {
-        list_packages(&prog, &deps.queuing_deps.packages)
+    if deps.queuing_deps.list_action.has_binary_listing() {
+        list_binaries(&prog, &deps.queuing_deps.packages)
     }
 
     let queuing = JobQueuing::new(&deps.queuing_deps, &deps.client, width, prog.clone())?;

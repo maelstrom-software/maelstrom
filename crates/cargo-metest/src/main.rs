@@ -71,9 +71,9 @@ struct CliOptions {
     #[arg(long)]
     list_tests: bool,
 
-    /// Only list the packages that would be built, don't actually build them
+    /// Only list the binaries that would be built, don't actually build them
     #[arg(long)]
-    list_packages: bool,
+    list_binaries: bool,
 }
 
 impl CliOptions {
@@ -135,7 +135,7 @@ pub fn main() -> Result<ExitCode> {
         "cargo".into(),
         cli_options.include_filters,
         cli_options.exclude_filters,
-        ListAction::from_cli_bools(cli_options.list_tests, cli_options.list_packages),
+        ListAction::from_cli_bools(cli_options.list_tests, cli_options.list_binaries),
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
