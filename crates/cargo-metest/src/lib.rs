@@ -12,6 +12,7 @@ use artifacts::GeneratedArtifacts;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
+use enumset::{EnumSet, EnumSetType};
 use indicatif::{ProgressBar, TermLike};
 use metadata::{AllMetadata, TestMetadata};
 use meticulous_base::{JobSpec, NonEmpty, Sha256Digest};
@@ -34,33 +35,22 @@ use std::{
 use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
+#[derive(EnumSetType)]
 pub enum ListAction {
-    None,
     ListTests,
     ListBinaries,
-    ListBinariesAndTests,
 }
 
 impl ListAction {
-    pub fn from_cli_bools(list_tests: bool, list_binaries: bool) -> Self {
-        match (list_tests, list_binaries) {
-            (true, true) => Self::ListBinariesAndTests,
-            (false, true) => Self::ListBinaries,
-            (true, false) => Self::ListTests,
-            (false, false) => Self::None,
+    pub fn from_cli_bools(list_tests: bool, list_binaries: bool) -> EnumSet<Self> {
+        let mut set = EnumSet::new();
+        if list_tests {
+            set.insert(Self::ListTests);
         }
-    }
-
-    fn is_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-
-    fn has_test_listing(&self) -> bool {
-        matches!(self, Self::ListTests | Self::ListBinariesAndTests)
-    }
-
-    fn has_binary_listing(&self) -> bool {
-        matches!(self, Self::ListBinaries | Self::ListBinariesAndTests)
+        if list_binaries {
+            set.insert(Self::ListBinaries);
+        }
+        set
     }
 }
 
@@ -101,7 +91,7 @@ struct JobQueuingDeps<StdErrT> {
     test_metadata: AllMetadata,
     expected_job_count: u64,
     test_listing: Mutex<TestListing>,
-    list_action: ListAction,
+    list_actions: EnumSet<ListAction>,
 }
 
 impl<StdErrT> JobQueuingDeps<StdErrT> {
@@ -114,7 +104,7 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
         stderr_color: bool,
         test_metadata: AllMetadata,
         test_listing: TestListing,
-        list_action: ListAction,
+        list_actions: EnumSet<ListAction>,
     ) -> Self {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -129,7 +119,7 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
             test_metadata,
             expected_job_count,
             test_listing: Mutex::new(test_listing),
-            list_action,
+            list_actions,
         }
     }
 }
@@ -218,7 +208,7 @@ where
         let binary = PathBuf::from(artifact.executable.clone().unwrap());
 
         ind.update_enqueue_status(format!("processing {package_name}"));
-        let running_tests = queuing_deps.list_action.is_none();
+        let running_tests = queuing_deps.list_actions.is_empty();
 
         let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
         let generated_artifacts = running_tests
@@ -267,7 +257,7 @@ where
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
 
-        if !self.queuing_deps.list_action.is_none() {
+        if !self.queuing_deps.list_actions.is_empty() {
             self.ind.println(case_str);
             return Ok(EnqueueResult::Listed);
         }
@@ -381,8 +371,9 @@ where
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Result<Self> {
-        let running_tests = queuing_deps.list_action.is_none();
-        let building_tests = running_tests || queuing_deps.list_action.has_test_listing();
+        let running_tests = queuing_deps.list_actions.is_empty();
+        let building_tests =
+            running_tests || queuing_deps.list_actions.contains(ListAction::ListTests);
         let mut cargo_build = building_tests
             .then(|| {
                 let package_names = queuing_deps
@@ -479,7 +470,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     /// `cargo`: the command to run when invoking cargo
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
-    /// `list_action`: if something other than ListAction::None, tests aren't run, just listed
+    /// `list_actions`: if not empty, tests aren't run, instead tests or other things are listed
     /// `stderr`: is written to for error output
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
     /// `workspace_root`: the path to the root of the workspace
@@ -491,7 +482,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         cargo: String,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
-        list_action: ListAction,
+        list_actions: EnumSet<ListAction>,
         stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
@@ -528,7 +519,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 stderr_color,
                 test_metadata,
                 test_listing,
-                list_action,
+                list_actions,
             ),
             cache_dir,
         })
@@ -633,7 +624,7 @@ where
             .wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
-        if self.deps.queuing_deps.list_action.is_none() {
+        if self.deps.queuing_deps.list_actions.is_empty() {
             let width = self.term.width() as usize;
             self.deps
                 .queuing_deps
@@ -690,7 +681,11 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
-    if deps.queuing_deps.list_action.has_binary_listing() {
+    if deps
+        .queuing_deps
+        .list_actions
+        .contains(ListAction::ListBinaries)
+    {
         list_binaries(&prog, &deps.queuing_deps.packages)
     }
 
@@ -723,7 +718,7 @@ where
     TermT: TermLike + Clone + Send + Sync + 'static,
     'deps: 'scope,
 {
-    if !deps.queuing_deps.list_action.is_none() {
+    if !deps.queuing_deps.list_actions.is_empty() {
         return if stdout_tty {
             Ok(new_helper(deps, TestListingProgress::new, term, driver)?)
         } else {

@@ -10,6 +10,7 @@ use cargo_metest::{
     progress::{ProgressDriver, ProgressIndicator},
     EnqueueResult, ListAction, MainAppDeps,
 };
+use enumset::{enum_set, EnumSet};
 use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
@@ -399,7 +400,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: ListAction,
+    list: EnumSet<ListAction>,
     finish: bool,
 ) -> String {
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
@@ -477,7 +478,7 @@ fn run_or_list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: ListAction,
+    list: EnumSet<ListAction>,
 ) -> String {
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
@@ -526,7 +527,7 @@ fn run_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        ListAction::None,
+        enum_set!(),
     )
 }
 
@@ -545,7 +546,7 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        ListAction::ListTests,
+        enum_set!(ListAction::ListTests),
     );
     assert_eq!(listing, expected_tests);
 
@@ -555,7 +556,7 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        ListAction::ListBinaries,
+        enum_set!(ListAction::ListBinaries),
     );
     assert_eq!(listing, expected_packages);
 
@@ -565,7 +566,7 @@ fn list_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        ListAction::ListBinariesAndTests,
+        enum_set!(ListAction::ListTests | ListAction::ListBinaries),
     );
 
     let mut combined = expected_packages.to_owned();
@@ -1034,7 +1035,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         Quiet::from(false),
         vec!["all".into()],
         vec![],
-        ListAction::None,
+        enum_set!(),
         true, // finish
     );
 
@@ -1112,7 +1113,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         quiet,
         vec!["all".into()],
         vec![],
-        ListAction::None,
+        enum_set!(),
         false, // finish
     );
     assert_eq!(contents, expected_output);
