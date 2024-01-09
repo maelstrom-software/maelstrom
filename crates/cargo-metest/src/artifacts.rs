@@ -122,11 +122,16 @@ fn create_artifact_for_binary_deps(
     Ok(tar_path)
 }
 
+pub struct GeneratedArtifacts {
+    pub binary: Sha256Digest,
+    pub deps: Sha256Digest,
+}
+
 pub fn add_generated_artifacts(
     client: &Mutex<Client>,
     binary_path: &Path,
     ind: &impl ProgressIndicator,
-) -> Result<(Sha256Digest, Sha256Digest)> {
+) -> Result<GeneratedArtifacts> {
     let prog = ind.new_side_progress("tar");
     let binary_artifact = client
         .lock()
@@ -137,5 +142,8 @@ pub fn add_generated_artifacts(
         .lock()
         .unwrap()
         .add_artifact(&create_artifact_for_binary_deps(binary_path, prog)?)?;
-    Ok((binary_artifact, deps_artifact))
+    Ok(GeneratedArtifacts {
+        binary: binary_artifact,
+        deps: deps_artifact,
+    })
 }

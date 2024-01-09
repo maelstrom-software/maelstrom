@@ -8,7 +8,7 @@ use cargo_metest::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
-    EnqueueResult, MainAppDeps,
+    EnqueueResult, ListAction, MainAppDeps,
 };
 use indicatif::InMemoryTerm;
 use meticulous_base::{
@@ -399,7 +399,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: bool,
+    list: ListAction,
     finish: bool,
 ) -> String {
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
@@ -477,7 +477,7 @@ fn run_or_list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: bool,
+    list: ListAction,
 ) -> String {
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
@@ -526,7 +526,7 @@ fn run_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        false, /* list */
+        ListAction::None,
     )
 }
 
@@ -536,15 +536,44 @@ fn list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-) -> String {
-    run_or_list_all_tests_sync(
+    expected_packages: &str,
+    expected_tests: &str,
+) {
+    let listing = run_or_list_all_tests_sync(
+        tmp_dir,
+        fake_tests.clone(),
+        quiet.clone(),
+        include_filter.clone(),
+        exclude_filter.clone(),
+        ListAction::ListTests,
+    );
+    assert_eq!(listing, expected_tests);
+
+    let listing = run_or_list_all_tests_sync(
+        tmp_dir,
+        fake_tests.clone(),
+        quiet.clone(),
+        include_filter.clone(),
+        exclude_filter.clone(),
+        ListAction::ListPackages,
+    );
+    assert_eq!(listing, expected_packages);
+
+    let listing = run_or_list_all_tests_sync(
         tmp_dir,
         fake_tests,
         quiet,
         include_filter,
         exclude_filter,
-        true, /* list */
-    )
+        ListAction::ListPackagesAndTests,
+    );
+
+    let mut combined = expected_packages.to_owned();
+    if !expected_tests.is_empty() {
+        combined += "\n";
+        combined += expected_tests;
+    }
+    assert_eq!(listing, combined);
 }
 
 #[test]
@@ -583,15 +612,14 @@ fn no_tests_all_tests_sync_listing() {
             tests: vec![],
         }],
     };
-    assert_eq!(
-        list_all_tests_sync(
-            &tmp_dir,
-            fake_tests,
-            false.into(),
-            vec!["all".into()],
-            vec![]
-        ),
-        ""
+    list_all_tests_sync(
+        &tmp_dir,
+        fake_tests,
+        false.into(),
+        vec!["all".into()],
+        vec![],
+        "package foo (library)",
+        "",
     );
 }
 
@@ -657,18 +685,20 @@ fn two_tests_all_tests_sync_listing() {
             },
         ],
     };
-    assert_eq!(
-        list_all_tests_sync(
-            &tmp_dir,
-            fake_tests,
-            false.into(),
-            vec!["all".into()],
-            vec![]
-        ),
+    list_all_tests_sync(
+        &tmp_dir,
+        fake_tests,
+        false.into(),
+        vec!["all".into()],
+        vec![],
+        "\
+        package bar (library)\n\
+        package foo (library)\
+        ",
         "\
         bar test_it\n\
         foo test_it\
-        "
+        ",
     );
 }
 
@@ -765,21 +795,24 @@ fn four_tests_filtered_sync_listing() {
             },
         ],
     };
-    assert_eq!(
-        list_all_tests_sync(
-            &tmp_dir,
-            fake_tests,
-            false.into(),
-            vec![
-                "name.equals(test_it)".into(),
-                "name.equals(test_it2)".into()
-            ],
-            vec!["package.equals(bin)".into()]
-        ),
+    list_all_tests_sync(
+        &tmp_dir,
+        fake_tests,
+        false.into(),
+        vec![
+            "name.equals(test_it)".into(),
+            "name.equals(test_it2)".into(),
+        ],
+        vec!["package.equals(bin)".into()],
+        "\
+        package bar (library)\n\
+        package baz (library)\n\
+        package foo (library)\
+        ",
         "\
         bar test_it2\n\
         foo test_it\
-        "
+        ",
     );
 }
 
@@ -1001,8 +1034,8 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         Quiet::from(false),
         vec!["all".into()],
         vec![],
-        false, // list
-        true,  // finish
+        ListAction::None,
+        true, // finish
     );
 
     term.contents()
@@ -1079,7 +1112,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         quiet,
         vec!["all".into()],
         vec![],
-        false, // list
+        ListAction::None,
         false, // finish
     );
     assert_eq!(contents, expected_output);

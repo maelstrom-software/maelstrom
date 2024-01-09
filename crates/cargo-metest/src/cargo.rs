@@ -39,7 +39,9 @@ impl CargoBuild {
 
     pub fn artifact_stream(&mut self) -> TestArtifactStream {
         TestArtifactStream {
-            stream: CargoMessage::parse_stream(BufReader::new(self.child.stdout.take().unwrap())),
+            stream: Some(CargoMessage::parse_stream(BufReader::new(
+                self.child.stdout.take().unwrap(),
+            ))),
         }
     }
 
@@ -54,16 +56,17 @@ impl CargoBuild {
     }
 }
 
+#[derive(Default)]
 pub struct TestArtifactStream {
-    stream: CargoMessageIter<BufReader<ChildStdout>>,
+    stream: Option<CargoMessageIter<BufReader<ChildStdout>>>,
 }
 
 impl Iterator for TestArtifactStream {
     type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.stream.next()? {
+        while let Some(stream) = &mut self.stream {
+            match stream.next()? {
                 Err(e) => return Some(Err(e.into())),
                 Ok(CargoMessage::CompilerArtifact(artifact)) => {
                     if artifact.executable.is_some() && artifact.profile.test {
@@ -73,6 +76,7 @@ impl Iterator for TestArtifactStream {
                 _ => continue,
             }
         }
+        None
     }
 }
 

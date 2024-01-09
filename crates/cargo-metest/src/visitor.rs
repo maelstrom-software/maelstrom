@@ -12,7 +12,6 @@ use unicode_width::UnicodeWidthStr as _;
 
 enum CaseResult {
     Ignored,
-    Listed,
     Ran(ExitCode),
 }
 
@@ -32,11 +31,6 @@ impl JobStatusTracker {
     pub fn job_ignored(&self, case: String) {
         let mut statuses = self.statuses.lock().unwrap();
         statuses.push((case, CaseResult::Ignored));
-    }
-
-    pub fn job_listed(&self, case: String) {
-        let mut statuses = self.statuses.lock().unwrap();
-        statuses.push((case, CaseResult::Listed));
     }
 
     pub fn print_summary(&self, width: usize, term: impl TermLike) -> Result<()> {
@@ -94,27 +88,6 @@ impl JobStatusTracker {
                     "ignored".yellow()
                 ))?;
             }
-        }
-
-        term.flush()?;
-        Ok(())
-    }
-
-    pub fn print_listing(&self, term: impl TermLike) -> Result<()> {
-        let statuses = self.statuses.lock().unwrap();
-        let to_run = statuses
-            .iter()
-            .filter(|(_, res)| matches!(res, CaseResult::Listed));
-        let ignored = statuses
-            .iter()
-            .filter(|(_, res)| matches!(res, CaseResult::Ignored));
-
-        for (to_run, _) in to_run {
-            term.write_line(to_run)?;
-        }
-
-        for (ignored, _) in ignored {
-            term.write_line(ignored)?;
         }
 
         term.flush()?;

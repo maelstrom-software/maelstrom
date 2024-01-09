@@ -1,6 +1,7 @@
 use crate::pattern::parser::*;
 use cargo_metadata::Target as CargoTarget;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[cfg(test)]
 use crate::parse_str;
@@ -12,6 +13,12 @@ pub enum ArtifactKind {
     Test,
     Benchmark,
     Example,
+}
+
+impl fmt::Display for ArtifactKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        format!("{:?}", self).to_lowercase().fmt(f)
+    }
 }
 
 impl ArtifactKind {

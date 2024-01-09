@@ -8,6 +8,7 @@ pub mod test_listing;
 pub mod visitor;
 
 use anyhow::Result;
+use artifacts::GeneratedArtifacts;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
@@ -32,6 +33,36 @@ use std::{
 };
 use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
+
+pub enum ListAction {
+    None,
+    ListTests,
+    ListPackages,
+    ListPackagesAndTests,
+}
+
+impl ListAction {
+    pub fn from_cli_bools(list_tests: bool, list_packages: bool) -> Self {
+        match (list_tests, list_packages) {
+            (true, true) => Self::ListPackagesAndTests,
+            (false, true) => Self::ListPackages,
+            (true, false) => Self::ListTests,
+            (false, false) => Self::None,
+        }
+    }
+
+    fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+
+    fn has_test_listing(&self) -> bool {
+        matches!(self, Self::ListTests | Self::ListPackagesAndTests)
+    }
+
+    fn has_package_listing(&self) -> bool {
+        matches!(self, Self::ListPackages | Self::ListPackagesAndTests)
+    }
+}
 
 /// Returns `true` if the given `CargoPackage` matches the given pattern
 fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
@@ -61,7 +92,7 @@ fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bo
 /// This object is separate from `MainAppDeps` because it is lent to `JobQueuing`
 struct JobQueuingDeps<StdErrT> {
     cargo: String,
-    packages: Vec<String>,
+    packages: Vec<CargoPackage>,
     filter: pattern::Pattern,
     stderr: Mutex<StdErrT>,
     stderr_color: bool,
@@ -70,20 +101,20 @@ struct JobQueuingDeps<StdErrT> {
     test_metadata: AllMetadata,
     expected_job_count: u64,
     test_listing: Mutex<TestListing>,
-    list: bool,
+    list_action: ListAction,
 }
 
 impl<StdErrT> JobQueuingDeps<StdErrT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         cargo: String,
-        packages: Vec<String>,
+        packages: Vec<CargoPackage>,
         filter: pattern::Pattern,
         stderr: StdErrT,
         stderr_color: bool,
         test_metadata: AllMetadata,
         test_listing: TestListing,
-        list: bool,
+        list_action: ListAction,
     ) -> Self {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -98,10 +129,12 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
             test_metadata,
             expected_job_count,
             test_listing: Mutex::new(test_listing),
-            list,
+            list_action,
         }
     }
 }
+
+type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 
 /// Enqueues test cases as jobs in the given client from the given `CargoArtifact`
 ///
@@ -117,11 +150,57 @@ struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
     ind: ProgressIndicatorT,
     artifact: CargoArtifact,
     binary: PathBuf,
-    binary_artifact: Sha256Digest,
-    deps_artifact: Sha256Digest,
+    generated_artifacts: Option<GeneratedArtifacts>,
     ignored_cases: HashSet<String>,
     package_name: String,
-    cases: <Vec<String> as IntoIterator>::IntoIter,
+    cases: StringIter,
+}
+
+#[derive(Default)]
+struct TestListingResult {
+    cases: Vec<String>,
+    ignored_cases: HashSet<String>,
+}
+
+fn list_test_cases<ProgressIndicatorT, StdErrT>(
+    queuing_deps: &JobQueuingDeps<StdErrT>,
+    ind: &ProgressIndicatorT,
+    artifact: &CargoArtifact,
+    package_name: &str,
+) -> Result<TestListingResult>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    let binary = PathBuf::from(artifact.executable.clone().unwrap());
+    let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
+        .into_iter()
+        .collect();
+
+    ind.update_enqueue_status(format!("processing {package_name}"));
+    let mut cases = get_cases_from_binary(&binary, &None)?;
+
+    let mut listing = queuing_deps.test_listing.lock().unwrap();
+    listing.add_cases(artifact, &cases[..]);
+
+    cases.retain(|c| filter_case(artifact, c, &queuing_deps.filter));
+    Ok(TestListingResult {
+        cases,
+        ignored_cases,
+    })
+}
+
+fn generate_artifacts<ProgressIndicatorT>(
+    client: &Mutex<Client>,
+    ind: &ProgressIndicatorT,
+    artifact: &CargoArtifact,
+    package_name: &str,
+) -> Result<GeneratedArtifacts>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    let binary = PathBuf::from(artifact.executable.clone().unwrap());
+    ind.update_enqueue_status(format!("tar {package_name}"));
+    artifacts::add_generated_artifacts(client, &binary, ind)
 }
 
 impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>
@@ -136,26 +215,15 @@ where
         artifact: CargoArtifact,
         package_name: String,
     ) -> Result<Self> {
-        ind.update_enqueue_status(format!("processing {package_name}"));
         let binary = PathBuf::from(artifact.executable.clone().unwrap());
-        let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
-            .into_iter()
-            .collect();
-
-        let (binary_artifact, deps_artifact) = if !queuing_deps.list {
-            ind.update_enqueue_status(format!("tar {package_name}"));
-            artifacts::add_generated_artifacts(client, &binary, &ind)?
-        } else {
-            (0u64.into(), 0u64.into())
-        };
 
         ind.update_enqueue_status(format!("processing {package_name}"));
-        let mut cases = get_cases_from_binary(&binary, &None)?;
+        let running_tests = queuing_deps.list_action.is_none();
 
-        let mut listing = queuing_deps.test_listing.lock().unwrap();
-        listing.add_cases(&artifact, &cases[..]);
-
-        cases.retain(|c| filter_case(&artifact, c, &queuing_deps.filter));
+        let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
+        let generated_artifacts = running_tests
+            .then(|| generate_artifacts(client, &ind, &artifact, &package_name))
+            .transpose()?;
 
         Ok(Self {
             queuing_deps,
@@ -164,11 +232,10 @@ where
             ind,
             artifact,
             binary,
-            binary_artifact,
-            deps_artifact,
-            ignored_cases,
+            generated_artifacts,
+            ignored_cases: listing.ignored_cases,
             package_name,
-            cases: cases.into_iter(),
+            cases: listing.cases.into_iter(),
         })
     }
 
@@ -186,10 +253,11 @@ where
                     .add_artifact(PathBuf::from(layer).as_path())
             })
             .collect::<Result<Vec<_>>>()?;
+        let artifacts = self.generated_artifacts.as_ref().unwrap();
         if test_metadata.include_shared_libraries() {
-            layers.push(self.deps_artifact.clone());
+            layers.push(artifacts.deps.clone());
         }
-        layers.push(self.binary_artifact.clone());
+        layers.push(artifacts.binary.clone());
 
         Ok(NonEmpty::try_from(layers).unwrap())
     }
@@ -199,8 +267,8 @@ where
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
 
-        if self.queuing_deps.list {
-            self.queuing_deps.tracker.job_listed(case_str);
+        if !self.queuing_deps.list_action.is_none() {
+            self.ind.println(case_str);
             return Ok(EnqueueResult::Listed);
         }
 
@@ -313,20 +381,35 @@ where
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Result<Self> {
-        let mut cargo_build = CargoBuild::new(
-            &queuing_deps.cargo,
-            queuing_deps.stderr_color,
-            queuing_deps.packages.clone(),
-        )?;
+        let running_tests = queuing_deps.list_action.is_none();
+        let building_tests = running_tests || queuing_deps.list_action.has_test_listing();
+        let mut cargo_build = building_tests
+            .then(|| {
+                let package_names = queuing_deps
+                    .packages
+                    .iter()
+                    .map(|p| p.name.clone())
+                    .collect();
+                CargoBuild::new(
+                    &queuing_deps.cargo,
+                    queuing_deps.stderr_color,
+                    package_names,
+                )
+            })
+            .transpose()?;
+
         Ok(Self {
             queuing_deps,
             client,
             width,
             ind,
             package_match: false,
-            artifacts: cargo_build.artifact_stream(),
+            artifacts: cargo_build
+                .as_mut()
+                .map(|c| c.artifact_stream())
+                .unwrap_or_default(),
             artifact_queuing: None,
-            cargo_build: Some(cargo_build),
+            cargo_build,
         })
     }
 
@@ -354,10 +437,9 @@ where
     /// Meant to be called when the user has enqueued all the jobs they want. Checks for deferred
     /// errors from cargo or otherwise
     fn finish(&mut self) -> Result<()> {
-        self.cargo_build
-            .take()
-            .unwrap()
-            .check_status(&mut *self.queuing_deps.stderr.lock().unwrap())?;
+        if let Some(cb) = self.cargo_build.take() {
+            cb.check_status(&mut *self.queuing_deps.stderr.lock().unwrap())?;
+        }
 
         Ok(())
     }
@@ -397,7 +479,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     /// `cargo`: the command to run when invoking cargo
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
-    /// `list`: if true, don't actually run any tests, just list them instead
+    /// `list_action`: if something other than ListAction::None, tests aren't run, just listed
     /// `stderr`: is written to for error output
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
     /// `workspace_root`: the path to the root of the workspace
@@ -409,7 +491,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         cargo: String,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
-        list: bool,
+        list_action: ListAction,
         stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
@@ -433,7 +515,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         let selected_packages = workspace_packages
             .iter()
             .filter(|p| filter_package(p, &filter))
-            .map(|p| p.name.clone())
+            .map(|&p| p.clone())
             .collect();
 
         Ok(Self {
@@ -446,7 +528,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 stderr_color,
                 test_metadata,
                 test_listing,
-                list,
+                list_action,
             ),
             cache_dir,
         })
@@ -551,12 +633,7 @@ where
             .wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
-        if self.deps.queuing_deps.list {
-            self.deps
-                .queuing_deps
-                .tracker
-                .print_listing(self.term.clone())?;
-        } else {
+        if self.deps.queuing_deps.list_action.is_none() {
             let width = self.term.width() as usize;
             self.deps
                 .queuing_deps
@@ -570,6 +647,18 @@ where
         )?;
 
         Ok(self.deps.queuing_deps.tracker.exit_code())
+    }
+}
+
+fn list_packages<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    for pkg in packages {
+        for tgt in &pkg.targets {
+            let pkg_kind = pattern::ArtifactKind::from_target(tgt);
+            ind.println(format!("package {} ({})", &pkg.name, pkg_kind));
+        }
     }
 }
 
@@ -590,6 +679,10 @@ where
 
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
+
+    if deps.queuing_deps.list_action.has_package_listing() {
+        list_packages(&prog, &deps.queuing_deps.packages)
+    }
 
     let queuing = JobQueuing::new(&deps.queuing_deps, &deps.client, width, prog.clone())?;
     Ok(Box::new(MainAppImpl::new(
@@ -620,7 +713,7 @@ where
     TermT: TermLike + Clone + Send + Sync + 'static,
     'deps: 'scope,
 {
-    if deps.queuing_deps.list {
+    if !deps.queuing_deps.list_action.is_none() {
         return if stdout_tty {
             Ok(new_helper(deps, TestListingProgress::new, term, driver)?)
         } else {

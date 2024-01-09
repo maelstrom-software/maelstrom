@@ -4,7 +4,7 @@ use cargo_metest::{
     config::{Config, ConfigOptions},
     main_app_new,
     progress::DefaultProgressDriver,
-    MainAppDeps,
+    ListAction, MainAppDeps,
 };
 use clap::{Args, Parser, Subcommand};
 use console::Term;
@@ -69,7 +69,11 @@ struct CliOptions {
 
     /// Only list the tests that would be run, don't actually run them
     #[arg(long)]
-    list: bool,
+    list_tests: bool,
+
+    /// Only list the packages that would be built, don't actually build them
+    #[arg(long)]
+    list_packages: bool,
 }
 
 impl CliOptions {
@@ -131,7 +135,7 @@ pub fn main() -> Result<ExitCode> {
         "cargo".into(),
         cli_options.include_filters,
         cli_options.exclude_filters,
-        cli_options.list,
+        ListAction::from_cli_bools(cli_options.list_tests, cli_options.list_packages),
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
