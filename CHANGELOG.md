@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `cargo-metest`
 
-### Added
+#### Added
 
 - A new test pattern language. The language can be used to select which test
   cases to run and which test binaries to build.
@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `--list-packages` option to list which packages match the given filters.
   This will not build any test binaries.
 
-### Removed
+#### Removed
 
 - The `--package` option. This can be specified using the filter language now.
 - The positional filter argument. Filters now have to be specified with `-i` or
