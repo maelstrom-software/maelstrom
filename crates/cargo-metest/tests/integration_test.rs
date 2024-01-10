@@ -10,7 +10,6 @@ use cargo_metest::{
     progress::{ProgressDriver, ProgressIndicator},
     EnqueueResult, ListAction, MainAppDeps,
 };
-use enumset::{enum_set, EnumSet};
 use indicatif::InMemoryTerm;
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
@@ -404,7 +403,7 @@ fn run_app(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: EnumSet<ListAction>,
+    list: Option<ListAction>,
     finish: bool,
 ) -> String {
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
@@ -482,7 +481,7 @@ fn run_or_list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    list: EnumSet<ListAction>,
+    list: Option<ListAction>,
 ) -> String {
     let mut state = BrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
@@ -531,7 +530,7 @@ fn run_all_tests_sync(
         quiet,
         include_filter,
         exclude_filter,
-        enum_set!(),
+        None,
     )
 }
 
@@ -551,7 +550,7 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        enum_set!(ListAction::ListTests),
+        Some(ListAction::ListTests),
     );
     assert_eq!(listing, expected_tests);
 
@@ -561,7 +560,7 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        enum_set!(ListAction::ListBinaries),
+        Some(ListAction::ListBinaries),
     );
     assert_eq!(listing, expected_binaries);
 
@@ -571,28 +570,9 @@ fn list_all_tests_sync(
         quiet.clone(),
         include_filter.clone(),
         exclude_filter.clone(),
-        enum_set!(ListAction::ListPackages),
+        Some(ListAction::ListPackages),
     );
     assert_eq!(listing, expected_packages);
-
-    let listing = run_or_list_all_tests_sync(
-        tmp_dir,
-        fake_tests,
-        quiet,
-        include_filter,
-        exclude_filter,
-        enum_set!(ListAction::ListTests | ListAction::ListBinaries | ListAction::ListPackages),
-    );
-
-    let mut combined = expected_packages.to_owned();
-    combined += "\n";
-    combined += expected_binaries;
-
-    if !expected_tests.is_empty() {
-        combined += "\n";
-        combined += expected_tests;
-    }
-    assert_eq!(listing, combined);
 }
 
 #[test]
@@ -1063,7 +1043,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
         Quiet::from(false),
         vec!["all".into()],
         vec![],
-        enum_set!(),
+        None,
         true, // finish
     );
 
@@ -1141,7 +1121,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         quiet,
         vec!["all".into()],
         vec![],
-        enum_set!(),
+        None,
         false, // finish
     );
     assert_eq!(contents, expected_output);

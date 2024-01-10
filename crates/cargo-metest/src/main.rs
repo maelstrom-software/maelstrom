@@ -6,7 +6,7 @@ use cargo_metest::{
     progress::DefaultProgressDriver,
     ListAction, MainAppDeps,
 };
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use console::Term;
 use figment::{
     error::Kind,
@@ -26,10 +26,6 @@ struct CliOptions {
     /// .config/cargo-metest.toml in the workspace root will be used, if it exists.
     #[arg(short = 'c', long)]
     config_file: Option<PathBuf>,
-
-    /// Print configuration and exit
-    #[arg(short = 'P', long)]
-    print_config: bool,
 
     /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
     #[arg(short = 'b', long)]
@@ -52,17 +48,8 @@ struct CliOptions {
     #[arg(short = 'x', long = "exclude", value_name = "FILTER_EXPRESSION")]
     exclude_filters: Vec<String>,
 
-    /// Only list the tests that would be run, don't actually run them
-    #[arg(short = 'l', long = "list_tests")]
-    list_tests: bool,
-
-    /// Only list the binaries that would be built, don't actually build them or run tests
-    #[arg(long)]
-    list_binaries: bool,
-
-    /// Only list the package that exist, don't build anything or run any tests
-    #[arg(long)]
-    list_packages: bool,
+    #[command(subcommand)]
+    command: Option<CliCommand>,
 }
 
 impl CliOptions {
@@ -71,6 +58,39 @@ impl CliOptions {
         let quiet = if self.quiet { Some(true) } else { None };
         ConfigOptions { broker, quiet }
     }
+}
+
+#[derive(Debug, Subcommand)]
+enum CliCommand {
+    /// Run tests
+    Run(CliRun),
+
+    /// List tests, binaries, or packages
+    List(CliList),
+
+    /// Print configuration and exit
+    PrintConfig,
+}
+
+#[derive(Args, Debug)]
+struct CliRun {}
+
+#[derive(Args, Debug)]
+struct CliList {
+    #[command(subcommand)]
+    what: Option<CliListType>,
+}
+
+#[derive(Debug, Subcommand)]
+enum CliListType {
+    /// Only list the tests that would be run, don't actually run them. This is the default
+    Tests,
+
+    /// Only list the binaries that would be built, don't actually build them or run tests
+    Binaries,
+
+    /// Only list the package that exist, don't build anything or run any tests
+    Packages,
 }
 
 /// The main function for the client. This should be called on a task of its own. It will return
@@ -119,22 +139,27 @@ pub fn main() -> Result<ExitCode> {
         })
         .context("reading configuration")?;
 
-    if cli_options.print_config {
+    if let Some(CliCommand::PrintConfig) = cli_options.command {
         println!("{config:#?}");
         return Ok(ExitCode::SUCCESS);
     }
 
-    let list_actions = ListAction::from_cli_bools(
-        cli_options.list_tests,
-        cli_options.list_binaries,
-        cli_options.list_packages,
-    );
+    let list_action = if let Some(CliCommand::List(CliList { what })) = cli_options.command {
+        Some(match what {
+            None | Some(CliListType::Tests) => ListAction::ListTests,
+            Some(CliListType::Binaries) => ListAction::ListBinaries,
+
+            Some(CliListType::Packages) => ListAction::ListPackages,
+        })
+    } else {
+        None
+    };
 
     let deps = MainAppDeps::new(
         "cargo".into(),
         cli_options.include_filters,
         cli_options.exclude_filters,
-        list_actions,
+        list_action,
         std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
