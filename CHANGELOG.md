@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `cargo-metest`
+
+#### Changed
+
+- The `--list-packages` option has been renamed to `--list-binaries`, since it
+  shows all of the test executables that can be run, and there can be multiple
+  executables in a package.
+  [Issue #111](https://github.com/meticulous-software/meticulous/issues/111)
+- A new `--list-packages` option has been added that just shows selected
+  packages.
+  [Issue #113](https://github.com/meticulous-software/meticulous/issues/113)
+
+#### Fixed
+
+- A bug in `--list-binaries` (previously `--list-packages`) has been fixed that
+  could lead to duplicate listings of the same type.
+  [Issue #112](https://github.com/meticulous-software/meticulous/issues/112)
+
 ## [0.3.0] - 2024-01-09
 
 ### General
