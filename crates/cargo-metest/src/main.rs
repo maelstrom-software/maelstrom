@@ -6,7 +6,7 @@ use cargo_metest::{
     progress::DefaultProgressDriver,
     ListAction, MainAppDeps,
 };
-use clap::{Args, Parser, Subcommand};
+use clap::Parser;
 use console::Term;
 use figment::{
     error::Kind,
@@ -15,30 +15,10 @@ use figment::{
 };
 use meticulous_client::DefaultClientDriver;
 use meticulous_util::process::ExitCode;
-use std::{io::IsTerminal as _, path::PathBuf, process::Command, str};
+use std::{env, io::IsTerminal as _, path::PathBuf, process::Command};
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
-#[derive(Parser)]
-#[command(version, bin_name = "cargo")]
-struct Cli {
-    #[clap(subcommand)]
-    subcommand: CliSubcommand,
-}
-
-impl Cli {
-    fn subcommand(self) -> CliOptions {
-        match self.subcommand {
-            CliSubcommand::Metest(cmd) => cmd,
-        }
-    }
-}
-
-#[derive(Debug, Subcommand)]
-enum CliSubcommand {
-    Metest(CliOptions),
-}
-
-#[derive(Debug, Args)]
+#[derive(Parser, Debug)]
 #[command(version)]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
@@ -96,7 +76,11 @@ impl CliOptions {
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
-    let cli_options = Cli::parse().subcommand();
+    let mut args = Vec::from_iter(env::args());
+    if args.len() > 1 && args[0].ends_with(format!("cargo-{}", args[1]).as_str()) {
+        args.remove(1);
+    }
+    let cli_options = CliOptions::parse_from(args);
 
     let cargo_metadata = Command::new("cargo")
         .args(["metadata", "--format-version=1"])
@@ -177,5 +161,5 @@ pub fn main() -> Result<ExitCode> {
 #[test]
 fn test_cli() {
     use clap::CommandFactory;
-    Cli::command().debug_assert()
+    CliOptions::command().debug_assert()
 }
