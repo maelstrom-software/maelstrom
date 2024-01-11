@@ -73,7 +73,7 @@ struct CliOptions {
     exclude_filters: Vec<String>,
 
     /// Only list the tests that would be run, don't actually run them
-    #[arg(long = "list_tests")]
+    #[arg(short = 'l', long = "list_tests")]
     list_tests: bool,
 
     /// Only list the binaries that would be built, don't actually build them or run tests

@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### `cargo-metest`
 
-#### Changed
+#### Added
 - The `--include` and `--exclude` long option names for `-i` and `-x`.
   [Issue #119](https://github.com/meticulous-software/meticulous/issues/119)
+- The `-l` short option for `--list-tests`.
+  [Issue #110](https://github.com/meticulous-software/meticulous/issues/110)
 
 #### Changed
 
