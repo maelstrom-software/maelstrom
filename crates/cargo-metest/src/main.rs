@@ -59,16 +59,21 @@ struct CliOptions {
     #[arg(short = 'q', long)]
     quiet: bool,
 
-    /// Only run tests which match the given filter
-    #[arg(short = 'i', default_value = "all")]
+    /// Only run tests which match the given filter. Can be specified multiple times
+    #[arg(
+        short = 'i',
+        long = "include",
+        value_name = "FILTER_EXPRESSION",
+        default_value = "all"
+    )]
     include_filters: Vec<String>,
 
-    /// Only run tests which don't match the given filter
-    #[arg(short = 'x')]
+    /// Only run tests which don't match the given filter. Can be specified multiple times
+    #[arg(short = 'x', long = "exclude", value_name = "FILTER_EXPRESSION")]
     exclude_filters: Vec<String>,
 
     /// Only list the tests that would be run, don't actually run them
-    #[arg(long)]
+    #[arg(long = "list_tests")]
     list_tests: bool,
 
     /// Only list the binaries that would be built, don't actually build them or run tests

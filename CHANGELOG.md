@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### `cargo-metest`
 
 #### Changed
+- The `--include` and `--exclude` long option names for `-i` and `-x`.
+  [Issue #119](https://github.com/meticulous-software/meticulous/issues/119)
+
+#### Changed
 
 - The `--list-packages` option has been renamed to `--list-binaries`, since it
   shows all of the test executables that can be run, and there can be multiple
@@ -18,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A new `--list-packages` option has been added that just shows selected
   packages.
   [Issue #113](https://github.com/meticulous-software/meticulous/issues/113)
+- Clarified the help message for `-i` and `-x`.
 
 #### Fixed
 
