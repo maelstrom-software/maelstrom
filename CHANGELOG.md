@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packages.
   [Issue #113](https://github.com/meticulous-software/meticulous/issues/113)
 - Clarified the help message for `-i` and `-x`.
+- To use subcommands. There are now two subcommands: `run` and `list`. `run`
+  takes `-q`, `-i`, `-x`, and `-P` flags. `list` takes `-i`, `-x`, and `-P`
+  flags. `list` also takes an optional positional argument to indicate what
+  type of artifact to list. The `-v`, `-h`, and `-b` flags remain at the top
+  level. The `quiet` configuration option also has moved into a new sub-section
+  for the run command in `cargo-metest.toml`.
+  [Issue #118](https://github.com/meticulous-software/meticulous/issues/118)
 
 #### Fixed
 
