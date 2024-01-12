@@ -2,10 +2,10 @@
 
 In order to run tests we will need to have a clustered job runner running
 somewhere first. (See [Installing Clustered Job
-Runner](/install/clustered_job_runner.md))
+Runner](../install/clustered_job_runner.md))
 
 Also ensure you've installed `cargo-metest` (See [Installing
-cargo-metest](/install/cargo-metest.md).)
+cargo-metest](../install/cargo_metest.md).)
 
 We need to provide the address of the broker to cargo-metest. This can be done
 via the command line by passing `--broker`, but since you have to provide it
@@ -33,7 +33,7 @@ Listing](#test-listing)
 # Terminal Output
 By default `cargo-metest` prints the name of the tests that have been completed
 to stdout. It also displays four progress bars indicating the state of jobs. See
-[Job States](clustered_job_runner_management/job_states.md).
+[Job States](../clustered_job_runner_management/job_states.md).
 
 When tests fail, their stderr is printed out after the name (also to stdout.)
 
@@ -56,7 +56,7 @@ If stdout isn't a TTY, no progress bars are displayed, and color is disabled.
 `cargo-metest` caches some things in the `target/` directory, these things are
 covered below. It also caches some things related to containers (not in the
 `target/` directory) and that is covered in [Using Container
-Images](./cargo_metest/using_container_images.md).
+Images](../cargo_metest/using_container_images.md).
 
 ## `.tar` files
 As part of running tests as jobs in the clustered job runner, `cargo-metest`

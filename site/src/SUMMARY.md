@@ -3,7 +3,7 @@
 - [Introduction](./introduction.md)
 - [Installation](./installation.md)
     - [Installing Clustered Job Runner](./install/clustered_job_runner.md)
-    - [Installing cargo-metest](./install/cargo-metest.md)
+    - [Installing cargo-metest](./install/cargo_metest.md)
 - [cargo-metest](./cargo_metest.md)
     - [Running Tests](./cargo_metest/running_tests.md)
     - [Filtering Tests](./cargo_metest/filtering_tests.md)
