@@ -15,7 +15,12 @@ use figment::{
 };
 use meticulous_client::DefaultClientDriver;
 use meticulous_util::process::ExitCode;
-use std::{env, io::IsTerminal as _, path::PathBuf, process::Command};
+use std::{
+    env,
+    io::IsTerminal as _,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser, Debug)]
@@ -33,24 +38,6 @@ struct CliOptions {
 
     #[command(subcommand)]
     command: CliCommand,
-}
-
-impl CliOptions {
-    fn to_config_options(&self) -> ConfigOptions {
-        let broker = self.broker.clone();
-        match self.command {
-            CliCommand::Run(CliRun { quiet, .. }) => ConfigOptions {
-                broker,
-                run: RunConfigOptions {
-                    quiet: quiet.then_some(true),
-                },
-            },
-            CliCommand::List(_) => ConfigOptions {
-                broker,
-                run: RunConfigOptions { quiet: None },
-            },
-        }
-    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -121,6 +108,24 @@ enum CliListType {
     Packages,
 }
 
+fn config(config_file: impl AsRef<Path>, cli_options: ConfigOptions) -> Result<Config> {
+    Figment::new()
+        .merge(Serialized::defaults(ConfigOptions::default()))
+        .merge(Toml::file(config_file))
+        .merge(Env::prefixed("CARGO_METEST_"))
+        .merge(Serialized::globals(cli_options))
+        .extract()
+        .map_err(|mut e| {
+            if let Kind::MissingField(field) = &e.kind {
+                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
+                e
+            } else {
+                e
+            }
+        })
+        .context("reading configuration")
+}
+
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -151,34 +156,26 @@ pub fn main() -> Result<ExitCode> {
             .into(),
     };
 
-    let config: Config = Figment::new()
-        .merge(Serialized::defaults(ConfigOptions::default()))
-        .merge(Toml::file(config_file))
-        .merge(Env::prefixed("CARGO_METEST_"))
-        .merge(Serialized::globals(cli_options.to_config_options()))
-        .extract()
-        .map_err(|mut e| {
-            if let Kind::MissingField(field) = &e.kind {
-                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
-                e
-            } else {
-                e
-            }
-        })
-        .context("reading configuration")?;
-
-    let (include, exclude, list_action) = match cli_options.command {
+    let (config, include, exclude, list_action) = match cli_options.command {
         CliCommand::List(CliList {
             what,
             include,
             exclude,
             print_config,
         }) => {
+            let config = config(
+                config_file,
+                ConfigOptions {
+                    broker: cli_options.broker,
+                    run: RunConfigOptions { quiet: None },
+                },
+            )?;
             if print_config {
                 println!("{config:#?}");
                 return Ok(ExitCode::SUCCESS);
             }
             (
+                config,
                 include,
                 exclude,
                 Some(match what {
@@ -192,13 +189,22 @@ pub fn main() -> Result<ExitCode> {
             include,
             exclude,
             print_config,
-            ..
+            quiet,
         }) => {
+            let config = config(
+                config_file,
+                ConfigOptions {
+                    broker: cli_options.broker,
+                    run: RunConfigOptions {
+                        quiet: quiet.then_some(true),
+                    },
+                },
+            )?;
             if print_config {
                 println!("{config:#?}");
                 return Ok(ExitCode::SUCCESS);
             }
-            (include, exclude, None)
+            (config, include, exclude, None)
         }
     };
 
