@@ -1,11 +1,12 @@
-# `-i` and `-x` Flags
+# `--include` and `--exclude` Flags
 
 These flags are about filtering which tests `cargo-metest` runs.
 
-The `-i` and `-x` flags accept a snippet of the [Test Pattern
-DSL](./test_pattern_dsl.md). The `-i` flag includes any tests matching the
-pattern and the `-x` flag excludes any test which matches the pattern. They are
-both able to be provided multiple times via the command line.
+The `--include` and `--exclude` flags (shorted as `-i` and `-x`) accept a
+snippet of the [Test Pattern DSL](./test_pattern_dsl.md). The `-i` flag includes
+any tests matching the pattern and the `-x` flag excludes any test which matches
+the pattern. They are both able to be provided multiple times via the command
+line.
 
 The tests that are ran are the set which matches any of the `-i` flag patterns
 after subtracting the set which matches any of the `-x` flag patterns. To put
