@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bug in `--list-binaries` (previously `--list-packages`) has been fixed that
   could lead to duplicate listings of the same type.
   [Issue #112](https://github.com/meticulous-software/meticulous/issues/112)
+- A bug when listing or running when the filter patterns exclude everything.
+  Work was still done when no work should have been done.
+  [Issue #120](https://github.com/meticulous-software/meticulous/issues/120)
 
 ## [0.3.0] - 2024-01-09
 
