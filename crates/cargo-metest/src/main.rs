@@ -49,7 +49,7 @@ struct CliOptions {
     exclude_filters: Vec<String>,
 
     #[command(subcommand)]
-    command: Option<CliCommand>,
+    command: CliCommand,
 }
 
 impl CliOptions {
@@ -139,12 +139,12 @@ pub fn main() -> Result<ExitCode> {
         })
         .context("reading configuration")?;
 
-    if let Some(CliCommand::PrintConfig) = cli_options.command {
+    if let CliCommand::PrintConfig = cli_options.command {
         println!("{config:#?}");
         return Ok(ExitCode::SUCCESS);
     }
 
-    let list_action = if let Some(CliCommand::List(CliList { what })) = cli_options.command {
+    let list_action = if let CliCommand::List(CliList { what }) = cli_options.command {
         Some(match what {
             None | Some(CliListType::Tests) => ListAction::ListTests,
             Some(CliListType::Binaries) => ListAction::ListBinaries,
