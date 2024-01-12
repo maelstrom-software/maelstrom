@@ -41,7 +41,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A bug when listing or running when the filter patterns exclude everything.
   Work was still done when no work should have been done.
   [Issue #120](https://github.com/meticulous-software/meticulous/issues/120)
-- Foo
 
 ## [0.3.0] - 2024-01-09
 
