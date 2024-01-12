@@ -379,16 +379,17 @@ where
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Result<Self> {
+        let package_names: Vec<_> = queuing_deps
+            .packages
+            .iter()
+            .map(|p| p.name.clone())
+            .collect();
+
         let running_tests = queuing_deps.list_actions.is_empty();
-        let building_tests =
-            running_tests || queuing_deps.list_actions.contains(ListAction::ListTests);
+        let building_tests = !package_names.is_empty()
+            && (running_tests || queuing_deps.list_actions.contains(ListAction::ListTests));
         let mut cargo_build = building_tests
             .then(|| {
-                let package_names = queuing_deps
-                    .packages
-                    .iter()
-                    .map(|p| p.name.clone())
-                    .collect();
                 CargoBuild::new(
                     &queuing_deps.cargo,
                     queuing_deps.stderr_color,

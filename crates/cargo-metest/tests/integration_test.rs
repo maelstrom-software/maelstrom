@@ -32,6 +32,10 @@ use std::{
 };
 use tempfile::{tempdir, TempDir};
 
+fn path_file_name(path: &Path) -> String {
+    path.file_name().unwrap().to_str().unwrap().to_owned()
+}
+
 fn put_file(fs: &Fs, path: &Path, contents: &str) {
     let mut f = fs.create_file(path).unwrap();
     f.write_all(contents.as_bytes()).unwrap();
@@ -1421,4 +1425,34 @@ fn expected_count_updates_cases() {
     // new listing should match
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
+}
+
+#[test]
+fn filtering_none_does_not_build() {
+    let tmp_dir = tempdir().unwrap();
+    let fake_tests = FakeTests {
+        test_binaries: vec![FakeTestBinary {
+            name: "foo".into(),
+            tests: vec![FakeTestCase {
+                name: "test_it".into(),
+                ..Default::default()
+            }],
+        }],
+    };
+    run_all_tests_sync(
+        &tmp_dir,
+        fake_tests.clone(),
+        false.into(),
+        vec!["none".into()],
+        vec![],
+    );
+
+    let fs = Fs::new();
+    let target_dir = tmp_dir.path().join("workspace/target");
+    let entries: Vec<_> = fs
+        .read_dir(target_dir)
+        .unwrap()
+        .map(|e| path_file_name(&e.unwrap().path()))
+        .collect();
+    assert_eq!(entries, vec![LAST_TEST_LISTING_NAME.to_owned()]);
 }

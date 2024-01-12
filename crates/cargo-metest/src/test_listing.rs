@@ -171,6 +171,9 @@ pub fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
 
 pub fn write_test_listing(path: &Path, job_listing: &TestListing) -> Result<()> {
     let fs = Fs::new();
+    if let Some(parent) = path.parent() {
+        fs.create_dir_all(parent)?;
+    }
     fs.write(path, toml::to_string_pretty(job_listing)?)?;
     Ok(())
 }
