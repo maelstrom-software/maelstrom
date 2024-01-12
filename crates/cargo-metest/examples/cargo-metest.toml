@@ -15,11 +15,14 @@
 # broker = "127.0.0.1:1234"
 broker = "[::1]:1234"
 
+# Options that apply to the `run` subcommand go in this section.
+[run]
+
 # Whether the output should be "quiet". If this is true, then only a single
 # status bar will be output.
 #
-# Can also be specified via the `--quiet` or `-a` command-line options, or via
-# the CARGO_METEST_QUIET environment variable.
+# Can also be specified via the `--quiet` or `-q` command-line options, or via
+# the CARGO_METEST_RUN environment variable like this: CARGO_METEST_RUN={quiet = true}
 #
 # Default: false
 # Examples:

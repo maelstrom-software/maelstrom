@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_metadata::Metadata as CargoMetadata;
 use cargo_metest::{
-    config::{Config, ConfigOptions},
+    config::{Config, ConfigOptions, RunConfigOptions},
     main_app_new,
     progress::DefaultProgressDriver,
     ListAction, MainAppDeps,
@@ -31,10 +31,6 @@ struct CliOptions {
     #[arg(short = 'b', long)]
     broker: Option<String>,
 
-    /// Don't output information about the tests being run
-    #[arg(short = 'q', long)]
-    quiet: bool,
-
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -42,8 +38,18 @@ struct CliOptions {
 impl CliOptions {
     fn to_config_options(&self) -> ConfigOptions {
         let broker = self.broker.clone();
-        let quiet = if self.quiet { Some(true) } else { None };
-        ConfigOptions { broker, quiet }
+        match self.command {
+            CliCommand::Run(CliRun { quiet, .. }) => ConfigOptions {
+                broker,
+                run: RunConfigOptions {
+                    quiet: quiet.then_some(true),
+                },
+            },
+            CliCommand::List(_) => ConfigOptions {
+                broker,
+                run: RunConfigOptions { quiet: None },
+            },
+        }
     }
 }
 
@@ -61,6 +67,10 @@ struct CliRun {
     /// Print configuration and exit
     #[arg(short = 'P', long)]
     print_config: bool,
+
+    /// Don't output information about the tests being run
+    #[arg(short = 'q', long)]
+    quiet: bool,
 
     /// Only run tests which match the given filter. Can be specified multiple times
     #[arg(
@@ -182,6 +192,7 @@ pub fn main() -> Result<ExitCode> {
             include,
             exclude,
             print_config,
+            ..
         }) => {
             if print_config {
                 println!("{config:#?}");
@@ -209,7 +220,7 @@ pub fn main() -> Result<ExitCode> {
         let mut app = main_app_new(
             &deps,
             stdout_tty,
-            config.quiet,
+            config.run.quiet,
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
         )?;

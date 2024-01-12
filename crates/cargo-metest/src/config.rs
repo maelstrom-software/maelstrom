@@ -24,6 +24,12 @@ impl Debug for Quiet {
 #[serde(deny_unknown_fields)]
 pub struct Config {
     pub broker: BrokerAddr,
+    pub run: RunConfig,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RunConfig {
     pub quiet: Quiet,
 }
 
@@ -31,6 +37,12 @@ pub struct Config {
 #[derive(Serialize)]
 pub struct ConfigOptions {
     pub broker: Option<String>,
+    pub run: RunConfigOptions,
+}
+
+#[skip_serializing_none]
+#[derive(Serialize)]
+pub struct RunConfigOptions {
     pub quiet: Option<bool>,
 }
 
@@ -38,7 +50,7 @@ impl Default for ConfigOptions {
     fn default() -> Self {
         ConfigOptions {
             broker: None,
-            quiet: Some(false),
+            run: RunConfigOptions { quiet: Some(false) },
         }
     }
 }
