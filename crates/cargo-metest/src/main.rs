@@ -54,13 +54,14 @@ enum CliCommand {
 
     /// List tests, binaries, or packages
     List(CliList),
-
-    /// Print configuration and exit
-    PrintConfig,
 }
 
 #[derive(Args, Debug)]
 struct CliRun {
+    /// Print configuration and exit
+    #[arg(short = 'P', long)]
+    print_config: bool,
+
     /// Only run tests which match the given filter. Can be specified multiple times
     #[arg(
         short = 'i',
@@ -79,6 +80,10 @@ struct CliRun {
 struct CliList {
     #[command(subcommand)]
     what: Option<CliListType>,
+
+    /// Print configuration and exit
+    #[arg(short = 'P', long)]
+    print_config: bool,
 
     /// Only list artifacts which match the given filter. Can be specified multiple times
     #[arg(
@@ -153,24 +158,37 @@ pub fn main() -> Result<ExitCode> {
         .context("reading configuration")?;
 
     let (include, exclude, list_action) = match cli_options.command {
-        CliCommand::PrintConfig => {
-            println!("{config:#?}");
-            return Ok(ExitCode::SUCCESS);
-        }
         CliCommand::List(CliList {
             what,
             include,
             exclude,
-        }) => (
+            print_config,
+        }) => {
+            if print_config {
+                println!("{config:#?}");
+                return Ok(ExitCode::SUCCESS);
+            }
+            (
+                include,
+                exclude,
+                Some(match what {
+                    None | Some(CliListType::Tests) => ListAction::ListTests,
+                    Some(CliListType::Binaries) => ListAction::ListBinaries,
+                    Some(CliListType::Packages) => ListAction::ListPackages,
+                }),
+            )
+        }
+        CliCommand::Run(CliRun {
             include,
             exclude,
-            Some(match what {
-                None | Some(CliListType::Tests) => ListAction::ListTests,
-                Some(CliListType::Binaries) => ListAction::ListBinaries,
-                Some(CliListType::Packages) => ListAction::ListPackages,
-            }),
-        ),
-        CliCommand::Run(CliRun { include, exclude }) => (include, exclude, None),
+            print_config,
+        }) => {
+            if print_config {
+                println!("{config:#?}");
+                return Ok(ExitCode::SUCCESS);
+            }
+            (include, exclude, None)
+        }
     };
 
     let deps = MainAppDeps::new(
