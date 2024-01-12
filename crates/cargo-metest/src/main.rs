@@ -35,19 +35,6 @@ struct CliOptions {
     #[arg(short = 'q', long)]
     quiet: bool,
 
-    /// Only run tests which match the given filter. Can be specified multiple times
-    #[arg(
-        short = 'i',
-        long = "include",
-        value_name = "FILTER_EXPRESSION",
-        default_value = "all"
-    )]
-    include_filters: Vec<String>,
-
-    /// Only run tests which don't match the given filter. Can be specified multiple times
-    #[arg(short = 'x', long = "exclude", value_name = "FILTER_EXPRESSION")]
-    exclude_filters: Vec<String>,
-
     #[command(subcommand)]
     command: CliCommand,
 }
@@ -73,12 +60,38 @@ enum CliCommand {
 }
 
 #[derive(Args, Debug)]
-struct CliRun {}
+struct CliRun {
+    /// Only run tests which match the given filter. Can be specified multiple times
+    #[arg(
+        short = 'i',
+        long,
+        value_name = "FILTER_EXPRESSION",
+        default_value = "all"
+    )]
+    include: Vec<String>,
+
+    /// Only run tests which don't match the given filter. Can be specified multiple times
+    #[arg(short = 'x', long, value_name = "FILTER_EXPRESSION")]
+    exclude: Vec<String>,
+}
 
 #[derive(Args, Debug)]
 struct CliList {
     #[command(subcommand)]
     what: Option<CliListType>,
+
+    /// Only list artifacts which match the given filter. Can be specified multiple times
+    #[arg(
+        short = 'i',
+        long,
+        value_name = "FILTER_EXPRESSION",
+        default_value = "all"
+    )]
+    include: Vec<String>,
+
+    /// Only list artifacts which don't match the given filter. Can be specified multiple times
+    #[arg(short = 'x', long, value_name = "FILTER_EXPRESSION")]
+    exclude: Vec<String>,
 }
 
 #[derive(Debug, Subcommand)]
@@ -139,26 +152,31 @@ pub fn main() -> Result<ExitCode> {
         })
         .context("reading configuration")?;
 
-    if let CliCommand::PrintConfig = cli_options.command {
-        println!("{config:#?}");
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    let list_action = if let CliCommand::List(CliList { what }) = cli_options.command {
-        Some(match what {
-            None | Some(CliListType::Tests) => ListAction::ListTests,
-            Some(CliListType::Binaries) => ListAction::ListBinaries,
-
-            Some(CliListType::Packages) => ListAction::ListPackages,
-        })
-    } else {
-        None
+    let (include, exclude, list_action) = match cli_options.command {
+        CliCommand::PrintConfig => {
+            println!("{config:#?}");
+            return Ok(ExitCode::SUCCESS);
+        }
+        CliCommand::List(CliList {
+            what,
+            include,
+            exclude,
+        }) => (
+            include,
+            exclude,
+            Some(match what {
+                None | Some(CliListType::Tests) => ListAction::ListTests,
+                Some(CliListType::Binaries) => ListAction::ListBinaries,
+                Some(CliListType::Packages) => ListAction::ListPackages,
+            }),
+        ),
+        CliCommand::Run(CliRun { include, exclude }) => (include, exclude, None),
     };
 
     let deps = MainAppDeps::new(
         "cargo".into(),
-        cli_options.include_filters,
-        cli_options.exclude_filters,
+        include,
+        exclude,
         list_action,
         std::io::stderr(),
         std::io::stderr().is_terminal(),
