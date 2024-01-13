@@ -27,7 +27,7 @@ Now we can install the broker
 
 ```bash
 export METICULOUS_GITHUB="https://github.com/meticulous-software/meticulous.git"
-cargo install --git $METICULOUS_GITHUB meticulous-broker
+cargo install --git $METICULOUS_GITHUB maelstrom-broker
 ```
 
 It is best to not run the service as root, so we will create a new user to use
@@ -35,15 +35,15 @@ for this purpose. The broker also uses the local file-system to cache artifacts
 so this will give us a place to put them.
 
 ```bash
-sudo adduser meticulous-broker
-sudo mkdir ~meticulous-broker/bin
-sudo mv ~/.cargo/bin/meticulous-broker ~meticulous-broker/bin/
+sudo adduser maelstrom-broker
+sudo mkdir ~maelstrom-broker/bin
+sudo mv ~/.cargo/bin/maelstrom-broker ~maelstrom-broker/bin/
 ```
 
 We need now to run the broker as a service. This guide will cover using
 [Systemd](https://systemd.io) to do this.
 
-Create a service file at `/etc/systemd/system/meticulous-broker.service` and
+Create a service file at `/etc/systemd/system/maelstrom-broker.service` and
 fill it with the following contents.
 
 ```language-systemd
@@ -51,9 +51,9 @@ fill it with the following contents.
 Description=Meticulous Broker
 
 [Service]
-User=meticulous-broker
-WorkingDirectory=/home/meticulous-broker
-ExecStart=/home/meticulous-broker/bin/meticulous-broker --http-port 9000 --port 9001
+User=maelstrom-broker
+WorkingDirectory=/home/maelstrom-broker
+ExecStart=/home/maelstrom-broker/bin/maelstrom-broker --http-port 9000 --port 9001
 Restart=always
 RestartSec=3
 
@@ -64,8 +64,8 @@ WantedBy=multi-user.target
 Now we install and start the broker
 
 ```bash
-sudo systemctl enable meticulous-broker
-sudo systemctl start meticulous-broker
+sudo systemctl enable maelstrom-broker
+sudo systemctl start maelstrom-broker
 ```
 
 The broker should be hopefully be running now and you can confirm by using a web
@@ -76,8 +76,8 @@ command-line arguments. The HTTP port has a web interface we can use to monitor
 and interact with the broker. The other port is the port workers and clients
 will connect to.
 
-It stores its caches in `<working-directory>/.cache/meticulous-broker`. For the
-given set-up this should be `/home/meticulous-broker/.cache/meticulous-broker`
+It stores its caches in `<working-directory>/.cache/maelstrom-broker`. For the
+given set-up this should be `/home/maelstrom-broker/.cache/maelstrom-broker`
 
 ## Installing the Worker
 

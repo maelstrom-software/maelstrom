@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-broker"
+name = "maelstrom-broker"
 version.workspace = true
 edition.workspace = true
 

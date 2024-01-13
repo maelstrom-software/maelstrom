@@ -677,10 +677,10 @@ dependencies = [
  "indicatif",
  "lddtree",
  "maelstrom-base",
+ "maelstrom-broker",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",
- "meticulous-broker",
  "meticulous-client",
  "regex",
  "regex-macro",
@@ -2359,6 +2359,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-broker"
+version = "0.4.0-dev"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bytesize",
+ "clap",
+ "derive_more",
+ "enum-map",
+ "figment",
+ "futures",
+ "hyper",
+ "hyper-tungstenite",
+ "itertools",
+ "maelstrom-base",
+ "maelstrom-test",
+ "maelstrom-util",
+ "maplit",
+ "serde",
+ "serde_with",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tar",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "maelstrom-container"
 version = "0.4.0-dev"
 dependencies = [
@@ -2530,35 +2559,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "meticulous-broker"
-version = "0.4.0-dev"
-dependencies = [
- "anyhow",
- "bincode",
- "bytesize",
- "clap",
- "derive_more",
- "enum-map",
- "figment",
- "futures",
- "hyper",
- "hyper-tungstenite",
- "itertools",
- "maelstrom-base",
- "maelstrom-test",
- "maelstrom-util",
- "maplit",
- "serde",
- "serde_with",
- "slog",
- "slog-async",
- "slog-term",
- "tar",
- "tempfile",
- "tokio",
 ]
 
 [[package]]

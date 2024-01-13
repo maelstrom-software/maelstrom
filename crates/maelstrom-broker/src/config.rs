@@ -83,7 +83,7 @@ impl Default for ConfigOptions {
         ConfigOptions {
             port: Some(0),
             http_port: Some(0),
-            cache_root: Some(".cache/meticulous-broker".into()),
+            cache_root: Some(".cache/maelstrom-broker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
             log_level: Some(LogLevel::Info),
         }

@@ -36,6 +36,6 @@ bincode.workspace = true
 enum-map.workspace = true
 serde.workspace = true
 tempfile.workspace = true
-meticulous-broker.workspace = true
+maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true

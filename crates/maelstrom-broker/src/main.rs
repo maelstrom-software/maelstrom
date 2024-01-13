@@ -5,8 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_broker::config::{Config, ConfigOptions};
 use maelstrom_util::config::LogLevel;
-use meticulous_broker::config::{Config, ConfigOptions};
 use slog::{info, o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::{net::TcpListener, runtime::Runtime};
 
-/// The meticulous broker. This process coordinates between clients and workers.
+/// The maelstrom broker. This process coordinates between clients and workers.
 #[derive(Parser)]
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
@@ -31,7 +31,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-broker.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-broker.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit
@@ -67,7 +67,7 @@ impl Default for CliOptions {
             print_config: false,
             port: Some(0),
             http_port: Some(0),
-            cache_root: Some(".cache/meticulous-broker".into()),
+            cache_root: Some(".cache/maelstrom-broker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
             log_level: Some(LogLevel::Info),
         }
@@ -92,7 +92,7 @@ fn main() -> Result<()> {
     let config: Config = Figment::new()
         .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
-        .merge(Env::prefixed("METICULOUS_BROKER_"))
+        .merge(Env::prefixed("MAELSTROM_BROKER_"))
         .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
@@ -145,7 +145,7 @@ fn main() -> Result<()> {
                 "http_addr" => http_listener_addr,
                 "pid" => process::id());
 
-            meticulous_broker::main(
+            maelstrom_broker::main(
                 listener,
                 http_listener,
                 config.cache_root,
