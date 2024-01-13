@@ -2,6 +2,7 @@ pub mod spec;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
+use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
 use meticulous_base::{
     proto::{
@@ -10,7 +11,6 @@ use meticulous_base::{
     stats::JobStateCounts,
     ClientJobId, JobSpec, JobStringResult, Sha256Digest,
 };
-use meticulous_container::ContainerImageDepot;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};

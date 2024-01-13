@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use meticulous_container::download_image;
+use maelstrom_container::download_image;
 use std::path::PathBuf;
 
 #[derive(Parser)]

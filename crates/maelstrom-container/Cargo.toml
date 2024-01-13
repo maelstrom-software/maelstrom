@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-container"
+name = "maelstrom-container"
 version.workspace = true
 edition.workspace = true
 

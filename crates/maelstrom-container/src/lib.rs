@@ -344,14 +344,14 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
             directories::BaseDirs::new()
                 .expect("failed to find cache dir")
                 .cache_dir()
-                .join("meticulous")
+                .join("maelstrom")
                 .join("containers"),
             DefaultContainerImageDepotOps::new(),
         )
     }
 }
 
-const TAG_FILE_NAME: &str = "meticulous-container-tags.lock";
+const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
 
 impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<ContainerImageDepotOpsT> {
     fn new_with(
