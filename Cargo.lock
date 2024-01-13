@@ -2344,6 +2344,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-simex"
+version = "0.4.0-dev"
+dependencies = [
+ "num",
+]
+
+[[package]]
 name = "maelstrom-test"
 version = "0.4.0-dev"
 
@@ -2599,13 +2606,6 @@ name = "meticulous-plot"
 version = "0.4.0-dev"
 dependencies = [
  "egui",
-]
-
-[[package]]
-name = "meticulous-simex"
-version = "0.4.0-dev"
-dependencies = [
- "num",
 ]
 
 [[package]]

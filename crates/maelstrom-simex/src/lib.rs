@@ -224,7 +224,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// use meticulous_simex::SimulationExplorer;
+    /// use maelstrom_simex::SimulationExplorer;
     /// let mut simex = SimulationExplorer::default();
     /// assert!(simex.map(|mut sim| sim.choose_bool()).eq([false, true]))
     /// ```
@@ -243,7 +243,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// use meticulous_simex::SimulationExplorer;
+    /// use maelstrom_simex::SimulationExplorer;
     /// assert!(SimulationExplorer::default()
     ///     .map(|mut sim| sim.choose_integer(0, 10))
     ///     .eq(0..=10));
@@ -283,7 +283,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// use meticulous_simex::SimulationExplorer;
+    /// use maelstrom_simex::SimulationExplorer;
     /// assert!(SimulationExplorer::default()
     ///     .map(|mut sim| sim.choose(0..10).unwrap())
     ///     .eq(0..10));
@@ -325,7 +325,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// let mut simex = meticulous_simex::SimulationExplorer::default();
+    /// let mut simex = maelstrom_simex::SimulationExplorer::default();
     /// let mut combinations = vec![];
     /// while let Some(mut simulation) = simex.next_simulation() {
     ///     combinations.push(Vec::from_iter(simulation.choose_n(3, 1..6)));
@@ -372,7 +372,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// use meticulous_simex::SimulationExplorer;
+    /// use maelstrom_simex::SimulationExplorer;
     /// assert!(SimulationExplorer::default()
     ///     .map(|mut sim| sim.choose_unknown_size(0..10).unwrap())
     ///     .eq(0..10));
@@ -415,7 +415,7 @@ impl<'a> Simulation<'a> {
     ///
     /// # Examples
     /// ```
-    /// let mut simex = meticulous_simex::SimulationExplorer::default();
+    /// let mut simex = maelstrom_simex::SimulationExplorer::default();
     /// let mut combinations = vec![];
     /// while let Some(mut simulation) = simex.next_simulation() {
     ///     combinations.push(Vec::from_iter(simulation.choose_n(3, 1..6)));

@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-simex"
+name = "maelstrom-simex"
 version.workspace = true
 edition.workspace = true
 
