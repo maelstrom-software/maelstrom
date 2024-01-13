@@ -3,9 +3,9 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
+use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
 use maelstrom_util::fs::Fs;
-use meticulous_base::Utf8PathBuf;
-use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
 use meticulous_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
@@ -213,8 +213,8 @@ impl AllMetadata {
 #[cfg(test)]
 mod test {
     use super::*;
+    use maelstrom_base::{enum_set, JobMountFsType};
     use maelstrom_test::{path_buf_vec, string, string_vec, utf8_path_buf};
-    use meticulous_base::{enum_set, JobMountFsType};
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {

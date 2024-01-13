@@ -2,17 +2,17 @@
 //! workers.
 
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
-use maelstrom_util::{
-    ext::{BoolExt as _, OptionExt as _},
-    heap::{Heap, HeapDeps, HeapIndex},
-};
-use meticulous_base::{
+use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
     ClientId, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest, WorkerId,
+};
+use maelstrom_util::{
+    ext::{BoolExt as _, OptionExt as _},
+    heap::{Heap, HeapDeps, HeapIndex},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -605,9 +605,9 @@ mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use itertools::Itertools;
+    use maelstrom_base::proto::BrokerToWorker::{self, *};
     use maelstrom_test::*;
     use maplit::hashmap;
-    use meticulous_base::proto::BrokerToWorker::{self, *};
     use std::{cell::RefCell, sync::Arc};
 
     #[derive(Clone, Debug, PartialEq)]

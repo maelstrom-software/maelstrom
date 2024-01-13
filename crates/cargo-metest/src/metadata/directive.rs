@@ -1,6 +1,6 @@
 use crate::pattern;
 use anyhow::Result;
-use meticulous_base::{
+use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
 };
 use meticulous_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
@@ -232,8 +232,8 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 mod test {
     use super::*;
     use anyhow::Error;
+    use maelstrom_base::{enum_set, JobMountFsType};
     use maelstrom_test::{string, string_vec, utf8_path_buf};
-    use meticulous_base::{enum_set, JobMountFsType};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {

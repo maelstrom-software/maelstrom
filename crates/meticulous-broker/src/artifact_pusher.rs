@@ -1,10 +1,10 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
+use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
     io::{FixedSizeReader, Sha256Reader},
     net,
 };
-use meticulous_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use slog::{debug, Logger};
 use std::{
     io,

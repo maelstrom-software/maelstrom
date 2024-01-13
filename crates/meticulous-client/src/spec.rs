@@ -8,7 +8,7 @@ pub mod substitute;
 
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
-use meticulous_base::Utf8PathBuf;
+use maelstrom_base::Utf8PathBuf;
 use serde::{de, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -90,7 +90,7 @@ pub enum PossiblyImage<T> {
 }
 
 /// A convenience struct for extracting parts of an OCI image for use in a
-/// [`meticulous_base::JobSpec`].
+/// [`maelstrom_base::JobSpec`].
 pub struct ImageOption<'a> {
     name: Option<&'a str>,
     layers: Vec<PathBuf>,

@@ -1,6 +1,6 @@
 //! Useful [`Read`]ers.
 
-use meticulous_base::Sha256Digest;
+use maelstrom_base::Sha256Digest;
 use sha2::{Digest as _, Sha256};
 use std::io::{self, Chain, Read, Repeat, Take};
 

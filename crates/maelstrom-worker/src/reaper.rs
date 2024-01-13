@@ -1,5 +1,5 @@
 use anyhow::{Error, Result};
-use meticulous_base::JobStatus;
+use maelstrom_base::JobStatus;
 use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
 use nix::{errno::Errno, unistd::Pid};
 use std::{mem, ops::ControlFlow};

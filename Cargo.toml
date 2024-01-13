@@ -57,7 +57,7 @@ indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 itertools = "0.10.5"
 lddtree = "0.3"
 maplit = "1"
-meticulous-base = { path = "crates/meticulous-base" }
+maelstrom-base = { path = "crates/maelstrom-base" }
 meticulous-broker = { path = "crates/meticulous-broker" }
 meticulous-client = { path = "crates/meticulous-client" }
 maelstrom-container = { path = "crates/maelstrom-container" }

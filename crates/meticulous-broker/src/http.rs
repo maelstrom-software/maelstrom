@@ -18,7 +18,7 @@ use futures::{
 };
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
-use meticulous_base::{proto::BrokerToClient, ClientId};
+use maelstrom_base::{proto::BrokerToClient, ClientId};
 use slog::{debug, error, o, Logger};
 use std::{
     collections::HashMap,

@@ -8,11 +8,11 @@ use bumpalo::{
 };
 use c_str_macro::c_str;
 use futures::ready;
-use maelstrom_worker_child::{sockaddr_nl_t, Syscall};
-use meticulous_base::{
+use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
+use maelstrom_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use nix::{
@@ -66,10 +66,10 @@ pub struct JobSpec {
 
 impl JobSpec {
     pub fn from_spec_and_layers(
-        spec: meticulous_base::JobSpec,
+        spec: maelstrom_base::JobSpec,
         layers: NonEmpty<PathBuf>,
     ) -> (Self, NonEmpty<Sha256Digest>) {
-        let meticulous_base::JobSpec {
+        let maelstrom_base::JobSpec {
             program,
             arguments,
             environment,
@@ -771,8 +771,8 @@ mod tests {
     use super::*;
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
+    use maelstrom_base::{nonempty, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
-    use meticulous_base::{nonempty, JobStatus};
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
     use std::ops::ControlFlow;
@@ -840,7 +840,7 @@ mod tests {
             }
         }
 
-        fn from_spec(spec: meticulous_base::JobSpec) -> Self {
+        fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
             let (spec, _) =
                 JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
             Self::new(spec)
@@ -900,15 +900,15 @@ mod tests {
         }
     }
 
-    fn test_spec(program: &str) -> meticulous_base::JobSpec {
-        meticulous_base::JobSpec::new(program, nonempty![digest![0]])
+    fn test_spec(program: &str) -> maelstrom_base::JobSpec {
+        maelstrom_base::JobSpec::new(program, nonempty![digest![0]])
     }
 
-    fn bash_spec(script: &str) -> meticulous_base::JobSpec {
+    fn bash_spec(script: &str) -> maelstrom_base::JobSpec {
         test_spec("/usr/bin/bash").arguments(["-c", script])
     }
 
-    fn python_spec(script: &str) -> meticulous_base::JobSpec {
+    fn python_spec(script: &str) -> maelstrom_base::JobSpec {
         test_spec("/usr/bin/python3").arguments(["-c", script])
     }
 
@@ -1191,11 +1191,8 @@ mod tests {
     #[serial]
     async fn multiple_layers_in_correct_order() {
         let (spec, _) = JobSpec::from_spec_and_layers(
-            meticulous_base::JobSpec::new(
-                "/bin/cat",
-                nonempty![digest![0], digest![1], digest![2]],
-            )
-            .arguments(["/root/file", "/root/bottom-file", "/root/top-file"]),
+            maelstrom_base::JobSpec::new("/bin/cat", nonempty![digest![0], digest![1], digest![2]])
+                .arguments(["/root/file", "/root/bottom-file", "/root/top-file"]),
             nonempty![
                 extract_dependencies(),
                 extract_layer_tar(include_bytes!("bottom-layer.tar")),
@@ -1535,7 +1532,7 @@ mod tests {
             .await;
     }
 
-    fn assert_execution_error(spec: meticulous_base::JobSpec) {
+    fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let (spec, _) = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
         assert_matches!(
             Executor::new(

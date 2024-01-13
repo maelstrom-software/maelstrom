@@ -1,7 +1,7 @@
 use super::{ProgressIndicator, COLORS};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, TermLike};
-use meticulous_base::stats::{JobState, JobStateCounts};
+use maelstrom_base::stats::{JobState, JobStateCounts};
 use std::{
     cmp::max,
     collections::HashMap,

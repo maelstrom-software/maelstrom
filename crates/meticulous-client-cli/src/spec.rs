@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Error, Result};
-use meticulous_base::{
+use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId, Utf8PathBuf,
 };
@@ -361,10 +361,10 @@ impl<'de> de::Deserialize<'de> for Job {
 #[cfg(test)]
 mod test {
     use super::*;
+    use maelstrom_base::{enum_set, nonempty, JobMountFsType};
     use maelstrom_test::{
         digest, path_buf_vec, string, string_nonempty, string_vec, utf8_path_buf,
     };
-    use meticulous_base::{enum_set, nonempty, JobMountFsType};
 
     fn layer_mapper(layer: String) -> Result<Sha256Digest> {
         Ok(Sha256Digest::from(layer.parse::<u64>()?))

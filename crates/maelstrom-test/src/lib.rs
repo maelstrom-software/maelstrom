@@ -1,18 +1,18 @@
 #[macro_export]
 macro_rules! cjid {
     [$n:expr] => {
-        meticulous_base::ClientJobId::from($n)
+        maelstrom_base::ClientJobId::from($n)
     };
 }
 
 #[macro_export]
 macro_rules! cid {
-    [$n:expr] => { meticulous_base::ClientId::from($n) };
+    [$n:expr] => { maelstrom_base::ClientId::from($n) };
 }
 
 #[macro_export]
 macro_rules! wid {
-    [$n:expr] => { meticulous_base::WorkerId::from($n) };
+    [$n:expr] => { maelstrom_base::WorkerId::from($n) };
 }
 
 #[macro_export]
@@ -21,35 +21,35 @@ macro_rules! jid {
         jid!($n, $n)
     };
     [$cid:expr, $cjid:expr] => {
-        meticulous_base::JobId{cid: cid![$cid], cjid: cjid![$cjid]}
+        maelstrom_base::JobId{cid: cid![$cid], cjid: cjid![$cjid]}
     };
 }
 
 #[macro_export]
 macro_rules! spec {
     [1] => {
-        meticulous_base::JobSpec::new("test_1", meticulous_base::nonempty![digest!(1)])
+        maelstrom_base::JobSpec::new("test_1", maelstrom_base::nonempty![digest!(1)])
     };
     [2] => {
-        meticulous_base::JobSpec::new("test_2", meticulous_base::nonempty![digest!(2)])
+        maelstrom_base::JobSpec::new("test_2", maelstrom_base::nonempty![digest!(2)])
             .arguments(["arg_1"])
     };
     [3] => {
-        meticulous_base::JobSpec::new("test_3", meticulous_base::nonempty![digest!(3)])
+        maelstrom_base::JobSpec::new("test_3", maelstrom_base::nonempty![digest!(3)])
             .arguments(["arg_1", "arg_2"])
     };
     [4] => {
-        meticulous_base::JobSpec::new("test_4", meticulous_base::nonempty![digest!(4)])
+        maelstrom_base::JobSpec::new("test_4", maelstrom_base::nonempty![digest!(4)])
             .arguments(["arg_1", "arg_2", "arg_3"])
     };
     [$n:literal] => {
-        meticulous_base::JobSpec::new(concat!("test_", stringify!($n)), meticulous_base::nonempty![digest!($n)])
+        maelstrom_base::JobSpec::new(concat!("test_", stringify!($n)), maelstrom_base::nonempty![digest!($n)])
             .arguments(["arg_1"])
     };
     [$n:literal, [$($digest:expr),*]] => {
         {
             let mut spec = spec![$n];
-            spec.layers = meticulous_base::nonempty![$(digest!($digest)),*];
+            spec.layers = maelstrom_base::nonempty![$(digest!($digest)),*];
             spec
         }
     }
@@ -58,31 +58,31 @@ macro_rules! spec {
 #[macro_export]
 macro_rules! result {
     [1] => {
-        Ok(meticulous_base::JobSuccess {
-            status: meticulous_base::JobStatus::Exited(0),
-            stdout: meticulous_base::JobOutputResult::None,
-            stderr: meticulous_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobSuccess {
+            status: maelstrom_base::JobStatus::Exited(0),
+            stdout: maelstrom_base::JobOutputResult::None,
+            stderr: maelstrom_base::JobOutputResult::None,
         })
     };
     [2] => {
-        Ok(meticulous_base::JobSuccess {
-            status: meticulous_base::JobStatus::Exited(1),
-            stdout: meticulous_base::JobOutputResult::None,
-            stderr: meticulous_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobSuccess {
+            status: maelstrom_base::JobStatus::Exited(1),
+            stdout: maelstrom_base::JobOutputResult::None,
+            stderr: maelstrom_base::JobOutputResult::None,
         })
     };
     [3] => {
-        Ok(meticulous_base::JobSuccess {
-            status: meticulous_base::JobStatus::Signaled(15),
-            stdout: meticulous_base::JobOutputResult::None,
-            stderr: meticulous_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobSuccess {
+            status: maelstrom_base::JobStatus::Signaled(15),
+            stdout: maelstrom_base::JobOutputResult::None,
+            stderr: maelstrom_base::JobOutputResult::None,
         })
     };
     [$n:expr] => {
-        Ok(meticulous_base::JobSuccess {
-            status: meticulous_base::JobStatus::Exited($n),
-            stdout: meticulous_base::JobOutputResult::None,
-            stderr: meticulous_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobSuccess {
+            status: maelstrom_base::JobStatus::Exited($n),
+            stdout: maelstrom_base::JobOutputResult::None,
+            stderr: maelstrom_base::JobOutputResult::None,
         })
     };
 }
@@ -90,7 +90,7 @@ macro_rules! result {
 #[macro_export]
 macro_rules! digest {
     [$n:expr] => {
-        meticulous_base::Sha256Digest::from($n as u64)
+        maelstrom_base::Sha256Digest::from($n as u64)
     }
 }
 
@@ -111,7 +111,7 @@ macro_rules! path_buf_vec {
 #[macro_export]
 macro_rules! utf8_path_buf {
     ($e:expr) => {
-        meticulous_base::Utf8PathBuf::from($e)
+        maelstrom_base::Utf8PathBuf::from($e)
     };
 }
 

@@ -2,11 +2,11 @@ mod cache;
 mod scheduler;
 
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
+use maelstrom_base::proto::{BrokerToClient, BrokerToWorker};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     sync,
 };
-use meticulous_base::proto::{BrokerToClient, BrokerToWorker};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{

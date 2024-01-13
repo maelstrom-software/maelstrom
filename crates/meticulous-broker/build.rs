@@ -16,7 +16,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../maelstrom-web/src/");
     println!("cargo:rerun-if-changed=../maelstrom-web/www/");
     println!("cargo:rerun-if-changed=../maelstrom-plot/src/");
-    println!("cargo:rerun-if-changed=../meticulous-base/src/");
+    println!("cargo:rerun-if-changed=../maelstrom-base/src/");
 
     #[cfg(not(debug_assertions))]
     let profile = "release";

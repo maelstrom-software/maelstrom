@@ -10,7 +10,7 @@ bytesize.workspace = true
 clap.workspace = true
 derive_more.workspace = true
 fs2.workspace = true
-meticulous-base.workspace = true
+maelstrom-base.workspace = true
 serde.workspace = true
 sha2.workspace = true
 tokio = { workspace = true, features = ["sync"] }

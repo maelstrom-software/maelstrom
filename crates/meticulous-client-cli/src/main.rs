@@ -6,12 +6,12 @@ use figment::{
     Figment,
 };
 use indicatif::ProgressBar;
+use maelstrom_base::{
+    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+};
 use maelstrom_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
-};
-use meticulous_base::{
-    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
 use meticulous_client::{
     spec::{std_env_lookup, ImageConfig},

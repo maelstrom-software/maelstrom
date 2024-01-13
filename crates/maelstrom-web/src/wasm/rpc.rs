@@ -5,7 +5,7 @@ use futures::{
 };
 use gloo_net::websocket::{futures::WebSocket, Message};
 use gloo_utils::errors::JsError;
-use meticulous_base::proto::{BrokerToClient, ClientToBroker};
+use maelstrom_base::proto::{BrokerToClient, ClientToBroker};
 use std::cell::RefCell;
 use wasm_bindgen_futures::spawn_local;
 

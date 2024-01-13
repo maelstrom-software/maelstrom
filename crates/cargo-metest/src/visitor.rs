@@ -2,10 +2,10 @@ use crate::ProgressIndicator;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
-use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
-use meticulous_base::{
+use maelstrom_base::{
     ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
+use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Mutex};
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;

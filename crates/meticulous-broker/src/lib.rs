@@ -7,8 +7,8 @@ mod connection;
 mod http;
 mod scheduler_task;
 
+use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot};
-use meticulous_base::stats::BROKER_STATISTICS_INTERVAL;
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, Logger};
 use std::sync::{
@@ -21,8 +21,8 @@ use tokio::{
     task::JoinSet,
 };
 
-/// Simple wrapper around a [AtomicU32] used to vend [meticulous_base::ClientId]s and
-/// [meticulous_base::WorkerId]s.
+/// Simple wrapper around a [AtomicU32] used to vend [maelstrom_base::ClientId]s and
+/// [maelstrom_base::WorkerId]s.
 pub struct IdVendor {
     id: AtomicU32,
 }

@@ -5,11 +5,11 @@
 //! request, by the client.
 
 use bytesize::ByteSize;
+use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
 };
-use meticulous_base::{ClientId, JobId, Sha256Digest};
 use slog::debug;
 use std::{
     collections::{hash_map, HashMap, HashSet},

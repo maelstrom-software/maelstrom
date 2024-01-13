@@ -9,7 +9,7 @@ use anyhow::Result;
 use colored::Colorize as _;
 pub use driver::{DefaultProgressDriver, ProgressDriver};
 use indicatif::{ProgressBar, ProgressStyle};
-use meticulous_base::stats::JobStateCounts;
+use maelstrom_base::stats::JobStateCounts;
 pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
 pub use quiet_no_bar::QuietNoBar;

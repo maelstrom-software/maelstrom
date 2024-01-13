@@ -676,10 +676,10 @@ dependencies = [
  "globset",
  "indicatif",
  "lddtree",
+ "maelstrom-base",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",
- "meticulous-base",
  "meticulous-broker",
  "meticulous-client",
  "regex",
@@ -2344,6 +2344,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-base"
+version = "0.4.0-dev"
+dependencies = [
+ "camino",
+ "derive_more",
+ "enum-map",
+ "enumset",
+ "hex",
+ "nonempty",
+ "serde",
+ "serde_test",
+ "strum",
+]
+
+[[package]]
 name = "maelstrom-container"
 version = "0.4.0-dev"
 dependencies = [
@@ -2395,7 +2410,7 @@ dependencies = [
  "concat-idents",
  "derive_more",
  "fs2",
- "meticulous-base",
+ "maelstrom-base",
  "rand",
  "serde",
  "sha2",
@@ -2416,8 +2431,8 @@ dependencies = [
  "futures",
  "gloo-net",
  "gloo-utils",
+ "maelstrom-base",
  "maelstrom-plot",
- "meticulous-base",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",
@@ -2439,10 +2454,10 @@ dependencies = [
  "futures",
  "gethostname 0.4.3",
  "itertools",
+ "maelstrom-base",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",
- "meticulous-base",
  "nc",
  "netlink-packet-core",
  "netlink-packet-route",
@@ -2518,21 +2533,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meticulous-base"
-version = "0.4.0-dev"
-dependencies = [
- "camino",
- "derive_more",
- "enum-map",
- "enumset",
- "hex",
- "nonempty",
- "serde",
- "serde_test",
- "strum",
-]
-
-[[package]]
 name = "meticulous-broker"
 version = "0.4.0-dev"
 dependencies = [
@@ -2547,10 +2547,10 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "itertools",
+ "maelstrom-base",
  "maelstrom-test",
  "maelstrom-util",
  "maplit",
- "meticulous-base",
  "serde",
  "serde_with",
  "slog",
@@ -2573,10 +2573,10 @@ dependencies = [
  "figment",
  "gethostname 0.4.3",
  "indicatif",
+ "maelstrom-base",
  "maelstrom-container",
  "maelstrom-test",
  "maelstrom-util",
- "meticulous-base",
  "regex",
  "serde",
  "serde_json",
@@ -2599,9 +2599,9 @@ dependencies = [
  "enumset",
  "figment",
  "indicatif",
+ "maelstrom-base",
  "maelstrom-test",
  "maelstrom-util",
- "meticulous-base",
  "meticulous-client",
  "serde",
  "serde_json",
