@@ -32,7 +32,7 @@ use tar::Archive;
 use tokio::{net::TcpListener, sync::mpsc::UnboundedReceiver};
 use tungstenite::Message;
 
-/// The embedded website. This is built from [`meticulous-web`].
+/// The embedded website. This is built from [`maelstrom-web`].
 #[cfg(not(debug_assertions))]
 const WASM_TAR: &[u8] = include_bytes!("../../../target/wasm_release/web.tar");
 #[cfg(debug_assertions)]

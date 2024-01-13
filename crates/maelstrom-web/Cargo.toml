@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-web"
+name = "maelstrom-web"
 version.workspace = true
 edition.workspace = true
 

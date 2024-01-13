@@ -2344,6 +2344,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-web"
+version = "0.4.0-dev"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "console_error_panic_hook",
+ "eframe",
+ "egui",
+ "egui-toast",
+ "egui_gauge",
+ "futures",
+ "gloo-net",
+ "gloo-utils",
+ "meticulous-base",
+ "meticulous-plot",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-logger",
+ "web-sys",
+]
+
+[[package]]
 name = "maelstrom-worker"
 version = "0.4.0-dev"
 dependencies = [
@@ -2584,28 +2606,6 @@ dependencies = [
  "serde",
  "sha2",
  "tokio",
-]
-
-[[package]]
-name = "meticulous-web"
-version = "0.4.0-dev"
-dependencies = [
- "anyhow",
- "bincode",
- "console_error_panic_hook",
- "eframe",
- "egui",
- "egui-toast",
- "egui_gauge",
- "futures",
- "gloo-net",
- "gloo-utils",
- "meticulous-base",
- "meticulous-plot",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-logger",
- "web-sys",
 ]
 
 [[package]]

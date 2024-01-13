@@ -23,7 +23,7 @@ rustPlatform.buildRustPackage {
   };
 
   prePatch = ''
-    patchShebangs crates/meticulous-web/build.sh
+    patchShebangs crates/maelstrom-web/build.sh
   '';
 
   # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
@@ -40,7 +40,7 @@ rustPlatform.buildRustPackage {
   buildInputs = [ openssl ];
 
   postInstall = ''
-    rm $out/lib/libmeticulous_web.so
+    rm $out/lib/libmaelstrom_web.so
     rmdir $out/lib
   '';
 

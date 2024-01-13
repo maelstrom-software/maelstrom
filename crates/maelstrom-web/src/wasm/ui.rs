@@ -248,7 +248,7 @@ impl<RpcConnectionT: ClientConnection> App for UiHandler<RpcConnectionT> {
     fn update(&mut self, ctx: &Context, _frame: &mut Frame) {
         CentralPanel::default().show(ctx, |ui| {
             ScrollArea::vertical().show(ui, |ui| {
-                ui.heading("Meticulous UI");
+                ui.heading("Maelstrom UI");
                 let mut toasts = Toasts::new()
                     .anchor(Align2::RIGHT_BOTTOM, (-10.0, -10.0))
                     .direction(egui::Direction::BottomUp);

@@ -1,4 +1,4 @@
-//! Plotting library for egui for use with meticulous-web
+//! Plotting library for egui for use with maelstrom-web
 //!
 //! This code is originally forked from egui-plot
 

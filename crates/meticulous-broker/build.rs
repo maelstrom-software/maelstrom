@@ -11,10 +11,10 @@ fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=../meticulous-web/build.sh");
-    println!("cargo:rerun-if-changed=../meticulous-web/Cargo.toml");
-    println!("cargo:rerun-if-changed=../meticulous-web/src/");
-    println!("cargo:rerun-if-changed=../meticulous-web/www/");
+    println!("cargo:rerun-if-changed=../maelstrom-web/build.sh");
+    println!("cargo:rerun-if-changed=../maelstrom-web/Cargo.toml");
+    println!("cargo:rerun-if-changed=../maelstrom-web/src/");
+    println!("cargo:rerun-if-changed=../maelstrom-web/www/");
     println!("cargo:rerun-if-changed=../meticulous-plot/src/");
     println!("cargo:rerun-if-changed=../meticulous-base/src/");
 
@@ -25,7 +25,7 @@ fn main() {
     let profile = "dev";
 
     sh(
-        ["crates/meticulous-web/build.sh", &format!("wasm_{profile}")],
+        ["crates/maelstrom-web/build.sh", &format!("wasm_{profile}")],
         "../..",
     );
 }
