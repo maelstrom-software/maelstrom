@@ -27,4 +27,4 @@ toml.workspace = true
 tuple.workspace = true
 
 [dev-dependencies]
-meticulous-test.workspace = true
+maelstrom-test.workspace = true

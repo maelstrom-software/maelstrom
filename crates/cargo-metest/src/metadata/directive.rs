@@ -232,8 +232,8 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 mod test {
     use super::*;
     use anyhow::Error;
+    use maelstrom_test::{string, string_vec, utf8_path_buf};
     use meticulous_base::{enum_set, JobMountFsType};
-    use meticulous_test::{string, string_vec, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {

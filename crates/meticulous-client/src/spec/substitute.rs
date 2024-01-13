@@ -143,7 +143,7 @@ where
 mod tests {
     use super::*;
     use anyhow::anyhow;
-    use meticulous_test::string;
+    use maelstrom_test::string;
 
     fn env_lookup(key: &str) -> anyhow::Result<Option<String>> {
         match key {

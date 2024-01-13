@@ -179,7 +179,7 @@ impl<'a> ImageOption<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use meticulous_test::{path_buf_vec, string, string_vec};
+    use maelstrom_test::{path_buf_vec, string, string_vec};
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
     #[test]

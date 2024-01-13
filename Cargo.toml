@@ -62,7 +62,7 @@ meticulous-broker = { path = "crates/meticulous-broker" }
 meticulous-client = { path = "crates/meticulous-client" }
 meticulous-container = { path = "crates/meticulous-container" }
 meticulous-plot = { path = "crates/meticulous-plot" }
-meticulous-test = { path = "crates/meticulous-test" }
+maelstrom-test = { path = "crates/maelstrom-test" }
 maelstrom-util = { path = "crates/maelstrom-util" }
 maelstrom-worker = { path = "crates/maelstrom-worker" }
 maelstrom-worker-child = { path = "crates/maelstrom-worker-child" }

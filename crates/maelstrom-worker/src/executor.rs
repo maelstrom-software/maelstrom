@@ -771,8 +771,8 @@ mod tests {
     use super::*;
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
+    use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use meticulous_base::{nonempty, JobStatus};
-    use meticulous_test::{boxed_u8, digest, utf8_path_buf};
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
     use std::ops::ControlFlow;

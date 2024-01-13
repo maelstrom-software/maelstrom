@@ -200,7 +200,7 @@ impl AllMetadata {
     }
 
     pub fn load(workspace_root: &impl AsRef<Path>) -> Result<Self> {
-        let path = workspace_root.as_ref().join("meticulous-test.toml");
+        let path = workspace_root.as_ref().join("maelstrom-test.toml");
 
         Ok(Fs::new()
             .read_to_string_if_exists(&path)?
@@ -213,8 +213,8 @@ impl AllMetadata {
 #[cfg(test)]
 mod test {
     use super::*;
+    use maelstrom_test::{path_buf_vec, string, string_vec, utf8_path_buf};
     use meticulous_base::{enum_set, JobMountFsType};
-    use meticulous_test::{path_buf_vec, string, string_vec, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {

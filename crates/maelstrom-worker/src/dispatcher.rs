@@ -412,7 +412,7 @@ mod tests {
     use super::{Message::*, *};
     use anyhow::anyhow;
     use itertools::Itertools;
-    use meticulous_test::*;
+    use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};
     use BrokerToWorker::*;
 

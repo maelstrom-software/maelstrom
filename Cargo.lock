@@ -676,12 +676,12 @@ dependencies = [
  "globset",
  "indicatif",
  "lddtree",
+ "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",
  "meticulous-base",
  "meticulous-broker",
  "meticulous-client",
- "meticulous-test",
  "regex",
  "regex-macro",
  "serde",
@@ -2344,6 +2344,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-test"
+version = "0.4.0-dev"
+
+[[package]]
 name = "maelstrom-util"
 version = "0.4.0-dev"
 dependencies = [
@@ -2398,10 +2402,10 @@ dependencies = [
  "futures",
  "gethostname 0.4.3",
  "itertools",
+ "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",
  "meticulous-base",
- "meticulous-test",
  "nc",
  "netlink-packet-core",
  "netlink-packet-route",
@@ -2506,10 +2510,10 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "itertools",
+ "maelstrom-test",
  "maelstrom-util",
  "maplit",
  "meticulous-base",
- "meticulous-test",
  "serde",
  "serde_with",
  "slog",
@@ -2532,10 +2536,10 @@ dependencies = [
  "figment",
  "gethostname 0.4.3",
  "indicatif",
+ "maelstrom-test",
  "maelstrom-util",
  "meticulous-base",
  "meticulous-container",
- "meticulous-test",
  "regex",
  "serde",
  "serde_json",
@@ -2558,10 +2562,10 @@ dependencies = [
  "enumset",
  "figment",
  "indicatif",
+ "maelstrom-test",
  "maelstrom-util",
  "meticulous-base",
  "meticulous-client",
- "meticulous-test",
  "serde",
  "serde_json",
  "serde_with",
@@ -2603,10 +2607,6 @@ version = "0.4.0-dev"
 dependencies = [
  "num",
 ]
-
-[[package]]
-name = "meticulous-test"
-version = "0.4.0-dev"
 
 [[package]]
 name = "mime"

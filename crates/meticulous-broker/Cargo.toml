@@ -28,4 +28,4 @@ bytesize.workspace = true
 enum-map.workspace = true
 itertools.workspace = true
 maplit.workspace = true
-meticulous-test.workspace = true
+maelstrom-test.workspace = true

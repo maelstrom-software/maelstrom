@@ -487,7 +487,7 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use meticulous_test::*;
+    use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 

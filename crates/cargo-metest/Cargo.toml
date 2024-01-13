@@ -37,5 +37,5 @@ enum-map.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 meticulous-broker.workspace = true
-meticulous-test.workspace = true
+maelstrom-test.workspace = true
 maelstrom-worker.workspace = true

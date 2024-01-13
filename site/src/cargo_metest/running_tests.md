@@ -66,7 +66,7 @@ ones.
 
 ## Test Listing
 A listing of all the tests in your project that `cargo-metest` found is stored
-in `target/meticulous-test-listing.toml` file. This listing is used to predict the
+in `target/maelstrom-test-listing.toml` file. This listing is used to predict the
 amount of tests that will be run with subsequent invocations.
 
 ## File Digests

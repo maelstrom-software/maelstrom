@@ -361,10 +361,10 @@ impl<'de> de::Deserialize<'de> for Job {
 #[cfg(test)]
 mod test {
     use super::*;
-    use meticulous_base::{enum_set, nonempty, JobMountFsType};
-    use meticulous_test::{
+    use maelstrom_test::{
         digest, path_buf_vec, string, string_nonempty, string_vec, utf8_path_buf,
     };
+    use meticulous_base::{enum_set, nonempty, JobMountFsType};
 
     fn layer_mapper(layer: String) -> Result<Sha256Digest> {
         Ok(Sha256Digest::from(layer.parse::<u64>()?))

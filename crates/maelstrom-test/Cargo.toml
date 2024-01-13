@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-test"
+name = "maelstrom-test"
 version.workspace = true
 edition.workspace = true
 

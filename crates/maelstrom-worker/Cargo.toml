@@ -36,7 +36,7 @@ tuple.workspace = true
 assert_matches.workspace = true
 anyhow.workspace = true
 itertools.workspace = true
-meticulous-test.workspace = true
+maelstrom-test.workspace = true
 serial_test.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros"] }

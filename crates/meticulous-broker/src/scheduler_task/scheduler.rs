@@ -605,9 +605,9 @@ mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use itertools::Itertools;
+    use maelstrom_test::*;
     use maplit::hashmap;
     use meticulous_base::proto::BrokerToWorker::{self, *};
-    use meticulous_test::*;
     use std::{cell::RefCell, sync::Arc};
 
     #[derive(Clone, Debug, PartialEq)]

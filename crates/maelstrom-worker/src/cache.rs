@@ -396,7 +396,7 @@ impl<FsT: CacheFs> Cache<FsT> {
 mod tests {
     use super::*;
     use itertools::Itertools;
-    use meticulous_test::*;
+    use maelstrom_test::*;
     use slog::{o, Discard};
     use std::{cell::RefCell, collections::HashSet, rc::Rc};
     use TestMessage::*;
