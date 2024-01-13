@@ -90,7 +90,7 @@ Install the worker with
 
 ```bash
 export METICULOUS_GITHUB="https://github.com/meticulous-software/meticulous.git"
-cargo install --git $METICULOUS_GITHUB meticulous-worker
+cargo install --git $METICULOUS_GITHUB maelstrom-worker
 ```
 
 It is best to not run the service as root, so we will create a new user to use
@@ -98,15 +98,15 @@ for this purpose. The worker also uses the local file-system to cache artifacts
 so this will give us a place to put them.
 
 ```bash
-sudo adduser meticulous-worker
-sudo mkdir ~meticulous-worker/bin
-sudo mv ~/.cargo/bin/meticulous-worker ~meticulous-worker/bin/
+sudo adduser maelstrom-worker
+sudo mkdir ~maelstrom-worker/bin
+sudo mv ~/.cargo/bin/maelstrom-worker ~maelstrom-worker/bin/
 ```
 
 We need now to run the worker as a service. This guide will cover using
 [Systemd](https://systemd.io) to do this.
 
-Create a service file at `/etc/systemd/system/meticulous-worker.service` and
+Create a service file at `/etc/systemd/system/maelstrom-worker.service` and
 fill it with the following contents.
 
 ```language-systemd
@@ -114,9 +114,9 @@ fill it with the following contents.
 Description=Meticulous Worker
 
 [Service]
-User=meticulous-worker
-WorkingDirectory=/home/meticulous-worker
-ExecStart=/home/meticulous-worker/bin/meticulous-worker --broker <broker-machine-address>:9001
+User=maelstrom-worker
+WorkingDirectory=/home/maelstrom-worker
+ExecStart=/home/maelstrom-worker/bin/maelstrom-worker --broker <broker-machine-address>:9001
 Restart=always
 RestartSec=3
 
@@ -131,14 +131,14 @@ when setting up the broker.
 Now we install and start the worker
 
 ```bash
-sudo systemctl enable meticulous-worker
-sudo systemctl start meticulous-worker
+sudo systemctl enable maelstrom-worker
+sudo systemctl start maelstrom-worker
 ```
 
 The worker should be running now. To make sure you can pull up the broker web UI
 and it should now show that there is 1 worker.
 
-It stores its caches in `<working-directory>/.cache/meticulous-worker`. For the
-given set-up this should be `/home/meticulous-worker/.cache/meticulous-worker`
+It stores its caches in `<working-directory>/.cache/maelstrom-worker`. For the
+given set-up this should be `/home/maelstrom-worker/.cache/maelstrom-worker`
 
 Repeat these steps for every machine you wish to install a worker on to.

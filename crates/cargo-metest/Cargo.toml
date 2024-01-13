@@ -38,4 +38,4 @@ serde.workspace = true
 tempfile.workspace = true
 meticulous-broker.workspace = true
 meticulous-test.workspace = true
-meticulous-worker.workspace = true
+maelstrom-worker.workspace = true

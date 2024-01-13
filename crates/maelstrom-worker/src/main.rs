@@ -5,8 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_worker::config::{Config, ConfigOptions};
 use meticulous_util::{config::LogLevel, fs::Fs};
-use meticulous_worker::config::{Config, ConfigOptions};
 use nix::{
     errno::Errno,
     sys::{
@@ -21,12 +21,12 @@ use slog_term::{FullFormat, TermDecorator};
 use std::{mem, path::PathBuf, process, slice};
 use tokio::runtime::Runtime;
 
-/// The meticulous worker. This process executes jobs as directed by the broker.
+/// The maelstrom worker. This process executes jobs as directed by the broker.
 #[derive(Parser)]
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
 
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the METICULOUS_WORKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
 
 All values except for 'broker' have reasonable defaults.
 "#
@@ -35,7 +35,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-worker.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-worker.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit
@@ -168,7 +168,7 @@ fn main() -> Result<()> {
     let config: Config = Figment::new()
         .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
-        .merge(Env::prefixed("METICULOUS_WORKER_"))
+        .merge(Env::prefixed("MAELSTROM_WORKER_"))
         .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {
@@ -198,7 +198,7 @@ fn main() -> Result<()> {
     let log = Logger::root(drain, o!());
     Runtime::new()
         .context("starting tokio runtime")?
-        .block_on(async move { meticulous_worker::main(config, log).await })?;
+        .block_on(async move { maelstrom_worker::main(config, log).await })?;
     Ok(())
 }
 

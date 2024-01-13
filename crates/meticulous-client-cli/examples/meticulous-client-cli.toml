@@ -6,7 +6,7 @@
 # The host and port of the broker.
 #
 # Can also be specified via the `--broker` or `-b` command-line options, or via
-# the METICULOUS_WORKER_BROKER environment variable.
+# the MAELSTROM_WORKER_BROKER environment variable.
 #
 # There is no default. This option must be specified.
 #

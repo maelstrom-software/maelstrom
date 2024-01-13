@@ -97,7 +97,7 @@ impl Default for ConfigOptions {
         ConfigOptions {
             broker: None,
             slots: Some(num_cpus::get().try_into().unwrap()),
-            cache_root: Some(".cache/meticulous-worker".into()),
+            cache_root: Some(".cache/maelstrom-worker".into()),
             cache_bytes_used_target: Some(1_000_000_000),
             inline_limit: Some(1_000_000),
             log_level: Some(LogLevel::Info),

@@ -134,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Binaries for the clustered job runner: `meticulous-worker`,
+- Binaries for the clustered job runner: `maelstrom-worker`,
   `meticulous-broker`, and `meticulous-client`.
 - Client library for communicating with the broker: `meticulous-client`.
 - A Rust test runner that uses the clustered job runner: `cargo-metest`.
