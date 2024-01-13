@@ -5,11 +5,11 @@
 //! request, by the client.
 
 use bytesize::ByteSize;
-use meticulous_base::{ClientId, JobId, Sha256Digest};
-use meticulous_util::{
+use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
 };
+use meticulous_base::{ClientId, JobId, Sha256Digest};
 use slog::debug;
 use std::{
     collections::{hash_map, HashMap, HashSet},
@@ -45,11 +45,11 @@ pub trait CacheFs {
 }
 
 /// Implement [`CacheFs`] using `std::fs`.
-pub struct StdCacheFs(meticulous_util::fs::Fs);
+pub struct StdCacheFs(maelstrom_util::fs::Fs);
 
 impl StdCacheFs {
     pub fn new() -> Self {
-        Self(meticulous_util::fs::Fs::new())
+        Self(maelstrom_util::fs::Fs::new())
     }
 }
 

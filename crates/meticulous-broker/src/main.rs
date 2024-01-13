@@ -5,8 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_util::config::LogLevel;
 use meticulous_broker::config::{Config, ConfigOptions};
-use meticulous_util::config::LogLevel;
 use slog::{info, o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};

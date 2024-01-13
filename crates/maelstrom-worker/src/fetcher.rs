@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Result};
-use meticulous_base::{
-    proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
-    Sha256Digest,
-};
-use meticulous_util::{
+use maelstrom_util::{
     config::BrokerAddr,
     io::{FixedSizeReader, Sha256Reader},
     net,
+};
+use meticulous_base::{
+    proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
+    Sha256Digest,
 };
 use slog::{debug, Logger};
 use std::{

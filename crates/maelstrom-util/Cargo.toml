@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-util"
+name = "maelstrom-util"
 version.workspace = true
 edition.workspace = true
 

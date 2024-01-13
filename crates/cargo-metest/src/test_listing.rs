@@ -1,7 +1,7 @@
 use crate::pattern;
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Target as CargoTarget};
-use meticulous_util::fs::Fs;
+use maelstrom_util::fs::Fs;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, FromInto};

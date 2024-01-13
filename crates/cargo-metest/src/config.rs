@@ -1,5 +1,5 @@
 use derive_more::From;
-use meticulous_util::config::BrokerAddr;
+use maelstrom_util::config::BrokerAddr;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::fmt::{self, Debug, Formatter};

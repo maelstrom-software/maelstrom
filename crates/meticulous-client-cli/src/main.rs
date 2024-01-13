@@ -6,6 +6,10 @@ use figment::{
     Figment,
 };
 use indicatif::ProgressBar;
+use maelstrom_util::{
+    config::BrokerAddr,
+    process::{ExitCode, ExitCodeAccumulator},
+};
 use meticulous_base::{
     ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
@@ -14,10 +18,6 @@ use meticulous_client::{
     Client, DefaultClientDriver,
 };
 use meticulous_client_cli::spec::job_spec_iter_from_reader;
-use meticulous_util::{
-    config::BrokerAddr,
-    process::{ExitCode, ExitCodeAccumulator},
-};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::{

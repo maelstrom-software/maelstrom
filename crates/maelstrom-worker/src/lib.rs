@@ -12,14 +12,14 @@ use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
-use meticulous_base::{
-    proto::{Hello, WorkerToBroker},
-    JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
-};
-use meticulous_util::{
+use maelstrom_util::{
     config::{BrokerAddr, CacheRoot},
     fs::Fs,
     net, sync,
+};
+use meticulous_base::{
+    proto::{Hello, WorkerToBroker},
+    JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
 use nix::{
     errno::Errno,

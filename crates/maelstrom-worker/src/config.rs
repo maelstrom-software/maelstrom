@@ -1,6 +1,6 @@
 use bytesize::ByteSize;
 use derive_more::From;
-use meticulous_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
+use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::{

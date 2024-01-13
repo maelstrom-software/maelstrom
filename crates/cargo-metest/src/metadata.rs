@@ -3,10 +3,10 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
+use maelstrom_util::fs::Fs;
 use meticulous_base::Utf8PathBuf;
 use meticulous_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
 use meticulous_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
-use meticulous_util::fs::Fs;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
 

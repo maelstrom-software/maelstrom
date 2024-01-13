@@ -676,12 +676,12 @@ dependencies = [
  "globset",
  "indicatif",
  "lddtree",
+ "maelstrom-util",
  "maelstrom-worker",
  "meticulous-base",
  "meticulous-broker",
  "meticulous-client",
  "meticulous-test",
- "meticulous-util",
  "regex",
  "regex-macro",
  "serde",
@@ -2344,6 +2344,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-util"
+version = "0.4.0-dev"
+dependencies = [
+ "anyhow",
+ "bincode",
+ "bytesize",
+ "clap",
+ "concat-idents",
+ "derive_more",
+ "fs2",
+ "meticulous-base",
+ "rand",
+ "serde",
+ "sha2",
+ "tokio",
+]
+
+[[package]]
 name = "maelstrom-web"
 version = "0.4.0-dev"
 dependencies = [
@@ -2380,10 +2398,10 @@ dependencies = [
  "futures",
  "gethostname 0.4.3",
  "itertools",
+ "maelstrom-util",
  "maelstrom-worker-child",
  "meticulous-base",
  "meticulous-test",
- "meticulous-util",
  "nc",
  "netlink-packet-core",
  "netlink-packet-route",
@@ -2488,10 +2506,10 @@ dependencies = [
  "hyper",
  "hyper-tungstenite",
  "itertools",
+ "maelstrom-util",
  "maplit",
  "meticulous-base",
  "meticulous-test",
- "meticulous-util",
  "serde",
  "serde_with",
  "slog",
@@ -2514,10 +2532,10 @@ dependencies = [
  "figment",
  "gethostname 0.4.3",
  "indicatif",
+ "maelstrom-util",
  "meticulous-base",
  "meticulous-container",
  "meticulous-test",
- "meticulous-util",
  "regex",
  "serde",
  "serde_json",
@@ -2540,10 +2558,10 @@ dependencies = [
  "enumset",
  "figment",
  "indicatif",
+ "maelstrom-util",
  "meticulous-base",
  "meticulous-client",
  "meticulous-test",
- "meticulous-util",
  "serde",
  "serde_json",
  "serde_with",
@@ -2559,8 +2577,8 @@ dependencies = [
  "directories",
  "futures",
  "indicatif",
+ "maelstrom-util",
  "maplit",
- "meticulous-util",
  "oci-spec",
  "reqwest",
  "serde",
@@ -2589,24 +2607,6 @@ dependencies = [
 [[package]]
 name = "meticulous-test"
 version = "0.4.0-dev"
-
-[[package]]
-name = "meticulous-util"
-version = "0.4.0-dev"
-dependencies = [
- "anyhow",
- "bincode",
- "bytesize",
- "clap",
- "concat-idents",
- "derive_more",
- "fs2",
- "meticulous-base",
- "rand",
- "serde",
- "sha2",
- "tokio",
-]
 
 [[package]]
 name = "mime"

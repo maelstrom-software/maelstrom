@@ -2,7 +2,7 @@ use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
 use futures::stream::TryStreamExt as _;
 use indicatif::ProgressBar;
-use meticulous_util::fs::Fs;
+use maelstrom_util::fs::Fs;
 use oci_spec::image::{Descriptor, ImageConfiguration, ImageIndex, ImageManifest, Platform};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};

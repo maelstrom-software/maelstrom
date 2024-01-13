@@ -4,8 +4,8 @@ use crate::{
     IdVendor,
 };
 use anyhow::Result;
+use maelstrom_util::net;
 use meticulous_base::{proto::Hello, ClientId, WorkerId};
-use meticulous_util::net;
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
 use std::{future::Future, path::PathBuf, sync::Arc, thread};

@@ -1,11 +1,11 @@
 //! Manage downloading, extracting, and storing of artifacts specified by jobs.
 
 use bytesize::ByteSize;
-use meticulous_base::{JobId, Sha256Digest};
-use meticulous_util::{
+use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
 };
+use meticulous_base::{JobId, Sha256Digest};
 use slog::{debug, Logger};
 use std::{
     cmp::Ordering,

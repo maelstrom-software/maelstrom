@@ -11,13 +11,13 @@ use cargo_metest::{
     EnqueueResult, ListAction, MainAppDeps,
 };
 use indicatif::InMemoryTerm;
+use maelstrom_util::{config::BrokerAddr, fs::Fs};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobSpec, JobStatus, JobStringResult, JobSuccess,
 };
 use meticulous_client::{Client, ClientDeps, ClientDriver};
-use meticulous_util::{config::BrokerAddr, fs::Fs};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     cell::RefCell,

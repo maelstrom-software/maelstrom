@@ -6,12 +6,12 @@ use crate::{
     config::Slots,
 };
 use anyhow::{Error, Result};
+use maelstrom_util::ext::OptionExt as _;
 use meticulous_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     JobError, JobId, JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty,
     Sha256Digest,
 };
-use meticulous_util::ext::OptionExt as _;
 use nix::unistd::Pid;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},

@@ -2,6 +2,10 @@
 //! workers.
 
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
+use maelstrom_util::{
+    ext::{BoolExt as _, OptionExt as _},
+    heap::{Heap, HeapDeps, HeapIndex},
+};
 use meticulous_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
@@ -9,10 +13,6 @@ use meticulous_base::{
         WorkerStatistics,
     },
     ClientId, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest, WorkerId,
-};
-use meticulous_util::{
-    ext::{BoolExt as _, OptionExt as _},
-    heap::{Heap, HeapDeps, HeapIndex},
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},

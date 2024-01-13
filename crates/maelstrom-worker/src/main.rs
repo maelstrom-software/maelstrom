@@ -5,8 +5,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use meticulous_util::{config::LogLevel, fs::Fs};
 use nix::{
     errno::Errno,
     sys::{

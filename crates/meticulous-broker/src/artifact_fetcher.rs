@@ -1,12 +1,12 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
+use maelstrom_util::{
+    fs::{File, Fs},
+    net,
+};
 use meticulous_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     Sha256Digest,
-};
-use meticulous_util::{
-    fs::{File, Fs},
-    net,
 };
 use slog::{debug, Logger};
 use std::{io, net::TcpStream, sync::mpsc};
