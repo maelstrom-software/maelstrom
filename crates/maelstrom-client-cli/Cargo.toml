@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-client-cli"
+name = "maelstrom-client-cli"
 version.workspace = true
 edition.workspace = true
 

@@ -9,6 +9,7 @@ use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
+use maelstrom_client_cli::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
@@ -17,7 +18,6 @@ use meticulous_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, DefaultClientDriver,
 };
-use meticulous_client_cli::spec::job_spec_iter_from_reader;
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::{
@@ -27,7 +27,7 @@ use std::{
     sync::Arc,
 };
 
-/// The meticulous client. This process sends jobs to the broker to be executed.
+/// The maelstrom client. This process sends jobs to the broker to be executed.
 #[derive(Parser)]
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
@@ -41,7 +41,7 @@ All values except for 'broker' have reasonable defaults.
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/meticulous-client-cli.toml").into_os_string())]
+    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-client-cli.toml").into_os_string())]
     config_file: PathBuf,
 
     /// Print configuration and exit
@@ -136,7 +136,7 @@ fn cache_dir() -> PathBuf {
     directories::BaseDirs::new()
         .expect("failed to find cache dir")
         .cache_dir()
-        .join("meticulous")
+        .join("maelstrom")
 }
 
 fn main() -> Result<ExitCode> {
@@ -145,7 +145,7 @@ fn main() -> Result<ExitCode> {
     let config: Config = Figment::new()
         .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(&cli_options.config_file))
-        .merge(Env::prefixed("METICULOUS_CLIENT_"))
+        .merge(Env::prefixed("MAELSTROM_CLIENT_"))
         .merge(Serialized::globals(cli_options.to_config_options()))
         .extract()
         .map_err(|mut e| {

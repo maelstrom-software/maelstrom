@@ -2388,6 +2388,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-client-cli"
+version = "0.4.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "directories",
+ "enumset",
+ "figment",
+ "indicatif",
+ "maelstrom-base",
+ "maelstrom-test",
+ "maelstrom-util",
+ "meticulous-client",
+ "serde",
+ "serde_json",
+ "serde_with",
+]
+
+[[package]]
 name = "maelstrom-container"
 version = "0.4.0-dev"
 dependencies = [
@@ -2587,25 +2606,6 @@ dependencies = [
  "tokio",
  "toml",
  "tuple",
-]
-
-[[package]]
-name = "meticulous-client-cli"
-version = "0.4.0-dev"
-dependencies = [
- "anyhow",
- "clap",
- "directories",
- "enumset",
- "figment",
- "indicatif",
- "maelstrom-base",
- "maelstrom-test",
- "maelstrom-util",
- "meticulous-client",
- "serde",
- "serde_json",
- "serde_with",
 ]
 
 [[package]]

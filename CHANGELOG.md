@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 - Ability to create a build environment using [`nix`](https://nixos.org).
-- Renamed `meticulous-client` binary to `meticulous-client-cli`.
+- Renamed `meticulous-client` binary to `maelstrom-client-cli`.
 
 ### `cargo-metest`
 
@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The positional filter argument. Filters now have to be specified with `-i` or
   `-x`.
 
-### `meticulous-client-cli`
+### `maelstrom-client-cli`
 
 #### Changed
 

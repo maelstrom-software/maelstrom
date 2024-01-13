@@ -1,12 +1,12 @@
-# Example config for meticulous-client-cli.
+# Example config for maelstrom-client-cli.
 #
-# Save this as .cache/meticulous-client-cli.toml or wherever you specify the
+# Save this as .cache/maelstrom-client-cli.toml or wherever you specify the
 # config file using the --config-file or -c option.
 
 # The host and port of the broker.
 #
 # Can also be specified via the `--broker` or `-b` command-line options, or via
-# the MAELSTROM_WORKER_BROKER environment variable.
+# the MAELSTROM_CLIENT_CLI_BROKER environment variable.
 #
 # There is no default. This option must be specified.
 #
