@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-worker-child"
+name = "maelstrom-worker-child"
 version.workspace = true
 edition.workspace = true
 

@@ -2344,6 +2344,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-worker-child"
+version = "0.4.0-dev"
+dependencies = [
+ "nc",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2578,10 +2585,10 @@ dependencies = [
  "futures",
  "gethostname 0.4.3",
  "itertools",
+ "maelstrom-worker-child",
  "meticulous-base",
  "meticulous-test",
  "meticulous-util",
- "meticulous-worker-child",
  "nc",
  "netlink-packet-core",
  "netlink-packet-route",
@@ -2599,13 +2606,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tuple",
-]
-
-[[package]]
-name = "meticulous-worker-child"
-version = "0.4.0-dev"
-dependencies = [
- "nc",
 ]
 
 [[package]]

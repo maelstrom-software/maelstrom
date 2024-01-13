@@ -8,11 +8,11 @@ use bumpalo::{
 };
 use c_str_macro::c_str;
 use futures::ready;
+use maelstrom_worker_child::{sockaddr_nl_t, Syscall};
 use meticulous_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use meticulous_worker_child::{sockaddr_nl_t, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use nix::{
@@ -680,7 +680,7 @@ impl Executor {
             };
         if child_pid == 0 {
             // This is the child process.
-            meticulous_worker_child::start_and_exec_in_child(
+            maelstrom_worker_child::start_and_exec_in_child(
                 exec_result_write_fd.into_raw_fd(),
                 builder.syscalls.as_mut_slice(),
             );
