@@ -15,7 +15,7 @@ fn main() {
     println!("cargo:rerun-if-changed=../maelstrom-web/Cargo.toml");
     println!("cargo:rerun-if-changed=../maelstrom-web/src/");
     println!("cargo:rerun-if-changed=../maelstrom-web/www/");
-    println!("cargo:rerun-if-changed=../meticulous-plot/src/");
+    println!("cargo:rerun-if-changed=../maelstrom-plot/src/");
     println!("cargo:rerun-if-changed=../meticulous-base/src/");
 
     #[cfg(not(debug_assertions))]

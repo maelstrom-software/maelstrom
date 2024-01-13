@@ -1,5 +1,5 @@
 [package]
-name = "meticulous-plot"
+name = "maelstrom-plot"
 version.workspace = true
 edition.workspace = true
 

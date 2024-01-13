@@ -4,11 +4,11 @@ use eframe::{App, CreationContext, Frame};
 use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
 use egui_toast::{Toast, ToastKind, ToastOptions, Toasts};
+use maelstrom_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use meticulous_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::{BrokerStatistics, JobState, JobStateCounts, BROKER_STATISTICS_INTERVAL},
 };
-use meticulous_plot::{Legend, Plot, PlotBounds, PlotPoints, PlotUi, StackedLine};
 use std::{collections::BTreeSet, time::Duration};
 
 const REFRESH_INTERVAL: Duration = BROKER_STATISTICS_INTERVAL;

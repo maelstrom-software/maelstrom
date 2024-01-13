@@ -2344,6 +2344,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
+name = "maelstrom-plot"
+version = "0.4.0-dev"
+dependencies = [
+ "egui",
+]
+
+[[package]]
 name = "maelstrom-simex"
 version = "0.4.0-dev"
 dependencies = [
@@ -2386,8 +2393,8 @@ dependencies = [
  "futures",
  "gloo-net",
  "gloo-utils",
+ "maelstrom-plot",
  "meticulous-base",
- "meticulous-plot",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-logger",
@@ -2599,13 +2606,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
-]
-
-[[package]]
-name = "meticulous-plot"
-version = "0.4.0-dev"
-dependencies = [
- "egui",
 ]
 
 [[package]]
