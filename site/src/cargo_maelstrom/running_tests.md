@@ -21,7 +21,8 @@ Replace `<broker-address>` with the hostname or IP of the machine the broker is
 running on. Replace `<broker-port>` with the port you provided to the broker via
 the `--port` CLI option. (In the book we chose port 9001 for this)
 
-Now we should be able to build and run tests just by running `cargo metest`
+Now we should be able to build and run tests just by running `cargo maelstrom
+run`
 
 With no arguments it attempt to run all the tests in your project.
 

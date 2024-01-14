@@ -109,8 +109,8 @@ These other expressions are useful occasionally
 - **`true`, `all`, `any`**: selects all tests
 - **`false`, `none`**: selects no tests
 
-When you provide no filter to `cargo-maelstrom` it acts as if typed `cargo metest
--i all`
+When you provide no filter to `cargo-maelstrom` it acts as if you typed `cargo
+maelstrom run -i all`
 
 ## Abbreviations
 

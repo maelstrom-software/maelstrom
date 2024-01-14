@@ -21,7 +21,7 @@ packages. This can be a useful tip to remember when trying to run a single test.
 
 If we were to run something like
 ```bash
-cargo metest -i "name.equals(foobar)"
+cargo maelstrom run -i "name.equals(foobar)"
 ```
 
 `cargo-maelstrom` would run any test which has the name "foobar". A test with this
@@ -30,7 +30,7 @@ build all of them. But if I happened to know that only one package has this
 test, the `baz` package, I would be better off running the following instead.
 
 ```bash
-cargo metest -i "package.equals(baz) && name.equals(foobar)"
+cargo maelstrom run -i "package.equals(baz) && name.equals(foobar)"
 ```
 
 Now since I specified that I only care about the "baz" package, `cargo-maelstrom`
