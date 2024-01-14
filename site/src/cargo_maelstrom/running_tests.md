@@ -10,6 +10,7 @@ cargo-maelstrom](../install/cargo_maelstrom.md).)
 We need to provide the address of the broker to cargo-maelstrom. This can be
 done via the command line by passing `--broker`. Since this is required every
 time the command is run, it is easier to provide it via the configuration file.
+See [Configuration](./configuration.md) for more details.
 
 Create a file in `.config/cargo-maelstrom.toml` and put the following contents
 
