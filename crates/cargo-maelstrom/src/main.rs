@@ -22,7 +22,7 @@ use std::{
     process::Command,
 };
 
-/// The meticulous client. This process sends work to the broker to be executed by workers.
+/// cargo-maelstrom. This binary build and sends Rust tests to the broker
 #[derive(Parser, Debug)]
 #[command(version)]
 #[command(bin_name = "cargo maelstrom")]

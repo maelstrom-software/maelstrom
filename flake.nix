@@ -1,5 +1,5 @@
 {
-  description = "Meticulous";
+  description = "Maelstrom";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs";

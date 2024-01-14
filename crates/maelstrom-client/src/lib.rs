@@ -219,7 +219,7 @@ impl DigestRepositoryContents {
     }
 }
 
-const CACHED_IMAGE_FILE_NAME: &str = "meticulous-cached-digests.toml";
+const CACHED_IMAGE_FILE_NAME: &str = "maelstrom-cached-digests.toml";
 
 struct DigestRespository {
     fs: Fs,

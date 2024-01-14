@@ -13,7 +13,7 @@ let
 in
 
 rustPlatform.buildRustPackage {
-  pname = "meticulous";
+  pname = "maelstrom";
   version = cargoToml.workspace.package.version;
 
   src = ./.;
@@ -47,8 +47,8 @@ rustPlatform.buildRustPackage {
   doCheck = false;
 
   meta = with lib; {
-    description = "Meticulous clustered job runner";
-    homepage = "https://github.com/meticulous-software/meticulous";
+    description = "Maelstrom clustered job runner";
+    homepage = "https://github.com/maelstrom-software/maelstrom";
     license = licenses.bsd3;
     maintainers = with maintainers; [ philiptaron ];
   };

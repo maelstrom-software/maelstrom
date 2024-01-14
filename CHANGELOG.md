@@ -11,19 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 - The `--include` and `--exclude` long option names for `-i` and `-x`.
-  [Issue #119](https://github.com/meticulous-software/meticulous/issues/119)
+  [Issue #119](https://github.com/maelstrom-software/maelstrom/issues/119)
 - The `-l` short option for `--list-tests`.
-  [Issue #110](https://github.com/meticulous-software/meticulous/issues/110)
+  [Issue #110](https://github.com/maelstrom-software/maelstrom/issues/110)
 
 #### Changed
 
 - The `--list-packages` option has been renamed to `--list-binaries`, since it
   shows all of the test executables that can be run, and there can be multiple
   executables in a package.
-  [Issue #111](https://github.com/meticulous-software/meticulous/issues/111)
+  [Issue #111](https://github.com/maelstrom-software/maelstrom/issues/111)
 - A new `--list-packages` option has been added that just shows selected
   packages.
-  [Issue #113](https://github.com/meticulous-software/meticulous/issues/113)
+  [Issue #113](https://github.com/maelstrom-software/maelstrom/issues/113)
 - Clarified the help message for `-i` and `-x`.
 - To use subcommands. There are now two subcommands: `run` and `list`. `run`
   takes `-q`, `-i`, `-x`, and `-P` flags. `list` takes `-i`, `-x`, and `-P`
@@ -31,16 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type of artifact to list. The `-v`, `-h`, and `-b` flags remain at the top
   level. The `quiet` configuration option also has moved into a new sub-section
   for the run command in `cargo-maelstrom.toml`.
-  [Issue #118](https://github.com/meticulous-software/meticulous/issues/118)
+  [Issue #118](https://github.com/maelstrom-software/maelstrom/issues/118)
 
 #### Fixed
 
 - A bug in `--list-binaries` (previously `--list-packages`) has been fixed that
   could lead to duplicate listings of the same type.
-  [Issue #112](https://github.com/meticulous-software/meticulous/issues/112)
+  [Issue #112](https://github.com/maelstrom-software/maelstrom/issues/112)
 - A bug when listing or running when the filter patterns exclude everything.
   Work was still done when no work should have been done.
-  [Issue #120](https://github.com/meticulous-software/meticulous/issues/120)
+  [Issue #120](https://github.com/maelstrom-software/maelstrom/issues/120)
 
 ## [0.3.0] - 2024-01-09
 
@@ -57,12 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A new test pattern language. The language can be used to select which test
   cases to run and which test binaries to build.
-  [Issue #91](https://github.com/meticulous-software/meticulous/issues/91)
+  [Issue #91](https://github.com/maelstrom-software/maelstrom/issues/91)
 - New `-i` and `-x` options to specify include and exclude filters.
-  [Issue #92](https://github.com/meticulous-software/meticulous/issues/92)
+  [Issue #92](https://github.com/maelstrom-software/maelstrom/issues/92)
 - New `--list-tests` option to list which tests would be run without actually
   running them. This may cause some test binaries to be built.
-  [Issue #93](https://github.com/meticulous-software/meticulous/issues/93)
+  [Issue #93](https://github.com/maelstrom-software/maelstrom/issues/93)
 - New `--list-packages` option to list which packages match the given filters.
   This will not build any test binaries.
 
@@ -79,7 +79,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The JSON language used to specify jobs. This now has all of the features of
   the language used by `cargo-maelstrom`, including specifying parts of an image
   to use.
-  [Issue #103](https://github.com/meticulous-software/meticulous/issues/103)
+  [Issue #103](https://github.com/maelstrom-software/maelstrom/issues/103)
 
 ## [0.2.0] - 2023-12-15
 
@@ -90,14 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This CHANGELOG file.
 - Ability to set working directory for jobs. This can be specified in
   `cargo metest` and `maelstrom-client`.
-  [Issue #89](https://github.com/meticulous-software/meticulous/issues/89).
+  [Issue #89](https://github.com/maelstrom-software/maelstrom/issues/89).
 - Ability to specify uid and gid for jobs. This can be specified in `cargo
   metest` and `maelstrom-client`.
-  [Issue #51](https://github.com/meticulous-software/meticulous/issues/51).
+  [Issue #51](https://github.com/maelstrom-software/maelstrom/issues/51).
 - Ability to specify a writable root file system. Any changes made will be
   discarded when the job completes. This can be specified in `cargo metest` and
   `maelstrom-client`.
-  [Issue #70](https://github.com/meticulous-software/meticulous/issues/70).
+  [Issue #70](https://github.com/maelstrom-software/maelstrom/issues/70).
 
 ### `cargo-maelstrom`
 
@@ -106,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` flag.
 - Ability to specify what to include from an image: layers, environment, and/or
   working directory.
-  [Issue #90](https://github.com/meticulous-software/meticulous/issues/90).
+  [Issue #90](https://github.com/maelstrom-software/maelstrom/issues/90).
 
 #### Fixed
 
@@ -140,7 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Rust test runner that uses the clustered job runner: `cargo-maelstrom`.
 - A bunch of other library packages that are used internally.
 
-[unreleased]: https://github.com/meticulous-software/meticulous/compare/v0.3.0...HEAD
-[0.3.0]: https://github.com/meticulous-software/meticulous/compare/v0.2.0...v0.3.0
-[0.2.0]: https://github.com/meticulous-software/meticulous/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/meticulous-software/meticulous/releases/tag/v0.1.0
+[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/maelstrom-software/maelstrom/releases/tag/v0.1.0
