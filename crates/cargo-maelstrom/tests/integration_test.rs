@@ -1,10 +1,10 @@
 use anyhow::Result;
 use assert_matches::assert_matches;
-use cargo_metest::test_listing::{
+use cargo_maelstrom::test_listing::{
     load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
     LAST_TEST_LISTING_NAME,
 };
-use cargo_metest::{
+use cargo_maelstrom::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},

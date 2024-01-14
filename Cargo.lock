@@ -658,7 +658,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "cargo-metest"
+name = "cargo-maelstrom"
 version = "0.4.0-dev"
 dependencies = [
  "anyhow",

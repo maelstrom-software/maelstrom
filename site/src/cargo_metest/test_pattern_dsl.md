@@ -1,6 +1,6 @@
 # Test Pattern DSL
 
-This domain-specific language has been designed specifically for `cargo-metest`
+This domain-specific language has been designed specifically for `cargo-maelstrom`
 to let users easily describe a set of tests to run.
 
 If you are a fan of formal explanations check out the
@@ -109,7 +109,7 @@ These other expressions are useful occasionally
 - **`true`, `all`, `any`**: selects all tests
 - **`false`, `none`**: selects no tests
 
-When you provide no filter to `cargo-metest` it acts as if typed `cargo metest
+When you provide no filter to `cargo-maelstrom` it acts as if typed `cargo metest
 -i all`
 
 ## Abbreviations

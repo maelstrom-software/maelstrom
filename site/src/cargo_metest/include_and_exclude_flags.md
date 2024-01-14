@@ -1,6 +1,6 @@
 # `--include` and `--exclude` Flags
 
-These flags are about filtering which tests `cargo-metest` runs.
+These flags are about filtering which tests `cargo-maelstrom` runs.
 
 The `--include` and `--exclude` flags (shorted as `-i` and `-x`) accept a
 snippet of the [Test Pattern DSL](./test_pattern_dsl.md). The `-i` flag includes
@@ -16,7 +16,7 @@ this more explicitly it is something like
 ```
 
 ## Working with Workspaces
-When you specify a filter a package, `cargo-metest` will only build the matching
+When you specify a filter a package, `cargo-maelstrom` will only build the matching
 packages. This can be a useful tip to remember when trying to run a single test.
 
 If we were to run something like
@@ -24,7 +24,7 @@ If we were to run something like
 cargo metest -i "name.equals(foobar)"
 ```
 
-`cargo-metest` would run any test which has the name "foobar". A test with this
+`cargo-maelstrom` would run any test which has the name "foobar". A test with this
 name could be found in any of the packages in the workspace, so it is forced to
 build all of them. But if I happened to know that only one package has this
 test, the `baz` package, I would be better off running the following instead.
@@ -33,5 +33,5 @@ test, the `baz` package, I would be better off running the following instead.
 cargo metest -i "package.equals(baz) && name.equals(foobar)"
 ```
 
-Now since I specified that I only care about the "baz" package, `cargo-metest`
+Now since I specified that I only care about the "baz" package, `cargo-maelstrom`
 will only bother to build that package.

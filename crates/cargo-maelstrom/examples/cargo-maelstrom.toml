@@ -1,12 +1,12 @@
-# Example config for cargo metest.
+# Example config for cargo maelstrom.
 #
-# Save this as <workspace-root>/.cache/cargo-metest.toml or wherever you
+# Save this as <workspace-root>/.cache/cargo-maelstrom.toml or wherever you
 # specify the config file using the --config-file or -c option.
 
 # The host and port of the broker.
 #
 # Can also be specified via the `--broker` or `-b` command-line options, or via
-# the CARGO_METEST_BROKER environment variable.
+# the CARGO_MAELSTROM_BROKER environment variable.
 #
 # There is no default. This option must be specified.
 #
@@ -22,7 +22,7 @@ broker = "[::1]:1234"
 # status bar will be output.
 #
 # Can also be specified via the `--quiet` or `-q` command-line options, or via
-# the CARGO_METEST_RUN environment variable like this: CARGO_METEST_RUN={quiet = true}
+# the CARGO_MAELSTROM_RUN environment variable like this: CARGO_MAELSTROM_RUN={quiet = true}
 #
 # Default: false
 # Examples:

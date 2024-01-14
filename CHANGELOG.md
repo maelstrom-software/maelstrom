@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### `cargo-metest`
+### `cargo-maelstrom`
 
 #### Added
 - The `--include` and `--exclude` long option names for `-i` and `-x`.
@@ -30,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flags. `list` also takes an optional positional argument to indicate what
   type of artifact to list. The `-v`, `-h`, and `-b` flags remain at the top
   level. The `quiet` configuration option also has moved into a new sub-section
-  for the run command in `cargo-metest.toml`.
+  for the run command in `cargo-maelstrom.toml`.
   [Issue #118](https://github.com/meticulous-software/meticulous/issues/118)
 
 #### Fixed
@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ability to create a build environment using [`nix`](https://nixos.org).
 - Renamed `maelstrom-client` binary to `maelstrom-client-cli`.
 
-### `cargo-metest`
+### `cargo-maelstrom`
 
 #### Added
 
@@ -77,7 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Changed
 
 - The JSON language used to specify jobs. This now has all of the features of
-  the language used by `cargo-metest`, including specifying parts of an image
+  the language used by `cargo-maelstrom`, including specifying parts of an image
   to use.
   [Issue #103](https://github.com/meticulous-software/meticulous/issues/103)
 
@@ -99,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `maelstrom-client`.
   [Issue #70](https://github.com/meticulous-software/meticulous/issues/70).
 
-### `cargo-metest`
+### `cargo-maelstrom`
 
 #### Added
 
@@ -119,7 +119,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worked on. There is an new, "pop-up", status bar when tar files are being
   generated. Plus other small improvements.
 - Initial progress bar accuracy by remembering how many tests there were the
-  last time `cargo-metest` was run.
+  last time `cargo-maelstrom` was run.
 
 #### Changed
 
@@ -137,7 +137,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Binaries for the clustered job runner: `maelstrom-worker`,
   `maelstrom-broker`, and `maelstrom-client`.
 - Client library for communicating with the broker: `maelstrom-client`.
-- A Rust test runner that uses the clustered job runner: `cargo-metest`.
+- A Rust test runner that uses the clustered job runner: `cargo-maelstrom`.
 - A bunch of other library packages that are used internally.
 
 [unreleased]: https://github.com/meticulous-software/meticulous/compare/v0.3.0...HEAD

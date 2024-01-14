@@ -1,6 +1,6 @@
 # Installation
 This is split up into two different installations processes. One for the
-clustered job runner, and another for cargo-metest
+clustered job runner, and another for cargo-maelstrom
 
 - [Clustered Job Runner](./install/clustered_job_runner.md)
-- [cargo-metest](./install/cargo_metest.md)
+- [cargo-maelstrom](./install/cargo_maelstrom.md)

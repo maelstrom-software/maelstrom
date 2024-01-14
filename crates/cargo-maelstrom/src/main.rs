@@ -1,11 +1,11 @@
 use anyhow::{Context as _, Result};
-use cargo_metadata::Metadata as CargoMetadata;
-use cargo_metest::{
+use cargo_maelstrom::{
     config::{Config, ConfigOptions, RunConfigOptions},
     main_app_new,
     progress::DefaultProgressDriver,
     ListAction, MainAppDeps,
 };
+use cargo_metadata::Metadata as CargoMetadata;
 use clap::{Args, Parser, Subcommand};
 use console::Term;
 use figment::{
@@ -25,11 +25,11 @@ use std::{
 /// The meticulous client. This process sends work to the broker to be executed by workers.
 #[derive(Parser, Debug)]
 #[command(version)]
-#[command(bin_name = "cargo metest")]
+#[command(bin_name = "cargo maelstrom")]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line. If not set, the file
-    /// .config/cargo-metest.toml in the workspace root will be used, if it exists.
+    /// .config/cargo-maelstrom.toml in the workspace root will be used, if it exists.
     #[arg(short = 'c', long)]
     config_file: Option<PathBuf>,
 
@@ -113,7 +113,7 @@ fn config(config_file: impl AsRef<Path>, cli_options: ConfigOptions) -> Result<C
     Figment::new()
         .merge(Serialized::defaults(ConfigOptions::default()))
         .merge(Toml::file(config_file))
-        .merge(Env::prefixed("CARGO_METEST_"))
+        .merge(Env::prefixed("CARGO_MAELSTROM_"))
         .merge(Serialized::globals(cli_options))
         .extract()
         .map_err(|mut e| {
@@ -153,7 +153,7 @@ pub fn main() -> Result<ExitCode> {
         None => cargo_metadata
             .workspace_root
             .join(".config")
-            .join("cargo-metest.toml")
+            .join("cargo-maelstrom.toml")
             .into(),
     };
 
