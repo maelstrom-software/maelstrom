@@ -1,5 +1,5 @@
-# What is Meticulous?
-Meticulous is a Rust test runner build on top of a general-purpose clustered job
+# What is Maelstrom?
+Maelstrom is a Rust test runner build on top of a general-purpose clustered job
 runner.
 
 It can be used as an alternate way to run tests for your Rust project that uses
@@ -9,7 +9,7 @@ cargo. It provides some advantages over using plain cargo alone.
 - Distributed. Compute from many machines can be utilized.
 - Isolation. Tests are run in their own lightweight containers.
 
-Meticulous itself is split up into a few different pieces of software.
+Maelstrom itself is split up into a few different pieces of software.
 
 - **The Broker**. This is the central brain of the clustered job runner. Clients
   and Workers connect to it.

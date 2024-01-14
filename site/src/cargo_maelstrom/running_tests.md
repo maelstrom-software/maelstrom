@@ -72,7 +72,7 @@ amount of tests that will be run with subsequent invocations.
 ## File Digests
 Files uploaded to the broker are identified via a hash of the file contents.
 Calculating these hashes can be time consuming so `cargo-maelstrom` caches this
-information. This can be found in `target/meticulous-cached-digests.toml`. The
+information. This can be found in `target/maelstrom-cached-digests.toml`. The
 cache works by recording the hash and the mtime of the file from when the hash
 was calculated. If the file has a different mtime than what is recorded, the
 entry is known to be stale.

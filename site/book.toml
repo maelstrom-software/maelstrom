@@ -1,6 +1,6 @@
 [book]
-authors = ["Meticulous Contributors"]
+authors = ["Maelstrom Contributors"]
 language = "en"
 multilingual = false
 src = "src"
-title = "Meticulous Documentation"
+title = "Maelstrom Documentation"

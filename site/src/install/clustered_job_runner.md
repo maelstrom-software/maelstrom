@@ -26,8 +26,8 @@ cargo install wasm-bindgen-cli wasm-opt
 Now we can install the broker
 
 ```bash
-export METICULOUS_GITHUB="https://github.com/meticulous-software/meticulous.git"
-cargo install --git $METICULOUS_GITHUB maelstrom-broker
+export GITHUB_URL="https://github.com/maelstrom-software/maelstrom.git"
+cargo install --git $GITHUB_URL maelstrom-broker
 ```
 
 It is best to not run the service as root, so we will create a new user to use
@@ -48,7 +48,7 @@ fill it with the following contents.
 
 ```language-systemd
 [Unit]
-Description=Meticulous Broker
+Description=Maelstrom Broker
 
 [Service]
 User=maelstrom-broker
@@ -89,8 +89,8 @@ First make sure you've installed [Rust](https://www.rust-lang.org/tools/install)
 Install the worker with
 
 ```bash
-export METICULOUS_GITHUB="https://github.com/meticulous-software/meticulous.git"
-cargo install --git $METICULOUS_GITHUB maelstrom-worker
+export GITHUB_URL="https://github.com/maelstrom-software/maelstrom.git"
+cargo install --git $GITHUB_URL maelstrom-worker
 ```
 
 It is best to not run the service as root, so we will create a new user to use
@@ -111,7 +111,7 @@ fill it with the following contents.
 
 ```language-systemd
 [Unit]
-Description=Meticulous Worker
+Description=Maelstrom Worker
 
 [Service]
 User=maelstrom-worker
