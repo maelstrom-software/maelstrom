@@ -1,7 +1,7 @@
 # Test Pattern DSL
 
-This domain-specific language has been designed specifically for `cargo-maelstrom`
-to let users easily describe a set of tests to run.
+This domain-specific language has been designed specifically for
+`cargo-maelstrom` to let users easily describe a set of tests to run.
 
 If you are a fan of formal explanations check out the
 [BNF](./test_pattern_dsl/bnf.md). Otherwise, this page will attempt to give a
@@ -62,7 +62,8 @@ Here are some examples
 
 - `!name.equals(foobar)` only tests not named foobar
 - `package.equals(foo) && name.equals(bar)` test(s) named bar in package foo
-- `package.equals(foo) - name.equals(bar)` tests in package foo except ones named bar
+- `package.equals(foo) - name.equals(bar)` tests in package foo except ones
+  named bar
 
 When combining multiple operators, parenthesis are allowed to control the
 precedence.

@@ -16,22 +16,24 @@ this more explicitly it is something like
 ```
 
 ## Working with Workspaces
-When you specify a filter a package, `cargo-maelstrom` will only build the matching
-packages. This can be a useful tip to remember when trying to run a single test.
+When you specify a filter with a package, `cargo-maelstrom` will only build the
+matching packages. This can be a useful tip to remember when trying to run a
+single test.
 
 If we were to run something like
 ```bash
 cargo maelstrom run -i "name.equals(foobar)"
 ```
 
-`cargo-maelstrom` would run any test which has the name "foobar". A test with this
-name could be found in any of the packages in the workspace, so it is forced to
-build all of them. But if I happened to know that only one package has this
-test, the `baz` package, I would be better off running the following instead.
+`cargo-maelstrom` would run any test which has the name "foobar". A test with
+this name could be found in any of the packages in the workspace, so it is
+forced to build all of them. But if we happened to know that only one package has
+this test, the `baz` package, we would be better off running the following
+instead.
 
 ```bash
 cargo maelstrom run -i "package.equals(baz) && name.equals(foobar)"
 ```
 
-Now since I specified that I only care about the "baz" package, `cargo-maelstrom`
-will only bother to build that package.
+Now since we specified that we only care about the "baz" package,
+`cargo-maelstrom` will only bother to build that package.
