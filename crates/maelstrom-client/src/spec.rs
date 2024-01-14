@@ -1,6 +1,6 @@
 //! Provide utilities for evaluating job specification directives.
 //!
-//! The job specification directives for `cargo-maelstrom` and the CLI differ in a number of ways, but
+//! The job specification directives for `cargo-metest` and the CLI differ in a number of ways, but
 //! also have a number of similar constructs. This module includes utilities for those similar
 //! constructs.
 
