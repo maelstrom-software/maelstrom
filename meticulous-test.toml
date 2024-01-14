@@ -12,7 +12,7 @@ mounts = [
 devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
-filter = "package.equals(cargo-metest)"
+filter = "package.equals(cargo-maelstrom)"
 image.name = "rust"
 image.use = ["layers", "environment"]
 enable_loopback = true

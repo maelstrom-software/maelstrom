@@ -46,7 +46,7 @@ this repository and use `cargo install`.
 Something like this should work:
 
 ```sh
-for i in meticulous-{broker,worker,client} cargo-metest; do
+for i in meticulous-{broker,worker,client} cargo-maelstrom; do
     cargo install --git https://github.com/meticulous-software/meticulous.git $i
 done
 ```

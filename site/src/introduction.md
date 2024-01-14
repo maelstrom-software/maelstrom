@@ -17,15 +17,15 @@ Meticulous itself is split up into a few different pieces of software.
   the actual job (or test.)
 - **The Client**. There are one or many instances of these. This is what
   connects to the broker and submits jobs.
-- **cargo-metest**. This is our cargo replacement which submits tests as jobs by
+- **cargo-maelstrom**. This is our cargo replacement which submits tests as jobs by
   acting as a client.
 
 # What will this book cover?
 This guide will attempt to cover the following topics:
 
 - Basic Install. How do you install and configure this for your own projects.
-  Both setting up the clustered job runner and using cargo-metest
-- cargo-metest configuration. Sometimes extra configuration is needed to make
+  Both setting up the clustered job runner and using cargo-maelstrom
+- cargo-maelstrom configuration. Sometimes extra configuration is needed to make
   tests run successfully, this will cover how to do that.
 - Clustered job runner management. How clustered job runner works and how to get
   insight into the job running process.
