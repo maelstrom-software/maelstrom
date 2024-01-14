@@ -13,8 +13,8 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_client::DefaultClientDriver;
 use maelstrom_util::process::ExitCode;
-use meticulous_client::DefaultClientDriver;
 use std::{
     env,
     io::IsTerminal as _,

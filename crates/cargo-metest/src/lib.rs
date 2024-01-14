@@ -14,9 +14,9 @@ use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{JobSpec, NonEmpty, Sha256Digest};
+use maelstrom_client::{spec::ImageConfig, Client, ClientDriver};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
-use meticulous_client::{spec::ImageConfig, Client, ClientDriver};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
     TestListingProgress, TestListingProgressNoSpinner,

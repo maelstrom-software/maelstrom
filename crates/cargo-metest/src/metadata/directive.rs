@@ -3,7 +3,7 @@ use anyhow::Result;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
 };
-use meticulous_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
+use maelstrom_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, str};
 

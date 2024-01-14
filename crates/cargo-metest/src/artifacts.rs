@@ -2,8 +2,8 @@ use crate::progress::ProgressIndicator;
 use anyhow::Result;
 use indicatif::ProgressBar;
 use maelstrom_base::Sha256Digest;
+use maelstrom_client::Client;
 use maelstrom_util::fs::Fs;
-use meticulous_client::Client;
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},

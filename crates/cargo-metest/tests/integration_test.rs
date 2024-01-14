@@ -16,8 +16,8 @@ use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobSpec, JobStatus, JobStringResult, JobSuccess,
 };
+use maelstrom_client::{Client, ClientDeps, ClientDriver};
 use maelstrom_util::{config::BrokerAddr, fs::Fs};
-use meticulous_client::{Client, ClientDeps, ClientDriver};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     cell::RefCell,

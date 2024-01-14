@@ -30,7 +30,7 @@ layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-filter = "package.equals(meticulous-client)"
+filter = "package.equals(maelstrom-client)"
 layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 

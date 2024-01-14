@@ -1,6 +1,6 @@
 use super::ProgressIndicator;
 use anyhow::Result;
-use meticulous_client::Client;
+use maelstrom_client::Client;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},

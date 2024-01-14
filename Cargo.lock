@@ -678,10 +678,10 @@ dependencies = [
  "lddtree",
  "maelstrom-base",
  "maelstrom-broker",
+ "maelstrom-client",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",
- "meticulous-client",
  "regex",
  "regex-macro",
  "serde",
@@ -2388,6 +2388,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-client"
+version = "0.4.0-dev"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "directories",
+ "enumset",
+ "figment",
+ "gethostname 0.4.3",
+ "indicatif",
+ "maelstrom-base",
+ "maelstrom-container",
+ "maelstrom-test",
+ "maelstrom-util",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_repr",
+ "serde_with",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tuple",
+]
+
+[[package]]
 name = "maelstrom-client-cli"
 version = "0.4.0-dev"
 dependencies = [
@@ -2398,9 +2426,9 @@ dependencies = [
  "figment",
  "indicatif",
  "maelstrom-base",
+ "maelstrom-client",
  "maelstrom-test",
  "maelstrom-util",
- "meticulous-client",
  "serde",
  "serde_json",
  "serde_with",
@@ -2578,34 +2606,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "meticulous-client"
-version = "0.4.0-dev"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "directories",
- "enumset",
- "figment",
- "gethostname 0.4.3",
- "indicatif",
- "maelstrom-base",
- "maelstrom-container",
- "maelstrom-test",
- "maelstrom-util",
- "regex",
- "serde",
- "serde_json",
- "serde_repr",
- "serde_with",
- "sha2",
- "tempfile",
- "tokio",
- "toml",
- "tuple",
 ]
 
 [[package]]

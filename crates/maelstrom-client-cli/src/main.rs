@@ -9,14 +9,14 @@ use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
+use maelstrom_client::{
+    spec::{std_env_lookup, ImageConfig},
+    Client, DefaultClientDriver,
+};
 use maelstrom_client_cli::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
-};
-use meticulous_client::{
-    spec::{std_env_lookup, ImageConfig},
-    Client, DefaultClientDriver,
 };
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;

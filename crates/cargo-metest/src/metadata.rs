@@ -5,8 +5,8 @@ use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
 use maelstrom_base::Utf8PathBuf;
 use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
+use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use maelstrom_util::fs::Fs;
-use meticulous_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
 

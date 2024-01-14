@@ -59,7 +59,7 @@ lddtree = "0.3"
 maplit = "1"
 maelstrom-base = { path = "crates/maelstrom-base" }
 maelstrom-broker = { path = "crates/maelstrom-broker" }
-meticulous-client = { path = "crates/meticulous-client" }
+maelstrom-client = { path = "crates/maelstrom-client" }
 maelstrom-container = { path = "crates/maelstrom-container" }
 maelstrom-plot = { path = "crates/maelstrom-plot" }
 maelstrom-test = { path = "crates/maelstrom-test" }

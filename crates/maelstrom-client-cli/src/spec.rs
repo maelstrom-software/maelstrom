@@ -3,7 +3,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
     Sha256Digest, UserId, Utf8PathBuf,
 };
-use meticulous_client::spec::{
+use maelstrom_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};

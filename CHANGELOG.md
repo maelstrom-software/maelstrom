@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 - Ability to create a build environment using [`nix`](https://nixos.org).
-- Renamed `meticulous-client` binary to `maelstrom-client-cli`.
+- Renamed `maelstrom-client` binary to `maelstrom-client-cli`.
 
 ### `cargo-metest`
 
@@ -89,14 +89,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This CHANGELOG file.
 - Ability to set working directory for jobs. This can be specified in
-  `cargo metest` and `meticulous-client`.
+  `cargo metest` and `maelstrom-client`.
   [Issue #89](https://github.com/meticulous-software/meticulous/issues/89).
 - Ability to specify uid and gid for jobs. This can be specified in `cargo
-  metest` and `meticulous-client`.
+  metest` and `maelstrom-client`.
   [Issue #51](https://github.com/meticulous-software/meticulous/issues/51).
 - Ability to specify a writable root file system. Any changes made will be
   discarded when the job completes. This can be specified in `cargo metest` and
-  `meticulous-client`.
+  `maelstrom-client`.
   [Issue #70](https://github.com/meticulous-software/meticulous/issues/70).
 
 ### `cargo-metest`
@@ -135,8 +135,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Binaries for the clustered job runner: `maelstrom-worker`,
-  `maelstrom-broker`, and `meticulous-client`.
-- Client library for communicating with the broker: `meticulous-client`.
+  `maelstrom-broker`, and `maelstrom-client`.
+- Client library for communicating with the broker: `maelstrom-client`.
 - A Rust test runner that uses the clustered job runner: `cargo-metest`.
 - A bunch of other library packages that are used internally.
 
