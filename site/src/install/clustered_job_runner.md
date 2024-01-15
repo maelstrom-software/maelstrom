@@ -76,8 +76,13 @@ command-line arguments. The HTTP port has a web interface we can use to monitor
 and interact with the broker. The other port is the port workers and clients
 will connect to.
 
-It stores its caches in `<working-directory>/.cache/maelstrom-broker`. For the
-given set-up this should be `/home/maelstrom-broker/.cache/maelstrom-broker`
+The broker can be configured using CLI, environment variables, or configuration
+file, for more information see [Broker
+Configuration](./clustered_job_runner_management/broker.md)
+
+By default it stores its caches in
+`<working-directory>/.cache/maelstrom-broker`. For the given set-up this should
+be `/home/maelstrom-broker/.cache/maelstrom-broker`
 
 ## Installing the Worker
 
@@ -138,7 +143,12 @@ sudo systemctl start maelstrom-worker
 The worker should be running now. To make sure you can pull up the broker web UI
 and it should now show that there is 1 worker.
 
-It stores its caches in `<working-directory>/.cache/maelstrom-worker`. For the
-given set-up this should be `/home/maelstrom-worker/.cache/maelstrom-worker`
+The worker can be configured using CLI, environment variables, or configuration
+file, for more information see [Worker
+Configuration](./clustered_job_runner_management/worker.md)
+
+By default it stores its caches in
+`<working-directory>/.cache/maelstrom-worker`. For the given set-up this should
+be `/home/maelstrom-worker/.cache/maelstrom-worker`
 
 Repeat these steps for every machine you wish to install a worker on to.

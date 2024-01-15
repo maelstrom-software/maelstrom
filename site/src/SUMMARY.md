@@ -16,4 +16,8 @@
         - [Layers](./cargo_maelstrom/layers.md)
         - [Container Images](./cargo_maelstrom/container_images.md)
 - [Clustered Job Runner Management](./clustered_job_runner_management.md)
+    - [Broker Configuration](./clustered_job_runner_management/broker.md)
+    - [Worker Configuration](./clustered_job_runner_management/worker.md)
+    - [Web UI](./clustered_job_runner_management/web_ui.md)
     - [Job States](./clustered_job_runner_management/job_states.md)
+    - [Log Level](./clustered_job_runner_management/log_level.md)

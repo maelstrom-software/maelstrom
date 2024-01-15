@@ -6,15 +6,34 @@ tests are run.
 
 ## Configuring `cargo-maelstrom`
 
+`cargo-maelstrom` can be configured with the CLI, environment variables, or a
+configuration file.
+
 The default configuration file path is
 `<workspace-root>/.config/cargo-maelstrom.toml`. This path can be overridden by
 passing the `--config-file` option via the CLI.
 
-It can contain the following options
-- `broker`: the address of the broker to connect to
+Here are the different options
+
+- [`broker`](#the-broker-field): the address of the broker to connect to
 - `[run]`: contains options about the `run` sub-command
-    - `quiet`: if true, use quiet mode by default
-    (See [Running Tests >> Terminal Output](./running_tests.html#terminal-output))
+    - [`quiet`](#the-quiet-field): if true, use quiet mode
+
+## The `broker` Field
+- TOML: `broker = "1.2.3.4:9000"`
+- CLI: `--broker 1.2.3.4:9000`
+- ENV: `CARGO_MAELSTROM_BROKER=1.2.3.4:9000`
+
+This is the network address of the broker which the client will attempt to
+establish a connection to.
+
+## The `quiet` Field
+- TOML: `quiet = true`
+- CLI: `--quiet`
+- ENV: `CARGO_MAELSTROM_RUN="{ quiet = true }"`
+
+Enables quiet mode. See
+[Running Tests >> Terminal Output](./running_tests.html#terminal-output).
 
 ## Configuring Tests
 
