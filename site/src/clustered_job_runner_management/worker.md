@@ -50,6 +50,14 @@ This is the path on the local file-system where the worker will store its cache.
 This is the target number of bytes for the cache. This bound isn't followed
 strictly, so it's best to be conservative.
 
+## The `inline_limit` Field
+- TOML: `inline_limit = 1048576`
+- CLI: `--inline-limit 1048576`
+- ENV: `MAELSTROM_WORKER_INLINE_LIMIT=1048576`
+
+This is the maximum number of bytes to be allowed when streaming back stdout and
+stderr from a job.
+
 ## The `log_level` Field
 - TOML: `log_level = "error"`
 - CLI: `--log-level error`
