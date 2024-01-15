@@ -1,4 +1,4 @@
-# Worker Management
+# Worker Configuration
 
 The worker can be configured via CLI, configuration file, or environment
 variables. CLI or environment variables override configuration file values.

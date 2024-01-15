@@ -17,8 +17,8 @@ Maelstrom itself is split up into a few different pieces of software.
   the actual job (or test.)
 - **The Client**. There are one or many instances of these. This is what
   connects to the broker and submits jobs.
-- **`cargo-maelstrom`**. This is our cargo test replacement which submits tests
-  as jobs by acting as a client.
+- [`cargo-maelstrom`](./cargo_maelstrom.md). This is our cargo test
+  replacement which submits tests as jobs by acting as a client.
 
 # What will this book cover?
 This guide will attempt to cover the following topics:
@@ -27,5 +27,6 @@ This guide will attempt to cover the following topics:
   Both setting up the clustered job runner and using cargo-maelstrom
 - `cargo-maelstrom` configuration. Sometimes extra configuration is needed to make
   tests run successfully, this will cover how to do that.
-- Clustered job runner management. How clustered job runner works and how to get
-  insight into the job running process.
+- Clustered job runner management. How clustered job runner works, how to
+  configured it, and how to use the
+    [web UI](./clustered_job_runner_management/web_ui.md).

@@ -1,4 +1,4 @@
- Installing Clustered Job Runner
+# Installing Clustered Job Runner
 
 This covers setting up the clustered job runner. This is split into two
 different parts.
@@ -78,7 +78,7 @@ will connect to.
 
 The broker can be configured using CLI, environment variables, or configuration
 file, for more information see [Broker
-Configuration](./clustered_job_runner_management/broker.md)
+Configuration](../clustered_job_runner_management/broker.md)
 
 By default it stores its caches in
 `<working-directory>/.cache/maelstrom-broker`. For the given set-up this should
@@ -145,7 +145,7 @@ and it should now show that there is 1 worker.
 
 The worker can be configured using CLI, environment variables, or configuration
 file, for more information see [Worker
-Configuration](./clustered_job_runner_management/worker.md)
+Configuration](../clustered_job_runner_management/worker.md)
 
 By default it stores its caches in
 `<working-directory>/.cache/maelstrom-worker`. For the given set-up this should

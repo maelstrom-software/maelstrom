@@ -1,4 +1,4 @@
-# Broker Management
+# Broker Configuration
 
 The broker can be configured via CLI, configuration file, or environment
 variables. CLI or environment variables override configuration file values.
