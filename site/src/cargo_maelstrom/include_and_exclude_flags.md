@@ -11,7 +11,7 @@ line.
 The tests that are ran are the set which matches any of the `-i` flag patterns
 after subtracting the set which matches any of the `-x` flag patterns. To put
 this more explicitly it is something like
-```
+```maelstrom-test-pattern
 (i_flag_1 || i_flag_2 || ...) - (x_flag_1 || x_flag_2 || ...)
 ```
 

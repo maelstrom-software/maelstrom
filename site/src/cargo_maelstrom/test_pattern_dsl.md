@@ -39,13 +39,13 @@ Using a property and a matcher we can craft a simple expression. For example, if
 we want to only select tests which have the exact name "my_mod::my_test" we do
 something like.
 
-```
+```maelstrom-test-pattern
 name.equals(my_mod::my_test)
 ```
 
 Or if we want to select all the tests in the package called foobar, we would do
 
-```
+```maelstrom-test-pattern
 package.equals(foobar)
 ```
 
@@ -69,12 +69,12 @@ When combining multiple operators, parenthesis are allowed to control the
 precedence.
 
 To select tests named foo or bar in package baz, you can do
-```
+```maelstrom-test-pattern
 (name.equals(foo) || name.equals(bar)) && package.equals(baz)
 ```
 
 To select tests named bar in package baz or tests named foo from any package
-```
+```maelstrom-test-pattern
 name.equals(foo) || (name.equals(bar) && package.equals(baz))
 ```
 
@@ -119,7 +119,7 @@ The matchers and selectors can be shortened as long as it doesn't create some
 ambiguity
 
 For example, the following are all the same
-```
+```maelstrom-test-pattern
 name.equals(foo)
 name.eq(foo)
 n.eq(foo)
