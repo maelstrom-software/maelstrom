@@ -37,7 +37,7 @@ It can contain the following options
     - [`mounts`](./execution_environment.md#the-mounts-field) Mounts done in
         test container
     - [`devices`](./execution_environment.md#the-devices-field) Devices created
-      in test contaienr
+      in test container
     - [`environment`](./execution_environment.md#the-environment-field)
         Environment variables set in test container
     - [`added_environment`](
@@ -47,12 +47,13 @@ It can contain the following options
         Devices added to existing ones
     - [`added_mounts`](./execution_environment.md#the-added_mounts-field)
         Mounts added to existing ones
-    - [`layers`](#the-layers-field) File-system layers when running the test
-    - [`added_layers`](#the-added_layers-field) File-system layers appended to
-        existing ones
-    - [`include_shared_libraries`](#the-include_shared_libraries-field) Include
+    - [`layers`](./layers.md#the-layers-field) File-system layers when running
+        the test
+    - [`added_layers`](./layers.md#the-added_layers-field) File-system layers
+        appended to existing ones
+    - [`include_shared_libraries`](./layers.md#the-include_shared_libraries-field) Include
         shared libraries in dependency layer.
-    - [`image`](#the-image-field) Configures a container image
+    - [`image`](./container_images.md#the-image-field) Configures a container image
 
 ### The `[directives]` section
 
@@ -69,3 +70,5 @@ filter = "package.equals(foo) && name.equals(bar)"
 
 This contains a [Test Pattern DSL](./test_pattern_dsl.md) snippet that describes
 the set of tests the directive applies to.
+
+If the `filter` field isn't provided, it defaults to matching all tests.
