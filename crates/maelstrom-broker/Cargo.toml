@@ -26,6 +26,7 @@ slog-async.workspace = true
 bytesize.workspace = true
 
 [dev-dependencies]
+assert_matches.workspace = true
 enum-map.workspace = true
 itertools.workspace = true
 maplit.workspace = true

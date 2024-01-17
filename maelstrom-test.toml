@@ -12,6 +12,14 @@ mounts = [
 devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
+filter = "package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)"
+layers = ["proc-and-tmp.tar"]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "proc", mount_point = "/proc" },
+]
+
+[[directives]]
 filter = "package.equals(cargo-maelstrom)"
 image.name = "rust"
 image.use = ["layers", "environment"]

@@ -57,10 +57,22 @@ pub enum Identity {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct Mode(u32);
+pub struct Mode(pub u32);
+
+impl From<Mode> for u32 {
+    fn from(m: Mode) -> u32 {
+        m.0
+    }
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
-pub struct UnixTimestamp(u64);
+pub struct UnixTimestamp(pub i64);
+
+impl From<UnixTimestamp> for i64 {
+    fn from(t: UnixTimestamp) -> Self {
+        t.0
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ManifestEntryMetadata {

@@ -130,6 +130,58 @@ impl Metadata {
     }
 }
 
+#[cfg(unix)]
+impl std::os::unix::fs::MetadataExt for Metadata {
+    fn dev(&self) -> u64 {
+        self.inner.dev()
+    }
+    fn ino(&self) -> u64 {
+        self.inner.ino()
+    }
+    fn mode(&self) -> u32 {
+        self.inner.mode()
+    }
+    fn nlink(&self) -> u64 {
+        self.inner.nlink()
+    }
+    fn uid(&self) -> u32 {
+        self.inner.uid()
+    }
+    fn gid(&self) -> u32 {
+        self.inner.gid()
+    }
+    fn rdev(&self) -> u64 {
+        self.inner.rdev()
+    }
+    fn size(&self) -> u64 {
+        self.inner.size()
+    }
+    fn atime(&self) -> i64 {
+        self.inner.atime()
+    }
+    fn atime_nsec(&self) -> i64 {
+        self.inner.atime_nsec()
+    }
+    fn mtime(&self) -> i64 {
+        self.inner.mtime()
+    }
+    fn mtime_nsec(&self) -> i64 {
+        self.inner.mtime_nsec()
+    }
+    fn ctime(&self) -> i64 {
+        self.inner.ctime()
+    }
+    fn ctime_nsec(&self) -> i64 {
+        self.inner.ctime_nsec()
+    }
+    fn blksize(&self) -> u64 {
+        self.inner.blksize()
+    }
+    fn blocks(&self) -> u64 {
+        self.inner.blocks()
+    }
+}
+
 fn is_not_found_err(err: &anyhow::Error) -> bool {
     let std_err = err.root_cause().downcast_ref::<std::io::Error>();
     matches!(std_err, Some(e) if e.kind() == std::io::ErrorKind::NotFound)

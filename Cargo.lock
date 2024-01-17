@@ -2364,6 +2364,7 @@ name = "maelstrom-broker"
 version = "0.4.0-dev"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "bincode",
  "bytesize",
  "clap",
