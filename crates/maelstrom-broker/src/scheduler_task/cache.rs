@@ -5,7 +5,10 @@
 //! request, by the client.
 
 use bytesize::ByteSize;
-use maelstrom_base::{proto::ArtifactMetadata, ClientId, JobId, Sha256Digest};
+use maelstrom_base::{
+    proto::{ArtifactMetadata, ArtifactType},
+    ClientId, JobId, Sha256Digest,
+};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -131,6 +134,7 @@ enum CacheEntry {
     /// currently being used by at least one job. We refcount this state since there may be
     /// multiple jobs that use the same artifact.
     InUse {
+        type_: ArtifactType,
         bytes_used: u64,
         refcount: NonZeroU32,
     },
@@ -139,6 +143,7 @@ enum CacheEntry {
     /// using it. [`Cache`] hands out `priority` values in a monotonically increasing way. This are
     /// used by the [`Heap`] to implement an LRU cache.
     InHeap {
+        type_: ArtifactType,
         bytes_used: u64,
         priority: u64,
         heap_index: HeapIndex,
@@ -251,6 +256,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                         result.entries.insert(
                             digest.clone(),
                             CacheEntry::InHeap {
+                                type_: ArtifactType::Tar,
                                 bytes_used,
                                 priority: result.next_priority,
                                 heap_index: HeapIndex::default(),
@@ -298,12 +304,14 @@ impl<FsT: CacheFs> Cache<FsT> {
                 GetArtifact::Success
             }
             CacheEntry::InHeap {
+                type_,
                 bytes_used,
                 heap_index,
                 ..
             } => {
                 let heap_index = *heap_index;
                 *entry = CacheEntry::InUse {
+                    type_: *type_,
                     bytes_used: *bytes_used,
                     refcount: NonZeroU32::new(1).unwrap(),
                 };
@@ -328,12 +336,17 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// this vec has its own refcount, and thus, [`Self::decrement_refcount`] must be called
     /// appropriately.
     pub fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId> {
-        let ArtifactMetadata { digest, size, .. } = artifact_meta;
+        let ArtifactMetadata {
+            type_,
+            digest,
+            size,
+        } = artifact_meta;
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
         match self.entries.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
+                    type_,
                     bytes_used: size,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
@@ -348,6 +361,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                         let refcount = NonZeroU32::new(u32::try_from(jids.len()).unwrap()).unwrap();
                         std::mem::swap(jids, &mut result);
                         *entry = CacheEntry::InUse {
+                            type_,
                             bytes_used: size,
                             refcount,
                         };
@@ -380,6 +394,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
         let entry = self.entries.get_mut(&digest).unwrap();
         let CacheEntry::InUse {
+            type_,
             bytes_used,
             refcount,
         } = entry
@@ -390,6 +405,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             Some(new_refcount) => *refcount = new_refcount,
             None => {
                 *entry = CacheEntry::InHeap {
+                    type_: *type_,
                     bytes_used: *bytes_used,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
@@ -433,6 +449,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         let Some(CacheEntry::InUse {
             refcount,
             bytes_used,
+            ..
         }) = self.entries.get_mut(digest)
         else {
             return Err(GetArtifactForWorkerError);
