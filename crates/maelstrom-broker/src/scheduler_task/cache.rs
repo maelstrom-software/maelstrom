@@ -4,6 +4,7 @@
 //! worker may query the broker to fill in holes in its own cache. The broker's cache is filled, on
 //! request, by the client.
 
+use anyhow::{anyhow, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{
     proto::{ArtifactMetadata, ArtifactType},
@@ -195,6 +196,19 @@ impl HeapDeps for CacheMap {
     }
 }
 
+fn artifact_metadata_try_from_path(fs: &mut impl CacheFs, path: &Path) -> Result<ArtifactMetadata> {
+    let path_str = path.file_name().unwrap().to_string_lossy();
+    let (left, right) = path_str.split_once('.').ok_or(anyhow!("bad filename"))?;
+    let type_ = ArtifactType::try_from_extension(right).ok_or(anyhow!("bad extension"))?;
+    let digest = left.parse::<Sha256Digest>()?;
+    let size = fs.file_size(path);
+    Ok(ArtifactMetadata {
+        type_,
+        digest,
+        size,
+    })
+}
+
 /// The actual cache.
 ///
 /// Two caches shouldn't use the same working directory simultaneously. However, one cache can use
@@ -247,27 +261,20 @@ impl<FsT: CacheFs> Cache<FsT> {
         path.push("sha256");
         result.fs.mkdir_recursively(&path);
         for child in result.fs.read_dir(&path) {
-            if let Some((left, right)) =
-                child.file_name().unwrap().to_string_lossy().split_once('.')
-            {
-                if right == "tar" {
-                    if let Ok(digest) = left.parse::<Sha256Digest>() {
-                        let bytes_used = result.fs.file_size(&child);
-                        result.entries.insert(
-                            digest.clone(),
-                            CacheEntry::InHeap {
-                                type_: ArtifactType::Tar,
-                                bytes_used,
-                                priority: result.next_priority,
-                                heap_index: HeapIndex::default(),
-                            },
-                        );
-                        result.heap.push(&mut result.entries, digest);
-                        result.next_priority = result.next_priority.checked_add(1).unwrap();
-                        result.bytes_used = result.bytes_used.checked_add(bytes_used).unwrap();
-                        continue;
-                    }
-                }
+            if let Ok(artifact_meta) = artifact_metadata_try_from_path(&mut result.fs, &child) {
+                result.entries.insert(
+                    artifact_meta.digest.clone(),
+                    CacheEntry::InHeap {
+                        type_: artifact_meta.type_,
+                        bytes_used: artifact_meta.size,
+                        priority: result.next_priority,
+                        heap_index: HeapIndex::default(),
+                    },
+                );
+                result.heap.push(&mut result.entries, artifact_meta.digest);
+                result.next_priority = result.next_priority.checked_add(1).unwrap();
+                result.bytes_used = result.bytes_used.checked_add(artifact_meta.size).unwrap();
+                continue;
             }
             result.fs.remove_file(&child);
         }
@@ -342,7 +349,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             size,
         } = artifact_meta;
         let mut result = vec![];
-        let new_path = self.cache_path(&digest);
+        let new_path = self.cache_path(&digest, type_);
         match self.entries.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
@@ -447,16 +454,17 @@ impl<FsT: CacheFs> Cache<FsT> {
         digest: &Sha256Digest,
     ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
         let Some(CacheEntry::InUse {
-            refcount,
+            type_,
             bytes_used,
-            ..
+            refcount,
         }) = self.entries.get_mut(digest)
         else {
             return Err(GetArtifactForWorkerError);
         };
         *refcount = refcount.checked_add(1).unwrap();
         let bytes_used = *bytes_used;
-        Ok((self.cache_path(digest), bytes_used))
+        let type_ = *type_;
+        Ok((self.cache_path(digest, type_), bytes_used))
     }
 
     /// Return a [`PathBuf`] that contains the temporary directory for the cache. This is where
@@ -468,10 +476,10 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Return the path of a cached artifact.
-    fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
+    fn cache_path(&self, digest: &Sha256Digest, type_: ArtifactType) -> PathBuf {
         let mut path = self.root.clone();
         path.push("sha256");
-        path.push(format!("{digest}.tar"));
+        path.push(format!("{digest}.{}", type_.ext()));
         path
     }
 
@@ -481,10 +489,13 @@ impl<FsT: CacheFs> Cache<FsT> {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
+            let Some(CacheEntry::InHeap {
+                type_, bytes_used, ..
+            }) = self.entries.remove(&digest)
+            else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            self.fs.remove_file(&self.cache_path(&digest));
+            self.fs.remove_file(&self.cache_path(&digest, type_));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "digest" => %digest,

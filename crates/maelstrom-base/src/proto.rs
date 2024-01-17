@@ -54,6 +54,21 @@ pub enum ArtifactType {
     Tar,
 }
 
+impl ArtifactType {
+    pub fn try_from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "tar" => Some(Self::Tar),
+            _ => None,
+        }
+    }
+
+    pub fn ext(&self) -> &'static str {
+        match self {
+            Self::Tar => "tar",
+        }
+    }
+}
+
 /// Metadata about an artifact.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactMetadata {
