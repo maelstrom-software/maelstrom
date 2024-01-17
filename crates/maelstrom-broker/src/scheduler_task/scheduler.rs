@@ -608,7 +608,7 @@ mod tests {
     use maelstrom_base::proto::BrokerToWorker::{self, *};
     use maelstrom_test::*;
     use maplit::hashmap;
-    use std::{cell::RefCell, sync::Arc};
+    use std::{cell::RefCell, rc::Rc};
 
     #[derive(Clone, Debug, PartialEq)]
     enum TestMessage {
@@ -633,11 +633,12 @@ mod tests {
         messages: Vec<TestMessage>,
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
+        #[allow(clippy::type_complexity)]
         get_artifact_for_worker_returns:
             HashMap<Sha256Digest, Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>>,
     }
 
-    impl SchedulerCache for Arc<RefCell<TestState>> {
+    impl SchedulerCache for Rc<RefCell<TestState>> {
         fn get_artifact(&mut self, jid: JobId, digest: Sha256Digest) -> GetArtifact {
             self.borrow_mut()
                 .messages
@@ -684,13 +685,13 @@ mod tests {
                 .push(CacheGetArtifactForWorker(digest.clone()));
             self.borrow_mut()
                 .get_artifact_for_worker_returns
-                .get_mut(&digest)
+                .get_mut(digest)
                 .unwrap()
                 .remove(0)
         }
     }
 
-    impl SchedulerDeps for Arc<RefCell<TestState>> {
+    impl SchedulerDeps for Rc<RefCell<TestState>> {
         type ClientSender = TestClientSender;
         type WorkerSender = TestWorkerSender;
         type WorkerArtifactFetcherSender = TestWorkerArtifactFetcherSender;
@@ -723,13 +724,13 @@ mod tests {
     }
 
     struct Fixture {
-        test_state: Arc<RefCell<TestState>>,
-        scheduler: Scheduler<Arc<RefCell<TestState>>, Arc<RefCell<TestState>>>,
+        test_state: Rc<RefCell<TestState>>,
+        scheduler: Scheduler<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
     }
 
     impl Default for Fixture {
         fn default() -> Self {
-            let test_state = Arc::new(RefCell::new(TestState::default()));
+            let test_state = Rc::new(RefCell::new(TestState::default()));
             Fixture {
                 test_state: test_state.clone(),
                 scheduler: Scheduler::new(test_state),
@@ -738,6 +739,7 @@ mod tests {
     }
 
     impl Fixture {
+        #[allow(clippy::type_complexity)]
         fn new<const L: usize, const M: usize, const N: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
@@ -772,7 +774,7 @@ mod tests {
             );
         }
 
-        fn receive_message(&mut self, msg: Message<Arc<RefCell<TestState>>>) {
+        fn receive_message(&mut self, msg: Message<Rc<RefCell<TestState>>>) {
             self.scheduler.receive_message(&mut self.test_state, msg);
         }
     }

@@ -536,7 +536,7 @@ fn sorted_dir_listing(fs: &Fs, path: impl AsRef<Path>) -> Vec<String> {
                 .unwrap()
                 .into()
         })
-        .filter(|n: &String| !n.starts_with("."))
+        .filter(|n: &String| !n.starts_with('.'))
         .collect();
     listing.sort();
     listing
@@ -685,6 +685,7 @@ fn container_image_depot_update_image() {
         }),
     )
     .unwrap();
+    #[allow(clippy::disallowed_names)]
     let foo = depot
         .get_container_image("foo", "latest", ProgressBar::hidden())
         .unwrap();

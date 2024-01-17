@@ -877,7 +877,7 @@ mod tests {
             .unwrap()
             .start(
                 &self.spec,
-                InlineLimit::from(self.inline_limit),
+                self.inline_limit,
                 |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                 |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
             );

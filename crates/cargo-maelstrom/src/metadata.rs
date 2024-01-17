@@ -260,24 +260,18 @@ mod test {
             "#,
         )
         .unwrap();
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            false
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
+        assert!(all
+            .get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
+        assert!(!all
+            .get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
+        assert!(all
+            .get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
     }
 
     #[test]
@@ -298,24 +292,18 @@ mod test {
             "#,
         )
         .unwrap();
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            true
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
-                .unwrap()
-                .include_shared_libraries(),
-            false
-        );
+        assert!(all
+            .get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
+        assert!(all
+            .get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
+        assert!(!all
+            .get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
+            .unwrap()
+            .include_shared_libraries());
     }
 
     #[test]
@@ -332,23 +320,20 @@ mod test {
             "#,
         )
         .unwrap();
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
+        assert!(
+            !all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
                 .unwrap()
-                .enable_loopback,
-            false
+                .enable_loopback
         );
-        assert_eq!(
+        assert!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
                 .unwrap()
-                .enable_loopback,
-            true
+                .enable_loopback
         );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
+        assert!(
+            !all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
                 .unwrap()
-                .enable_loopback,
-            false
+                .enable_loopback
         );
     }
 
@@ -366,23 +351,20 @@ mod test {
             "#,
         )
         .unwrap();
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
+        assert!(
+            !all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
                 .unwrap()
-                .enable_writable_file_system,
-            false
+                .enable_writable_file_system
         );
-        assert_eq!(
+        assert!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
                 .unwrap()
-                .enable_writable_file_system,
-            true
+                .enable_writable_file_system
         );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
+        assert!(
+            !all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
                 .unwrap()
-                .enable_writable_file_system,
-            false
+                .enable_writable_file_system
         );
     }
 

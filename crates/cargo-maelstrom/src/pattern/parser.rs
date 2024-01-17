@@ -82,7 +82,7 @@ fn matcher_parameter_test() {
     test_it("((a)(b))", "(a)(b)");
 
     fn test_err(a: &str) {
-        assert!(matches!(parse_str!(MatcherParameter, a), Err(_)));
+        assert!(parse_str!(MatcherParameter, a).is_err());
     }
     test_err("[1)");
     test_err("(((hello))");
@@ -621,13 +621,10 @@ fn pattern_longer_boolean_expr() {
         "all || any || none",
         OrExpression::Or(
             SimpleSelectorName::All.into(),
-            Box::new(
-                OrExpression::Or(
-                    SimpleSelectorName::Any.into(),
-                    Box::new(SimpleSelectorName::None.into()),
-                )
-                .into(),
-            ),
+            Box::new(OrExpression::Or(
+                SimpleSelectorName::Any.into(),
+                Box::new(SimpleSelectorName::None.into()),
+            )),
         ),
     );
     test_it(

@@ -201,7 +201,7 @@ mod test {
     fn std_env_lookup_error() {
         let var = "AN_ENVIRONMENT_VARIABLE_2";
         let val = unsafe { std::ffi::OsString::from_encoded_bytes_unchecked(vec![0xff]) };
-        env::set_var(var, &val);
+        env::set_var(var, val);
         assert_eq!(
             format!("{}", std_env_lookup(var).unwrap_err()),
             r#"environment variable was not valid unicode: "\xFF""#

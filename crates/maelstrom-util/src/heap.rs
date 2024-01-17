@@ -240,7 +240,7 @@ mod tests {
     impl Fixture {
         fn validate_indices(&self) {
             for (idx, id) in self.heap.0.iter().enumerate() {
-                assert_eq!(self.elements.get(&id).unwrap().heap_index, HeapIndex(idx));
+                assert_eq!(self.elements.get(id).unwrap().heap_index, HeapIndex(idx));
             }
         }
 

@@ -86,7 +86,7 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
     fs.create_dir(&crates_dir).unwrap();
     for binary in &fake_tests.test_binaries {
         let crate_name = &binary.name;
-        let project_dir = crates_dir.join(&crate_name);
+        let project_dir = crates_dir.join(crate_name);
         fs.create_dir(&project_dir).unwrap();
         put_file(
             &fs,
@@ -144,18 +144,17 @@ fn test_path(spec: &JobSpec) -> TestPath {
     let binary = spec
         .program
         .as_str()
-        .split("/")
+        .split('/')
         .last()
         .unwrap()
-        .split("-")
+        .split('-')
         .next()
         .unwrap()
         .into();
     let test_name = spec
         .arguments
         .iter()
-        .filter(|a| !a.starts_with("-"))
-        .next()
+        .find(|a| !a.starts_with('-'))
         .unwrap()
         .clone();
     TestPath { binary, test_name }
@@ -217,7 +216,7 @@ impl FakeBrokerConnection {
                 }
                 ClientToBroker::JobStateCountsRequest => send_message(
                     &self.messages.stream,
-                    &BrokerToClient::JobStateCountsResponse(self.state.job_states.clone()),
+                    &BrokerToClient::JobStateCountsResponse(self.state.job_states),
                 ),
 
                 _ => (),
@@ -304,22 +303,17 @@ struct TestPath {
 
 impl FakeTests {
     fn all_test_paths(&self) -> impl Iterator<Item = (&FakeTestCase, TestPath)> + '_ {
-        self.test_binaries
-            .iter()
-            .map(|b| {
-                b.tests.iter().filter_map(|t| {
-                    (!t.ignored).then(|| {
-                        (
-                            t,
-                            TestPath {
-                                binary: b.name.clone(),
-                                test_name: t.name.clone(),
-                            },
-                        )
-                    })
-                })
+        self.test_binaries.iter().flat_map(|b| {
+            b.tests.iter().filter(|&t| !t.ignored).map(|t| {
+                (
+                    t,
+                    TestPath {
+                        binary: b.name.clone(),
+                        test_name: t.name.clone(),
+                    },
+                )
             })
-            .flatten()
+        })
     }
 
     fn get(&self, package_name: &str, case: &str) -> &FakeTestCase {
@@ -367,6 +361,7 @@ impl TestClientDriver {
 
 #[derive(Default, Clone)]
 struct TestProgressDriver<'scope> {
+    #[allow(clippy::type_complexity)]
     update_func: Rc<RefCell<Option<Box<dyn FnMut(JobStateCounts) -> Result<bool> + 'scope>>>>,
 }
 
@@ -393,6 +388,7 @@ impl<'scope> TestProgressDriver<'scope> {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_app(
     term: InMemoryTerm,
     fake_tests: FakeTests,
@@ -424,7 +420,7 @@ fn run_app(
         false, // stderr_color
         &workspace_root,
         &cargo_metadata.workspace_packages(),
-        b.address.clone(),
+        b.address,
         client_driver.clone(),
     )
     .unwrap();
@@ -534,6 +530,7 @@ fn run_all_tests_sync(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn list_all_tests_sync(
     tmp_dir: &TempDir,
     fake_tests: FakeTests,

@@ -487,7 +487,7 @@ mod tests {
                 .push(CacheGotArtifactFailure(digest.clone()));
             self.borrow_mut()
                 .got_artifact_failure_returns
-                .remove(&digest)
+                .remove(digest)
                 .unwrap()
         }
 
@@ -501,7 +501,7 @@ mod tests {
                 .push(CacheGotArtifactSuccess(digest.clone(), bytes_used));
             self.borrow_mut()
                 .got_artifact_success_returns
-                .remove(&digest)
+                .remove(digest)
                 .unwrap()
         }
 
