@@ -22,9 +22,9 @@ fn get_file<'fs>(
         channel_sender,
     ))?;
 
-    let (path, size) = channel_receiver.recv()??;
+    let (path, artifact_meta) = channel_receiver.recv()??;
     let f = fs.open_file(path)?;
-    Ok((f, size))
+    Ok((f, artifact_meta.size))
 }
 
 fn handle_one_message(

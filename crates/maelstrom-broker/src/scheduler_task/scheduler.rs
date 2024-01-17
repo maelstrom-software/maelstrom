@@ -40,7 +40,7 @@ pub trait SchedulerDeps {
     fn send_message_to_worker_artifact_fetcher(
         &mut self,
         sender: &mut Self::WorkerArtifactFetcherSender,
-        message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+        message: Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>,
     );
 }
 
@@ -69,7 +69,7 @@ pub trait SchedulerCache {
     fn get_artifact_for_worker(
         &mut self,
         digest: &Sha256Digest,
-    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError>;
+    ) -> Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>;
 }
 
 impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
@@ -92,7 +92,7 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
     fn get_artifact_for_worker(
         &mut self,
         digest: &Sha256Digest,
-    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
+    ) -> Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError> {
         self.get_artifact_for_worker(digest)
     }
 }
@@ -617,7 +617,10 @@ mod tests {
     enum TestMessage {
         ToClient(ClientId, BrokerToClient),
         ToWorker(WorkerId, BrokerToWorker),
-        ToWorkerArtifactFetcher(u32, Result<(PathBuf, u64), GetArtifactForWorkerError>),
+        ToWorkerArtifactFetcher(
+            u32,
+            Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>,
+        ),
         CacheGetArtifact(JobId, Sha256Digest),
         CacheGotArtifact(ArtifactMetadata, PathBuf),
         CacheDecrementRefcount(Sha256Digest),
@@ -637,8 +640,10 @@ mod tests {
         get_artifact_returns: HashMap<(JobId, Sha256Digest), Vec<GetArtifact>>,
         got_artifact_returns: HashMap<Sha256Digest, Vec<Vec<JobId>>>,
         #[allow(clippy::type_complexity)]
-        get_artifact_for_worker_returns:
-            HashMap<Sha256Digest, Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>>,
+        get_artifact_for_worker_returns: HashMap<
+            Sha256Digest,
+            Vec<Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>>,
+        >,
     }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
@@ -675,7 +680,7 @@ mod tests {
         fn get_artifact_for_worker(
             &mut self,
             digest: &Sha256Digest,
-        ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
+        ) -> Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError> {
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifactForWorker(digest.clone()));
@@ -711,7 +716,7 @@ mod tests {
         fn send_message_to_worker_artifact_fetcher(
             &mut self,
             sender: &mut TestWorkerArtifactFetcherSender,
-            message: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+            message: Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>,
         ) {
             self.borrow_mut()
                 .messages
@@ -741,7 +746,7 @@ mod tests {
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
             get_artifact_for_worker_returns: [(
                 Sha256Digest,
-                Vec<Result<(PathBuf, u64), GetArtifactForWorkerError>>,
+                Vec<Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>>,
             ); N],
         ) -> Self {
             let result = Self::default();
@@ -1546,12 +1551,23 @@ mod tests {
         get_artifact_for_worker,
         {
             Fixture::new([], [], [
-                (digest![42], vec![Ok(("/a/good/path".into(), 42))]),
+                (
+                    digest![42],
+                    vec![Ok(("/a/good/path".into(), ArtifactMetadata {
+                        type_: ArtifactType::Tar,
+                        digest: digest![42],
+                        size: 42
+                    }))]
+                ),
             ])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
-            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), 42))),
+            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), ArtifactMetadata {
+                type_: ArtifactType::Tar,
+                digest: digest![42],
+                size: 42
+            }))),
         }
     }
 

@@ -452,7 +452,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn get_artifact_for_worker(
         &mut self,
         digest: &Sha256Digest,
-    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
+    ) -> Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError> {
         let Some(CacheEntry::InUse {
             type_,
             bytes_used,
@@ -464,7 +464,14 @@ impl<FsT: CacheFs> Cache<FsT> {
         *refcount = refcount.checked_add(1).unwrap();
         let bytes_used = *bytes_used;
         let type_ = *type_;
-        Ok((self.cache_path(digest, type_), bytes_used))
+        Ok((
+            self.cache_path(digest, type_),
+            ArtifactMetadata {
+                type_,
+                digest: digest.clone(),
+                size: bytes_used,
+            },
+        ))
     }
 
     /// Return a [`PathBuf`] that contains the temporary directory for the cache. This is where
@@ -656,7 +663,7 @@ mod tests {
         fn get_artifact_for_worker(
             &mut self,
             digest: Sha256Digest,
-            expected: Result<(PathBuf, u64), GetArtifactForWorkerError>,
+            expected: Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>,
         ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
         }
@@ -1258,7 +1265,17 @@ mod tests {
             },
             short_path!("/z/tmp", 1, "tar"),
         );
-        fixture.get_artifact_for_worker(digest!(1), Ok((long_path!("/z/sha256", 1, "tar"), 42)));
+        fixture.get_artifact_for_worker(
+            digest!(1),
+            Ok((
+                long_path!("/z/sha256", 1, "tar"),
+                ArtifactMetadata {
+                    type_: ArtifactType::Tar,
+                    digest: digest!(1),
+                    size: 42,
+                },
+            )),
+        );
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
