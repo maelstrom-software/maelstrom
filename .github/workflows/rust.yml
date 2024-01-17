@@ -1,25 +1,37 @@
 name: Rust
 
-on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
+on: [ push ]
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
-
+  build_and_test:
+    name: Build and Test Maelstrom
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
-    - uses: DeterminateSystems/nix-installer-action@main
-    - name: Build Nix
-      run: nix build --verbose .
-    - name: Build
-      run: cargo build --verbose
-    - name: Run tests
-      run: cargo test --verbose
+    - name: Get Repository from Git
+      uses: actions/checkout@v3
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+    - name: Set up Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    - name: Check Nixpkgs Inputs
+      uses: DeterminateSystems/flake-checker-action@main
+      with:
+        fail-mode: true
+    - name: Set up Rust Cache
+      uses: actions/cache@v3
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: todos-app-${{ hashFiles('**/Cargo.lock') }}
+    - name: Check Rust Formatting
+      run: nix develop --command cargo fmt --check
+    - name: Test Rust Code
+      run: nix develop --command cargo test
+    - name: Build Rust Code
+      run: nix build
