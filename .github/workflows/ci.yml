@@ -32,10 +32,10 @@ jobs:
           target/
         key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
     - name: Check Rust Formatting
-      run: nix develop --ignore-env --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo fmt --check
+      run: nix develop --ignore-environment --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo fmt --check
     - name: Lint Rust Code
-      run: nix develop --ignore-env --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo clippy --all-targets --all-features
+      run: nix develop --ignore-environment --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo clippy --all-targets --all-features
     - name: Test Rust Code
-      run: nix develop --ignore-env --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo test
+      run: nix develop --ignore-environment --keep TERM --keep RUSTFLAGS --keep CARGO_TERM_COLOR --command cargo test
     - name: Build Rust Code
       run: nix build
