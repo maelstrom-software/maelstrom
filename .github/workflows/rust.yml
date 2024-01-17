@@ -28,7 +28,7 @@ jobs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/
-        key: todos-app-${{ hashFiles('**/Cargo.lock') }}
+        key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
     - name: Check Rust Formatting
       run: nix develop --command cargo fmt --check
     - name: Test Rust Code
