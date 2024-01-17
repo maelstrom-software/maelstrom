@@ -49,6 +49,15 @@ pub enum ClientToBroker {
     JobStateCountsRequest,
 }
 
+/// Metadata about an artifact.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ArtifactMetadata {
+    /// The digest of the contents
+    pub digest: Sha256Digest,
+    /// The size of the artifact in bytes
+    pub size: u64,
+}
+
 /// Message sent from the broker to an artifact fetcher. This will be in response to an
 /// [`ArtifactFetcherToBroker`] message. On success, the message contains the size of the artifact.
 /// The message is then be followed by exactly that many bytes of the artifact's body. On failure,
@@ -70,8 +79,8 @@ pub struct ArtifactFetcherToBroker(pub Sha256Digest);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BrokerToArtifactPusher(pub Result<(), String>);
 
-/// Message sent from an artifact pusher to the broker. It contains the digest of the artifact
-/// that is about to be pushed as well as its size. The body of the artifact will immediately
-/// follow this message. It will be answered with a [`BrokerToArtifactPusher`].
+/// Message sent from an artifact pusher to the broker. It contains metadata about the artifact
+/// that is about to be pushed. The body of the artifact will immediately follow this message. It
+/// will be answered with a [`BrokerToArtifactPusher`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
+pub struct ArtifactPusherToBroker(pub ArtifactMetadata);

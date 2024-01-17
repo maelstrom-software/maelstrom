@@ -18,19 +18,19 @@ fn handle_one_message(
     scheduler_sender: &SchedulerSender,
     cache_tmp_path: &Path,
 ) -> Result<()> {
-    let ArtifactPusherToBroker(digest, size) = msg;
+    let ArtifactPusherToBroker(artifact_meta) = msg;
     let mut tmp = tempfile::Builder::new()
-        .prefix(&digest.to_string())
+        .prefix(&artifact_meta.digest.to_string())
         .suffix(".tar")
         .tempfile_in(cache_tmp_path)?;
-    let fixed_size_reader = FixedSizeReader::new(socket, size);
+    let fixed_size_reader = FixedSizeReader::new(socket, artifact_meta.size);
     let mut sha_reader = Sha256Reader::new(fixed_size_reader);
     let copied = io::copy(&mut sha_reader, &mut tmp)?;
-    assert_eq!(copied, size);
+    assert_eq!(copied, artifact_meta.size);
     let (_, actual_digest) = sha_reader.finalize();
-    actual_digest.verify(&digest)?;
+    actual_digest.verify(&artifact_meta.digest)?;
     let (_, path) = tmp.keep()?;
-    scheduler_sender.send(SchedulerMessage::GotArtifact(digest.clone(), path, size))?;
+    scheduler_sender.send(SchedulerMessage::GotArtifact(artifact_meta, path))?;
     Ok(())
 }
 

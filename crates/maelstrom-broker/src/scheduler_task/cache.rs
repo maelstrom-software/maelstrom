@@ -5,7 +5,7 @@
 //! request, by the client.
 
 use bytesize::ByteSize;
-use maelstrom_base::{ClientId, JobId, Sha256Digest};
+use maelstrom_base::{proto::ArtifactMetadata, ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -327,18 +327,14 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// These were `JobId`s provided by previous calls to [`Self::get_artifact`]. Each entry in
     /// this vec has its own refcount, and thus, [`Self::decrement_refcount`] must be called
     /// appropriately.
-    pub fn got_artifact(
-        &mut self,
-        digest: Sha256Digest,
-        path: &Path,
-        bytes_used: u64,
-    ) -> Vec<JobId> {
+    pub fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId> {
+        let ArtifactMetadata { digest, size } = artifact_meta;
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
         match self.entries.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
-                    bytes_used,
+                    bytes_used: size,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
                 });
@@ -352,7 +348,7 @@ impl<FsT: CacheFs> Cache<FsT> {
                         let refcount = NonZeroU32::new(u32::try_from(jids.len()).unwrap()).unwrap();
                         std::mem::swap(jids, &mut result);
                         *entry = CacheEntry::InUse {
-                            bytes_used,
+                            bytes_used: size,
                             refcount,
                         };
                     }
@@ -364,10 +360,10 @@ impl<FsT: CacheFs> Cache<FsT> {
             }
         }
         self.fs.rename(path, &new_path);
-        self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
+        self.bytes_used = self.bytes_used.checked_add(size).unwrap();
         debug!(self.log, "cache added artifact";
             "digest" => %digest,
-            "artifact_bytes_used" => %ByteSize::b(bytes_used),
+            "artifact_bytes_used" => %ByteSize::b(size),
             "entries" => %self.entries.len(),
             "bytes_used" => %ByteSize::b(self.bytes_used),
             "byte_used_target" => %ByteSize::b(self.bytes_used_target)
@@ -599,19 +595,18 @@ mod tests {
 
         fn got_artifact(
             &mut self,
-            digest: Sha256Digest,
+            artifact_meta: ArtifactMetadata,
             path: PathBuf,
-            bytes_used: u64,
             expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
-            let result = self.cache.got_artifact(digest, &path, bytes_used);
+            let result = self.cache.got_artifact(artifact_meta, &path);
             assert_eq!(result, expected);
             self.expect_fs_operations(expected_fs_operations);
         }
 
-        fn got_artifact_ign(&mut self, digest: Sha256Digest, path: PathBuf, bytes_used: u64) {
-            _ = self.cache.got_artifact(digest, &path, bytes_used);
+        fn got_artifact_ign(&mut self, artifact_meta: ArtifactMetadata, path: PathBuf) {
+            _ = self.cache.got_artifact(artifact_meta, &path);
             self.clear_fs_operations();
         }
 
@@ -760,7 +755,13 @@ mod tests {
     fn get_artifact_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
+            short_path!("/z/tmp", 1, "tar"),
+        );
         fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Success, vec![]);
 
         // Refcount should be 2.
@@ -790,9 +791,11 @@ mod tests {
         // heap a bunch and never remove our artifact.
         for i in 0..10 {
             fixture.got_artifact(
-                digest!(i),
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
                 short_path!("/z/tmp", i, "tar"),
-                1,
                 vec![],
                 vec![Rename(
                     short_path!("/z/tmp", i, "tar"),
@@ -802,9 +805,11 @@ mod tests {
         }
         for i in 10..100 {
             fixture.got_artifact(
-                digest!(i),
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
                 short_path!("/z/tmp", i, "tar"),
-                1,
                 vec![],
                 vec![
                     Rename(
@@ -831,7 +836,13 @@ mod tests {
         fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Success, vec![]);
 
         fixture.get_artifact_ign(jid!(1, 1002), digest!(2));
-        fixture.got_artifact_ign(digest!(2), short_path!("/z/tmp", 2, "tar"), 1);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(2),
+                size: 1,
+            },
+            short_path!("/z/tmp", 2, "tar"),
+        );
 
         fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
     }
@@ -840,9 +851,11 @@ mod tests {
     fn got_artifact_no_entry() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 10,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            10,
             vec![],
             vec![Rename(
                 short_path!("/z/tmp", 1, "tar"),
@@ -864,9 +877,11 @@ mod tests {
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
         fixture.got_artifact(
-            digest!(2),
+            ArtifactMetadata {
+                digest: digest!(2),
+                size: 1,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            1,
             vec![],
             vec![
                 Rename(
@@ -884,9 +899,11 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 1..=10 {
             fixture.got_artifact(
-                digest!(i),
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
                 short_path!("/z/tmp", i, "tar"),
-                1,
                 vec![],
                 vec![Rename(
                     short_path!("/z/tmp", i, "tar"),
@@ -896,9 +913,11 @@ mod tests {
         }
         for i in 11..=20 {
             fixture.got_artifact(
-                digest!(i),
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
                 short_path!("/z/tmp", i, "tar"),
-                1,
                 vec![],
                 vec![
                     Rename(
@@ -919,9 +938,11 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
 
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 10,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            10,
             vec![jid!(1, 1001), jid!(2, 1001), jid!(1, 1002)],
             vec![Rename(
                 short_path!("/z/tmp", 1, "tar"),
@@ -949,9 +970,11 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(2));
         fixture.got_artifact(
-            digest!(2),
+            ArtifactMetadata {
+                digest: digest!(2),
+                size: 1,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            1,
             vec![jid!(1, 1001)],
             vec![
                 Rename(
@@ -968,12 +991,20 @@ mod tests {
     fn got_artifact_already_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 10);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 10,
+            },
+            short_path!("/z/tmp", 1, "tar"),
+        );
 
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 10,
+            },
             short_path!("/z/tmp", 2, "tar"),
-            10,
             vec![],
             vec![Remove(short_path!("/z/tmp", 2, "tar"))],
         );
@@ -994,9 +1025,11 @@ mod tests {
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 10,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            10,
             vec![],
             vec![Remove(short_path!("/z/tmp", 1, "tar"))],
         );
@@ -1007,15 +1040,23 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 0..10 {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
-            fixture.got_artifact_ign(digest!(i), short_path!("/z/tmp", i, "tar"), 1);
+            fixture.got_artifact_ign(
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
+                short_path!("/z/tmp", i, "tar"),
+            );
             fixture.decrement_refcount(digest!(i), vec![]);
         }
         for i in 10..100 {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact(
-                digest!(i),
+                ArtifactMetadata {
+                    digest: digest!(i),
+                    size: 1,
+                },
                 short_path!("/z/tmp", i, "tar"),
-                1,
                 vec![jid!(1, 1000 + i)],
                 vec![
                     Rename(
@@ -1048,7 +1089,13 @@ mod tests {
     #[should_panic]
     fn decrement_refcount_in_heap_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
+            short_path!("/z/tmp", 1, "tar"),
+        );
         fixture.decrement_refcount_ign(digest!(1));
     }
 
@@ -1058,9 +1105,11 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            1,
             vec![],
             vec![
                 Rename(
@@ -1080,9 +1129,11 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1003), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            1,
             vec![],
             vec![
                 Rename(
@@ -1104,9 +1155,11 @@ mod tests {
         fixture.get_artifact(jid!(1, 1003), digest!(1), GetArtifact::Get, vec![]);
         fixture.get_artifact(jid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
         fixture.got_artifact(
-            digest!(1),
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
             short_path!("/z/tmp", 1, "tar"),
-            1,
             vec![jid!(3, 1003), jid!(1, 1003), jid!(3, 1003)],
             vec![Rename(
                 short_path!("/z/tmp", 1, "tar"),
@@ -1134,7 +1187,13 @@ mod tests {
     #[test]
     fn get_artifact_for_worker_in_cache() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 1);
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 1);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 1,
+            },
+            short_path!("/z/tmp", 1, "tar"),
+        );
         fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
@@ -1142,7 +1201,13 @@ mod tests {
     fn get_artifact_for_worker_in_use() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(digest!(1), short_path!("/z/tmp", 1, "tar"), 42);
+        fixture.got_artifact_ign(
+            ArtifactMetadata {
+                digest: digest!(1),
+                size: 42,
+            },
+            short_path!("/z/tmp", 1, "tar"),
+        );
         fixture.get_artifact_for_worker(digest!(1), Ok((long_path!("/z/sha256", 1, "tar"), 42)));
 
         // Refcount should be 2.
