@@ -1,5 +1,7 @@
 # Maelstrom
 
+[![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
+
 Maelstrom is an extremely fast Rust test runner built on top of a
 general-purpose clustered job runner. Test runners for other languages will
 follow soon.
