@@ -12,6 +12,7 @@ enumset.workspace = true
 hex.workspace = true
 nonempty.workspace = true
 serde.workspace = true
+serde_repr.workspace = true
 strum.workspace = true
 
 [dev-dependencies]

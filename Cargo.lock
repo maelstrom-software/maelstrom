@@ -2354,6 +2354,7 @@ dependencies = [
  "hex",
  "nonempty",
  "serde",
+ "serde_repr",
  "serde_test",
  "strum",
 ]

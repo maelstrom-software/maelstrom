@@ -2,9 +2,10 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest,
+    ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest, Utf8PathBuf,
 };
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// The first message sent by a connector to the broker. It identifies what the connector is, and
 /// provides any relevant information.
@@ -49,15 +50,65 @@ pub enum ClientToBroker {
     JobStateCountsRequest,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum Identity {
+    Name(String),
+    Id(u64),
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct Mode(u32);
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct UnixTimestamp(u64);
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ManifestEntryMetadata {
+    pub size: u64,
+    pub mode: Mode,
+    pub user: Identity,
+    pub group: Identity,
+    pub mtime: UnixTimestamp,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ManifestEntryData {
+    Directory,
+    File(Option<Sha256Digest>),
+    Symlink(Vec<u8>),
+    Hardlink(Utf8PathBuf),
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ManifestEntry {
+    pub path: Utf8PathBuf,
+    pub metadata: ManifestEntryMetadata,
+    pub data: ManifestEntryData,
+}
+
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[repr(u32)]
+pub enum ManifestVersion {
+    #[default]
+    V0 = 0,
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ArtifactType {
+    /// A .tar file
     Tar,
+    /// A serialized `Manifest`
+    Manifest,
+    /// Binary blob used by manifests
+    Binary,
 }
 
 impl ArtifactType {
     pub fn try_from_extension(ext: &str) -> Option<Self> {
         match ext {
             "tar" => Some(Self::Tar),
+            "manifest" => Some(Self::Manifest),
+            "bin" => Some(Self::Binary),
             _ => None,
         }
     }
@@ -65,6 +116,8 @@ impl ArtifactType {
     pub fn ext(&self) -> &'static str {
         match self {
             Self::Tar => "tar",
+            Self::Manifest => "manifest",
+            Self::Binary => "bin",
         }
     }
 }
