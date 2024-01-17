@@ -16,6 +16,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - uses: DeterminateSystems/nix-installer-action@main
+    - name: Build Nix
+      run: nix build .
     - name: Build
       run: cargo build --verbose
     - name: Run tests
