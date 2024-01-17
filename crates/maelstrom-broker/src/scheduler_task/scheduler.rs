@@ -1548,7 +1548,7 @@ mod tests {
     }
 
     script_test! {
-        get_artifact_for_worker,
+        get_artifact_for_worker_tar,
         {
             Fixture::new([], [], [
                 (
@@ -1565,6 +1565,30 @@ mod tests {
             CacheGetArtifactForWorker(digest![42]),
             ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), ArtifactMetadata {
                 type_: ArtifactType::Tar,
+                digest: digest![42],
+                size: 42
+            }))),
+        }
+    }
+
+    script_test! {
+        get_artifact_for_worker_manifest,
+        {
+            Fixture::new([], [], [
+                (
+                    digest![42],
+                    vec![Ok(("/a/good/path".into(), ArtifactMetadata {
+                        type_: ArtifactType::Manifest,
+                        digest: digest![42],
+                        size: 42
+                    }))]
+                ),
+            ])
+        },
+        GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
+            CacheGetArtifactForWorker(digest![42]),
+            ToWorkerArtifactFetcher(1, Ok(("/a/good/path".into(), ArtifactMetadata {
+                type_: ArtifactType::Manifest,
                 digest: digest![42],
                 size: 42
             }))),

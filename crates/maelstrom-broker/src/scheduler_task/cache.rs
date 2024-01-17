@@ -1061,27 +1061,36 @@ mod tests {
         fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
     }
 
-    #[test]
-    fn got_artifact_already_in_cache() {
+    fn got_artifact_already_in_cache(ext: &str, type_: ArtifactType) {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "tar")],
+                vec![long_path!("/z/sha256", 1, ext)],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), 1000)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, ext), 1000)]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
         fixture.got_artifact(
             ArtifactMetadata {
-                type_: ArtifactType::Tar,
+                type_,
                 digest: digest!(1),
                 size: 10,
             },
-            short_path!("/z/tmp", 1, "tar"),
+            short_path!("/z/tmp", 1, ext),
             vec![],
-            vec![Remove(short_path!("/z/tmp", 1, "tar"))],
+            vec![Remove(short_path!("/z/tmp", 1, ext))],
         );
+    }
+
+    #[test]
+    fn got_artifact_already_in_cache_tar() {
+        got_artifact_already_in_cache("tar", ArtifactType::Tar);
+    }
+
+    #[test]
+    fn got_artifact_already_in_cache_manifest() {
+        got_artifact_already_in_cache("manifest", ArtifactType::Manifest);
     }
 
     #[test]
