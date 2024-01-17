@@ -49,9 +49,15 @@ pub enum ClientToBroker {
     JobStateCountsRequest,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ArtifactType {
+    Tar,
+}
+
 /// Metadata about an artifact.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactMetadata {
+    pub type_: ArtifactType,
     /// The digest of the contents
     pub digest: Sha256Digest,
     /// The size of the artifact in bytes

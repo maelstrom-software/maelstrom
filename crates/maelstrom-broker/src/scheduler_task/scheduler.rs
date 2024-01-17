@@ -605,7 +605,10 @@ mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use itertools::Itertools;
-    use maelstrom_base::proto::BrokerToWorker::{self, *};
+    use maelstrom_base::proto::{
+        ArtifactType,
+        BrokerToWorker::{self, *},
+    };
     use maelstrom_test::*;
     use maplit::hashmap;
     use std::{cell::RefCell, rc::Rc};
@@ -1506,15 +1509,25 @@ mod tests {
             ToClient(cid![1], BrokerToClient::TransferArtifact(digest![44])),
         };
 
-        GotArtifact(ArtifactMetadata { digest: digest![43], size: 100 }, "/z/tmp/foo".into()) => {
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Tar,
+                digest: digest![43],
+                size: 100
+            }, "/z/tmp/foo".into()) => {
             CacheGotArtifact(
-                ArtifactMetadata { digest: digest![43], size: 100 },
+                ArtifactMetadata { type_: ArtifactType::Tar, digest: digest![43], size: 100 },
                 "/z/tmp/foo".into()
             ),
         };
-        GotArtifact(ArtifactMetadata { digest: digest![44], size: 100 }, "/z/tmp/bar".into()) => {
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Tar,
+                digest: digest![44],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
             CacheGotArtifact(
-                ArtifactMetadata { digest: digest![44], size: 100 },
+                ArtifactMetadata { type_: ArtifactType::Tar, digest: digest![44], size: 100 },
                 "/z/tmp/bar".into()
             ),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42, 43, 44]])),

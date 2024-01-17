@@ -4,8 +4,8 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use maelstrom_base::{
     proto::{
-        ArtifactMetadata, ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient,
-        ClientToBroker, Hello,
+        ArtifactMetadata, ArtifactPusherToBroker, ArtifactType, BrokerToArtifactPusher,
+        BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
     ClientJobId, JobSpec, JobStringResult, Sha256Digest,
@@ -35,7 +35,11 @@ fn push_one_artifact(broker_addr: BrokerAddr, path: PathBuf, digest: Sha256Diges
     net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
     net::write_message_to_socket(
         &mut stream,
-        ArtifactPusherToBroker(ArtifactMetadata { digest, size }),
+        ArtifactPusherToBroker(ArtifactMetadata {
+            type_: ArtifactType::Tar,
+            digest,
+            size,
+        }),
     )?;
     let copied = io::copy(&mut file, &mut stream)?;
     assert_eq!(copied, size);

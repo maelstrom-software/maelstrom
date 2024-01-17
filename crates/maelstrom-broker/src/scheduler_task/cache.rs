@@ -328,7 +328,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// this vec has its own refcount, and thus, [`Self::decrement_refcount`] must be called
     /// appropriately.
     pub fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId> {
-        let ArtifactMetadata { digest, size } = artifact_meta;
+        let ArtifactMetadata { digest, size, .. } = artifact_meta;
         let mut result = vec![];
         let new_path = self.cache_path(&digest);
         match self.entries.entry(digest.clone()) {
@@ -483,6 +483,7 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maelstrom_base::proto::ArtifactType;
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
@@ -757,6 +758,7 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -792,6 +794,7 @@ mod tests {
         for i in 0..10 {
             fixture.got_artifact(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -806,6 +809,7 @@ mod tests {
         for i in 10..100 {
             fixture.got_artifact(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -838,6 +842,7 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1002), digest!(2));
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(2),
                 size: 1,
             },
@@ -852,6 +857,7 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 10,
             },
@@ -878,6 +884,7 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(2),
                 size: 1,
             },
@@ -900,6 +907,7 @@ mod tests {
         for i in 1..=10 {
             fixture.got_artifact(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -914,6 +922,7 @@ mod tests {
         for i in 11..=20 {
             fixture.got_artifact(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -939,6 +948,7 @@ mod tests {
 
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 10,
             },
@@ -971,6 +981,7 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(2));
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(2),
                 size: 1,
             },
@@ -993,6 +1004,7 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 10,
             },
@@ -1001,6 +1013,7 @@ mod tests {
 
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 10,
             },
@@ -1026,6 +1039,7 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 10,
             },
@@ -1042,6 +1056,7 @@ mod tests {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact_ign(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -1053,6 +1068,7 @@ mod tests {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact(
                 ArtifactMetadata {
+                    type_: ArtifactType::Tar,
                     digest: digest!(i),
                     size: 1,
                 },
@@ -1091,6 +1107,7 @@ mod tests {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -1106,6 +1123,7 @@ mod tests {
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -1130,6 +1148,7 @@ mod tests {
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -1156,6 +1175,7 @@ mod tests {
         fixture.get_artifact(jid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
         fixture.got_artifact(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -1189,6 +1209,7 @@ mod tests {
         let mut fixture = Fixture::new(TestCacheFs::default(), 1);
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 1,
             },
@@ -1203,6 +1224,7 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(
             ArtifactMetadata {
+                type_: ArtifactType::Tar,
                 digest: digest!(1),
                 size: 42,
             },
