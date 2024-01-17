@@ -1,6 +1,6 @@
 name: Rust
 
-on: [ push ]
+on: [ push, workflow_dispatch ]
 env:
   CARGO_TERM_COLOR: always
 
