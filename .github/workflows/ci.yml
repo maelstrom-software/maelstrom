@@ -3,6 +3,8 @@ name: CI
 on: [ push, workflow_dispatch ]
 env:
   CARGO_TERM_COLOR: always
+  # Make sure CI fails on all warnings, including Clippy lints
+  RUSTFLAGS: "-Dwarnings"
 
 jobs:
   build_and_test:
@@ -31,6 +33,8 @@ jobs:
         key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
     - name: Check Rust Formatting
       run: nix develop --command cargo fmt --check
+    - name: Lint Rust Code
+      run: nix develop --command cargo clippy --all-targets --all-features
     - name: Test Rust Code
       run: nix develop --command cargo test
     - name: Build Rust Code
