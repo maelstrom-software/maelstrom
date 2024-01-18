@@ -2,8 +2,12 @@
 //! workers.
 
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
+use anyhow::Result;
 use maelstrom_base::{
-    proto::{ArtifactMetadata, BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    proto::{
+        ArtifactMetadata, ArtifactType, BrokerToClient, BrokerToWorker, ClientToBroker,
+        ManifestEntryData, ManifestReader, WorkerToBroker,
+    },
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
@@ -17,6 +21,7 @@ use maelstrom_util::{
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt::{self, Debug, Formatter},
+    io,
     path::{Path, PathBuf},
 };
 
@@ -59,6 +64,12 @@ pub trait SchedulerCache {
     /// See [`super::cache::Cache::got_artifact`].
     fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId>;
 
+    /// See [`super::cache::Cache::read_manifest`].
+    fn read_manifest(
+        &mut self,
+        digest: Sha256Digest,
+    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>>;
+
     /// See [`super::cache::Cache::decrement_refcount`].
     fn decrement_refcount(&mut self, digest: Sha256Digest);
 
@@ -79,6 +90,13 @@ impl<FsT: CacheFs> SchedulerCache for Cache<FsT> {
 
     fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId> {
         self.got_artifact(artifact_meta, path)
+    }
+
+    fn read_manifest(
+        &mut self,
+        digest: Sha256Digest,
+    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
+        self.read_manifest(digest)
     }
 
     fn decrement_refcount(&mut self, digest: Sha256Digest) {
@@ -372,6 +390,34 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.possibly_start_jobs(deps);
     }
 
+    fn ensure_artifact_for_job(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
+        let client = self.clients.get_mut(&jid.cid).unwrap();
+        let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        match self.cache.get_artifact(jid, digest.clone()) {
+            GetArtifact::Success(artifact_type) => {
+                job.acquired_artifacts
+                    .insert(digest.clone())
+                    .assert_is_true();
+                if artifact_type == ArtifactType::Manifest {
+                    self.ensure_manifest_artifacts_for_job(deps, jid, digest)
+                        .unwrap();
+                }
+            }
+            GetArtifact::Wait => {
+                job.missing_artifacts.insert(digest).assert_is_true();
+            }
+            GetArtifact::Get => {
+                job.missing_artifacts
+                    .insert(digest.clone())
+                    .assert_is_true();
+                deps.send_message_to_client(
+                    &mut client.sender,
+                    BrokerToClient::TransferArtifact(digest),
+                );
+            }
+        }
+    }
+
     fn receive_client_job_request(
         &mut self,
         deps: &mut DepsT,
@@ -379,30 +425,18 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         cjid: ClientJobId,
         spec: JobSpec,
     ) {
-        let client = self.clients.get_mut(&cid).unwrap();
-        let mut job = Job::new(spec);
         let jid = JobId { cid, cjid };
-        for layer in &job.spec.layers {
-            match self.cache.get_artifact(jid, layer.clone()) {
-                GetArtifact::Success => {
-                    job.acquired_artifacts
-                        .insert(layer.clone())
-                        .assert_is_true();
-                }
-                GetArtifact::Wait => {
-                    job.missing_artifacts.insert(layer.clone()).assert_is_true();
-                }
-                GetArtifact::Get => {
-                    job.missing_artifacts.insert(layer.clone()).assert_is_true();
-                    deps.send_message_to_client(
-                        &mut client.sender,
-                        BrokerToClient::TransferArtifact(layer.clone()),
-                    );
-                }
-            }
+        let client = self.clients.get_mut(&cid).unwrap();
+        let layers = spec.layers.clone();
+        client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
+
+        for layer in layers {
+            self.ensure_artifact_for_job(deps, layer, jid);
         }
+
+        let client = self.clients.get_mut(&cid).unwrap();
+        let job = client.jobs.get(&jid.cjid).unwrap();
         let have_all_artifacts = job.missing_artifacts.is_empty();
-        client.jobs.insert(cjid, job).assert_is_none();
         if have_all_artifacts {
             self.queued_requests.push_back(jid);
             self.possibly_start_jobs(deps);
@@ -508,6 +542,20 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
     }
 
+    fn ensure_manifest_artifacts_for_job(
+        &mut self,
+        deps: &mut DepsT,
+        jid: JobId,
+        digest: Sha256Digest,
+    ) -> Result<()> {
+        for entry in self.cache.read_manifest(digest)? {
+            if let ManifestEntryData::File(Some(digest)) = entry?.data {
+                self.ensure_artifact_for_job(deps, digest, jid);
+            }
+        }
+        Ok(())
+    }
+
     fn receive_got_artifact(
         &mut self,
         deps: &mut DepsT,
@@ -515,19 +563,22 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         path: PathBuf,
     ) {
         for jid in self.cache.got_artifact(artifact_meta.clone(), &path) {
-            let job = self
-                .clients
-                .get_mut(&jid.cid)
-                .unwrap()
-                .jobs
-                .get_mut(&jid.cjid)
-                .unwrap();
+            let client = self.clients.get_mut(&jid.cid).unwrap();
+            let job = client.jobs.get_mut(&jid.cjid).unwrap();
             job.acquired_artifacts
                 .insert(artifact_meta.digest.clone())
                 .assert_is_true();
             job.missing_artifacts
-                .remove(&artifact_meta.digest)
+                .remove(&artifact_meta.digest.clone())
                 .assert_is_true();
+
+            if artifact_meta.type_ == ArtifactType::Manifest {
+                self.ensure_manifest_artifacts_for_job(deps, jid, artifact_meta.digest.clone())
+                    .unwrap();
+            }
+
+            let client = self.clients.get_mut(&jid.cid).unwrap();
+            let job = client.jobs.get_mut(&jid.cjid).unwrap();
             if job.missing_artifacts.is_empty() {
                 self.queued_requests.push_back(jid);
             }
@@ -608,6 +659,7 @@ mod tests {
     use maelstrom_base::proto::{
         ArtifactType,
         BrokerToWorker::{self, *},
+        Identity, ManifestEntry, ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp,
     };
     use maelstrom_test::*;
     use maplit::hashmap;
@@ -644,6 +696,7 @@ mod tests {
             Sha256Digest,
             Vec<Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>>,
         >,
+        read_manifest_returns: HashMap<Sha256Digest, Vec<ManifestEntry>>,
     }
 
     impl SchedulerCache for Rc<RefCell<TestState>> {
@@ -666,6 +719,22 @@ mod tests {
                 .get_mut(&artifact_meta.digest)
                 .unwrap()
                 .remove(0)
+        }
+        fn read_manifest(
+            &mut self,
+            digest: Sha256Digest,
+        ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
+            let mut manifest_data = vec![];
+            let mut writer = ManifestWriter::new(&mut manifest_data).unwrap();
+            writer
+                .write_entries(
+                    self.borrow_mut()
+                        .read_manifest_returns
+                        .get(&digest)
+                        .unwrap(),
+                )
+                .unwrap();
+            Ok(ManifestReader::new(io::Cursor::new(manifest_data))?)
         }
         fn decrement_refcount(&mut self, digest: Sha256Digest) {
             self.borrow_mut()
@@ -741,13 +810,14 @@ mod tests {
 
     impl Fixture {
         #[allow(clippy::type_complexity)]
-        fn new<const L: usize, const M: usize, const N: usize>(
+        fn new<const L: usize, const M: usize, const N: usize, const O: usize>(
             get_artifact_returns: [((JobId, Sha256Digest), Vec<GetArtifact>); L],
             got_artifact_returns: [(Sha256Digest, Vec<Vec<JobId>>); M],
             get_artifact_for_worker_returns: [(
                 Sha256Digest,
                 Vec<Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>>,
             ); N],
+            read_manifest_returns: [(Sha256Digest, Vec<ManifestEntry>); O],
         ) -> Self {
             let result = Self::default();
             result.test_state.borrow_mut().get_artifact_returns =
@@ -758,6 +828,8 @@ mod tests {
                 .test_state
                 .borrow_mut()
                 .get_artifact_for_worker_returns = HashMap::from(get_artifact_for_worker_returns);
+            result.test_state.borrow_mut().read_manifest_returns =
+                HashMap::from(read_manifest_returns);
             result
         }
 
@@ -812,8 +884,8 @@ mod tests {
         message_from_known_client_ok,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1])) => {
@@ -881,8 +953,8 @@ mod tests {
         one_client_one_worker,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
@@ -906,17 +978,17 @@ mod tests {
         requests_go_to_workers_based_on_subscription_percentage,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-                ((jid![1, 7], digest![7]), vec![GetArtifact::Success]),
-                ((jid![1, 8], digest![8]), vec![GetArtifact::Success]),
-                ((jid![1, 9], digest![9]), vec![GetArtifact::Success]),
-                ((jid![1, 10], digest![10]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 5], digest![5]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 6], digest![6]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 7], digest![7]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 8], digest![8]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 9], digest![9]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 10], digest![10]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
         WorkerConnected(wid![2], 2, worker_sender![2]) => {};
@@ -997,13 +1069,13 @@ mod tests {
         requests_start_queueing_at_2x_workers_slot_count,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 5], digest![5]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 6], digest![6]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         WorkerConnected(wid![2], 1, worker_sender![2]) => {};
@@ -1060,13 +1132,13 @@ mod tests {
         queued_requests_go_to_workers_on_connect,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-                ((jid![1, 6], digest![6]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 5], digest![5]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 6], digest![6]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
 
@@ -1106,12 +1178,12 @@ mod tests {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-                ((jid![1, 5], digest![5]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 5], digest![5]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         WorkerConnected(wid![2], 1, worker_sender![2]) => {};
@@ -1158,11 +1230,11 @@ mod tests {
         requests_outstanding_on_disconnected_worker_get_sent_to_new_workers_2,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1209,11 +1281,11 @@ mod tests {
         requests_outstanding_on_disconnected_worker_go_to_head_of_queue_for_other_workers,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-                ((jid![1, 3], digest![3]), vec![GetArtifact::Success]),
-                ((jid![1, 4], digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 3], digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 4], digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1247,9 +1319,9 @@ mod tests {
         requests_get_removed_from_workers_pending_map,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![2]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
 
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1283,8 +1355,8 @@ mod tests {
         client_disconnects_with_outstanding_work_1,
         {
             Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1305,10 +1377,10 @@ mod tests {
         client_disconnects_with_outstanding_work_2,
         {
             Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![3]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 1), digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(1, 2), digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         WorkerConnected(wid![2], 1, worker_sender![2]) => {};
@@ -1341,11 +1413,11 @@ mod tests {
         client_disconnects_with_outstanding_work_3,
         {
             Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(1, 3), digest![3]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(1, 3), digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1384,13 +1456,13 @@ mod tests {
         client_disconnects_with_outstanding_work_4,
         {
             Fixture::new([
-                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success]),
-                ((jid!(2, 2), digest![2]), vec![GetArtifact::Success]),
-                ((jid!(2, 3), digest![3]), vec![GetArtifact::Success]),
-                ((jid!(2, 4), digest![4]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid!(1, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(1, 2), digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 1), digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 2), digest![2]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 3), digest![3]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid!(2, 4), digest![4]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         WorkerConnected(wid![2], 1, worker_sender![2]) => {};
@@ -1444,10 +1516,10 @@ mod tests {
         request_with_layers,
         {
             Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Tar)]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
                 ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
-            ], [], [])
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1469,10 +1541,10 @@ mod tests {
         request_with_layers_2,
         {
             Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![43]), vec![GetArtifact::Success]),
-                ((jid![1, 2], digest![44]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+                ((jid![1, 2], digest![44]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1496,13 +1568,13 @@ mod tests {
         request_with_layers_3,
         {
             Fixture::new([
-                ((jid![1, 2], digest![42]), vec![GetArtifact::Success]),
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Tar)]),
                 ((jid![1, 2], digest![43]), vec![GetArtifact::Wait]),
                 ((jid![1, 2], digest![44]), vec![GetArtifact::Get]),
             ], [
                 (digest![43], vec![vec![jid![1, 2]]]),
                 (digest![44], vec![vec![jid![1, 2]]]),
-            ], [])
+            ], [], [])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
@@ -1548,6 +1620,125 @@ mod tests {
     }
 
     script_test! {
+        request_with_manifest_nothing_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![ManifestEntry {
+                    path: "foobar.txt".into(),
+                    metadata: ManifestEntryMetadata {
+                        size: 11,
+                        mode: Mode(0o0555),
+                        user: Identity::Id(1001),
+                        group: Identity::Id(1002),
+                        mtime: UnixTimestamp(1705538554),
+                    },
+                    data: ManifestEntryData::File(Some(digest![43])),
+                }])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Manifest,
+                digest: digest![42],
+                size: 100
+            }, "/z/tmp/foo".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Manifest, digest: digest![42], size: 100 },
+                "/z/tmp/foo".into()
+            ),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Binary,
+                digest: digest![43],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Binary, digest: digest![43], size: 100 },
+                "/z/tmp/bar".into()
+            ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
+        request_with_manifest_already_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Manifest)]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![ManifestEntry {
+                    path: "foobar.txt".into(),
+                    metadata: ManifestEntryMetadata {
+                        size: 11,
+                        mode: Mode(0o0555),
+                        user: Identity::Id(1001),
+                        group: Identity::Id(1002),
+                        mtime: UnixTimestamp(1705538554),
+                    },
+                    data: ManifestEntryData::File(Some(digest![43])),
+                }])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Binary,
+                digest: digest![43],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Binary, digest: digest![43], size: 100 },
+                "/z/tmp/bar".into()
+            ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
         get_artifact_for_worker_tar,
         {
             Fixture::new([], [], [
@@ -1559,7 +1750,7 @@ mod tests {
                         size: 42
                     }))]
                 ),
-            ])
+            ], [])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
@@ -1583,7 +1774,7 @@ mod tests {
                         size: 42
                     }))]
                 ),
-            ])
+            ], [])
         },
         GetArtifactForWorker(digest![42], worker_artifact_fetcher_sender![1]) => {
             CacheGetArtifactForWorker(digest![42]),
@@ -1607,7 +1798,7 @@ mod tests {
         {
             Fixture::new([
                 ((jid![1, 1], digest![42]), vec![GetArtifact::Wait]),
-            ], [], [])
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
@@ -1638,8 +1829,8 @@ mod tests {
         job_statistics_pending,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1])) => {
@@ -1667,8 +1858,8 @@ mod tests {
         job_statistics_running,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
@@ -1700,8 +1891,8 @@ mod tests {
         job_statistics_completed,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};
@@ -1737,8 +1928,8 @@ mod tests {
         job_state_counts,
         {
             Fixture::new([
-                ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
-            ], [], [])
+                ((jid![1, 1], digest![1]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
         },
         ClientConnected(cid![1], client_sender![1]) => {};
         WorkerConnected(wid![1], 2, worker_sender![1]) => {};

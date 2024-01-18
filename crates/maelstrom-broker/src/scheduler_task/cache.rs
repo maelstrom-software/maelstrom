@@ -7,7 +7,7 @@
 use anyhow::{anyhow, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{
-    proto::{ArtifactMetadata, ArtifactType},
+    proto::{ArtifactMetadata, ArtifactType, ManifestReader},
     ClientId, JobId, Sha256Digest,
 };
 use maelstrom_util::{
@@ -19,6 +19,7 @@ use std::{
     collections::{hash_map, HashMap, HashSet},
     error::Error,
     fmt::{self, Debug, Display, Formatter},
+    io,
     num::NonZeroU32,
     path::{Path, PathBuf},
 };
@@ -46,6 +47,12 @@ pub trait CacheFs {
     /// Return the size, in bytes, of the file (or directory) at `path`. Panic on file system error
     /// or if `path` doesn't exist.
     fn file_size(&mut self, path: &Path) -> u64;
+
+    type File: io::Read + io::Seek + 'static;
+
+    /// Return an object that can be used to read a file. Panic on file system error or if `path`
+    /// doesn't exist
+    fn open_file(&mut self, path: &Path) -> Self::File;
 }
 
 /// Implement [`CacheFs`] using `std::fs`.
@@ -77,6 +84,12 @@ impl CacheFs for StdCacheFs {
     fn file_size(&mut self, path: &Path) -> u64 {
         self.0.metadata(path).unwrap().len()
     }
+
+    type File = std::fs::File;
+
+    fn open_file(&mut self, path: &Path) -> Self::File {
+        self.0.open_file(path).unwrap().into_inner()
+    }
 }
 
 /// Return value for [`Cache::get_artifact`].
@@ -85,7 +98,7 @@ pub enum GetArtifact {
     /// The artifact was in the cache, and was successfully gotten. The caller now has a reference
     /// on the artifact that will eventually need to be dropped with [`Cache::decrement_refcount`].
     /// The caller is free to use the artifact until they call [`Cache::decrement_refcount`].
-    Success,
+    Success(ArtifactType),
 
     /// The artifact was not in the cache, but the requesting client has already been asked to push
     /// the artifact. The caller will know the artifact has been gotten when
@@ -295,7 +308,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         let entry = self
             .entries
             .0
-            .entry(digest)
+            .entry(digest.clone())
             .or_insert(CacheEntry::Waiting(Vec::default(), HashSet::default()));
         match entry {
             CacheEntry::Waiting(requests, clients) => {
@@ -306,9 +319,11 @@ impl<FsT: CacheFs> Cache<FsT> {
                     GetArtifact::Wait
                 }
             }
-            CacheEntry::InUse { refcount, .. } => {
+            CacheEntry::InUse {
+                type_, refcount, ..
+            } => {
                 *refcount = refcount.checked_add(1).unwrap();
-                GetArtifact::Success
+                GetArtifact::Success(*type_)
             }
             CacheEntry::InHeap {
                 type_,
@@ -316,14 +331,15 @@ impl<FsT: CacheFs> Cache<FsT> {
                 heap_index,
                 ..
             } => {
+                let type_ = *type_;
                 let heap_index = *heap_index;
                 *entry = CacheEntry::InUse {
-                    type_: *type_,
+                    type_,
                     bytes_used: *bytes_used,
                     refcount: NonZeroU32::new(1).unwrap(),
                 };
                 self.heap.remove(&mut self.entries, heap_index);
-                GetArtifact::Success
+                GetArtifact::Success(type_)
             }
         }
     }
@@ -391,6 +407,14 @@ impl<FsT: CacheFs> Cache<FsT> {
         );
         self.possibly_remove_some();
         result
+    }
+
+    pub fn read_manifest(
+        &mut self,
+        digest: Sha256Digest,
+    ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
+        let path = self.cache_path(&digest, ArtifactType::Manifest);
+        Ok(ManifestReader::new(self.fs.open_file(&path))?)
     }
 
     /// Decrement the refcount for a digest. Once the refcount for an artifact reaches zero, the
@@ -518,7 +542,10 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::proto::ArtifactType;
+    use maelstrom_base::proto::{
+        ArtifactType, Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata,
+        ManifestWriter, Mode, UnixTimestamp,
+    };
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
@@ -530,12 +557,13 @@ mod tests {
         MkdirRecursively(PathBuf),
         ReadDir(PathBuf),
         FileSize(PathBuf),
+        OpenFile(PathBuf),
     }
 
     #[derive(Default)]
     struct TestCacheFs {
         messages: Vec<TestMessage>,
-        files: HashMap<PathBuf, u64>,
+        files: HashMap<PathBuf, Vec<u8>>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
     }
 
@@ -570,7 +598,14 @@ mod tests {
 
         fn file_size(&mut self, path: &Path) -> u64 {
             self.borrow_mut().messages.push(FileSize(path.to_owned()));
-            *self.borrow().files.get(path).unwrap()
+            self.borrow().files.get(path).unwrap().len() as u64
+        }
+
+        type File = std::io::Cursor<Vec<u8>>;
+
+        fn open_file(&mut self, path: &Path) -> Self::File {
+            self.borrow_mut().messages.push(OpenFile(path.to_owned()));
+            std::io::Cursor::new(self.borrow().files.get(path).unwrap().clone())
         }
     }
 
@@ -667,6 +702,16 @@ mod tests {
         ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
         }
+
+        fn read_manifest(
+            &mut self,
+            digest: Sha256Digest,
+            expected_fs_operations: Vec<TestMessage>,
+        ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
+            let reader = self.cache.read_manifest(digest);
+            self.expect_fs_operations(expected_fs_operations);
+            reader
+        }
     }
 
     #[test]
@@ -714,8 +759,8 @@ mod tests {
                 ],
             )]),
             files: HashMap::from([
-                (long_path!("/z/sha256", 1, "tar"), 1000),
-                (long_path!("/z/sha256", 2, "tar"), 100),
+                (long_path!("/z/sha256", 1, "tar"), vec![0; 1000]),
+                (long_path!("/z/sha256", 2, "tar"), vec![0; 100]),
             ]),
             ..Default::default()
         };
@@ -746,9 +791,9 @@ mod tests {
                 ],
             )]),
             files: HashMap::from([
-                (long_path!("/z/sha256", 1, "tar"), 1001),
-                (long_path!("/z/sha256", 2, "tar"), 1002),
-                (long_path!("/z/sha256", 3, "tar"), 1003),
+                (long_path!("/z/sha256", 1, "tar"), vec![0; 1001]),
+                (long_path!("/z/sha256", 2, "tar"), vec![0; 1002]),
+                (long_path!("/z/sha256", 3, "tar"), vec![0; 1003]),
             ]),
             ..Default::default()
         };
@@ -793,13 +838,18 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.got_artifact_ign(
             ArtifactMetadata {
-                type_: ArtifactType::Tar,
                 digest: digest!(1),
+                type_: ArtifactType::Tar,
                 size: 1,
             },
             short_path!("/z/tmp", 1, "tar"),
         );
-        fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Success, vec![]);
+        fixture.get_artifact(
+            jid!(2, 1001),
+            digest!(1),
+            GetArtifact::Success(ArtifactType::Tar),
+            vec![],
+        );
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
@@ -813,14 +863,14 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![long_path!("/z/sha256", 112358, "tar")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 112358, "tar"), 1)]),
+            files: HashMap::from([(long_path!("/z/sha256", 112358, "tar"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 11);
         fixture.get_artifact(
             jid!(1, 112358),
             digest!(112358),
-            GetArtifact::Success,
+            GetArtifact::Success(ArtifactType::Tar),
             vec![],
         );
 
@@ -868,11 +918,16 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![long_path!("/z/sha256", 1, "tar")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), 1)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
-        fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Success, vec![]);
+        fixture.get_artifact(
+            jid!(1, 1001),
+            digest!(1),
+            GetArtifact::Success(ArtifactType::Tar),
+            vec![],
+        );
 
         fixture.get_artifact_ign(jid!(1, 1002), digest!(2));
         fixture.got_artifact_ign(
@@ -913,7 +968,7 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![long_path!("/z/sha256", 1, "tar")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), 1)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
@@ -1009,7 +1064,7 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![long_path!("/z/sha256", 1, "tar")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), 1)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
@@ -1067,7 +1122,7 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![long_path!("/z/sha256", 1, ext)],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, ext), 1000)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, ext), vec![0; 1000])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
@@ -1295,5 +1350,40 @@ mod tests {
     fn tmp_path() {
         let fixture = Fixture::new(TestCacheFs::default(), 0);
         assert_eq!(fixture.cache.tmp_path(), PathBuf::from("/z/tmp"));
+    }
+
+    #[test]
+    fn read_manifest() {
+        let mut manifest_data = vec![];
+        let mut writer = ManifestWriter::new(&mut manifest_data).unwrap();
+        let entries = vec![ManifestEntry {
+            path: "foobar.txt".into(),
+            metadata: ManifestEntryMetadata {
+                size: 11,
+                mode: Mode(0o0555),
+                user: Identity::Id(1001),
+                group: Identity::Id(1002),
+                mtime: UnixTimestamp(1705538554),
+            },
+            data: ManifestEntryData::File(Some(digest![43])),
+        }];
+        writer.write_entries(&entries).unwrap();
+
+        let fs = TestCacheFs {
+            directories: HashMap::from([(
+                path_buf!("/z/sha256"),
+                vec![long_path!("/z/sha256", 1, "manifest")],
+            )]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "manifest"), manifest_data)]),
+            ..Default::default()
+        };
+        let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
+        let reader = fixture
+            .read_manifest(
+                digest![1],
+                vec![OpenFile(long_path!("/z/sha256", 1, "manifest"))],
+            )
+            .unwrap();
+        assert_eq!(reader.map(|e| e.unwrap()).collect::<Vec<_>>(), entries);
     }
 }

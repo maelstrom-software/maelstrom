@@ -5,6 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+bincode.workspace = true
 camino.workspace = true
 derive_more.workspace = true
 enum-map.workspace = true

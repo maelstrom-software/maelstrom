@@ -1,9 +1,9 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use maelstrom_base::{
     proto::{
         ArtifactFetcherToBroker, ArtifactMetadata, ArtifactType, BrokerToArtifactFetcher, Identity,
-        ManifestEntry, ManifestEntryData, ManifestVersion,
+        ManifestEntry, ManifestEntryData, ManifestReader,
     },
     Sha256Digest,
 };
@@ -88,15 +88,9 @@ fn send_manifest(
     mut socket: &mut impl io::Write,
     artifact_meta: ArtifactMetadata,
 ) -> Result<()> {
-    let version: ManifestVersion = bincode::deserialize_from(&mut file)?;
-    if version != ManifestVersion::default() {
-        return Err(anyhow!("bad manifest version"));
-    }
-
     let mut tar = tar::Builder::new(&mut socket);
-    while file.stream_position()? != file.metadata()?.len() {
-        let entry = bincode::deserialize_from::<_, ManifestEntry>(&mut file)?;
-        add_entry_to_tar(fs, &mut tar, scheduler_sender, &entry)?;
+    for entry in ManifestReader::new(&mut file)? {
+        add_entry_to_tar(fs, &mut tar, scheduler_sender, &entry?)?;
     }
     tar.finish()?;
 
@@ -173,7 +167,7 @@ pub fn connection_main(
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::proto::{ManifestEntryMetadata, Mode, UnixTimestamp};
+    use maelstrom_base::proto::{ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp};
     use maelstrom_test::*;
     use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
@@ -185,10 +179,8 @@ mod tests {
     fn write_manifest(path: &Path, entries: Vec<ManifestEntry>) -> u64 {
         let fs = Fs::new();
         let mut f = fs.create_file(path).unwrap();
-        bincode::serialize_into(&mut f, &ManifestVersion::default()).unwrap();
-        for entry in entries {
-            bincode::serialize_into(&mut f, &entry).unwrap();
-        }
+        let mut writer = ManifestWriter::new(&mut f).unwrap();
+        writer.write_entries(&entries).unwrap();
         f.stream_position().unwrap()
     }
 
