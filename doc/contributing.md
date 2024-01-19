@@ -110,8 +110,7 @@ git push --atomic origin main v1.2.3
 
 ## Create GitHub Release
 
-Go to the [GitHub repository's `Releases`
-page](https://github.com/maelstrom-software/maelstrom/releases). Click `Draft a
+Go to the [GitHub releases page](https://github.com/maelstrom-software/maelstrom/releases). Click `Draft a
 new release`. Use the tag you just crated to draft the release.
 
 ## Update GitHub Milestones
