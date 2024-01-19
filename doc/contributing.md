@@ -9,6 +9,7 @@ These are the items we need to do to release:
   - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
   - Rebuild to update `Cargo.lock` again.
   - Push changesets and tags.
+  - Create GitHub release.
 
 ## Update `CHANGELOG.md`
 
@@ -76,7 +77,6 @@ like "`v1.2.3`".
 ```bash
 git tag v1.2.3
 ```
-```
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml` to Next Dev Version
 
@@ -105,3 +105,10 @@ Ensure that you push, and that you push the tags along with the changesets. We
 can do that atomically like this:
 ```bash
 git push --atomic origin main v1.2.3
+```
+
+## Create GitHub Release
+
+Go to the [GitHub repository's `Releases`
+page](https://github.com/maelstrom-software/maelstrom/releases). Click `Draft a
+new release`. Use the tag you just crated to draft the release.
