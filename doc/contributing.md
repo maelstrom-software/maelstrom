@@ -124,3 +124,8 @@ If there are any open issues, either close them or move them out of the
 release, as appropriate.
 
 Finally, close the milestone for the just-released version.
+
+## Announce the Release on Discord
+
+Go to the [`#general` channel on the community discord
+server](https://discord.gg/nyaGuzJr). Announce the release.
