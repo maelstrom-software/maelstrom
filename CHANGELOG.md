@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2024-01-19
+
 ### General
 
 #### Changed
@@ -155,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Rust test runner that uses the clustered job runner: `cargo-metest`.
 - A bunch of other library packages that are used internally.
 
-[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v0.3.0...HEAD
+[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/maelstrom-software/maelstrom/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/maelstrom-software/maelstrom/releases/tag/v0.1.0
