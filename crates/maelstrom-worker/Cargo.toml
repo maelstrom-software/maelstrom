@@ -1,7 +1,11 @@
 [package]
 name = "maelstrom-worker"
+description = "Maelstrom worker process"
+documentation.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 

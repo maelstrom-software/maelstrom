@@ -1,7 +1,11 @@
 [package]
 name = "maelstrom-base"
+description = "Data structures and code used by all Maelstrom code, including WASM"
+documentation.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 

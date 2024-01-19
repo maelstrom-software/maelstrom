@@ -1,7 +1,11 @@
 [package]
 name = "maelstrom-test"
+description = "Macros that are useful for testing"
+documentation.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 

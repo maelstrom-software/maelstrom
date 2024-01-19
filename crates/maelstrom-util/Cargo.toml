@@ -1,7 +1,11 @@
 [package]
 name = "maelstrom-util"
+description = "Utilities for use by Maelstrom processes, but not WASM code)"
+documentation.workspace = true
 edition.workspace = true
+homepage.workspace = true
 license.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 

@@ -15,8 +15,11 @@ panic = "abort"
 panic = "abort"
 
 [workspace.package]
+documentation = "https://maelstrom-software.github.io/maelstrom/"
 edition = "2021"
+homepage = "https://github.com/maelstrom-software/maelstrom"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/maelstrom-software/maelstrom"
 rust-version = "1.75"
 version = "0.5.0-dev"
 

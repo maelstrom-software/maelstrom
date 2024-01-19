@@ -1,7 +1,11 @@
 [package]
 name = "maelstrom-plot"
-edition.workspace = true
+description = "Fork of egui_plot with some changes for Maelstrom"
 license = "MIT OR Apache-2.0"
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+repository.workspace = true
 rust-version.workspace = true
 version.workspace = true
 
