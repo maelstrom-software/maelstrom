@@ -49,7 +49,7 @@ rustPlatform.buildRustPackage {
   meta = with lib; {
     description = "Maelstrom clustered job runner";
     homepage = "https://github.com/maelstrom-software/maelstrom";
-    license = licenses.bsd3;
+    license = [licenses.mit licenses.asl20];
     maintainers = with maintainers; [ philiptaron ];
   };
 }
