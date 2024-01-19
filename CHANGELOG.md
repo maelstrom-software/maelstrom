@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2024-01-19
+## [0.4.0] - 2024-01-19
 
 ### General
 
@@ -16,13 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - We renamed the project from "meticulous" to "maelstrom". All uses of
   "meticulous" changed accordingly. We renamed `cargo-metest` to
   `cargo-maelstrom`.
+  [Issue #121](https://github.com/maelstrom-software/maelstrom/issues/121)
+  [Issue #124](https://github.com/maelstrom-software/maelstrom/issues/124)
 - We changed the licensing to use dual license using Apache 2.0 and MIT instead
   of the BSD 2-clause license. This brings us into line with the Rust community.
+  [Issue #134](https://github.com/maelstrom-software/maelstrom/issues/134)
+  [Issue #135](https://github.com/maelstrom-software/maelstrom/issues/135)
 
 #### Added
 - The start of documentation. The (alpha version) docs can be found
   [here](https://https://maelstrom-software.github.io/maelstrom/).
+  [Issue #139](https://github.com/maelstrom-software/maelstrom/issues/139)
 - CI for the project on GitHub.
+  [Issue #141](https://github.com/maelstrom-software/maelstrom/issues/141)
 
 ### `cargo-maelstrom`
 
