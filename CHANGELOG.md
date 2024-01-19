@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### General
+
+#### Changed
+
+- We renamed the project from "meticulous" to "maelstrom". All uses of
+  "meticulous" changed accordingly. We renamed `cargo-metest` to
+  `cargo-maelstrom`.
+- We changed the licensing to use dual license using Apache 2.0 and MIT instead
+  of the BSD 2-clause license. This brings us into line with the Rust community.
+
+#### Added
+- The start of documentation. The (alpha version) docs can be found
+  [here](https://https://maelstrom-software.github.io/maelstrom/).
+- CI for the project on GitHub.
+
 ### `cargo-maelstrom`
 
 #### Added
@@ -25,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   packages.
   [Issue #113](https://github.com/maelstrom-software/maelstrom/issues/113)
 - Clarified the help message for `-i` and `-x`.
-- To use subcommands. There are now two subcommands: `run` and `list`. `run`
+- To subcommands. There are now two subcommands: `run` and `list`. `run`
   takes `-q`, `-i`, `-x`, and `-P` flags. `list` takes `-i`, `-x`, and `-P`
   flags. `list` also takes an optional positional argument to indicate what
   type of artifact to list. The `-v`, `-h`, and `-b` flags remain at the top
@@ -49,9 +64,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Added
 
 - Ability to create a build environment using [`nix`](https://nixos.org).
-- Renamed `maelstrom-client` binary to `maelstrom-client-cli`.
+- Renamed `meticulous-client` binary to `meticulous-client-cli`.
 
-### `cargo-maelstrom`
+### `cargo-metest`
 
 #### Added
 
@@ -72,12 +87,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The positional filter argument. Filters now have to be specified with `-i` or
   `-x`.
 
-### `maelstrom-client-cli`
+### `meticulous-client-cli`
 
 #### Changed
 
 - The JSON language used to specify jobs. This now has all of the features of
-  the language used by `cargo-maelstrom`, including specifying parts of an image
+  the language used by `cargo-metest`, including specifying parts of an image
   to use.
   [Issue #103](https://github.com/maelstrom-software/maelstrom/issues/103)
 
@@ -89,17 +104,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - This CHANGELOG file.
 - Ability to set working directory for jobs. This can be specified in
-  `cargo metest` and `maelstrom-client`.
+  `cargo metest` and `meticulous-client`.
   [Issue #89](https://github.com/maelstrom-software/maelstrom/issues/89).
 - Ability to specify uid and gid for jobs. This can be specified in `cargo
-  metest` and `maelstrom-client`.
+  metest` and `meticulous-client`.
   [Issue #51](https://github.com/maelstrom-software/maelstrom/issues/51).
 - Ability to specify a writable root file system. Any changes made will be
   discarded when the job completes. This can be specified in `cargo metest` and
-  `maelstrom-client`.
+  `meticulous-client`.
   [Issue #70](https://github.com/maelstrom-software/maelstrom/issues/70).
 
-### `cargo-maelstrom`
+### `cargo-metest`
 
 #### Added
 
@@ -119,7 +134,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   worked on. There is an new, "pop-up", status bar when tar files are being
   generated. Plus other small improvements.
 - Initial progress bar accuracy by remembering how many tests there were the
-  last time `cargo-maelstrom` was run.
+  last time `cargo-metest` was run.
 
 #### Changed
 
@@ -134,10 +149,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Binaries for the clustered job runner: `maelstrom-worker`,
-  `maelstrom-broker`, and `maelstrom-client`.
-- Client library for communicating with the broker: `maelstrom-client`.
-- A Rust test runner that uses the clustered job runner: `cargo-maelstrom`.
+- Binaries for the clustered job runner: `meticulous-worker`,
+  `meticulous-broker`, and `meticulous-client`.
+- Client library for communicating with the broker: `meticulous-client`.
+- A Rust test runner that uses the clustered job runner: `cargo-metest`.
 - A bunch of other library packages that are used internally.
 
 [unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v0.3.0...HEAD
