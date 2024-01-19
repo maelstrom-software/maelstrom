@@ -10,6 +10,7 @@ These are the items we need to do to release:
   - Rebuild to update `Cargo.lock` again.
   - Push changesets and tags.
   - Create GitHub release.
+  - Update GitHub milestones.
 
 ## Update `CHANGELOG.md`
 
@@ -112,3 +113,15 @@ git push --atomic origin main v1.2.3
 Go to the [GitHub repository's `Releases`
 page](https://github.com/maelstrom-software/maelstrom/releases). Click `Draft a
 new release`. Use the tag you just crated to draft the release.
+
+## Update GitHub Milestones
+
+Go to the [GitHub milestones page](https://github.com/maelstrom-software/maelstrom/milestones).
+
+If there isn't yet a milestone for the next release, create one.
+
+Then, look at all of the issues in the milestone for the just-released version.
+If there are any open issues, either close them or move them out of the
+release, as appropriate.
+
+Finally, close the milestone for the just-released version.
