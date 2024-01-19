@@ -2,6 +2,7 @@
 name = "maelstrom-plot"
 edition.workspace = true
 license = "MIT OR Apache-2.0"
+rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
