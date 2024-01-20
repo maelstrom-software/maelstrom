@@ -60,15 +60,15 @@ indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 itertools = "0.10.5"
 lddtree = "0.3"
 maplit = "1"
-maelstrom-base = { path = "crates/maelstrom-base" }
-maelstrom-broker = { path = "crates/maelstrom-broker" }
-maelstrom-client = { path = "crates/maelstrom-client" }
-maelstrom-container = { path = "crates/maelstrom-container" }
-maelstrom-plot = { path = "crates/maelstrom-plot" }
-maelstrom-test = { path = "crates/maelstrom-test" }
-maelstrom-util = { path = "crates/maelstrom-util" }
-maelstrom-worker = { path = "crates/maelstrom-worker" }
-maelstrom-worker-child = { path = "crates/maelstrom-worker-child" }
+maelstrom-base = {  version = "0.5.0-dev", path = "crates/maelstrom-base" }
+maelstrom-broker = { version = "0.5.0-dev", path = "crates/maelstrom-broker" }
+maelstrom-client = { version = "0.5.0-dev", path = "crates/maelstrom-client" }
+maelstrom-container = { version = "0.5.0-dev", path = "crates/maelstrom-container" }
+maelstrom-plot = { version = "0.5.0-dev", path = "crates/maelstrom-plot" }
+maelstrom-test = { version = "0.5.0-dev", path = "crates/maelstrom-test" }
+maelstrom-util = { version = "0.5.0-dev", path = "crates/maelstrom-util" }
+maelstrom-worker = { version = "0.5.0-dev", path = "crates/maelstrom-worker" }
+maelstrom-worker-child = { version = "0.5.0-dev", path = "crates/maelstrom-worker-child" }
 nc = { version = "0.8.18", default-features = false }
 netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
