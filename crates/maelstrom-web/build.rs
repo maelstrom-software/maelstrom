@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use wasm_bindgen_cli_support::Bindgen;
 
@@ -123,11 +123,8 @@ fn create_web_tar(profile: &str, build_dir: &Path) {
         wasm_opt(&pkg_dir.join("maelstrom_web_bg.wasm"));
     }
 
-    create_tar(
-        Path::new("www"),
-        &pkg_dir,
-        &build_dir.join(profile).join("web.tar"),
-    );
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    create_tar(Path::new("www"), &pkg_dir, &out_dir.join("web.tar"));
 }
 
 fn main() {
