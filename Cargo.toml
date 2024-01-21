@@ -70,6 +70,7 @@ maelstrom-container = { version = "0.5.0-dev", path = "crates/maelstrom-containe
 maelstrom-plot = { version = "0.5.0-dev", path = "crates/maelstrom-plot" }
 maelstrom-test = { version = "0.5.0-dev", path = "crates/maelstrom-test" }
 maelstrom-util = { version = "0.5.0-dev", path = "crates/maelstrom-util" }
+maelstrom-web = { version = "0.5.0-dev", path = "crates/maelstrom-web" }
 maelstrom-worker = { version = "0.5.0-dev", path = "crates/maelstrom-worker" }
 maelstrom-worker-child = { version = "0.5.0-dev", path = "crates/maelstrom-worker-child" }
 nc = { version = "0.8.18", default-features = false }

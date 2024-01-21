@@ -19,6 +19,7 @@ use futures::{
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
 use maelstrom_base::{proto::BrokerToClient, ClientId};
+use maelstrom_web::WASM_TAR;
 use slog::{debug, error, o, Logger};
 use std::{
     collections::HashMap,
@@ -31,12 +32,6 @@ use std::{
 use tar::Archive;
 use tokio::{net::TcpListener, sync::mpsc::UnboundedReceiver};
 use tungstenite::Message;
-
-/// The embedded website. This is built from [`maelstrom-web`].
-#[cfg(not(debug_assertions))]
-const WASM_TAR: &[u8] = include_bytes!("../../../target/wasm_release/web.tar");
-#[cfg(debug_assertions)]
-const WASM_TAR: &[u8] = include_bytes!("../../../target/wasm_dev/web.tar");
 
 pub struct TarHandler {
     map: HashMap<String, &'static [u8]>,

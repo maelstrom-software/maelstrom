@@ -3,11 +3,9 @@
 set -ex
 
 profile=$1
-
-pushd crates/maelstrom-web
+build_dir=$2
 
 target=wasm32-unknown-unknown
-build_dir=../../target
 pkg_dir=$build_dir/$profile/wasm_pkg/
 mkdir -p $pkg_dir
 
@@ -33,5 +31,3 @@ fi
 
 cp www/* $pkg_dir
 tar --create --directory $pkg_dir . --file $build_dir/$profile/web.tar
-
-popd
