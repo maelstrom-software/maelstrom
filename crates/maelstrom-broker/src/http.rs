@@ -45,7 +45,7 @@ impl TarHandler {
         for entry in ar.entries().unwrap() {
             let entry = entry.unwrap();
             let header = entry.header();
-            let path = header.path().unwrap().to_str().unwrap().into();
+            let path = format!("./{}", header.path().unwrap().to_str().unwrap());
             let start = entry.raw_file_position() as usize;
             let end = start + header.size().unwrap() as usize;
             map.insert(path, &bytes[start..end]);

@@ -37,3 +37,11 @@ features = [
   "WebSocket",
   "Window",
 ]
+
+[build-dependencies]
+tar.workspace = true
+wasm-bindgen-cli-support.workspace = true
+cargo_metadata.workspace = true
+# These dependencies ensure the build script re-runs
+maelstrom-plot.workspace = true
+maelstrom-base.workspace = true
