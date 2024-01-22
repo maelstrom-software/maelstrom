@@ -3,11 +3,9 @@
 These are the items we need to do to release:
   - Update `CHANGELOG.md`.
   - Update `version` in `[workspace.package]` in `Cargo.toml`.
-  - Rebuild to update `Cargo.lock`.
   - Commit above changes.
   - Tag previous changeset with the version tag.
   - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
-  - Rebuild to update `Cargo.lock` again.
   - Push changesets and tags.
   - Create GitHub release.
   - Update GitHub milestones.
@@ -51,17 +49,17 @@ These are the steps to take:
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml`
 
-This is a mechanical change. In the future, we will do this using a tool.
+This is a bit tricky because you have to update the version itself as well as
+all internal dependencies. To do this, run `cargo set-version`.
 
-Edit `Cargo.toml`, find `version` in `[workspace.package]`, and change it to
-the new version.
+If you're just removing the `-dev` suffix of the version, you can just run:
+```
+cargo set-version
+```
 
-## Run `cargo build` to Update `Cargo.lock`
-
-Since you've changed the version of all of the packages, you need to update
-Cargo.lock.
-```bash
-cargo clean && cargo build
+Otherwise, you can set the version explicitly with:
+```
+cargo set-version <new version>
 ```
 
 ## Commit Above Changes
@@ -83,16 +81,9 @@ git tag v1.2.3
 
 This is a mechanical change. In the future, we will do this using a tool.
 
-Edit `Cargo.toml`, find `version` in `[workspace.package]`, and change it to
-the next dev version. If you just pushed version `X.Y.Z`, make the new version
-`X.(Y+1).0-dev`.
-
-## Run `cargo build` to Update `Cargo.lock` Again
-
-Since you've changed the version of all of the packages, you need to update
-Cargo.lock again.
-```bash
-cargo build
+Use `cargo set-version` again:
+```
+cargo set-version <NEXT VERSION>-dev
 ```
 
 ## Commit Above Changes
