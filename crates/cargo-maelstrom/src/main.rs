@@ -25,7 +25,6 @@ use std::{
 /// cargo-maelstrom. This binary build and sends Rust tests to the broker
 #[derive(Parser, Debug)]
 #[command(version)]
-#[command(bin_name = "cargo maelstrom")]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line. If not set, the file
