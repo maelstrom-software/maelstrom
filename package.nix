@@ -5,7 +5,6 @@
 , pkg-config
 , rustPlatform
 , rustc-wasm32
-, wasm-bindgen-cli
 }:
 
 let
@@ -34,7 +33,6 @@ rustPlatform.buildRustPackage {
     pkg-config
     rustc-wasm32
     rustc-wasm32.llvmPackages.lld
-    wasm-bindgen-cli
   ];
 
   buildInputs = [ openssl ];

@@ -20,7 +20,7 @@ required things.
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli wasm-opt
+cargo install wasm-opt
 ```
 
 Now we can install the broker
