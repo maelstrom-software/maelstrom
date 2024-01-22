@@ -5,6 +5,7 @@ These are the items we need to do to release:
   - Update `version` in `[workspace.package]` in `Cargo.toml`.
   - Commit above changes.
   - Tag previous changeset with the version tag.
+  - Publish to crates.io.
   - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
   - Push changesets and tags.
   - Create GitHub release.
@@ -76,6 +77,21 @@ like "`v1.2.3`".
 ```bash
 git tag v1.2.3
 ```
+
+## Publish to Crates.io
+
+Packages are published to crates.io individually. Moreover, they have to be
+published in the right order, such that all a package's depdendencies are
+published before the package itself. We'll automate this at some point, but for
+now:
+
+```
+for i in crates/{maelstrom-{base,plot,simex,test,worker-child,util,web,worker,broker,container,client,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
+```
+
+To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and
+that secret must allow you to publish these crates. If that is not the case,
+ask Neal for the secret and then run `cargo login`.
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml` to Next Dev Version
 
