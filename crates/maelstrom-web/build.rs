@@ -134,12 +134,20 @@ fn main() {
     #[cfg(debug_assertions)]
     let profile = "dev";
 
-    let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
-
     if std::env::var("TARGET").unwrap() != "wasm32-unknown-unknown" {
+        let crate_root_cargo_lock = Path::new("Cargo.lock");
+        let cargo_lock_existed_at_crate_root = crate_root_cargo_lock.exists();
+
+        let metadata = cargo_metadata::MetadataCommand::new().exec().unwrap();
         create_web_tar(
             &format!("wasm_{profile}"),
             metadata.target_directory.as_std_path(),
         );
+
+        // this should only be the case when publishing, and at that point we can't be the ones
+        // creating the Cargo.lock file
+        if !cargo_lock_existed_at_crate_root && crate_root_cargo_lock.exists() {
+            fs::remove_file("Cargo.lock").unwrap();
+        }
     }
 }
