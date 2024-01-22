@@ -2,12 +2,6 @@
 resolver = "2"
 members = [ "crates/*" ]
 
-[profile.wasm_dev]
-inherits = "dev"
-
-[profile.wasm_release]
-inherits = "release"
-
 [profile.dev]
 panic = "abort"
 

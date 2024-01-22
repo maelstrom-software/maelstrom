@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use wasm_bindgen_cli_support::Bindgen;
@@ -90,29 +91,60 @@ fn create_tar(web_dir: &Path, pkg_dir: &Path, output_file: &Path) {
     builder.finish().unwrap();
 }
 
-fn build_wasm(target: &str, profile: &str) {
-    sh(
-        [
-            "cargo",
-            "build",
-            "--lib",
-            "--target",
-            target,
-            "--profile",
-            profile,
-        ],
-        ".",
-    );
+fn with_profiles(workspace_root: &Path, body: impl FnOnce() + std::panic::UnwindSafe) {
+    let cargo_toml = workspace_root.join("Cargo.toml");
+    let cargo_toml_old = workspace_root.join("Cargo.toml.old");
+    fs::copy(&cargo_toml, &cargo_toml_old).unwrap();
+
+    let mut f = fs::OpenOptions::new()
+        .read(true)
+        .append(true)
+        .open(&cargo_toml)
+        .unwrap();
+    f.write_all(
+        b"\
+        [profile.wasm_dev]\n\
+        inherits = \"dev\"\n\
+        [profile.wasm_release]\n\
+        inherits = \"release\"\n\
+    ",
+    )
+    .unwrap();
+
+    let result = std::panic::catch_unwind(|| {
+        body();
+    });
+
+    fs::rename(cargo_toml_old, cargo_toml).unwrap();
+
+    result.unwrap();
 }
 
-fn create_web_tar(profile: &str, build_dir: &Path) {
+fn build_wasm(target: &str, profile: &str, workspace_root: &Path) {
+    with_profiles(workspace_root, || {
+        sh(
+            [
+                "cargo",
+                "build",
+                "--lib",
+                "--target",
+                target,
+                "--profile",
+                profile,
+            ],
+            ".",
+        );
+    });
+}
+
+fn create_web_tar(profile: &str, build_dir: &Path, workspace_root: &Path) {
     let target = "wasm32-unknown-unknown";
     let pkg_dir = build_dir.join(profile).join("wasm_pkg");
 
     fs::remove_dir_all(&pkg_dir).ok();
     fs::create_dir_all(&pkg_dir).unwrap();
 
-    build_wasm(target, profile);
+    build_wasm(target, profile, workspace_root);
     let wasm_file = build_dir
         .join(target)
         .join(profile)
@@ -142,6 +174,7 @@ fn main() {
         create_web_tar(
             &format!("wasm_{profile}"),
             metadata.target_directory.as_std_path(),
+            metadata.workspace_root.as_std_path(),
         );
 
         // this should only be the case when publishing, and at that point we can't be the ones

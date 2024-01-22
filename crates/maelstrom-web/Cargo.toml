@@ -45,11 +45,3 @@ cargo_metadata.workspace = true
 # These dependencies ensure the build script re-runs
 maelstrom-plot.workspace = true
 maelstrom-base.workspace = true
-
-# These profiles are copied from the workspace root so they can be used when
-# publishing. See this issue <https://github.com/rust-lang/cargo/issues/8264>
-[profile.wasm_dev]
-inherits = "dev"
-
-[profile.wasm_release]
-inherits = "release"
