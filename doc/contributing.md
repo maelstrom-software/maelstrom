@@ -25,7 +25,7 @@ Cross-reference these changes to the closed issues in GitHub. Make sure you add
 links to issues when appropriate.
 
 Generally, only add things to `CHANGELOG.md` that you think users would care
-about. There shouldn't be an entry for every changeset.
+about. There need not be an entry for every changeset.
 
 It's a good idea to commit these changes in a separate changeset.
 
