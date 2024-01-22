@@ -15,6 +15,7 @@ bumpalo.workspace = true
 bytesize.workspace = true
 c_str_macro.workspace = true
 clap.workspace = true
+countio.workspace = true
 derive_more.workspace = true
 figment.workspace = true
 futures.workspace = true

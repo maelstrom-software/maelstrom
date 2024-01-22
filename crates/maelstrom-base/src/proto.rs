@@ -214,12 +214,11 @@ pub struct ArtifactMetadata {
 }
 
 /// Message sent from the broker to an artifact fetcher. This will be in response to an
-/// [`ArtifactFetcherToBroker`] message. On success, the message contains the size of the artifact.
-/// The message is then be followed by exactly that many bytes of the artifact's body. On failure,
-/// the contains details about what went wrong. After a failure, the broker will close the artifact
-/// fetcher connection.
+/// [`ArtifactFetcherToBroker`] message. On failure to get the artifact, the result contains
+/// details about what went wrong. After a failure, the broker will close the artifact fetcher
+/// connection.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BrokerToArtifactFetcher(pub Result<u64, String>);
+pub struct BrokerToArtifactFetcher(pub Result<(), String>);
 
 /// Message sent from an artifact fetcher to the broker. It will be answered with a
 /// [`BrokerToArtifactFetcher`].

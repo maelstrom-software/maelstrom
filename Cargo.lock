@@ -1065,6 +1065,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "countio"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deb137baf1ce7c00453689055b2a4311ed34d288cb2e66e892e3142e30dae67f"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2737,6 +2743,7 @@ dependencies = [
  "bytesize",
  "c_str_macro",
  "clap",
+ "countio",
  "derive_more",
  "figment",
  "futures",

@@ -9,6 +9,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{
     fs::{File, Fs},
+    io::ChunkedWriter,
     net,
 };
 use slog::{debug, Logger};
@@ -112,6 +113,8 @@ fn send_tar(
     Ok(())
 }
 
+const MAX_CHUNK_SIZE: usize = 1024 * 1024;
+
 fn handle_one_message(
     msg: ArtifactFetcherToBroker,
     mut socket: &mut impl io::Write,
@@ -122,14 +125,11 @@ fn handle_one_message(
     let ArtifactFetcherToBroker(digest) = msg;
     let fs = Fs::new();
     let result = get_file(&fs, &digest, scheduler_sender);
-    let msg = BrokerToArtifactFetcher(
-        result
-            .as_ref()
-            .map(|(_, artifact_meta)| artifact_meta.size)
-            .map_err(|e| e.to_string()),
-    );
+    let msg = BrokerToArtifactFetcher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
     debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
     net::write_message_to_socket(&mut socket, msg)?;
+
+    let mut socket = ChunkedWriter::new(socket, MAX_CHUNK_SIZE);
     let (mut f, artifact_meta) = result?;
     match artifact_meta.type_ {
         ArtifactType::Manifest => {
@@ -138,6 +138,8 @@ fn handle_one_message(
         ArtifactType::Tar => send_tar(scheduler_sender, &mut f, &mut socket, artifact_meta)?,
         ArtifactType::Binary => unreachable!(),
     }
+    socket.finish()?;
+
     Ok(())
 }
 
@@ -169,6 +171,7 @@ mod tests {
     use assert_matches::assert_matches;
     use maelstrom_base::proto::{ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp};
     use maelstrom_test::*;
+    use maelstrom_util::io::ChunkedReader;
     use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
     use std::path::Path;
@@ -277,9 +280,12 @@ mod tests {
         let fs = Fs::new();
         let extracted_path = tmp_dir.path().join("extracted");
         let mut sent_data = fs.open_file(artifact_msg).unwrap();
+
         let msg: BrokerToArtifactFetcher = net::read_message_from_socket(&mut sent_data).unwrap();
-        let _size = msg.0.unwrap();
-        let mut tar = tar::Archive::new(sent_data);
+        msg.0.unwrap();
+
+        let mut reader = ChunkedReader::new(sent_data);
+        let mut tar = tar::Archive::new(&mut reader);
         tar.set_preserve_mtime(true);
         tar.set_preserve_permissions(true);
         tar.unpack(&extracted_path).unwrap();

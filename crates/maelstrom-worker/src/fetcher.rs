@@ -3,24 +3,14 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use maelstrom_util::{
-    config::BrokerAddr,
-    io::{FixedSizeReader, Sha256Reader},
-    net,
-};
+use maelstrom_util::{config::BrokerAddr, io::ChunkedReader, net};
 use slog::{debug, Logger};
 use std::{
-    io::{BufReader, Read},
+    io::{self, BufReader},
     net::TcpStream,
     path::PathBuf,
 };
 use tar::Archive;
-
-fn read_to_end(mut input: impl Read) -> Result<()> {
-    let mut buf = [0u8; 4096];
-    while input.read(&mut buf)? > 0 {}
-    Ok(())
-}
 
 pub fn main(
     digest: &Sha256Digest,
@@ -31,19 +21,21 @@ pub fn main(
     let mut writer = TcpStream::connect(broker_addr.inner())?;
     let mut reader = BufReader::new(writer.try_clone()?);
     net::write_message_to_socket(&mut writer, Hello::ArtifactFetcher)?;
+
     let msg = ArtifactFetcherToBroker(digest.clone());
     debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
+
     net::write_message_to_socket(&mut writer, msg)?;
     let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut reader)?;
     debug!(log, "artifact fetcher received message"; "msg" => ?msg);
-    let size = msg
-        .0
+    msg.0
         .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
-    let reader = FixedSizeReader::new(reader, size);
-    let mut reader = Sha256Reader::new(reader);
+
+    let mut reader = countio::Counter::new(ChunkedReader::new(reader));
     Archive::new(&mut reader).unpack(path)?;
-    read_to_end(&mut reader)?;
-    let (_, actual_digest) = reader.finalize();
-    actual_digest.verify(digest)?;
-    Ok(size)
+
+    // N.B. Make sure archive wasn't truncated by reading ending chunk.
+    io::copy(&mut reader, &mut io::sink())?;
+
+    Ok(reader.reader_bytes() as u64)
 }
