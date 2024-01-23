@@ -70,8 +70,9 @@ impl<'a> Syscall<'a> {
                 let buf_len = buf.len();
                 syscalls::syscall6(nc::SYS_RECVFROM, *saved, buf_ptr, buf_len, 0, 0, 0)
             }
-            Syscall::OpenAndSave(filename, flags, mode) => syscalls::syscall3(
-                nc::SYS_OPEN,
+            Syscall::OpenAndSave(filename, flags, mode) => syscalls::syscall4(
+                nc::SYS_OPENAT,
+                nc::AT_FDCWD as usize,
                 filename.to_bytes_with_nul().as_ptr() as usize,
                 *flags as usize,
                 *mode as usize,
@@ -87,7 +88,7 @@ impl<'a> Syscall<'a> {
             }
             Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID),
             Syscall::Dup2(from, to) => {
-                syscalls::syscall2(nc::SYS_DUP2, *from as usize, *to as usize)
+                syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0)
             }
             Syscall::CloseRange(first, last, flags) => syscalls::syscall3(
                 nc::SYS_CLOSE_RANGE,
@@ -108,8 +109,9 @@ impl<'a> Syscall<'a> {
             Syscall::Chdir(path) => {
                 syscalls::syscall1(nc::SYS_CHDIR, path.to_bytes_with_nul().as_ptr() as usize)
             }
-            Syscall::Mkdir(path, mode) => syscalls::syscall2(
-                nc::SYS_MKDIR,
+            Syscall::Mkdir(path, mode) => syscalls::syscall3(
+                nc::SYS_MKDIRAT,
+                nc::AT_FDCWD as usize,
                 path.to_bytes_with_nul().as_ptr() as usize,
                 *mode as usize,
             ),
