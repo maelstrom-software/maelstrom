@@ -1,6 +1,7 @@
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
 use std::{
+    fmt,
     io::{self},
     path::{Path, PathBuf},
 };
@@ -15,14 +16,14 @@ impl Fs {
 }
 
 macro_rules! fs_trampoline {
-    ($f:ident, $p:ident) => {{
+    ($f:path, $p:ident) => {{
         let path = $p.as_ref();
-        std::fs::$f(path).with_context(|| format!("{}(\"{}\")", stringify!($f), path.display()))
+        $f(path).with_context(|| format!("{}(\"{}\")", stringify!($f), path.display()))
     }};
-    ($f:ident, $p1:ident, $p2:ident) => {{
+    ($f:path, $p1:ident, $p2:ident) => {{
         let path1 = $p1.as_ref();
         let path2 = $p2.as_ref();
-        std::fs::$f(path1, path2).with_context(|| {
+        $f(path1, path2).with_context(|| {
             format!(
                 "{}(\"{}\", \"{}\")",
                 stringify!($f),
@@ -79,6 +80,12 @@ impl DirEntry {
                 path: self.path(),
             })
             .with_context(|| format!("metadata(\"{}\")", self.path().display()))
+    }
+}
+
+impl fmt::Debug for DirEntry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
     }
 }
 
@@ -189,34 +196,41 @@ fn is_not_found_err(err: &anyhow::Error) -> bool {
 
 impl Fs {
     pub fn create_dir<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        fs_trampoline!(create_dir, path)
+        fs_trampoline!(std::fs::create_dir, path)
     }
 
     pub fn create_dir_all<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        fs_trampoline!(create_dir_all, path)
+        fs_trampoline!(std::fs::create_dir_all, path)
     }
 
     pub fn metadata<P: AsRef<Path>>(&self, path: P) -> Result<Metadata> {
-        fs_trampoline!(metadata, path).map(|inner| Metadata {
+        fs_trampoline!(std::fs::metadata, path).map(|inner| Metadata {
+            inner,
+            path: path.as_ref().into(),
+        })
+    }
+
+    pub fn symlink_metadata<P: AsRef<Path>>(&self, path: P) -> Result<Metadata> {
+        fs_trampoline!(std::fs::symlink_metadata, path).map(|inner| Metadata {
             inner,
             path: path.as_ref().into(),
         })
     }
 
     pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<()> {
-        fs_trampoline!(rename, from, to)
+        fs_trampoline!(std::fs::rename, from, to)
     }
 
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        fs_trampoline!(remove_dir, path)
+        fs_trampoline!(std::fs::remove_dir, path)
     }
 
     pub fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        fs_trampoline!(remove_dir_all, path)
+        fs_trampoline!(std::fs::remove_dir_all, path)
     }
 
     pub fn remove_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        fs_trampoline!(remove_file, path)
+        fs_trampoline!(std::fs::remove_file, path)
     }
 
     pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(&self, path: P, contents: C) -> Result<()> {
@@ -225,11 +239,11 @@ impl Fs {
     }
 
     pub fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
-        fs_trampoline!(read_to_string, path)
+        fs_trampoline!(std::fs::read_to_string, path)
     }
 
     pub fn read_to_string_if_exists<P: AsRef<Path>>(&self, path: P) -> Result<Option<String>> {
-        match fs_trampoline!(read_to_string, path) {
+        match fs_trampoline!(std::fs::read_to_string, path) {
             Ok(contents) => Ok(Some(contents)),
             Err(err) if is_not_found_err(&err) => Ok(None),
             Err(err) => Err(err),
@@ -237,10 +251,14 @@ impl Fs {
     }
 
     pub fn read_dir<P: AsRef<Path>>(&self, path: P) -> Result<ReadDir> {
-        fs_trampoline!(read_dir, path).map(|inner| ReadDir {
+        fs_trampoline!(std::fs::read_dir, path).map(|inner| ReadDir {
             inner,
             path: path.as_ref().into(),
         })
+    }
+
+    pub fn read_link<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
+        fs_trampoline!(std::fs::read_link, path)
     }
 
     pub fn open_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
@@ -278,11 +296,18 @@ impl Fs {
     }
 
     pub fn canonicalize<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
-        fs_trampoline!(canonicalize, path)
+        fs_trampoline!(std::fs::canonicalize, path)
     }
 
     pub fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         path.as_ref().exists()
+    }
+}
+
+#[cfg(unix)]
+impl Fs {
+    pub fn symlink<P: AsRef<Path>, Q: AsRef<Path>>(&self, original: P, link: Q) -> Result<()> {
+        fs_trampoline!(std::os::unix::fs::symlink, original, link)
     }
 }
 

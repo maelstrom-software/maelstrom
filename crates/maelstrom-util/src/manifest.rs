@@ -1,4 +1,5 @@
-use crate::fs;
+use crate::fs::{self, Fs};
+use anyhow::{anyhow, Result};
 use maelstrom_base::{
     manifest::{
         Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
@@ -16,7 +17,7 @@ fn to_utf8_path(path: impl AsRef<Path>) -> Utf8PathBuf {
 
 fn convert_metadata(meta: &fs::Metadata) -> ManifestEntryMetadata {
     ManifestEntryMetadata {
-        size: meta.size(),
+        size: meta.is_file().then(|| meta.size()).unwrap_or(0),
         mode: Mode(meta.mode()),
         user: Identity::Id(meta.uid() as u64),
         group: Identity::Id(meta.gid() as u64),
@@ -24,14 +25,23 @@ fn convert_metadata(meta: &fs::Metadata) -> ManifestEntryMetadata {
     }
 }
 
-pub struct ManifestBuilder<WriteT> {
+type DataUploadCb<'cb> = Box<dyn FnMut(&Path) -> Result<Sha256Digest> + 'cb>;
+
+pub struct ManifestBuilder<'cb, WriteT> {
+    fs: Fs,
     writer: ManifestWriter<WriteT>,
+    data_upload: DataUploadCb<'cb>,
 }
 
-impl<WriteT: io::Write> ManifestBuilder<WriteT> {
-    pub fn new(writer: WriteT) -> io::Result<Self> {
+impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
+    pub fn new(
+        writer: WriteT,
+        data_upload: impl FnMut(&Path) -> Result<Sha256Digest> + 'cb,
+    ) -> io::Result<Self> {
         Ok(Self {
+            fs: Fs::new(),
             writer: ManifestWriter::new(writer)?,
+            data_upload: Box::new(data_upload),
         })
     }
 
@@ -40,7 +50,7 @@ impl<WriteT: io::Write> ManifestBuilder<WriteT> {
         meta: &fs::Metadata,
         path: impl AsRef<Path>,
         data: ManifestEntryData,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         let entry = ManifestEntry {
             path: to_utf8_path(path),
             metadata: convert_metadata(meta),
@@ -49,75 +59,122 @@ impl<WriteT: io::Write> ManifestBuilder<WriteT> {
         self.writer.write_entry(&entry)?;
         Ok(())
     }
-    pub fn add_file(
-        &mut self,
-        meta: &fs::Metadata,
-        path: impl AsRef<Path>,
-        data: Option<Sha256Digest>,
-    ) -> io::Result<()> {
-        self.add_entry(meta, path, ManifestEntryData::File(data))
-    }
 
-    pub fn add_directory(&mut self, meta: &fs::Metadata, path: impl AsRef<Path>) -> io::Result<()> {
-        self.add_entry(meta, path, ManifestEntryData::Directory)
-    }
-
-    pub fn add_symlink(
-        &mut self,
-        meta: &fs::Metadata,
-        path: impl AsRef<Path>,
-        data: impl Into<Vec<u8>>,
-    ) -> io::Result<()> {
-        self.add_entry(meta, path, ManifestEntryData::Symlink(data.into()))
-    }
-
-    pub fn add_hardlink(
-        &mut self,
-        meta: &fs::Metadata,
-        target: impl AsRef<Path>,
-        source: impl AsRef<Path>,
-    ) -> io::Result<()> {
-        self.add_entry(
-            meta,
-            target,
-            ManifestEntryData::Hardlink(to_utf8_path(source)),
-        )
+    pub fn add_file(&mut self, source: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
+        let meta = self.fs.symlink_metadata(source.as_ref())?;
+        if meta.is_file() {
+            let data = (meta.size() > 0)
+                .then(|| (self.data_upload)(source.as_ref()))
+                .transpose()?;
+            self.add_entry(&meta, dest, ManifestEntryData::File(data))
+        } else if meta.is_dir() {
+            self.add_entry(&meta, dest, ManifestEntryData::Directory)
+        } else if meta.is_symlink() {
+            let data = self.fs.read_link(source.as_ref())?;
+            self.add_entry(
+                &meta,
+                dest,
+                ManifestEntryData::Symlink(data.into_os_string().into_encoded_bytes()),
+            )
+        } else {
+            Err(anyhow!("unknown file type {}", source.as_ref().display()))
+        }
     }
 }
 
-#[test]
-fn builder_file() {
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::Fs;
     use maelstrom_base::manifest::ManifestReader;
     use maelstrom_test::*;
+    use std::path::PathBuf;
+    use tempfile::{tempdir, TempDir};
 
-    let mut buffer = vec![];
-    let mut builder = ManifestBuilder::new(&mut buffer).unwrap();
+    struct Fixture {
+        fs: Fs,
+        _temp_dir: TempDir,
+        input_path: PathBuf,
+    }
 
-    let tmp_dir = tempfile::tempdir().unwrap();
-    let fs = fs::Fs::new();
-    let foo_path = tmp_dir.path().join("foo.txt");
-    fs.write(&foo_path, b"foobar").unwrap();
-    builder
-        .add_file(
-            &fs.metadata(&foo_path).unwrap(),
-            "foo/bar.txt",
-            Some(digest![42]),
-        )
-        .unwrap();
+    impl Fixture {
+        fn new() -> Self {
+            let temp_dir = tempdir().unwrap();
+            Fixture {
+                fs: Fs::new(),
+                input_path: temp_dir.path().join("input_entry"),
+                _temp_dir: temp_dir,
+            }
+        }
+    }
 
-    let entries: Vec<_> = ManifestReader::new(io::Cursor::new(buffer))
-        .unwrap()
-        .map(|e| e.unwrap())
-        .collect();
-    assert_eq!(
-        entries,
-        vec![ManifestEntry {
-            path: to_utf8_path("foo/bar.txt"),
-            metadata: ManifestEntryMetadata {
-                size: 6,
-                ..convert_metadata(&fs.metadata(&foo_path).unwrap())
+    fn assert_entry(
+        build: impl FnOnce(&mut Fixture, &mut ManifestBuilder<&mut Vec<u8>>),
+        expected_path: &str,
+        expected_size: u64,
+        data: ManifestEntryData,
+    ) {
+        let mut buffer = vec![];
+        let mut builder = ManifestBuilder::new(&mut buffer, |_| Ok(digest![42])).unwrap();
+
+        let mut fixture = Fixture::new();
+        build(&mut fixture, &mut builder);
+
+        let actual_entries: Vec<_> = ManifestReader::new(io::Cursor::new(buffer))
+            .unwrap()
+            .map(|e| e.unwrap())
+            .collect();
+        assert_eq!(
+            actual_entries,
+            vec![ManifestEntry {
+                path: to_utf8_path(expected_path),
+                metadata: ManifestEntryMetadata {
+                    size: expected_size,
+                    ..convert_metadata(&fixture.fs.symlink_metadata(&fixture.input_path).unwrap())
+                },
+                data,
+            }]
+        );
+    }
+
+    #[test]
+    fn builder_file() {
+        assert_entry(
+            |fixture, builder| {
+                fixture.fs.write(&fixture.input_path, b"foobar").unwrap();
+                builder
+                    .add_file(&fixture.input_path, "foo/bar.txt")
+                    .unwrap();
             },
-            data: ManifestEntryData::File(Some(digest![42]))
-        }]
-    );
+            "foo/bar.txt",
+            6,
+            ManifestEntryData::File(Some(digest![42])),
+        );
+    }
+
+    #[test]
+    fn builder_directory() {
+        assert_entry(
+            |fixture, builder| {
+                fixture.fs.create_dir(&fixture.input_path).unwrap();
+                builder.add_file(&fixture.input_path, "foo/bar").unwrap();
+            },
+            "foo/bar",
+            0,
+            ManifestEntryData::Directory,
+        );
+    }
+
+    #[test]
+    fn builder_symlink() {
+        assert_entry(
+            |fixture, builder| {
+                fixture.fs.symlink("../baz", &fixture.input_path).unwrap();
+                builder.add_file(&fixture.input_path, "foo/bar").unwrap();
+            },
+            "foo/bar",
+            0,
+            ManifestEntryData::Symlink(b"../baz".to_vec()),
+        );
+    }
 }
