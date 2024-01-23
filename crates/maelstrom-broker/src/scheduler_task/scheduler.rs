@@ -4,9 +4,10 @@
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use anyhow::Result;
 use maelstrom_base::{
+    manifest::{ManifestEntryData, ManifestReader},
     proto::{
         ArtifactMetadata, ArtifactType, BrokerToClient, BrokerToWorker, ClientToBroker,
-        ManifestEntryData, ManifestReader, WorkerToBroker,
+        WorkerToBroker,
     },
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
@@ -656,10 +657,14 @@ mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use itertools::Itertools;
-    use maelstrom_base::proto::{
-        ArtifactType,
-        BrokerToWorker::{self, *},
-        Identity, ManifestEntry, ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp,
+    use maelstrom_base::{
+        manifest::{
+            Identity, ManifestEntry, ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp,
+        },
+        proto::{
+            ArtifactType,
+            BrokerToWorker::{self, *},
+        },
     };
     use maelstrom_test::*;
     use maplit::hashmap;

@@ -7,7 +7,8 @@
 use anyhow::{anyhow, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{
-    proto::{ArtifactMetadata, ArtifactType, ManifestReader},
+    manifest::ManifestReader,
+    proto::{ArtifactMetadata, ArtifactType},
     ClientId, JobId, Sha256Digest,
 };
 use maelstrom_util::{
@@ -542,9 +543,12 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::proto::{
-        ArtifactType, Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata,
-        ManifestWriter, Mode, UnixTimestamp,
+    use maelstrom_base::{
+        manifest::{
+            Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter,
+            Mode, UnixTimestamp,
+        },
+        proto::ArtifactType,
     };
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};

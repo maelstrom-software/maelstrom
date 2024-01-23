@@ -1,10 +1,8 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
 use maelstrom_base::{
-    proto::{
-        ArtifactFetcherToBroker, ArtifactMetadata, ArtifactType, BrokerToArtifactFetcher, Identity,
-        ManifestEntry, ManifestEntryData, ManifestReader,
-    },
+    manifest::{Identity, ManifestEntry, ManifestEntryData, ManifestReader},
+    proto::{ArtifactFetcherToBroker, ArtifactMetadata, ArtifactType, BrokerToArtifactFetcher},
     Sha256Digest,
 };
 use maelstrom_util::{
@@ -168,7 +166,7 @@ pub fn connection_main(
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::proto::{ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp};
+    use maelstrom_base::manifest::{ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp};
     use maelstrom_test::*;
     use maelstrom_util::io::ChunkedReader;
     use std::io::Read as _;

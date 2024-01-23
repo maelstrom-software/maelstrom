@@ -1,6 +1,7 @@
 //! Core structs used by the broker, worker, and clients. Everything in this crate must be usable
 //! from wasm.
 
+pub mod manifest;
 pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
