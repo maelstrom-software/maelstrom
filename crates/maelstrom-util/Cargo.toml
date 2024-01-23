@@ -24,5 +24,7 @@ tokio = { workspace = true, features = ["sync"] }
 
 [dev-dependencies]
 concat-idents.workspace = true
+maelstrom-test.workspace = true
 rand.workspace = true
+tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread"] }

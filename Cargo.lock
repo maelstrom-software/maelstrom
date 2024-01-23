@@ -2702,9 +2702,11 @@ dependencies = [
  "derive_more",
  "fs2",
  "maelstrom-base",
+ "maelstrom-test",
  "rand",
  "serde",
  "sha2",
+ "tempfile",
  "tokio",
 ]
 
