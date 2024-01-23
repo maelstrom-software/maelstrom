@@ -2,6 +2,7 @@
 name = "cargo-maelstrom"
 categories = ["command-line-utilities", "development-tools::cargo-plugins", "development-tools::testing", "virtualization"]
 description = "Cargo Test Runner for Maelstrom."
+keywords = ["cargo", "cluster", "containers", "subcommand", "test-runner"]
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
