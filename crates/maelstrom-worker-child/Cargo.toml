@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-worker-child"
-description = "No_std worker code that is run in the child process"
+description = "No_std worker code that is run in the child process."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
