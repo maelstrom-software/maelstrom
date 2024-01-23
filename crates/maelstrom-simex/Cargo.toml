@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-simex"
-description = "SIMulation EXplorer: utility to exhaustively test code using simulations"
+description = "SIMulation EXplorer: a test utility for exhaustively exploring all possible simulations in a simulation space."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

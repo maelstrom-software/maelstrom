@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-broker"
-description = "Maelstrom worker process"
+description = "Maelstrom broker binary."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

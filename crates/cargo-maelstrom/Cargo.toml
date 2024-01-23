@@ -1,6 +1,6 @@
 [package]
 name = "cargo-maelstrom"
-description = "Maelstrom Rust test runner"
+description = "Cargo Test Runner for Maelstrom."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

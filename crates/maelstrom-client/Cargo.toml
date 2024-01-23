@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-client"
-description = "Client library for Maelstrom"
+description = "Client library for Maelstrom."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-client-cli"
-description = "CLI for submitting jobs to Maelstrom"
+description = "CLI for submitting jobs to Maelstrom clusters."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

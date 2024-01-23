@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-base"
-description = "Data structures and code used by all Maelstrom code, including WASM"
+description = "Fundamental data structures used by all Maelstrom code."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

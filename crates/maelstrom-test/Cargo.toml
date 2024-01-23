@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-test"
-description = "Macros that are useful for testing"
+description = "Test macros for Maelstrom."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

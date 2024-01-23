@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-web"
-description = "Maelstrom WASM web client"
+description = "Maelstrom WASM web client."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

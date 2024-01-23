@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-plot"
-description = "Fork of egui_plot with some changes for Maelstrom"
+description = "Fork of egui_plot with added stacked line graph functionality."
 license = "MIT OR Apache-2.0"
 documentation.workspace = true
 edition.workspace = true

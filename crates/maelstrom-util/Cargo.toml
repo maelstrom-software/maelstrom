@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-util"
-description = "Utilities for use by Maelstrom processes, but not WASM code)"
+description = "Utilities for use by non-WASM Maelstrom libraries and binaries."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
