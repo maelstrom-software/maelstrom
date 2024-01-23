@@ -55,7 +55,6 @@ fn add_entry_to_tar(
         ManifestEntryData::File(Some(digest)) => {
             header.set_entry_type(tar::EntryType::Regular);
             let (mut f, artifact_meta) = get_file(fs, digest, scheduler_sender)?;
-            assert_eq!(artifact_meta.type_, ArtifactType::Binary);
             tar.append_data(&mut header, &entry.path, &mut f)?;
             assert_eq!(f.stream_position()?, artifact_meta.size);
             scheduler_sender.send(SchedulerMessage::DecrementRefcount(artifact_meta.digest))?;
