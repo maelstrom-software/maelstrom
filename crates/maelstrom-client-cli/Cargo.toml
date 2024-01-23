@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-client-cli"
+categories = ["command-line-utilities", "development-tools::testing", "virtualization"]
 description = "CLI for submitting jobs to Maelstrom clusters."
 documentation.workspace = true
 edition.workspace = true

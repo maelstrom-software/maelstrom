@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-simex"
+categories = ["simulation", "development-tools::testing"]
 description = "SIMulation EXplorer: a test utility for exhaustively exploring all possible simulations in a simulation space."
 documentation.workspace = true
 edition.workspace = true

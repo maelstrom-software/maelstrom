@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-worker"
+categories = ["development-tools::testing", "virtualization"]
 description = "Maelstrom worker binary."
 documentation.workspace = true
 edition.workspace = true

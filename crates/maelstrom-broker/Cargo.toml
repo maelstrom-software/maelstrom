@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-broker"
+categories = ["development-tools::testing", "virtualization"]
 description = "Maelstrom broker binary."
 documentation.workspace = true
 edition.workspace = true

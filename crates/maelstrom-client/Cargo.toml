@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-client"
+categories = ["development-tools::testing", "virtualization"]
 description = "Client library for Maelstrom."
 documentation.workspace = true
 edition.workspace = true
