@@ -1,3 +1,9 @@
+//! Helper library for maelstrom-worker.
+//!
+//! This code is run in the child process after the call to `clone`. In this environment, since the
+//! cloning process is multi-threaded, there is very little that we can do safely. In particular,
+//! we can't allocate from the heap. This library is separate so we can make it `no_std` and manage
+//! its dependencies carefully.
 #![no_std]
 
 use core::{
@@ -18,6 +24,8 @@ pub struct sockaddr_nl_t {
     pub nl_groups: u32,
 }
 
+/// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
+/// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
     SocketAndSave(i32, i32, i32),
     BindSaved(&'a sockaddr_nl_t),
@@ -148,7 +156,16 @@ fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, nc::Errno)
     panic!("should not reach here");
 }
 
-/// Try to exec the job and write the error message to the pipe on failure.
+/// Run the provided syscall script in `syscalls`.
+///
+/// It is assumed that the last syscall won't return (i.e. will be `execve`). If there is an error,
+/// write an 8-byte value to `exec_result_write_fd` describing the error in little-endian format.
+/// The upper 32 bits will be the index in the script of the syscall that errored, and the lower 32
+/// bits will be the errno value.
+///
+/// The caller should ensure that `exec_result_write_fd` is marked close-on-exec. This way, upon
+/// normal completion, no bytes will be written to the file descriptor and the worker can
+/// distinguish between an error and no error.
 pub fn start_and_exec_in_child(exec_result_write_fd: c_int, syscalls: &mut [Syscall]) -> ! {
     let (index, errno) = start_and_exec_in_child_inner(syscalls);
     let result = (index as u64) << 32 | (errno as u64);
