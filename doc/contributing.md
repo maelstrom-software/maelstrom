@@ -1,15 +1,28 @@
 # Releasing
 
 These are the items we need to do to release:
+  - Set environment variables.
   - Update `CHANGELOG.md`.
   - Update `version` in `[workspace.package]` in `Cargo.toml`.
   - Commit above changes.
   - Tag previous changeset with the version tag.
-  - Publish to crates.io.
-  - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
   - Push changesets and tags.
+  - Publish to crates.io.
+  - Update `CHANGELOG.md` for unreleased changes.
+  - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
+  - Commit above changes.
+  - Push changesets.
+  - Unset environment variables.
   - Create GitHub release.
   - Update GitHub milestones.
+
+## Set Environment Variables
+
+If you want to be able to cut and past below, set `VERSION` and `NEXT_VERSION`:
+```bash
+VERSION=1.2.0
+NEXT_VERSION=1.3.0
+```
 
 ## Update `CHANGELOG.md`
 
@@ -20,14 +33,20 @@ the headings to reflect the new release.
 
 The first thing to do when updating the `CHANGELOG.md` is to ensure it is complete.
 To do this, look at the `[Unreleased]` link at the bottom of the file in your
-browser and fill in the missing items in the `[Unreleaed]` section.
-Cross-reference these changes to the closed issues in GitHub. Make sure you add
+browser and fill in the missing items in the `[Unreleaed]` section. If there is
+no `[Unreleased]` section yet, create one, then fill it in. Cross-reference
+these changes to the closed issues in GitHub for the release. Make sure you add
 links to issues when appropriate.
 
 Generally, only add things to `CHANGELOG.md` that you think users would care
-about. There need not be an entry for every changeset.
+about. There need not be an entry for every changeset or even issue.
 
-It's a good idea to commit these changes in a separate changeset.
+You should set commit these changes in a separate changeset.
+
+```bash
+$EDITOR CHANGELOG.md
+git commit -am "Update CHANGELOG.md for version $VERSION"
+```
 
 ### Change Headings
 
@@ -35,47 +54,44 @@ The second thing to do is to update the headers in `CHANGELOG.md`. This is
 mechanical. In the future, we will do this using a tool.
 
 These are the steps to take:
-  - Go to the bottom of the file and duplicate the `[unreleased]` line. In the
-    bottom copy, change "`unreleased`" to the new version number and change
-    "`HEAD`" to the new release's tag.
-  - In the preceding line (for `[unreleased]`, change the "from" tag before
-    "`...HEAD`" to the new release's tag.
-  - Go back to the top of the file, duplicate the `[Unreleased]` header, and
-    put an empty line between the two duplicate headers.
-  - Change the second duplicate header to contain the version number and the
-    date:
+  - At the top of the file, change the `[Unreleased]` header to contain the
+    version number and the date. Something like this:
 ```
 ## [10.3.1] - 2028-06-26
 ```
+  - Go to the bottom of the file and change the `[unreleased]` line. Change
+    "`unreleased`" to the new version number and change "`HEAD`" to the new
+    release's tag.
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml`
 
 This is a bit tricky because you have to update the version itself as well as
-all internal dependencies. To do this, run `cargo set-version`.
-
-If you're just removing the `-dev` suffix of the version, you can just run:
-```
-cargo set-version
-```
-
-Otherwise, you can set the version explicitly with:
-```
-cargo set-version <new version>
+all internal dependencies:
+```bash
+cargo set-version $VERSION
 ```
 
 ## Commit Above Changes
 
 This commit should only include the mechanical changes to `CHANGELOG.md`,
-`Cargo.toml`, and `Cargo.lock`. If you're using `stg`, make sure you commit all
-of these changesets using `stg commit -a`. The message should just be `Version
-XXX`.
-
-## Tag
-
-Tag the last committed changeset with the release's tag. This will be something
-like "`v1.2.3`".
+`Cargo.toml`, and `Cargo.lock`.
 ```bash
-git tag v1.2.3
+git commit -am "Version $VERSION"
+```
+
+## Tag Previous Changeset with the Version Tag
+
+Tag the last committed changeset with the release's tag.
+```bash
+git tag v$VERSION
+```
+
+## Push Changesets and Tags
+
+Ensure that you push, and that you push the tags along with the changesets. We
+can do that atomically like this:
+```bash
+git push --atomic origin main v$VERSION
 ```
 
 ## Publish to Crates.io
@@ -85,7 +101,7 @@ published in the right order, such that all a package's depdendencies are
 published before the package itself. We'll automate this at some point, but for
 now:
 
-```
+```bash
 for i in crates/{maelstrom-{base,plot,simex,test,worker-child,util,web,worker,broker,container,client,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
 ```
 
@@ -93,13 +109,33 @@ To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and
 that secret must allow you to publish these crates. If that is not the case,
 ask Neal for the secret and then run `cargo login`.
 
+## Update `CHANGELOG.md` for Unreleased Changes
+
+Add the `[Unreleased]` section into `CHANGELOG.md`. This should look like:
+```
+## [Unreleased]
+### General
+#### Changed
+#### Added
+#### Removed
+#### Fixed
+### `cargo-maelstrom`
+#### Changed
+#### Added
+#### Removed
+#### Fixed
+```
+
+At the bottom of the file, add a link like this:
+```
+[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v<VERSION>...HEAD
+```
+
 ## Update `version` in `[workspace.package]` in `Cargo.toml` to Next Dev Version
 
-This is a mechanical change. In the future, we will do this using a tool.
-
 Use `cargo set-version` again:
-```
-cargo set-version <NEXT VERSION>-dev
+```bash
+cargo set-version $NEXT_VERSION-dev
 ```
 
 ## Commit Above Changes
@@ -107,12 +143,20 @@ cargo set-version <NEXT VERSION>-dev
 It's important to commit these new changes right away, so that nothing other that the
 actual version has the given version string.
 
+```bash
+git commit -am "Update CHANGELOG.md for version $NEXT_VERSION"
+```
+
 ## Push Changesets and Tags
 
-Ensure that you push, and that you push the tags along with the changesets. We
-can do that atomically like this:
+Ensure that you push again:
 ```bash
-git push --atomic origin main v1.2.3
+git push
+```
+
+## Unset Environment Variables
+```bash
+unset VERSION NEXT_VERSION
 ```
 
 ## Create GitHub Release
