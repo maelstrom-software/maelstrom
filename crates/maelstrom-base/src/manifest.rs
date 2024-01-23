@@ -1,7 +1,7 @@
 use crate::{Sha256Digest, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::io;
+use std::{fmt, io};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum Identity {
@@ -9,13 +9,35 @@ pub enum Identity {
     Id(u64),
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+struct OctalFmt<T>(T);
+
+impl<T> fmt::Debug for OctalFmt<T>
+where
+    T: fmt::Octal,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Octal::fmt(&self.0, f)
+    }
+}
+
+#[derive(Clone, Copy, Deserialize, PartialEq, Serialize)]
 pub struct Mode(pub u32);
+
+impl fmt::Debug for Mode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Mode").field(&OctalFmt(self.0)).finish()
+    }
+}
 
 impl From<Mode> for u32 {
     fn from(m: Mode) -> u32 {
         m.0
     }
+}
+
+#[test]
+fn mode_fmt() {
+    assert_eq!(format!("{:?}", Mode(0o1755)), "Mode(1755)");
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
