@@ -550,8 +550,15 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         digest: Sha256Digest,
     ) -> Result<()> {
         for entry in self.cache.read_manifest(digest)? {
-            if let ManifestEntryData::File(Some(digest)) = entry?.data {
-                self.ensure_artifact_for_job(deps, digest, jid);
+            let entry = entry?;
+            if let ManifestEntryData::File(Some(digest)) = entry.data {
+                let client = self.clients.get_mut(&jid.cid).unwrap();
+                let job = client.jobs.get_mut(&jid.cjid).unwrap();
+                if !job.acquired_artifacts.contains(&digest)
+                    && !job.missing_artifacts.contains(&digest)
+                {
+                    self.ensure_artifact_for_job(deps, digest, jid);
+                }
             }
         }
         Ok(())
