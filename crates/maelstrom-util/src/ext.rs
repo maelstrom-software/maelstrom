@@ -26,9 +26,12 @@ pub trait BoolExt {
 }
 
 impl BoolExt for bool {
+    #[track_caller]
     fn assert_is_true(self) {
         assert!(self);
     }
+
+    #[track_caller]
     fn assert_is_false(self) {
         assert!(!self);
     }
