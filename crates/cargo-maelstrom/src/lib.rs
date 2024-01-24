@@ -165,18 +165,12 @@ where
     })
 }
 
-fn generate_artifacts<ProgressIndicatorT>(
+fn generate_artifacts(
     client: &Mutex<Client>,
-    ind: &ProgressIndicatorT,
     artifact: &CargoArtifact,
-    package_name: &str,
-) -> Result<GeneratedArtifacts>
-where
-    ProgressIndicatorT: ProgressIndicator,
-{
+) -> Result<GeneratedArtifacts> {
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    ind.update_enqueue_status(format!("tar {package_name}"));
-    artifacts::add_generated_artifacts(client, &binary, ind)
+    artifacts::add_generated_artifacts(client, &binary)
 }
 
 impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>
@@ -198,7 +192,7 @@ where
 
         let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
         let generated_artifacts = running_tests
-            .then(|| generate_artifacts(client, &ind, &artifact, &package_name))
+            .then(|| generate_artifacts(client, &artifact))
             .transpose()?;
 
         Ok(Self {

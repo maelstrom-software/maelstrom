@@ -63,12 +63,6 @@ fn push_one_artifact(
 fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = Fs::new();
     let mut hasher = Sha256::new();
-    if path.extension() != Some("tar".as_ref()) {
-        return Err(anyhow!(
-            "path \"{}\" does not end in \".tar\"",
-            path.display()
-        ));
-    }
     let mut f = fs.open_file(path)?;
     std::io::copy(&mut f, &mut hasher)?;
     let mtime = f.metadata()?.modified()?;

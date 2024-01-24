@@ -1,63 +1,59 @@
-use crate::progress::ProgressIndicator;
 use anyhow::Result;
-use indicatif::ProgressBar;
 use maelstrom_base::Sha256Digest;
 use maelstrom_client::Client;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{fs::Fs, manifest::ManifestBuilder};
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use tar::Header;
 
-fn create_artifact_for_binary(binary_path: &Path, prog: Option<ProgressBar>) -> Result<PathBuf> {
-    let prog = prog.unwrap_or_else(ProgressBar::hidden);
-
+fn create_artifact_for_binary(
+    binary_path: &Path,
+    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+) -> Result<PathBuf> {
     let fs = Fs::new();
     let binary = fs.open_file(binary_path)?;
 
-    let mut tar_path = PathBuf::from(binary_path);
-    assert!(tar_path.set_extension("tar"));
+    let mut manifest_path = PathBuf::from(binary_path);
+    assert!(manifest_path.set_extension("manifest"));
 
-    if fs.exists(&tar_path) {
+    if fs.exists(&manifest_path) {
         let binary_mtime = binary.metadata()?.modified()?;
-        let tar_mtime = fs.metadata(&tar_path)?.modified()?;
-        if binary_mtime < tar_mtime {
-            return Ok(tar_path);
+        let manifest_mtime = fs.metadata(&manifest_path)?.modified()?;
+        if binary_mtime < manifest_mtime {
+            return Ok(manifest_path);
         }
     }
 
-    let tar_file = fs.create_file(&tar_path)?;
-    let mut a = tar::Builder::new(tar_file);
+    let mut temp_manifest_path = manifest_path.clone();
+    temp_manifest_path.set_extension("manifest.temp");
 
-    let binary_path_in_tar = Path::new("./").join(binary_path.file_name().unwrap());
-    let mut header = Header::new_gnu();
-    let meta = binary.metadata()?;
-    prog.set_length(meta.len());
-    header.set_metadata(&meta.into_inner());
-    a.append_data(&mut header, binary_path_in_tar, prog.wrap_read(binary))?;
-    a.finish()?;
+    let manifest_file = fs.create_file(&temp_manifest_path)?;
+    let mut manifest = ManifestBuilder::new(manifest_file, data_upload)?;
 
-    Ok(tar_path)
+    let binary_path_in_manifest = Path::new("./").join(binary_path.file_name().unwrap());
+    manifest.add_file(binary_path, binary_path_in_manifest)?;
+
+    fs.rename(&temp_manifest_path, &manifest_path)?;
+    Ok(manifest_path)
 }
 
 fn create_artifact_for_binary_deps(
     binary_path: &Path,
-    prog: Option<ProgressBar>,
+    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
 ) -> Result<PathBuf> {
-    let prog = prog.unwrap_or_else(ProgressBar::hidden);
     let fs = Fs::new();
 
-    let mut tar_path = PathBuf::from(binary_path);
-    assert!(tar_path.set_extension("deps.tar"));
+    let mut manifest_path = PathBuf::from(binary_path);
+    assert!(manifest_path.set_extension("deps.manifest"));
 
-    if fs.exists(&tar_path) {
+    if fs.exists(&manifest_path) {
         let binary_mtime = fs.metadata(binary_path)?.modified()?;
-        let tar_mtime = fs.metadata(&tar_path)?.modified()?;
+        let manifest_mtime = fs.metadata(&manifest_path)?.modified()?;
 
-        if binary_mtime < tar_mtime {
-            return Ok(tar_path);
+        if binary_mtime < manifest_mtime {
+            return Ok(manifest_path);
         }
     }
 
@@ -91,35 +87,17 @@ fn create_artifact_for_binary_deps(
         path.components().skip(1).collect()
     }
 
-    let tar_file = fs.create_file(&tar_path)?;
-    let mut a = tar::Builder::new(tar_file);
+    let mut temp_manifest_path = manifest_path.clone();
+    temp_manifest_path.set_extension("manifest.temp");
+    let manifest_file = fs.create_file(&temp_manifest_path)?;
+    let mut manifest = ManifestBuilder::new(manifest_file, data_upload)?;
 
-    let files = paths
-        .iter()
-        .map(|p| fs.open_file(p))
-        .collect::<Result<Vec<_>>>()?;
-
-    let metas = files
-        .iter()
-        .map(|f| f.metadata())
-        .collect::<Result<Vec<_>>>()?;
-
-    let total_size = metas.iter().map(|m| m.len()).sum();
-    prog.set_length(total_size);
-
-    for ((path, file), meta) in paths
-        .into_iter()
-        .zip(files.into_iter())
-        .zip(metas.into_iter())
-    {
-        let mut header = Header::new_gnu();
-        header.set_metadata(&meta.into_inner());
-        a.append_data(&mut header, &remove_root(&path), prog.wrap_read(file))?;
+    for path in paths {
+        manifest.add_file(&path, &remove_root(&path))?;
     }
 
-    a.finish()?;
-
-    Ok(tar_path)
+    fs.rename(&temp_manifest_path, &manifest_path)?;
+    Ok(manifest_path)
 }
 
 pub struct GeneratedArtifacts {
@@ -130,18 +108,11 @@ pub struct GeneratedArtifacts {
 pub fn add_generated_artifacts(
     client: &Mutex<Client>,
     binary_path: &Path,
-    ind: &impl ProgressIndicator,
 ) -> Result<GeneratedArtifacts> {
-    let prog = ind.new_side_progress("tar");
-    let binary_artifact = client
-        .lock()
-        .unwrap()
-        .add_artifact(&create_artifact_for_binary(binary_path, prog)?)?;
-    let prog = ind.new_side_progress("tar");
-    let deps_artifact = client
-        .lock()
-        .unwrap()
-        .add_artifact(&create_artifact_for_binary_deps(binary_path, prog)?)?;
+    let upload = |p: &Path| client.lock().unwrap().add_artifact(p);
+
+    let binary_artifact = upload(&create_artifact_for_binary(binary_path, upload)?)?;
+    let deps_artifact = upload(&create_artifact_for_binary_deps(binary_path, upload)?)?;
     Ok(GeneratedArtifacts {
         binary: binary_artifact,
         deps: deps_artifact,
