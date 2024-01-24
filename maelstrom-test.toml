@@ -43,4 +43,9 @@ layers = ["proc-and-tmp.tar"]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
+filter = "package.equals(maelstrom-util) && name.starts_with(manifest::)"
+layers = ["proc-and-tmp.tar"]
+mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+
+[[directives]]
 added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
