@@ -643,10 +643,11 @@ mod tests {
         fn expect_fs_operations(&mut self, expected: Vec<TestMessage>) {
             assert!(
                 *self.fs.borrow().messages == expected,
-                "Expected messages didn't match actual messages.\n\
-                 Expected: {:#?}\nActual: {:#?}",
-                expected,
-                self.fs.borrow().messages
+                "Expected messages didn't match actual messages.\n{}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{:#?}", expected),
+                    actual: &format!("{:#?}", self.fs.borrow().messages)
+                }
             );
             self.fs.borrow_mut().messages.clear();
         }

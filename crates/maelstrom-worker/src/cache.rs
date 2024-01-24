@@ -498,18 +498,22 @@ mod tests {
                 }
             }
             panic!(
-                "Expected messages didn't match actual messages in any order.\n\
-                 Expected: {expected:#?}\nActual: {messages:#?}"
+                "Expected messages didn't match actual messages in any order.\n{}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{:#?}", expected),
+                    actual: &format!("{:#?}", messages)
+                }
             );
         }
 
         fn expect_messages_in_specific_order(&mut self, expected: Vec<TestMessage>) {
             assert!(
                 *self.messages.borrow() == expected,
-                "Expected messages didn't match actual messages in specific order.\n\
-                 Expected: {:#?}\nActual: {:#?}",
-                expected,
-                self.messages.borrow()
+                "Expected messages didn't match actual messages in specific order.\n{}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{:#?}", expected),
+                    actual: &format!("{:#?}", self.messages.borrow())
+                }
             );
             self.clear_messages();
         }

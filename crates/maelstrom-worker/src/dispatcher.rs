@@ -552,8 +552,11 @@ mod tests {
                 }
             }
             panic!(
-                "Expected messages didn't match actual messages in any order.\n\
-                 Expected: {expected:#?}\nActual: {messages:#?}"
+                "Expected messages didn't match actual messages in any order.\n{}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{:#?}", expected),
+                    actual: &format!("{:#?}", messages)
+                }
             );
         }
     }
