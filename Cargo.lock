@@ -756,6 +756,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "bincode",
+ "byteorder",
  "cargo_metadata",
  "clap",
  "colored",
