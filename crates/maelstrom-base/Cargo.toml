@@ -23,3 +23,7 @@ strum.workspace = true
 
 [dev-dependencies]
 serde_test.workspace = true
+
+[[bin]]
+name = "manifest-cli"
+path = "src/manifest_cli.rs"
