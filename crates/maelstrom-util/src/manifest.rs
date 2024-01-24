@@ -30,18 +30,21 @@ type DataUploadCb<'cb> = Box<dyn FnMut(&Path) -> Result<Sha256Digest> + 'cb>;
 pub struct ManifestBuilder<'cb, WriteT> {
     fs: Fs,
     writer: ManifestWriter<WriteT>,
+    follow_symlinks: bool,
     data_upload: DataUploadCb<'cb>,
 }
 
 impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
     pub fn new(
         writer: WriteT,
+        follow_symlinks: bool,
         data_upload: impl FnMut(&Path) -> Result<Sha256Digest> + 'cb,
     ) -> io::Result<Self> {
         Ok(Self {
             fs: Fs::new(),
             writer: ManifestWriter::new(writer)?,
             data_upload: Box::new(data_upload),
+            follow_symlinks,
         })
     }
 
@@ -61,7 +64,11 @@ impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
     }
 
     pub fn add_file(&mut self, source: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
-        let meta = self.fs.symlink_metadata(source.as_ref())?;
+        let meta = if self.follow_symlinks {
+            self.fs.metadata(source.as_ref())?
+        } else {
+            self.fs.symlink_metadata(source.as_ref())?
+        };
         if meta.is_file() {
             let data = (meta.size() > 0)
                 .then(|| (self.data_upload)(source.as_ref()))
@@ -93,7 +100,7 @@ mod tests {
 
     struct Fixture {
         fs: Fs,
-        _temp_dir: TempDir,
+        temp_dir: TempDir,
         input_path: PathBuf,
     }
 
@@ -103,19 +110,21 @@ mod tests {
             Fixture {
                 fs: Fs::new(),
                 input_path: temp_dir.path().join("input_entry"),
-                _temp_dir: temp_dir,
+                temp_dir,
             }
         }
     }
 
     fn assert_entry(
         build: impl FnOnce(&mut Fixture, &mut ManifestBuilder<&mut Vec<u8>>),
+        follow_symlinks: bool,
         expected_path: &str,
         expected_size: u64,
         data: ManifestEntryData,
     ) {
         let mut buffer = vec![];
-        let mut builder = ManifestBuilder::new(&mut buffer, |_| Ok(digest![42])).unwrap();
+        let mut builder =
+            ManifestBuilder::new(&mut buffer, follow_symlinks, |_| Ok(digest![42])).unwrap();
 
         let mut fixture = Fixture::new();
         build(&mut fixture, &mut builder);
@@ -124,13 +133,18 @@ mod tests {
             .unwrap()
             .map(|e| e.unwrap())
             .collect();
+        let input_meta = if follow_symlinks {
+            fixture.fs.metadata(&fixture.input_path).unwrap()
+        } else {
+            fixture.fs.symlink_metadata(&fixture.input_path).unwrap()
+        };
         assert_eq!(
             actual_entries,
             vec![ManifestEntry {
                 path: to_utf8_path(expected_path),
                 metadata: ManifestEntryMetadata {
                     size: expected_size,
-                    ..convert_metadata(&fixture.fs.symlink_metadata(&fixture.input_path).unwrap())
+                    ..convert_metadata(&input_meta)
                 },
                 data,
             }]
@@ -146,6 +160,7 @@ mod tests {
                     .add_file(&fixture.input_path, "foo/bar.txt")
                     .unwrap();
             },
+            false, /* follow_symlinks */
             "foo/bar.txt",
             6,
             ManifestEntryData::File(Some(digest![42])),
@@ -159,6 +174,7 @@ mod tests {
                 fixture.fs.create_dir(&fixture.input_path).unwrap();
                 builder.add_file(&fixture.input_path, "foo/bar").unwrap();
             },
+            false, /* follow_symlinks */
             "foo/bar",
             0,
             ManifestEntryData::Directory,
@@ -172,9 +188,28 @@ mod tests {
                 fixture.fs.symlink("../baz", &fixture.input_path).unwrap();
                 builder.add_file(&fixture.input_path, "foo/bar").unwrap();
             },
+            false, /* follow_symlinks */
             "foo/bar",
             0,
             ManifestEntryData::Symlink(b"../baz".to_vec()),
+        );
+    }
+
+    #[test]
+    fn builder_follows_symlinks() {
+        assert_entry(
+            |fixture, builder| {
+                let real_file = fixture.temp_dir.path().join("real");
+                fixture.fs.write(&real_file, b"foobar").unwrap();
+                fixture.fs.symlink(&real_file, &fixture.input_path).unwrap();
+                builder
+                    .add_file(&fixture.input_path, "foo/bar.txt")
+                    .unwrap();
+            },
+            true, /* follow_symlinks */
+            "foo/bar.txt",
+            6,
+            ManifestEntryData::File(Some(digest![42])),
         );
     }
 }

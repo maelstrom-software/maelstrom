@@ -30,7 +30,8 @@ fn create_artifact_for_binary(
     temp_manifest_path.set_extension("manifest.temp");
 
     let manifest_file = fs.create_file(&temp_manifest_path)?;
-    let mut manifest = ManifestBuilder::new(manifest_file, data_upload)?;
+    let mut manifest =
+        ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
 
     let binary_path_in_manifest = Path::new("./").join(binary_path.file_name().unwrap());
     manifest.add_file(binary_path, binary_path_in_manifest)?;
@@ -90,7 +91,8 @@ fn create_artifact_for_binary_deps(
     let mut temp_manifest_path = manifest_path.clone();
     temp_manifest_path.set_extension("manifest.temp");
     let manifest_file = fs.create_file(&temp_manifest_path)?;
-    let mut manifest = ManifestBuilder::new(manifest_file, data_upload)?;
+    let mut manifest =
+        ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
 
     for path in paths {
         manifest.add_file(&path, &remove_root(&path))?;
