@@ -119,7 +119,7 @@ fn build_manifest(
     strip_prefix: impl AsRef<Path>,
     data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
 ) -> Result<()> {
-    let temp_manifest_path = temp_path(&manifest_path);
+    let temp_manifest_path = temp_path(manifest_path);
     let manifest_file = fs.create_file(&temp_manifest_path)?;
     let mut manifest =
         ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
