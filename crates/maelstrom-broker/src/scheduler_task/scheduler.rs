@@ -394,6 +394,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn ensure_artifact_for_job(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
+        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains(&digest) {
+            return;
+        }
         match self.cache.get_artifact(jid, digest.clone()) {
             GetArtifact::Success(artifact_type) => {
                 job.acquired_artifacts
@@ -552,13 +555,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for entry in self.cache.read_manifest(digest)? {
             let entry = entry?;
             if let ManifestEntryData::File(Some(digest)) = entry.data {
-                let client = self.clients.get_mut(&jid.cid).unwrap();
-                let job = client.jobs.get_mut(&jid.cjid).unwrap();
-                if !job.acquired_artifacts.contains(&digest)
-                    && !job.missing_artifacts.contains(&digest)
-                {
-                    self.ensure_artifact_for_job(deps, digest, jid);
-                }
+                self.ensure_artifact_for_job(deps, digest, jid);
             }
         }
         Ok(())
@@ -1632,6 +1629,65 @@ mod tests {
     }
 
     script_test! {
+        request_with_duplicate_layers_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Tar)]),
+            ], [], [], [])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42, 42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42, 42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+        }
+    }
+
+    script_test! {
+        request_with_duplicate_layers_not_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+            ], [], [])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42, 42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Tar,
+                digest: digest![42],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Tar, digest: digest![42], size: 100 },
+                "/z/tmp/bar".into()
+            ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42, 42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+        }
+    }
+
+    script_test! {
         request_with_manifest_nothing_in_cache,
         {
             Fixture::new([
@@ -1652,6 +1708,85 @@ mod tests {
                     },
                     data: ManifestEntryData::File(Some(digest![43])),
                 }])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![42])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Manifest,
+                digest: digest![42],
+                size: 100
+            }, "/z/tmp/foo".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Manifest, digest: digest![42], size: 100 },
+                "/z/tmp/foo".into()
+            ),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Binary,
+                digest: digest![43],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Binary, digest: digest![43], size: 100 },
+                "/z/tmp/bar".into()
+            ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
+        request_with_manifest_with_duplicate_digests_with_nothing_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Get]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![
+                    ManifestEntry {
+                        path: "foo.txt".into(),
+                        metadata: ManifestEntryMetadata {
+                            size: 11,
+                            mode: Mode(0o0555),
+                            user: Identity::Id(1001),
+                            group: Identity::Id(1002),
+                            mtime: UnixTimestamp(1705538554),
+                        },
+                        data: ManifestEntryData::File(Some(digest![43])),
+                    },
+                    ManifestEntry {
+                        path: "bar.txt".into(),
+                        metadata: ManifestEntryMetadata {
+                            size: 11,
+                            mode: Mode(0o0555),
+                            user: Identity::Id(1001),
+                            group: Identity::Id(1002),
+                            mtime: UnixTimestamp(1705538554),
+                        },
+                        data: ManifestEntryData::File(Some(digest![43])),
+                    }
+                ])
             ])
         },
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
@@ -1739,6 +1874,59 @@ mod tests {
                 ArtifactMetadata { type_: ArtifactType::Binary, digest: digest![43], size: 100 },
                 "/z/tmp/bar".into()
             ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
+        request_with_manifest_with_duplicate_digests_already_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Manifest)]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Success(ArtifactType::Binary)]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![
+                    ManifestEntry {
+                        path: "foo.txt".into(),
+                        metadata: ManifestEntryMetadata {
+                            size: 11,
+                            mode: Mode(0o0555),
+                            user: Identity::Id(1001),
+                            group: Identity::Id(1002),
+                            mtime: UnixTimestamp(1705538554),
+                        },
+                        data: ManifestEntryData::File(Some(digest![43])),
+                    },
+                    ManifestEntry {
+                        path: "bar.txt".into(),
+                        metadata: ManifestEntryMetadata {
+                            size: 11,
+                            mode: Mode(0o0555),
+                            user: Identity::Id(1001),
+                            group: Identity::Id(1002),
+                            mtime: UnixTimestamp(1705538554),
+                        },
+                        data: ManifestEntryData::File(Some(digest![43])),
+                    }
+                ])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
         };
 
