@@ -252,18 +252,30 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  *  FIGLET: private
  */
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ManifestExpansion {
+    Enabled,
+    Disabled,
+}
+
+impl ManifestExpansion {
+    fn is_enabled(&self) -> bool {
+        self == &Self::Enabled
+    }
+}
+
 struct Job {
     spec: JobSpec,
     acquired_artifacts: HashSet<Sha256Digest>,
-    missing_artifacts: HashSet<Sha256Digest>,
+    missing_artifacts: HashMap<Sha256Digest, ManifestExpansion>,
 }
 
 impl Job {
     fn new(spec: JobSpec) -> Self {
         Job {
             spec,
-            acquired_artifacts: HashSet::default(),
-            missing_artifacts: HashSet::default(),
+            acquired_artifacts: Default::default(),
+            missing_artifacts: Default::default(),
         }
     }
 }
@@ -391,10 +403,16 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         self.possibly_start_jobs(deps);
     }
 
-    fn ensure_artifact_for_job(&mut self, deps: &mut DepsT, digest: Sha256Digest, jid: JobId) {
+    fn ensure_artifact_for_job(
+        &mut self,
+        deps: &mut DepsT,
+        digest: Sha256Digest,
+        jid: JobId,
+        expand_manifests: ManifestExpansion,
+    ) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
-        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains(&digest) {
+        if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
             return;
         }
         match self.cache.get_artifact(jid, digest.clone()) {
@@ -402,18 +420,20 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 job.acquired_artifacts
                     .insert(digest.clone())
                     .assert_is_true();
-                if artifact_type == ArtifactType::Manifest {
+                if expand_manifests.is_enabled() && artifact_type == ArtifactType::Manifest {
                     self.ensure_manifest_artifacts_for_job(deps, jid, digest)
                         .unwrap();
                 }
             }
             GetArtifact::Wait => {
-                job.missing_artifacts.insert(digest).assert_is_true();
+                job.missing_artifacts
+                    .insert(digest, expand_manifests)
+                    .assert_is_none();
             }
             GetArtifact::Get => {
                 job.missing_artifacts
-                    .insert(digest.clone())
-                    .assert_is_true();
+                    .insert(digest.clone(), expand_manifests)
+                    .assert_is_none();
                 deps.send_message_to_client(
                     &mut client.sender,
                     BrokerToClient::TransferArtifact(digest),
@@ -435,7 +455,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
         for layer in layers {
-            self.ensure_artifact_for_job(deps, layer, jid);
+            self.ensure_artifact_for_job(deps, layer, jid, ManifestExpansion::Enabled);
         }
 
         let client = self.clients.get_mut(&cid).unwrap();
@@ -555,7 +575,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for entry in self.cache.read_manifest(digest)? {
             let entry = entry?;
             if let ManifestEntryData::File(Some(digest)) = entry.data {
-                self.ensure_artifact_for_job(deps, digest, jid);
+                self.ensure_artifact_for_job(deps, digest, jid, ManifestExpansion::Disabled);
             }
         }
         Ok(())
@@ -573,11 +593,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             job.acquired_artifacts
                 .insert(artifact_meta.digest.clone())
                 .assert_is_true();
-            job.missing_artifacts
+            let expand_manifests = job
+                .missing_artifacts
                 .remove(&artifact_meta.digest.clone())
-                .assert_is_true();
+                .unwrap();
 
-            if artifact_meta.type_ == ArtifactType::Manifest {
+            if expand_manifests.is_enabled() && artifact_meta.type_ == ArtifactType::Manifest {
                 self.ensure_manifest_artifacts_for_job(deps, jid, artifact_meta.digest.clone())
                     .unwrap();
             }
@@ -1877,6 +1898,99 @@ mod tests {
                 ArtifactMetadata { type_: ArtifactType::Binary, digest: digest![43], size: 100 },
                 "/z/tmp/bar".into()
             ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
+        request_with_manifest_with_manifest_dependency_not_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Manifest)]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Get]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![ManifestEntry {
+                    path: "foobar.txt".into(),
+                    metadata: ManifestEntryMetadata {
+                        size: 11,
+                        mode: Mode(0o0555),
+                        user: Identity::Id(1001),
+                        group: Identity::Id(1002),
+                        mtime: UnixTimestamp(1705538554),
+                    },
+                    data: ManifestEntryData::File(Some(digest![43])),
+                }])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
+            ToClient(cid![1], BrokerToClient::TransferArtifact(digest![43])),
+        };
+
+        GotArtifact(
+            ArtifactMetadata {
+                type_: ArtifactType::Manifest,
+                digest: digest![43],
+                size: 100
+            }, "/z/tmp/bar".into()) => {
+            CacheGotArtifact(
+                ArtifactMetadata { type_: ArtifactType::Manifest, digest: digest![43], size: 100 },
+                "/z/tmp/bar".into()
+            ),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
+        };
+
+        ClientDisconnected(cid![1]) => {
+            ToWorker(wid![1], CancelJob(jid![1, 2])),
+            CacheClientDisconnected(cid![1]),
+            CacheDecrementRefcount(digest![42]),
+            CacheDecrementRefcount(digest![43]),
+        }
+    }
+
+    script_test! {
+        request_with_manifest_with_manifest_dependency_in_cache,
+        {
+            Fixture::new([
+                ((jid![1, 2], digest![42]), vec![GetArtifact::Success(ArtifactType::Manifest)]),
+                ((jid![1, 2], digest![43]), vec![GetArtifact::Success(ArtifactType::Manifest)]),
+            ], [
+                (digest![42], vec![vec![jid![1, 2]]]),
+                (digest![43], vec![vec![jid![1, 2]]]),
+            ], [], [
+                (digest![42], vec![ManifestEntry {
+                    path: "foobar.txt".into(),
+                    metadata: ManifestEntryMetadata {
+                        size: 11,
+                        mode: Mode(0o0555),
+                        user: Identity::Id(1001),
+                        group: Identity::Id(1002),
+                        mtime: UnixTimestamp(1705538554),
+                    },
+                    data: ManifestEntryData::File(Some(digest![43])),
+                }])
+            ])
+        },
+        WorkerConnected(wid![1], 1, worker_sender![1]) => {};
+        ClientConnected(cid![1], client_sender![1]) => {};
+
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![1, [42]])) => {
+            CacheGetArtifact(jid![1, 2], digest![42]),
+            CacheGetArtifact(jid![1, 2], digest![43]),
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![1, [42]])),
         };
 
