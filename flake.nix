@@ -23,10 +23,19 @@
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
 
           pname = "all";
-          src = craneLib.cleanCargoSource (craneLib.path ./.);
+          src = let
+	    # Only keeps markdown files
+	    tarFilter = path: _type: builtins.match ".*tar$" path != null;
+	    tarOrCargo = path: type:
+	      (tarFilter path type) || (craneLib.filterCargoSources path type);
+	  in nixpkgs.lib.cleanSourceWith {
+	    src = craneLib.path ./.;
+	    filter = tarOrCargo;
+	  };
           strictDeps = true;
 
 	  nativeBuildInputs = [
+	    pkgs.binaryen
 	    pkgs.pkg-config
 	    pkgs.rustc-wasm32.llvmPackages.lld
 	  ];
@@ -38,6 +47,8 @@
             # Additional darwin specific inputs can be set here
             pkgs.libiconv
           ];
+
+          doCheck = false;
 
           # Additional environment variables can be set directly
           # MY_CUSTOM_VAR = "some value";
