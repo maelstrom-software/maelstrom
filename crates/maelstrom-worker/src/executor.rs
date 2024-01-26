@@ -372,9 +372,10 @@ impl Executor {
                 &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
             );
             // This binds the socket.
-            builder.push(Syscall::BindSaved(&self.netlink_socket_addr), &|err| {
-                JobError::System(anyhow!("binding rtnetlink socket: {err}"))
-            });
+            builder.push(
+                Syscall::BindNetlinkSaved(&self.netlink_socket_addr),
+                &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
+            );
             // This sends the message to the kernel.
             builder.push(
                 Syscall::SendToSaved(self.netlink_message.as_ref()),

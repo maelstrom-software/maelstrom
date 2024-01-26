@@ -20,7 +20,7 @@ use nc::{
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
     SocketAndSave(i32, i32, i32),
-    BindSaved(&'a sockaddr_nl_t),
+    BindNetlinkSaved(&'a sockaddr_nl_t),
     SendToSaved(&'a [u8]),
     RecvFromSaved(&'a mut [u8]),
     OpenAndSave(&'a CStr, i32, mode_t),
@@ -50,7 +50,7 @@ impl<'a> Syscall<'a> {
                     *saved = v as usize;
                 })
             }
-            Syscall::BindSaved(sockaddr) => linux::bind_netlink(*saved as u32, sockaddr),
+            Syscall::BindNetlinkSaved(sockaddr) => linux::bind_netlink(*saved as u32, sockaddr),
             Syscall::SendToSaved(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
