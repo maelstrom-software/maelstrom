@@ -117,7 +117,6 @@ impl<ReaderT: io::Read> io::Read for ChunkedReader<ReaderT> {
 #[cfg(test)]
 fn test_chunked_reader(input: &[u8], expected: &[&[u8]]) -> io::Result<()> {
     let mut reader = ChunkedReader::new(input);
-    println!("start");
     for e in expected {
         let mut actual = vec![0; e.len()];
         reader.read_exact(&mut actual[..])?;
