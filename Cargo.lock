@@ -2700,6 +2700,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-linux"
+version = "0.5.0-dev"
+dependencies = [
+ "nc",
+]
+
+[[package]]
 name = "maelstrom-plot"
 version = "0.5.0-dev"
 dependencies = [
@@ -2781,6 +2788,7 @@ dependencies = [
  "gethostname 0.4.3",
  "itertools",
  "maelstrom-base",
+ "maelstrom-linux",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",
@@ -2807,6 +2815,7 @@ dependencies = [
 name = "maelstrom-worker-child"
 version = "0.5.0-dev"
 dependencies = [
+ "maelstrom-linux",
  "nc",
 ]
 

@@ -10,19 +10,11 @@ use core::{
     ffi::{c_int, CStr},
     mem, ptr, result,
 };
+use maelstrom_linux::sockaddr_nl_t;
 use nc::{
     mode_t,
     syscalls::{self, Errno},
 };
-
-#[repr(C)]
-#[allow(non_camel_case_types)]
-pub struct sockaddr_nl_t {
-    pub sin_family: nc::sa_family_t,
-    pub nl_pad: u16,
-    pub nl_pid: u32,
-    pub nl_groups: u32,
-}
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.

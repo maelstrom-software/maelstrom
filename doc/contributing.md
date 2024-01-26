@@ -164,7 +164,7 @@ published before the package itself. We'll automate this at some point, but for
 now:
 
 ```bash
-for i in crates/{maelstrom-{base,plot,simex,test,worker-child,util,web,worker,broker,container,client,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
+for i in crates/{maelstrom-{base,linux,plot,simex,test,worker-child,util,web,worker,broker,container,client,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
 ```
 
 To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and

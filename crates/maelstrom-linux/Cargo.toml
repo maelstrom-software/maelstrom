@@ -1,6 +1,6 @@
 [package]
-name = "maelstrom-worker-child"
-description = "Helper library for maelstrom-worker."
+name = "maelstrom-linux"
+description = "Function wrappers of Linux syscalls used by Maelstrom."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -11,4 +11,3 @@ version.workspace = true
 
 [dependencies]
 nc.workspace = true
-maelstrom-linux.workspace = true
