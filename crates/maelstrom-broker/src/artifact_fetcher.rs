@@ -3,7 +3,7 @@ use anyhow::Result;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestReader},
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
-    ArtifactMetadata, ArtifactType, Sha256Digest,
+    ArtifactType, Sha256Digest,
 };
 use maelstrom_util::{
     fs::{File, Fs},
@@ -18,16 +18,16 @@ fn get_file<'fs>(
     fs: &'fs Fs,
     digest: &Sha256Digest,
     scheduler_sender: &SchedulerSender,
-) -> Result<(File<'fs>, ArtifactMetadata)> {
+) -> Result<(File<'fs>, u64)> {
     let (channel_sender, channel_receiver) = mpsc::channel();
     scheduler_sender.send(SchedulerMessage::GetArtifactForWorker(
         digest.clone(),
         channel_sender,
     ))?;
 
-    let (path, artifact_meta) = channel_receiver.recv()??;
+    let (path, size) = channel_receiver.recv()??;
     let f = fs.open_file(path)?;
-    Ok((f, artifact_meta))
+    Ok((f, size))
 }
 
 fn add_entry_to_tar(
@@ -44,10 +44,10 @@ fn add_entry_to_tar(
     match &entry.data {
         ManifestEntryData::File(Some(digest)) => {
             header.set_entry_type(tar::EntryType::Regular);
-            let (mut f, artifact_meta) = get_file(fs, digest, scheduler_sender)?;
+            let (mut f, size) = get_file(fs, digest, scheduler_sender)?;
             tar.append_data(&mut header, &entry.path, &mut f)?;
-            assert_eq!(f.stream_position()?, artifact_meta.size);
-            scheduler_sender.send(SchedulerMessage::DecrementRefcount(artifact_meta.digest))?;
+            assert_eq!(f.stream_position()?, size);
+            scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest.clone()))?;
         }
         ManifestEntryData::File(None) => {
             header.set_entry_type(tar::EntryType::Regular);
@@ -76,7 +76,8 @@ fn send_manifest(
     scheduler_sender: &SchedulerSender,
     mut file: &mut File<'_>,
     mut socket: &mut impl io::Write,
-    artifact_meta: ArtifactMetadata,
+    size: u64,
+    digest: Sha256Digest,
 ) -> Result<()> {
     let mut tar = tar::Builder::new(&mut socket);
     for entry in ManifestReader::new(&mut file)? {
@@ -84,8 +85,8 @@ fn send_manifest(
     }
     tar.finish()?;
 
-    assert_eq!(file.stream_position()?, artifact_meta.size);
-    scheduler_sender.send(SchedulerMessage::DecrementRefcount(artifact_meta.digest))?;
+    assert_eq!(file.stream_position()?, size);
+    scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
 
     Ok(())
 }
@@ -94,11 +95,12 @@ fn send_tar(
     scheduler_sender: &SchedulerSender,
     mut file: &mut File<'_>,
     mut socket: &mut impl io::Write,
-    artifact_meta: ArtifactMetadata,
+    size: u64,
+    digest: Sha256Digest,
 ) -> Result<()> {
     let copied = io::copy(&mut file, &mut socket)?;
-    assert_eq!(copied, artifact_meta.size);
-    scheduler_sender.send(SchedulerMessage::DecrementRefcount(artifact_meta.digest))?;
+    assert_eq!(copied, size);
+    scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest))?;
     Ok(())
 }
 
@@ -111,7 +113,7 @@ fn handle_one_message(
     log: &mut Logger,
 ) -> Result<()> {
     debug!(log, "received artifact fetcher message"; "msg" => ?msg);
-    let ArtifactFetcherToBroker(digest) = msg;
+    let ArtifactFetcherToBroker(digest, type_) = msg;
     let fs = Fs::new();
     let result = get_file(&fs, &digest, scheduler_sender);
     let msg = BrokerToArtifactFetcher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
@@ -119,12 +121,12 @@ fn handle_one_message(
     net::write_message_to_socket(&mut socket, msg)?;
 
     let mut socket = ChunkedWriter::new(socket, MAX_CHUNK_SIZE);
-    let (mut f, artifact_meta) = result?;
-    match artifact_meta.type_ {
+    let (mut f, size) = result?;
+    match type_ {
         ArtifactType::Manifest => {
-            send_manifest(&fs, scheduler_sender, &mut f, &mut socket, artifact_meta)?
+            send_manifest(&fs, scheduler_sender, &mut f, &mut socket, size, digest)?
         }
-        ArtifactType::Tar => send_tar(scheduler_sender, &mut f, &mut socket, artifact_meta)?,
+        ArtifactType::Tar => send_tar(scheduler_sender, &mut f, &mut socket, size, digest)?,
         ArtifactType::Binary => unreachable!(),
     }
     socket.finish()?;
@@ -187,16 +189,7 @@ mod tests {
         };
         let manifest_path = tmp_dir.path().join(format!("{digest}.manifest"));
         let size = write_manifest(&manifest_path, manifest_entries);
-        sender
-            .send(Ok((
-                manifest_path,
-                ArtifactMetadata {
-                    digest,
-                    type_: ArtifactType::Manifest,
-                    size,
-                },
-            )))
-            .unwrap();
+        sender.send(Ok((manifest_path, size))).unwrap();
     }
 
     fn put_file(path: &Path, data: &[u8]) {
@@ -215,16 +208,7 @@ mod tests {
         };
         let bin_path = tmp_dir.path().join(format!("{digest}.bin"));
         put_file(&bin_path, data);
-        sender
-            .send(Ok((
-                bin_path,
-                ArtifactMetadata {
-                    digest,
-                    type_: ArtifactType::Binary,
-                    size: data.len() as u64,
-                },
-            )))
-            .unwrap();
+        sender.send(Ok((bin_path, data.len() as u64))).unwrap();
     }
 
     async fn wait_for_ref_dec(
@@ -244,7 +228,7 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
         let artifact_msg = tmp_dir.path().join("sent_data.bin");
 
-        let msg = ArtifactFetcherToBroker(digest![42]);
+        let msg = ArtifactFetcherToBroker(digest![42], ArtifactType::Manifest);
         let (sender, receiver) = unbounded_channel();
         let mut log = Logger::root(slog::Discard, slog::o!());
         thread::scope(|scope| {

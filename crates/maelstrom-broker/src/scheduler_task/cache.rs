@@ -6,9 +6,7 @@
 
 use anyhow::{anyhow, Result};
 use bytesize::ByteSize;
-use maelstrom_base::{
-    manifest::ManifestReader, ArtifactMetadata, ArtifactType, ClientId, JobId, Sha256Digest,
-};
+use maelstrom_base::{manifest::ManifestReader, ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
@@ -97,7 +95,7 @@ pub enum GetArtifact {
     /// The artifact was in the cache, and was successfully gotten. The caller now has a reference
     /// on the artifact that will eventually need to be dropped with [`Cache::decrement_refcount`].
     /// The caller is free to use the artifact until they call [`Cache::decrement_refcount`].
-    Success(ArtifactType),
+    Success,
 
     /// The artifact was not in the cache, but the requesting client has already been asked to push
     /// the artifact. The caller will know the artifact has been gotten when
@@ -147,7 +145,6 @@ enum CacheEntry {
     /// currently being used by at least one job. We refcount this state since there may be
     /// multiple jobs that use the same artifact.
     InUse {
-        type_: ArtifactType,
         bytes_used: u64,
         refcount: NonZeroU32,
     },
@@ -156,7 +153,6 @@ enum CacheEntry {
     /// using it. [`Cache`] hands out `priority` values in a monotonically increasing way. This are
     /// used by the [`Heap`] to implement an LRU cache.
     InHeap {
-        type_: ArtifactType,
         bytes_used: u64,
         priority: u64,
         heap_index: HeapIndex,
@@ -208,17 +204,15 @@ impl HeapDeps for CacheMap {
     }
 }
 
-fn artifact_metadata_try_from_path(fs: &mut impl CacheFs, path: &Path) -> Result<ArtifactMetadata> {
+fn try_read_cache_file(fs: &mut impl CacheFs, path: &Path) -> Result<(Sha256Digest, u64)> {
     let path_str = path.file_name().unwrap().to_string_lossy();
     let (left, right) = path_str.split_once('.').ok_or(anyhow!("bad filename"))?;
-    let type_ = ArtifactType::try_from_extension(right).ok_or(anyhow!("bad extension"))?;
+    if right != "bin" {
+        return Err(anyhow!("bad extension"));
+    }
     let digest = left.parse::<Sha256Digest>()?;
     let size = fs.file_size(path);
-    Ok(ArtifactMetadata {
-        type_,
-        digest,
-        size,
-    })
+    Ok((digest, size))
 }
 
 /// The actual cache.
@@ -273,19 +267,18 @@ impl<FsT: CacheFs> Cache<FsT> {
         path.push("sha256");
         result.fs.mkdir_recursively(&path);
         for child in result.fs.read_dir(&path) {
-            if let Ok(artifact_meta) = artifact_metadata_try_from_path(&mut result.fs, &child) {
+            if let Ok((digest, size)) = try_read_cache_file(&mut result.fs, &child) {
                 result.entries.insert(
-                    artifact_meta.digest.clone(),
+                    digest.clone(),
                     CacheEntry::InHeap {
-                        type_: artifact_meta.type_,
-                        bytes_used: artifact_meta.size,
+                        bytes_used: size,
                         priority: result.next_priority,
                         heap_index: HeapIndex::default(),
                     },
                 );
-                result.heap.push(&mut result.entries, artifact_meta.digest);
+                result.heap.push(&mut result.entries, digest);
                 result.next_priority = result.next_priority.checked_add(1).unwrap();
-                result.bytes_used = result.bytes_used.checked_add(artifact_meta.size).unwrap();
+                result.bytes_used = result.bytes_used.checked_add(size).unwrap();
                 continue;
             }
             result.fs.remove_file(&child);
@@ -318,27 +311,22 @@ impl<FsT: CacheFs> Cache<FsT> {
                     GetArtifact::Wait
                 }
             }
-            CacheEntry::InUse {
-                type_, refcount, ..
-            } => {
+            CacheEntry::InUse { refcount, .. } => {
                 *refcount = refcount.checked_add(1).unwrap();
-                GetArtifact::Success(*type_)
+                GetArtifact::Success
             }
             CacheEntry::InHeap {
-                type_,
                 bytes_used,
                 heap_index,
                 ..
             } => {
-                let type_ = *type_;
                 let heap_index = *heap_index;
                 *entry = CacheEntry::InUse {
-                    type_,
                     bytes_used: *bytes_used,
                     refcount: NonZeroU32::new(1).unwrap(),
                 };
                 self.heap.remove(&mut self.entries, heap_index);
-                GetArtifact::Success(type_)
+                GetArtifact::Success
             }
         }
     }
@@ -357,18 +345,12 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// These were `JobId`s provided by previous calls to [`Self::get_artifact`]. Each entry in
     /// this vec has its own refcount, and thus, [`Self::decrement_refcount`] must be called
     /// appropriately.
-    pub fn got_artifact(&mut self, artifact_meta: ArtifactMetadata, path: &Path) -> Vec<JobId> {
-        let ArtifactMetadata {
-            type_,
-            digest,
-            size,
-        } = artifact_meta;
+    pub fn got_artifact(&mut self, digest: Sha256Digest, size: u64, path: &Path) -> Vec<JobId> {
         let mut result = vec![];
-        let new_path = self.cache_path(&digest, type_);
+        let new_path = self.cache_path(&digest);
         match self.entries.entry(digest.clone()) {
             hash_map::Entry::Vacant(entry) => {
                 entry.insert(CacheEntry::InHeap {
-                    type_,
                     bytes_used: size,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
@@ -383,7 +365,6 @@ impl<FsT: CacheFs> Cache<FsT> {
                         let refcount = NonZeroU32::new(u32::try_from(jids.len()).unwrap()).unwrap();
                         std::mem::swap(jids, &mut result);
                         *entry = CacheEntry::InUse {
-                            type_,
                             bytes_used: size,
                             refcount,
                         };
@@ -412,7 +393,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         &mut self,
         digest: Sha256Digest,
     ) -> Result<ManifestReader<impl io::Read + io::Seek + 'static>> {
-        let path = self.cache_path(&digest, ArtifactType::Manifest);
+        let path = self.cache_path(&digest);
         Ok(ManifestReader::new(self.fs.open_file(&path))?)
     }
 
@@ -424,7 +405,6 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn decrement_refcount(&mut self, digest: Sha256Digest) {
         let entry = self.entries.get_mut(&digest).unwrap();
         let CacheEntry::InUse {
-            type_,
             bytes_used,
             refcount,
         } = entry
@@ -435,7 +415,6 @@ impl<FsT: CacheFs> Cache<FsT> {
             Some(new_refcount) => *refcount = new_refcount,
             None => {
                 *entry = CacheEntry::InHeap {
-                    type_: *type_,
                     bytes_used: *bytes_used,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
@@ -475,9 +454,8 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn get_artifact_for_worker(
         &mut self,
         digest: &Sha256Digest,
-    ) -> Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError> {
+    ) -> Result<(PathBuf, u64), GetArtifactForWorkerError> {
         let Some(CacheEntry::InUse {
-            type_,
             bytes_used,
             refcount,
         }) = self.entries.get_mut(digest)
@@ -486,15 +464,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         };
         *refcount = refcount.checked_add(1).unwrap();
         let bytes_used = *bytes_used;
-        let type_ = *type_;
-        Ok((
-            self.cache_path(digest, type_),
-            ArtifactMetadata {
-                type_,
-                digest: digest.clone(),
-                size: bytes_used,
-            },
-        ))
+        Ok((self.cache_path(digest), bytes_used))
     }
 
     /// Return a [`PathBuf`] that contains the temporary directory for the cache. This is where
@@ -506,10 +476,10 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Return the path of a cached artifact.
-    fn cache_path(&self, digest: &Sha256Digest, type_: ArtifactType) -> PathBuf {
+    fn cache_path(&self, digest: &Sha256Digest) -> PathBuf {
         let mut path = self.root.clone();
         path.push("sha256");
-        path.push(format!("{digest}.{}", type_.ext()));
+        path.push(format!("{digest}.bin"));
         path
     }
 
@@ -519,13 +489,10 @@ impl<FsT: CacheFs> Cache<FsT> {
             let Some(digest) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap {
-                type_, bytes_used, ..
-            }) = self.entries.remove(&digest)
-            else {
+            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&digest) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
-            self.fs.remove_file(&self.cache_path(&digest, type_));
+            self.fs.remove_file(&self.cache_path(&digest));
             self.bytes_used = self.bytes_used.checked_sub(bytes_used).unwrap();
             debug!(self.log, "cache removed artifact";
                 "digest" => %digest,
@@ -541,12 +508,9 @@ impl<FsT: CacheFs> Cache<FsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use maelstrom_base::{
-        manifest::{
-            ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
-            UnixTimestamp,
-        },
-        ArtifactType,
+    use maelstrom_base::manifest::{
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
+        UnixTimestamp,
     };
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc};
@@ -669,18 +633,19 @@ mod tests {
 
         fn got_artifact(
             &mut self,
-            artifact_meta: ArtifactMetadata,
+            digest: Sha256Digest,
+            size: u64,
             path: PathBuf,
             expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
-            let result = self.cache.got_artifact(artifact_meta, &path);
+            let result = self.cache.got_artifact(digest, size, &path);
             assert_eq!(result, expected);
             self.expect_fs_operations(expected_fs_operations);
         }
 
-        fn got_artifact_ign(&mut self, artifact_meta: ArtifactMetadata, path: PathBuf) {
-            _ = self.cache.got_artifact(artifact_meta, &path);
+        fn got_artifact_ign(&mut self, digest: Sha256Digest, size: u64, path: PathBuf) {
+            _ = self.cache.got_artifact(digest, size, &path);
             self.clear_fs_operations();
         }
 
@@ -701,7 +666,7 @@ mod tests {
         fn get_artifact_for_worker(
             &mut self,
             digest: Sha256Digest,
-            expected: Result<(PathBuf, ArtifactMetadata), GetArtifactForWorkerError>,
+            expected: Result<(PathBuf, u64), GetArtifactForWorkerError>,
         ) {
             assert_eq!(self.cache.get_artifact_for_worker(&digest), expected);
         }
@@ -755,15 +720,15 @@ mod tests {
                 path_buf!("/z/sha256"),
                 vec![
                     path_buf!("/z/sha256/one"),
-                    long_path!("/z/sha256", 1, "tar"),
+                    long_path!("/z/sha256", 1, "bin"),
                     path_buf!("/z/sha256/two.tar"),
-                    long_path!("/z/sha256", 2, "tar"),
+                    long_path!("/z/sha256", 2, "bin"),
                     long_path!("/z/sha256", 3, "tar.gz"),
                 ],
             )]),
             files: HashMap::from([
-                (long_path!("/z/sha256", 1, "tar"), vec![0; 1000]),
-                (long_path!("/z/sha256", 2, "tar"), vec![0; 100]),
+                (long_path!("/z/sha256", 1, "bin"), vec![0; 1000]),
+                (long_path!("/z/sha256", 2, "bin"), vec![0; 100]),
             ]),
             ..Default::default()
         };
@@ -774,9 +739,9 @@ mod tests {
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
             Remove(path_buf!("/z/sha256/one")),
-            FileSize(long_path!("/z/sha256", 1, "tar")),
+            FileSize(long_path!("/z/sha256", 1, "bin")),
             Remove(path_buf!("/z/sha256/two.tar")),
-            FileSize(long_path!("/z/sha256", 2, "tar")),
+            FileSize(long_path!("/z/sha256", 2, "bin")),
             Remove(long_path!("/z/sha256", 3, "tar.gz")),
         ]);
         assert_eq!(fixture.cache.bytes_used, 1100);
@@ -788,15 +753,15 @@ mod tests {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
                 vec![
-                    long_path!("/z/sha256", 1, "tar"),
-                    long_path!("/z/sha256", 2, "tar"),
-                    long_path!("/z/sha256", 3, "tar"),
+                    long_path!("/z/sha256", 1, "bin"),
+                    long_path!("/z/sha256", 2, "bin"),
+                    long_path!("/z/sha256", 3, "bin"),
                 ],
             )]),
             files: HashMap::from([
-                (long_path!("/z/sha256", 1, "tar"), vec![0; 1001]),
-                (long_path!("/z/sha256", 2, "tar"), vec![0; 1002]),
-                (long_path!("/z/sha256", 3, "tar"), vec![0; 1003]),
+                (long_path!("/z/sha256", 1, "bin"), vec![0; 1001]),
+                (long_path!("/z/sha256", 2, "bin"), vec![0; 1002]),
+                (long_path!("/z/sha256", 3, "bin"), vec![0; 1003]),
             ]),
             ..Default::default()
         };
@@ -806,11 +771,11 @@ mod tests {
             ReadDir(path_buf!("/z/tmp")),
             MkdirRecursively(path_buf!("/z/sha256")),
             ReadDir(path_buf!("/z/sha256")),
-            FileSize(long_path!("/z/sha256", 1, "tar")),
-            FileSize(long_path!("/z/sha256", 2, "tar")),
-            FileSize(long_path!("/z/sha256", 3, "tar")),
-            Remove(long_path!("/z/sha256", 1, "tar")),
-            Remove(long_path!("/z/sha256", 2, "tar")),
+            FileSize(long_path!("/z/sha256", 1, "bin")),
+            FileSize(long_path!("/z/sha256", 2, "bin")),
+            FileSize(long_path!("/z/sha256", 3, "bin")),
+            Remove(long_path!("/z/sha256", 1, "bin")),
+            Remove(long_path!("/z/sha256", 2, "bin")),
         ]);
         assert_eq!(fixture.cache.bytes_used, 1003);
     }
@@ -839,24 +804,12 @@ mod tests {
     fn get_artifact_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                digest: digest!(1),
-                type_: ArtifactType::Tar,
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
-        );
-        fixture.get_artifact(
-            jid!(2, 1001),
-            digest!(1),
-            GetArtifact::Success(ArtifactType::Tar),
-            vec![],
-        );
+        fixture.got_artifact_ign(digest!(1), 1, short_path!("/z/tmp", 1, "bin"));
+        fixture.get_artifact(jid!(2, 1001), digest!(1), GetArtifact::Success, vec![]);
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
     #[test]
@@ -864,16 +817,16 @@ mod tests {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 112358, "tar")],
+                vec![long_path!("/z/sha256", 112358, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 112358, "tar"), vec![0; 1])]),
+            files: HashMap::from([(long_path!("/z/sha256", 112358, "bin"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 11);
         fixture.get_artifact(
             jid!(1, 112358),
             digest!(112358),
-            GetArtifact::Success(ArtifactType::Tar),
+            GetArtifact::Success,
             vec![],
         );
 
@@ -881,34 +834,28 @@ mod tests {
         // heap a bunch and never remove our artifact.
         for i in 0..10 {
             fixture.got_artifact(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
+                digest!(i),
+                1,
+                short_path!("/z/tmp", i, "bin"),
                 vec![],
                 vec![Rename(
-                    short_path!("/z/tmp", i, "tar"),
-                    long_path!("/z/sha256", i, "tar"),
+                    short_path!("/z/tmp", i, "bin"),
+                    long_path!("/z/sha256", i, "bin"),
                 )],
             );
         }
         for i in 10..100 {
             fixture.got_artifact(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
+                digest!(i),
+                1,
+                short_path!("/z/tmp", i, "bin"),
                 vec![],
                 vec![
                     Rename(
-                        short_path!("/z/tmp", i, "tar"),
-                        long_path!("/z/sha256", i, "tar"),
+                        short_path!("/z/tmp", i, "bin"),
+                        long_path!("/z/sha256", i, "bin"),
                     ),
-                    Remove(long_path!("/z/sha256", i - 10, "tar")),
+                    Remove(long_path!("/z/sha256", i - 10, "bin")),
                 ],
             );
         }
@@ -919,46 +866,31 @@ mod tests {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "tar")],
+                vec![long_path!("/z/sha256", 1, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
-        fixture.get_artifact(
-            jid!(1, 1001),
-            digest!(1),
-            GetArtifact::Success(ArtifactType::Tar),
-            vec![],
-        );
+        fixture.get_artifact(jid!(1, 1001), digest!(1), GetArtifact::Success, vec![]);
 
         fixture.get_artifact_ign(jid!(1, 1002), digest!(2));
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(2),
-                size: 1,
-            },
-            short_path!("/z/tmp", 2, "tar"),
-        );
+        fixture.got_artifact_ign(digest!(2), 1, short_path!("/z/tmp", 2, "bin"));
 
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
     #[test]
     fn got_artifact_no_entry() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 1000);
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 10,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(1),
+            10,
+            short_path!("/z/tmp", 1, "bin"),
             vec![],
             vec![Rename(
-                short_path!("/z/tmp", 1, "tar"),
-                long_path!("/z/sha256", 1, "tar"),
+                short_path!("/z/tmp", 1, "bin"),
+                long_path!("/z/sha256", 1, "bin"),
             )],
         );
         assert_eq!(fixture.cache.bytes_used, 10);
@@ -969,26 +901,23 @@ mod tests {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "tar")],
+                vec![long_path!("/z/sha256", 1, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(2),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(2),
+            1,
+            short_path!("/z/tmp", 1, "bin"),
             vec![],
             vec![
                 Rename(
-                    short_path!("/z/tmp", 1, "tar"),
-                    long_path!("/z/sha256", 2, "tar"),
+                    short_path!("/z/tmp", 1, "bin"),
+                    long_path!("/z/sha256", 2, "bin"),
                 ),
-                Remove(long_path!("/z/sha256", 1, "tar")),
+                Remove(long_path!("/z/sha256", 1, "bin")),
             ],
         );
         assert_eq!(fixture.cache.bytes_used, 1);
@@ -999,34 +928,28 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 1..=10 {
             fixture.got_artifact(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
+                digest!(i),
+                1,
+                short_path!("/z/tmp", i, "bin"),
                 vec![],
                 vec![Rename(
-                    short_path!("/z/tmp", i, "tar"),
-                    long_path!("/z/sha256", i, "tar"),
+                    short_path!("/z/tmp", i, "bin"),
+                    long_path!("/z/sha256", i, "bin"),
                 )],
             );
         }
         for i in 11..=20 {
             fixture.got_artifact(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
+                digest!(i),
+                1,
+                short_path!("/z/tmp", i, "bin"),
                 vec![],
                 vec![
                     Rename(
-                        short_path!("/z/tmp", i, "tar"),
-                        long_path!("/z/sha256", i, "tar"),
+                        short_path!("/z/tmp", i, "bin"),
+                        long_path!("/z/sha256", i, "bin"),
                     ),
-                    Remove(long_path!("/z/sha256", i - 10, "tar")),
+                    Remove(long_path!("/z/sha256", i - 10, "bin")),
                 ],
             );
         }
@@ -1040,16 +963,13 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1002), digest!(1));
 
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 10,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(1),
+            10,
+            short_path!("/z/tmp", 1, "bin"),
             vec![jid!(1, 1001), jid!(2, 1001), jid!(1, 1002)],
             vec![Rename(
-                short_path!("/z/tmp", 1, "tar"),
-                long_path!("/z/sha256", 1, "tar"),
+                short_path!("/z/tmp", 1, "bin"),
+                long_path!("/z/sha256", 1, "bin"),
             )],
         );
         assert_eq!(fixture.cache.bytes_used, 10);
@@ -1057,7 +977,7 @@ mod tests {
         // Refcount should be 3.
         fixture.decrement_refcount(digest!(1), vec![]);
         fixture.decrement_refcount(digest!(1), vec![]);
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
     #[test]
@@ -1065,27 +985,24 @@ mod tests {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "tar")],
+                vec![long_path!("/z/sha256", 1, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "tar"), vec![0; 1])]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), vec![0; 1])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(2));
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(2),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(2),
+            1,
+            short_path!("/z/tmp", 1, "bin"),
             vec![jid!(1, 1001)],
             vec![
                 Rename(
-                    short_path!("/z/tmp", 1, "tar"),
-                    long_path!("/z/sha256", 2, "tar"),
+                    short_path!("/z/tmp", 1, "bin"),
+                    long_path!("/z/sha256", 2, "bin"),
                 ),
-                Remove(long_path!("/z/sha256", 1, "tar")),
+                Remove(long_path!("/z/sha256", 1, "bin")),
             ],
         );
         assert_eq!(fixture.cache.bytes_used, 1);
@@ -1095,60 +1012,38 @@ mod tests {
     fn got_artifact_already_in_use() {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 10,
-            },
-            short_path!("/z/tmp", 1, "tar"),
-        );
+        fixture.got_artifact_ign(digest!(1), 10, short_path!("/z/tmp", 1, "bin"));
 
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 10,
-            },
-            short_path!("/z/tmp", 2, "tar"),
+            digest!(1),
+            10,
+            short_path!("/z/tmp", 2, "bin"),
             vec![],
-            vec![Remove(short_path!("/z/tmp", 2, "tar"))],
+            vec![Remove(short_path!("/z/tmp", 2, "bin"))],
         );
 
         // Refcount should be 1.
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
-    fn got_artifact_already_in_cache(ext: &str, type_: ArtifactType) {
+    #[test]
+    fn got_artifact_already_in_cache() {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, ext)],
+                vec![long_path!("/z/sha256", 1, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, ext), vec![0; 1000])]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), vec![0; 1000])]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_,
-                digest: digest!(1),
-                size: 10,
-            },
-            short_path!("/z/tmp", 1, ext),
+            digest!(1),
+            10,
+            short_path!("/z/tmp", 1, "bin"),
             vec![],
-            vec![Remove(short_path!("/z/tmp", 1, ext))],
+            vec![Remove(short_path!("/z/tmp", 1, "bin"))],
         );
-    }
-
-    #[test]
-    fn got_artifact_already_in_cache_tar() {
-        got_artifact_already_in_cache("tar", ArtifactType::Tar);
-    }
-
-    #[test]
-    fn got_artifact_already_in_cache_manifest() {
-        got_artifact_already_in_cache("manifest", ArtifactType::Manifest);
     }
 
     #[test]
@@ -1156,32 +1051,22 @@ mod tests {
         let mut fixture = Fixture::new_and_clear_fs_operations(TestCacheFs::default(), 10);
         for i in 0..10 {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
-            fixture.got_artifact_ign(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
-            );
+            fixture.got_artifact_ign(digest!(i), 1, short_path!("/z/tmp", i, "bin"));
             fixture.decrement_refcount(digest!(i), vec![]);
         }
         for i in 10..100 {
             fixture.get_artifact_ign(jid!(1, 1000 + i), digest!(i));
             fixture.got_artifact(
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(i),
-                    size: 1,
-                },
-                short_path!("/z/tmp", i, "tar"),
+                digest!(i),
+                1,
+                short_path!("/z/tmp", i, "bin"),
                 vec![jid!(1, 1000 + i)],
                 vec![
                     Rename(
-                        short_path!("/z/tmp", i, "tar"),
-                        long_path!("/z/sha256", i, "tar"),
+                        short_path!("/z/tmp", i, "bin"),
+                        long_path!("/z/sha256", i, "bin"),
                     ),
-                    Remove(long_path!("/z/sha256", i - 10, "tar")),
+                    Remove(long_path!("/z/sha256", i - 10, "bin")),
                 ],
             );
             fixture.decrement_refcount(digest!(i), vec![]);
@@ -1207,14 +1092,7 @@ mod tests {
     #[should_panic]
     fn decrement_refcount_in_heap_panics() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 10);
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
-        );
+        fixture.got_artifact_ign(digest!(1), 1, short_path!("/z/tmp", 1, "bin"));
         fixture.decrement_refcount_ign(digest!(1));
     }
 
@@ -1224,19 +1102,16 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(1),
+            1,
+            short_path!("/z/tmp", 1, "bin"),
             vec![],
             vec![
                 Rename(
-                    short_path!("/z/tmp", 1, "tar"),
-                    long_path!("/z/sha256", 1, "tar"),
+                    short_path!("/z/tmp", 1, "bin"),
+                    long_path!("/z/sha256", 1, "bin"),
                 ),
-                Remove(long_path!("/z/sha256", 1, "tar")),
+                Remove(long_path!("/z/sha256", 1, "bin")),
             ],
         );
     }
@@ -1249,19 +1124,16 @@ mod tests {
         fixture.get_artifact_ign(jid!(1, 1003), digest!(1));
         fixture.cache.client_disconnected(cid!(1));
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(1),
+            1,
+            short_path!("/z/tmp", 1, "bin"),
             vec![],
             vec![
                 Rename(
-                    short_path!("/z/tmp", 1, "tar"),
-                    long_path!("/z/sha256", 1, "tar"),
+                    short_path!("/z/tmp", 1, "bin"),
+                    long_path!("/z/sha256", 1, "bin"),
                 ),
-                Remove(long_path!("/z/sha256", 1, "tar")),
+                Remove(long_path!("/z/sha256", 1, "bin")),
             ],
         );
     }
@@ -1276,21 +1148,18 @@ mod tests {
         fixture.get_artifact(jid!(1, 1003), digest!(1), GetArtifact::Get, vec![]);
         fixture.get_artifact(jid!(3, 1003), digest!(1), GetArtifact::Wait, vec![]);
         fixture.got_artifact(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
+            digest!(1),
+            1,
+            short_path!("/z/tmp", 1, "bin"),
             vec![jid!(3, 1003), jid!(1, 1003), jid!(3, 1003)],
             vec![Rename(
-                short_path!("/z/tmp", 1, "tar"),
-                long_path!("/z/sha256", 1, "tar"),
+                short_path!("/z/tmp", 1, "bin"),
+                long_path!("/z/sha256", 1, "bin"),
             )],
         );
         fixture.decrement_refcount(digest!(1), vec![]);
         fixture.decrement_refcount(digest!(1), vec![]);
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
     #[test]
@@ -1309,14 +1178,7 @@ mod tests {
     #[test]
     fn get_artifact_for_worker_in_cache() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 1);
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 1,
-            },
-            short_path!("/z/tmp", 1, "tar"),
-        );
+        fixture.got_artifact_ign(digest!(1), 1, short_path!("/z/tmp", 1, "bin"));
         fixture.get_artifact_for_worker(digest!(1), Err(GetArtifactForWorkerError));
     }
 
@@ -1324,29 +1186,12 @@ mod tests {
     fn get_artifact_for_worker_in_use() {
         let mut fixture = Fixture::new(TestCacheFs::default(), 0);
         fixture.get_artifact_ign(jid!(1, 1001), digest!(1));
-        fixture.got_artifact_ign(
-            ArtifactMetadata {
-                type_: ArtifactType::Tar,
-                digest: digest!(1),
-                size: 42,
-            },
-            short_path!("/z/tmp", 1, "tar"),
-        );
-        fixture.get_artifact_for_worker(
-            digest!(1),
-            Ok((
-                long_path!("/z/sha256", 1, "tar"),
-                ArtifactMetadata {
-                    type_: ArtifactType::Tar,
-                    digest: digest!(1),
-                    size: 42,
-                },
-            )),
-        );
+        fixture.got_artifact_ign(digest!(1), 42, short_path!("/z/tmp", 1, "bin"));
+        fixture.get_artifact_for_worker(digest!(1), Ok((long_path!("/z/sha256", 1, "bin"), 42)));
 
         // Refcount should be 2.
         fixture.decrement_refcount(digest!(1), vec![]);
-        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "tar"))]);
+        fixture.decrement_refcount(digest!(1), vec![Remove(long_path!("/z/sha256", 1, "bin"))]);
     }
 
     #[test]
@@ -1373,16 +1218,16 @@ mod tests {
         let fs = TestCacheFs {
             directories: HashMap::from([(
                 path_buf!("/z/sha256"),
-                vec![long_path!("/z/sha256", 1, "manifest")],
+                vec![long_path!("/z/sha256", 1, "bin")],
             )]),
-            files: HashMap::from([(long_path!("/z/sha256", 1, "manifest"), manifest_data)]),
+            files: HashMap::from([(long_path!("/z/sha256", 1, "bin"), manifest_data)]),
             ..Default::default()
         };
         let mut fixture = Fixture::new_and_clear_fs_operations(fs, 1000);
         let reader = fixture
             .read_manifest(
                 digest![1],
-                vec![OpenFile(long_path!("/z/sha256", 1, "manifest"))],
+                vec![OpenFile(long_path!("/z/sha256", 1, "bin"))],
             )
             .unwrap();
         assert_eq!(reader.map(|e| e.unwrap()).collect::<Vec<_>>(), entries);

@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ArtifactMetadata, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest,
+    ArtifactType, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest,
 };
 use serde::{Deserialize, Serialize};
 
@@ -59,7 +59,7 @@ pub struct BrokerToArtifactFetcher(pub Result<(), String>);
 /// Message sent from an artifact fetcher to the broker. It will be answered with a
 /// [`BrokerToArtifactFetcher`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ArtifactFetcherToBroker(pub Sha256Digest);
+pub struct ArtifactFetcherToBroker(pub Sha256Digest, pub ArtifactType);
 
 /// Message sent from the broker to an artifact pusher. This will be in response to an
 /// [`ArtifactPusherToBroker`] message and the artifact's body. On success, the message contains no
@@ -69,8 +69,8 @@ pub struct ArtifactFetcherToBroker(pub Sha256Digest);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct BrokerToArtifactPusher(pub Result<(), String>);
 
-/// Message sent from an artifact pusher to the broker. It contains metadata about the artifact
-/// that is about to be pushed. The body of the artifact will immediately follow this message. It
-/// will be answered with a [`BrokerToArtifactPusher`].
+/// Message sent from an artifact pusher to the broker. It contains the digest and size of the
+/// artifact. The body of the artifact will immediately follow this message. It will be answered
+/// with a [`BrokerToArtifactPusher`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ArtifactPusherToBroker(pub ArtifactMetadata);
+pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);

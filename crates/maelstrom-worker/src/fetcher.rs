@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
-    Sha256Digest,
+    ArtifactType, Sha256Digest,
 };
 use maelstrom_util::{config::BrokerAddr, io::ChunkedReader, net};
 use slog::{debug, Logger};
@@ -14,6 +14,7 @@ use tar::Archive;
 
 pub fn main(
     digest: &Sha256Digest,
+    type_: ArtifactType,
     path: PathBuf,
     broker_addr: BrokerAddr,
     log: &mut Logger,
@@ -22,7 +23,7 @@ pub fn main(
     let mut reader = BufReader::new(writer.try_clone()?);
     net::write_message_to_socket(&mut writer, Hello::ArtifactFetcher)?;
 
-    let msg = ArtifactFetcherToBroker(digest.clone());
+    let msg = ArtifactFetcherToBroker(digest.clone(), type_);
     debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
 
     net::write_message_to_socket(&mut writer, msg)?;

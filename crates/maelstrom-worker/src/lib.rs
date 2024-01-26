@@ -14,7 +14,7 @@ use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
+    ArtifactType, JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
 use maelstrom_util::{
     config::{BrokerAddr, CacheRoot},
@@ -115,7 +115,7 @@ impl DispatcherDeps for DispatcherAdapter {
         signal::kill(pid, Signal::SIGKILL).ok();
     }
 
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf) {
         let sender = self.dispatcher_sender.clone();
         let broker_addr = self.broker_addr;
         let mut log = self.log.new(o!(
@@ -124,7 +124,7 @@ impl DispatcherDeps for DispatcherAdapter {
         ));
         debug!(log, "artifact fetcher starting");
         thread::spawn(move || {
-            let result = fetcher::main(&digest, path, broker_addr, &mut log);
+            let result = fetcher::main(&digest, type_, path, broker_addr, &mut log);
             debug!(log, "artifact fetcher completed"; "result" => ?result);
             sender.send(Message::ArtifactFetcher(digest, result)).ok();
         });

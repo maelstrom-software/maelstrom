@@ -8,8 +8,8 @@ use crate::{
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    JobError, JobId, JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess, NonEmpty,
-    Sha256Digest,
+    ArtifactType, JobError, JobId, JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
+    NonEmpty, Sha256Digest,
 };
 use maelstrom_util::ext::OptionExt as _;
 use nix::unistd::Pid;
@@ -51,7 +51,7 @@ pub trait DispatcherDeps {
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
 
     /// Start a thread that will download an artifact from the broker and extract it into `path`.
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf);
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -241,13 +241,15 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
     fn receive_enqueue_job(&mut self, jid: JobId, spec: JobSpec) {
         let mut entry = AwaitingLayersEntry::new(spec);
-        for (digest, _) in &entry.spec.layers {
+        for (digest, type_) in &entry.spec.layers {
             match self.cache.get_artifact(digest.clone(), jid) {
                 GetArtifact::Success(path) => {
                     entry.layers.insert(digest.clone(), path).assert_is_none()
                 }
                 GetArtifact::Wait => {}
-                GetArtifact::Get(path) => self.deps.start_artifact_fetch(digest.clone(), path),
+                GetArtifact::Get(path) => {
+                    self.deps.start_artifact_fetch(digest.clone(), *type_, path)
+                }
             }
         }
         if entry.has_all_layers() {
@@ -420,7 +422,7 @@ mod tests {
     enum TestMessage {
         StartJob(JobId, JobSpec, Vec<PathBuf>),
         SendMessageToBroker(WorkerToBroker),
-        StartArtifactFetch(Sha256Digest, PathBuf),
+        StartArtifactFetch(Sha256Digest, ArtifactType, PathBuf),
         CacheGetArtifact(Sha256Digest, JobId),
         CacheGotArtifactSuccess(Sha256Digest, u64),
         CacheGotArtifactFailure(Sha256Digest),
@@ -460,10 +462,15 @@ mod tests {
             self.borrow_mut().messages.push(Kill(pid));
         }
 
-        fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+        fn start_artifact_fetch(
+            &mut self,
+            digest: Sha256Digest,
+            type_: ArtifactType,
+            path: PathBuf,
+        ) {
             self.borrow_mut()
                 .messages
-                .push(StartArtifactFetch(digest, path));
+                .push(StartArtifactFetch(digest, type_, path));
         }
 
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {
@@ -627,7 +634,7 @@ mod tests {
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (43, Tar)]))) => {
             CacheGetArtifact(digest!(41), jid!(1)),
             CacheGetArtifact(digest!(42), jid!(1)),
-            StartArtifactFetch(digest!(42), path_buf!("/b")),
+            StartArtifactFetch(digest!(42), ArtifactType::Tar, path_buf!("/b")),
             CacheGetArtifact(digest!(43), jid!(1)),
         };
         Broker(CancelJob(jid!(1))) => {
