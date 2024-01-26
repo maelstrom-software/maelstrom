@@ -4,11 +4,10 @@ use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use maelstrom_base::{
     proto::{
-        ArtifactMetadata, ArtifactPusherToBroker, ArtifactType, BrokerToArtifactPusher,
-        BrokerToClient, ClientToBroker, Hello,
+        ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobSpec, JobStringResult, Sha256Digest,
+    ArtifactMetadata, ArtifactType, ClientJobId, JobSpec, JobStringResult, Sha256Digest,
 };
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};

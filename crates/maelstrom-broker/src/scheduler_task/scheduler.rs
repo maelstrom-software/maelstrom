@@ -5,15 +5,13 @@ use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWo
 use anyhow::Result;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestReader},
-    proto::{
-        ArtifactMetadata, ArtifactType, BrokerToClient, BrokerToWorker, ClientToBroker,
-        WorkerToBroker,
-    },
+    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
         WorkerStatistics,
     },
-    ClientId, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest, WorkerId,
+    ArtifactMetadata, ArtifactType, ClientId, ClientJobId, JobId, JobSpec, JobStringResult,
+    Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
     ext::{BoolExt as _, OptionExt as _},
@@ -686,10 +684,8 @@ mod tests {
         manifest::{
             Identity, ManifestEntry, ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp,
         },
-        proto::{
-            ArtifactType,
-            BrokerToWorker::{self, *},
-        },
+        proto::BrokerToWorker::{self, *},
+        ArtifactType,
     };
     use maelstrom_test::*;
     use maplit::hashmap;

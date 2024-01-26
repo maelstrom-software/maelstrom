@@ -2,8 +2,8 @@ use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
 use maelstrom_base::{
     manifest::{Identity, ManifestEntry, ManifestEntryData, ManifestReader},
-    proto::{ArtifactFetcherToBroker, ArtifactMetadata, ArtifactType, BrokerToArtifactFetcher},
-    Sha256Digest,
+    proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
+    ArtifactMetadata, ArtifactType, Sha256Digest,
 };
 use maelstrom_util::{
     fs::{File, Fs},

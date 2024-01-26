@@ -33,6 +33,45 @@ pub struct ClientId(u32);
 )]
 pub struct ClientJobId(u32);
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ArtifactType {
+    /// A .tar file
+    Tar,
+    /// A serialized `Manifest`
+    Manifest,
+    /// Binary blob used by manifests
+    Binary,
+}
+
+impl ArtifactType {
+    pub fn try_from_extension(ext: &str) -> Option<Self> {
+        match ext {
+            "tar" => Some(Self::Tar),
+            "manifest" => Some(Self::Manifest),
+            "bin" => Some(Self::Binary),
+            _ => None,
+        }
+    }
+
+    pub fn ext(&self) -> &'static str {
+        match self {
+            Self::Tar => "tar",
+            Self::Manifest => "manifest",
+            Self::Binary => "bin",
+        }
+    }
+}
+
+/// Metadata about an artifact.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct ArtifactMetadata {
+    pub type_: ArtifactType,
+    /// The digest of the contents
+    pub digest: Sha256Digest,
+    /// The size of the artifact in bytes
+    pub size: u64,
+}
+
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct JobId {

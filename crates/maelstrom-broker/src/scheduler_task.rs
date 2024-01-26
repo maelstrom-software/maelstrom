@@ -2,7 +2,10 @@ mod cache;
 mod scheduler;
 
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
-use maelstrom_base::proto::{ArtifactMetadata, BrokerToClient, BrokerToWorker};
+use maelstrom_base::{
+    proto::{BrokerToClient, BrokerToWorker},
+    ArtifactMetadata,
+};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     sync,
