@@ -127,7 +127,6 @@ fn handle_one_message(
             send_manifest(&fs, scheduler_sender, &mut f, &mut socket, size, digest)?
         }
         ArtifactType::Tar => send_tar(scheduler_sender, &mut f, &mut socket, size, digest)?,
-        ArtifactType::Binary => unreachable!(),
     }
     socket.finish()?;
 

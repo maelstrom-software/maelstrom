@@ -39,27 +39,6 @@ pub enum ArtifactType {
     Tar,
     /// A serialized `Manifest`
     Manifest,
-    /// Binary blob used by manifests
-    Binary,
-}
-
-impl ArtifactType {
-    pub fn try_from_extension(ext: &str) -> Option<Self> {
-        match ext {
-            "tar" => Some(Self::Tar),
-            "manifest" => Some(Self::Manifest),
-            "bin" => Some(Self::Binary),
-            _ => None,
-        }
-    }
-
-    pub fn ext(&self) -> &'static str {
-        match self {
-            Self::Tar => "tar",
-            Self::Manifest => "manifest",
-            Self::Binary => "bin",
-        }
-    }
 }
 
 /// An absolute job ID that includes a [`ClientId`] for disambiguation.
