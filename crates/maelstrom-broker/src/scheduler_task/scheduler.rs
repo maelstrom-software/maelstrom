@@ -251,21 +251,31 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
  */
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum ManifestExpansion {
-    Enabled,
-    Disabled,
+enum IsManifest {
+    Manifest,
+    NotManifest,
 }
 
-impl ManifestExpansion {
-    fn is_enabled(&self) -> bool {
-        self == &Self::Enabled
+impl From<bool> for IsManifest {
+    fn from(is_manifest: bool) -> Self {
+        if is_manifest {
+            Self::Manifest
+        } else {
+            Self::NotManifest
+        }
+    }
+}
+
+impl IsManifest {
+    fn is_manifest(&self) -> bool {
+        self == &Self::Manifest
     }
 }
 
 struct Job {
     spec: JobSpec,
     acquired_artifacts: HashSet<Sha256Digest>,
-    missing_artifacts: HashMap<Sha256Digest, ManifestExpansion>,
+    missing_artifacts: HashMap<Sha256Digest, IsManifest>,
 }
 
 impl Job {
@@ -406,7 +416,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         deps: &mut DepsT,
         digest: Sha256Digest,
         jid: JobId,
-        expand_manifests: ManifestExpansion,
+        is_manifest: IsManifest,
     ) {
         let client = self.clients.get_mut(&jid.cid).unwrap();
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
@@ -414,23 +424,23 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             return;
         }
         match self.cache.get_artifact(jid, digest.clone()) {
-            GetArtifact::Success(artifact_type) => {
+            GetArtifact::Success(_) => {
                 job.acquired_artifacts
                     .insert(digest.clone())
                     .assert_is_true();
-                if expand_manifests.is_enabled() && artifact_type == ArtifactType::Manifest {
+                if is_manifest.is_manifest() {
                     self.ensure_manifest_artifacts_for_job(deps, jid, digest)
                         .unwrap();
                 }
             }
             GetArtifact::Wait => {
                 job.missing_artifacts
-                    .insert(digest, expand_manifests)
+                    .insert(digest, is_manifest)
                     .assert_is_none();
             }
             GetArtifact::Get => {
                 job.missing_artifacts
-                    .insert(digest.clone(), expand_manifests)
+                    .insert(digest.clone(), is_manifest)
                     .assert_is_none();
                 deps.send_message_to_client(
                     &mut client.sender,
@@ -452,8 +462,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         let layers = spec.layers.clone();
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
-        for (digest, _) in layers {
-            self.ensure_artifact_for_job(deps, digest, jid, ManifestExpansion::Enabled);
+        for (digest, type_) in layers {
+            let is_manifest = IsManifest::from(type_ == ArtifactType::Manifest);
+            self.ensure_artifact_for_job(deps, digest, jid, is_manifest);
         }
 
         let client = self.clients.get_mut(&cid).unwrap();
@@ -573,7 +584,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for entry in self.cache.read_manifest(digest)? {
             let entry = entry?;
             if let ManifestEntryData::File(Some(digest)) = entry.data {
-                self.ensure_artifact_for_job(deps, digest, jid, ManifestExpansion::Disabled);
+                self.ensure_artifact_for_job(deps, digest, jid, IsManifest::NotManifest);
             }
         }
         Ok(())
@@ -591,12 +602,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             job.acquired_artifacts
                 .insert(artifact_meta.digest.clone())
                 .assert_is_true();
-            let expand_manifests = job
+            let is_manifest = job
                 .missing_artifacts
                 .remove(&artifact_meta.digest.clone())
                 .unwrap();
 
-            if expand_manifests.is_enabled() && artifact_meta.type_ == ArtifactType::Manifest {
+            if is_manifest.is_manifest() {
                 self.ensure_manifest_artifacts_for_job(deps, jid, artifact_meta.digest.clone())
                     .unwrap();
             }
