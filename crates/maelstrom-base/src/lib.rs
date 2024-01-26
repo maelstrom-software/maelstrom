@@ -148,7 +148,7 @@ pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
-    pub layers: NonEmpty<Sha256Digest>,
+    pub layers: NonEmpty<(Sha256Digest, ArtifactType)>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
@@ -159,7 +159,10 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn new(program: impl Into<String>, layers: impl Into<NonEmpty<Sha256Digest>>) -> Self {
+    pub fn new(
+        program: impl Into<String>,
+        layers: impl Into<NonEmpty<(Sha256Digest, ArtifactType)>>,
+    ) -> Self {
         JobSpec {
             program: program.into().into(),
             layers: layers.into(),

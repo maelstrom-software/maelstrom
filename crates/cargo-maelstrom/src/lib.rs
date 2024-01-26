@@ -13,7 +13,7 @@ use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
-use maelstrom_base::{JobSpec, NonEmpty, Sha256Digest};
+use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest};
 use maelstrom_client::{spec::ImageConfig, Client, ClientDriver};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
@@ -212,22 +212,25 @@ where
     fn calculate_job_layers(
         &mut self,
         test_metadata: &TestMetadata,
-    ) -> Result<NonEmpty<Sha256Digest>> {
+    ) -> Result<NonEmpty<(Sha256Digest, ArtifactType)>> {
         let mut layers = test_metadata
             .layers
             .iter()
             .map(|layer| {
-                self.client
-                    .lock()
-                    .unwrap()
-                    .add_artifact(PathBuf::from(layer).as_path())
+                Ok((
+                    self.client
+                        .lock()
+                        .unwrap()
+                        .add_artifact(PathBuf::from(layer).as_path())?,
+                    ArtifactType::Tar,
+                ))
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
         if test_metadata.include_shared_libraries() {
-            layers.push(artifacts.deps.clone());
+            layers.push((artifacts.deps.clone(), ArtifactType::Manifest));
         }
-        layers.push(artifacts.binary.clone());
+        layers.push((artifacts.binary.clone(), ArtifactType::Manifest));
 
         Ok(NonEmpty::try_from(layers).unwrap())
     }

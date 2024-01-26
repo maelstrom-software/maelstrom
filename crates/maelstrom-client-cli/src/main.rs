@@ -7,7 +7,7 @@ use figment::{
 };
 use indicatif::ProgressBar;
 use maelstrom_base::{
-    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+    ArtifactType, ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
@@ -185,7 +185,12 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = job_spec_iter_from_reader(
         reader,
-        |layer| client.borrow_mut().add_artifact(Path::new(&layer)),
+        |layer| {
+            Ok((
+                client.borrow_mut().add_artifact(Path::new(&layer))?,
+                ArtifactType::Tar,
+            ))
+        },
         std_env_lookup,
         image_lookup,
     );

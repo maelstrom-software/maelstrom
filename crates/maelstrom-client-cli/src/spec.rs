@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, NonEmpty,
-    Sha256Digest, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec,
+    NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, PossiblyImage,
@@ -20,7 +20,7 @@ impl<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> Iterator
     for JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT>
 where
     InnerT: Iterator<Item = serde_json::Result<Job>>,
-    LayerMapperT: Fn(String) -> Result<Sha256Digest>,
+    LayerMapperT: Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
     EnvLookupT: Fn(&str) -> Result<Option<String>>,
     ImageLookupT: FnMut(&str) -> Result<ImageConfig>,
 {
@@ -41,7 +41,7 @@ where
 
 pub fn job_spec_iter_from_reader(
     reader: impl Read,
-    layer_mapper: impl Fn(String) -> Result<Sha256Digest>,
+    layer_mapper: impl Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
     image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
 ) -> impl Iterator<Item = Result<JobSpec>> {
@@ -95,7 +95,7 @@ impl Job {
 
     fn into_job_spec(
         self,
-        layer_mapper: impl Fn(String) -> Result<Sha256Digest>,
+        layer_mapper: impl Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<JobSpec> {
@@ -366,8 +366,8 @@ mod test {
         digest, path_buf_vec, string, string_nonempty, string_vec, utf8_path_buf,
     };
 
-    fn layer_mapper(layer: String) -> Result<Sha256Digest> {
-        Ok(Sha256Digest::from(layer.parse::<u64>()?))
+    fn layer_mapper(layer: String) -> Result<(Sha256Digest, ArtifactType)> {
+        Ok((Sha256Digest::from(layer.parse::<u64>()?), ArtifactType::Tar))
     }
 
     fn env(var: &str) -> Result<Option<String>> {
@@ -400,7 +400,7 @@ mod test {
             Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
                 .into_job_spec(layer_mapper, env, images)
                 .unwrap(),
-            JobSpec::new("program", nonempty![digest!(1)]),
+            JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)]),
         );
     }
 
@@ -425,7 +425,7 @@ mod test {
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("program", nonempty![digest!(1)])
+            JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)])
                 .arguments(["arg1", "arg2"])
                 .environment(["BAR=bar", "FOO=foo"])
                 .devices(enum_set! {JobDevice::Null})
@@ -448,7 +448,8 @@ mod test {
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("program", nonempty![digest!(1)]).enable_loopback(true),
+            JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)])
+                .enable_loopback(true),
         );
     }
 
@@ -461,7 +462,8 @@ mod test {
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new("program", nonempty![digest!(1)]).enable_writable_file_system(true),
+            JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)])
+                .enable_writable_file_system(true),
         );
     }
 
@@ -497,7 +499,10 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            ),
         );
     }
 
@@ -556,7 +561,13 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(42), digest!(43)]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![
+                    (digest!(42), ArtifactType::Tar),
+                    (digest!(43), ArtifactType::Tar)
+                ]
+            ),
         );
     }
 
@@ -633,7 +644,11 @@ mod test {
             .unwrap(),
             JobSpec::new(
                 string!("/bin/sh"),
-                nonempty![digest!(42), digest!(43), digest!(1)]
+                nonempty![
+                    (digest!(42), ArtifactType::Tar),
+                    (digest!(43), ArtifactType::Tar),
+                    (digest!(1), ArtifactType::Tar)
+                ]
             ),
         );
     }
@@ -710,7 +725,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).arguments(["-e", "echo foo"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .arguments(["-e", "echo foo"]),
         )
     }
 
@@ -727,8 +746,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .environment(["BAR=bar", "FOO=foo"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["BAR=bar", "FOO=foo"]),
         )
     }
 
@@ -745,8 +767,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .environment(["BAR=bar", "FOO=pre-foo-env-post"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["BAR=bar", "FOO=pre-foo-env-post"]),
         )
     }
 
@@ -763,8 +788,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .environment(["BAR=bar", "FOO=pre-no-prev-post"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["BAR=bar", "FOO=pre-no-prev-post"]),
         )
     }
 
@@ -781,8 +809,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .environment(["BAZ=image-baz", "FOO=image-foo"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["BAZ=image-baz", "FOO=image-foo"]),
         )
     }
 
@@ -799,8 +830,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .environment(["PATH=$env{PATH}"]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["PATH=$env{PATH}"]),
         )
     }
 
@@ -850,11 +884,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).environment([
-                "BAR=bar",
-                "BAZ=image-baz",
-                "FOO=foo"
-            ]),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment(["BAR=bar", "BAZ=image-baz", "FOO=foo"]),
         )
     }
 
@@ -876,7 +910,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).environment([
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .environment([
                 "BAR=no-env-bar:no-prev-bar",
                 "BAZ=no-env-baz:image-baz",
                 "FOO=foo-env:image-foo"
@@ -960,8 +998,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .devices(enum_set! {JobDevice::Null | JobDevice::Zero}),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .devices(enum_set! {JobDevice::Null | JobDevice::Zero}),
         )
     }
 
@@ -980,7 +1021,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).mounts([JobMount {
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .mounts([JobMount {
                 fs_type: JobMountFsType::Tmp,
                 mount_point: utf8_path_buf!("/tmp"),
             }])
@@ -1000,7 +1045,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).enable_loopback(true),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .enable_loopback(true),
         )
     }
 
@@ -1017,8 +1066,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)])
-                .enable_writable_file_system(true),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .enable_writable_file_system(true),
         )
     }
 
@@ -1035,7 +1087,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).working_directory("/foo/bar"),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .working_directory("/foo/bar"),
         )
     }
 
@@ -1055,7 +1111,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).working_directory("/foo"),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .working_directory("/foo"),
         )
     }
 
@@ -1110,7 +1170,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).user(1234),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .user(1234),
         )
     }
 
@@ -1127,7 +1191,11 @@ mod test {
             .unwrap()
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
-            JobSpec::new(string!("/bin/sh"), nonempty![digest!(1)]).group(4321),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .group(4321),
         )
     }
 }

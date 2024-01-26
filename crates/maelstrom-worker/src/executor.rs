@@ -96,7 +96,7 @@ impl JobSpec {
                 user,
                 group,
             },
-            digest_layers,
+            digest_layers.map(|(d, _)| d),
         )
     }
 }
@@ -771,7 +771,7 @@ mod tests {
     use super::*;
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
-    use maelstrom_base::{nonempty, JobStatus};
+    use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use nix::sys::signal::{self, Signal};
     use serial_test::serial;
@@ -901,7 +901,7 @@ mod tests {
     }
 
     fn test_spec(program: &str) -> maelstrom_base::JobSpec {
-        maelstrom_base::JobSpec::new(program, nonempty![digest![0]])
+        maelstrom_base::JobSpec::new(program, nonempty![(digest![0], ArtifactType::Tar)])
     }
 
     fn bash_spec(script: &str) -> maelstrom_base::JobSpec {
@@ -1191,8 +1191,15 @@ mod tests {
     #[serial]
     async fn multiple_layers_in_correct_order() {
         let (spec, _) = JobSpec::from_spec_and_layers(
-            maelstrom_base::JobSpec::new("/bin/cat", nonempty![digest![0], digest![1], digest![2]])
-                .arguments(["/root/file", "/root/bottom-file", "/root/top-file"]),
+            maelstrom_base::JobSpec::new(
+                "/bin/cat",
+                nonempty![
+                    (digest![0], ArtifactType::Tar),
+                    (digest![1], ArtifactType::Tar),
+                    (digest![2], ArtifactType::Tar)
+                ],
+            )
+            .arguments(["/root/file", "/root/bottom-file", "/root/top-file"]),
             nonempty![
                 extract_dependencies(),
                 extract_layer_tar(include_bytes!("bottom-layer.tar")),
