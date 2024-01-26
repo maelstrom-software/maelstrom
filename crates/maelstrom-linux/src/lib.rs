@@ -1,6 +1,7 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
+use core::mem;
 use nc::syscalls;
 
 pub type Errno = nc::Errno;
@@ -29,4 +30,18 @@ pub fn socket(domain: i32, sock_type: i32, protocol: i32) -> Result<u32, Errno> 
         )
     }
     .map(|ret| ret as u32)
+}
+
+pub fn bind_netlink(fd: u32, sockaddr: &sockaddr_nl_t) -> Result<(), Errno> {
+    let sockaddr_ptr = sockaddr as *const sockaddr_nl_t;
+    let sockaddr_len = mem::size_of::<sockaddr_nl_t>();
+    unsafe {
+        syscalls::syscall3(
+            nc::SYS_BIND,
+            fd as usize,
+            sockaddr_ptr as usize,
+            sockaddr_len,
+        )
+    }
+    .map(drop)
 }

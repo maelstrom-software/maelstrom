@@ -8,7 +8,7 @@
 
 use core::{
     ffi::{c_int, CStr},
-    mem, ptr, result,
+    ptr, result,
 };
 use maelstrom_linux::{self as linux, sockaddr_nl_t};
 use nc::{
@@ -50,11 +50,7 @@ impl<'a> Syscall<'a> {
                     *saved = v as usize;
                 })
             }
-            Syscall::BindSaved(sockaddr) => {
-                let sockaddr_ptr = *sockaddr as *const sockaddr_nl_t as usize;
-                let sockaddr_len = mem::size_of::<sockaddr_nl_t>();
-                syscalls::syscall3(nc::SYS_BIND, *saved, sockaddr_ptr, sockaddr_len).map(drop)
-            }
+            Syscall::BindSaved(sockaddr) => linux::bind_netlink(*saved as u32, sockaddr),
             Syscall::SendToSaved(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
