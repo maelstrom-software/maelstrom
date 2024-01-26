@@ -12,7 +12,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use maelstrom_linux::sockaddr_nl_t;
+use maelstrom_linux::{self as linux, sockaddr_nl_t};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -340,7 +340,6 @@ impl Executor {
             .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
         const MNT_DETACH: usize = 2;
-        const NETLINK_ROUTE: i32 = 0;
 
         // Now we set up the script. This will be run in the child where we have to follow some
         // very stringent rules to avoid deadlocking. This comes about because we're going to clone
@@ -366,9 +365,9 @@ impl Executor {
             // configure things with the kernel. This creates the socket.
             builder.push(
                 Syscall::SocketAndSave(
-                    nc::AF_NETLINK,
-                    nc::SOCK_RAW | nc::SOCK_CLOEXEC,
-                    NETLINK_ROUTE,
+                    linux::AF_NETLINK,
+                    linux::SOCK_RAW | linux::SOCK_CLOEXEC,
+                    linux::NETLINK_ROUTE,
                 ),
                 &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
             );

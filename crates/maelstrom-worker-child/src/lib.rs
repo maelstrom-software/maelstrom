@@ -10,7 +10,7 @@ use core::{
     ffi::{c_int, CStr},
     mem, ptr, result,
 };
-use maelstrom_linux::sockaddr_nl_t;
+use maelstrom_linux::{self as linux, sockaddr_nl_t};
 use nc::{
     mode_t,
     syscalls::{self, Errno},
@@ -45,16 +45,12 @@ pub enum Syscall<'a> {
 impl<'a> Syscall<'a> {
     unsafe fn call(&mut self, saved: &mut usize) -> result::Result<usize, Errno> {
         match self {
-            Syscall::SocketAndSave(domain, sock_type, protocol) => syscalls::syscall3(
-                nc::SYS_SOCKET,
-                *domain as usize,
-                *sock_type as usize,
-                *protocol as usize,
-            )
-            .map(|v| {
-                *saved = v;
-                v
-            }),
+            Syscall::SocketAndSave(domain, sock_type, protocol) => {
+                linux::socket(*domain, *sock_type, *protocol).map(|v| {
+                    *saved = v as usize;
+                    v as usize
+                })
+            }
             Syscall::BindSaved(sockaddr) => {
                 let sockaddr_ptr = *sockaddr as *const sockaddr_nl_t as usize;
                 let sockaddr_len = mem::size_of::<sockaddr_nl_t>();
