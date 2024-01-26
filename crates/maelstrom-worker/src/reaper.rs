@@ -1,7 +1,10 @@
 use anyhow::{Error, Result};
 use maelstrom_base::JobStatus;
 use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
-use nix::{errno::Errno, unistd::Pid};
+use nix::{
+    errno::Errno,
+    unistd::{self, Pid},
+};
 use std::{mem, ops::ControlFlow};
 
 fn clip_to_u8(val: i32) -> u8 {
@@ -60,7 +63,7 @@ pub fn clone_dummy_child() -> Result<Pid> {
         .map_err(|e| Error::from(Errno::from_i32(e)))?;
     if child_pid == 0 {
         loop {
-            unsafe { nc::pause().ok() };
+            unistd::pause();
         }
     } else {
         Ok(Pid::from_raw(child_pid))

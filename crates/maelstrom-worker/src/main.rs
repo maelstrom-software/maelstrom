@@ -7,6 +7,7 @@ use figment::{
 };
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
+use nc::{syscalls, timespec_t, SYS_PPOLL};
 use nix::{
     errno::Errno,
     sys::{
@@ -119,7 +120,30 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 events: nc::POLLIN,
                 revents: 0,
             };
-            if unsafe { nc::poll(slice::from_mut(&mut pollfd), 0) }.map_err(Errno::from_i32)? == 1 {
+            if {
+                let fds = slice::from_mut(&mut pollfd);
+                let fds_ptr = fds.as_mut_ptr() as usize;
+                let nfds = fds.len();
+                let timeout = timespec_t::default();
+                let timeout = &timeout;
+                let timeout_ptr = timeout as *const timespec_t as usize;
+                let sigmask_ptr = 0;
+                let sigsetsize = 0;
+                unsafe {
+                    syscalls::syscall5(
+                        SYS_PPOLL,
+                        fds_ptr,
+                        nfds,
+                        timeout_ptr,
+                        sigmask_ptr,
+                        sigsetsize,
+                    )
+                }
+                .map(|ret| ret as i32)
+            }
+            .map_err(Errno::from_i32)?
+                == 1
+            {
                 process::abort();
             }
 
