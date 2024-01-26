@@ -186,7 +186,7 @@ impl<WriterT: io::Write> ChunkedWriter<WriterT> {
         self.max_chunk_size - (self.chunk.len() - 4)
     }
 
-    pub fn finish(&mut self) -> io::Result<()> {
+    pub fn finish(mut self) -> io::Result<()> {
         use std::io::Write as _;
 
         self.flush()?;
