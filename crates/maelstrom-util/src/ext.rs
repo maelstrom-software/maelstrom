@@ -9,9 +9,11 @@ pub trait OptionExt {
 }
 
 impl<T> OptionExt for Option<T> {
+    #[track_caller]
     fn assert_is_none(self) {
         assert!(self.is_none());
     }
+    #[track_caller]
     fn assert_is_some(self) {
         assert!(self.is_some());
     }
