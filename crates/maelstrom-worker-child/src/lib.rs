@@ -43,28 +43,27 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    unsafe fn call(&mut self, saved: &mut usize) -> result::Result<usize, Errno> {
+    unsafe fn call(&mut self, saved: &mut usize) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSave(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|v| {
                     *saved = v as usize;
-                    v as usize
                 })
             }
             Syscall::BindSaved(sockaddr) => {
                 let sockaddr_ptr = *sockaddr as *const sockaddr_nl_t as usize;
                 let sockaddr_len = mem::size_of::<sockaddr_nl_t>();
-                syscalls::syscall3(nc::SYS_BIND, *saved, sockaddr_ptr, sockaddr_len)
+                syscalls::syscall3(nc::SYS_BIND, *saved, sockaddr_ptr, sockaddr_len).map(drop)
             }
             Syscall::SendToSaved(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall6(nc::SYS_SENDTO, *saved, buf_ptr, buf_len, 0, 0, 0)
+                syscalls::syscall6(nc::SYS_SENDTO, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
             }
             Syscall::RecvFromSaved(buf) => {
                 let buf_ptr = buf.as_mut_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall6(nc::SYS_RECVFROM, *saved, buf_ptr, buf_len, 0, 0, 0)
+                syscalls::syscall6(nc::SYS_RECVFROM, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
             }
             Syscall::OpenAndSave(filename, flags, mode) => syscalls::syscall4(
                 nc::SYS_OPENAT,
@@ -75,23 +74,23 @@ impl<'a> Syscall<'a> {
             )
             .map(|v| {
                 *saved = v;
-                v
             }),
             Syscall::WriteSaved(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall3(nc::SYS_WRITE, *saved, buf_ptr, buf_len)
+                syscalls::syscall3(nc::SYS_WRITE, *saved, buf_ptr, buf_len).map(drop)
             }
-            Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID),
+            Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
             Syscall::Dup2(from, to) => {
-                syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0)
+                syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0).map(drop)
             }
             Syscall::CloseRange(first, last, flags) => syscalls::syscall3(
                 nc::SYS_CLOSE_RANGE,
                 *first as usize,
                 *last as usize,
                 *flags as usize,
-            ),
+            )
+            .map(drop),
             Syscall::Mount(source, target, fstype, flags, data) => syscalls::syscall5(
                 nc::SYS_MOUNT,
                 source
@@ -101,32 +100,38 @@ impl<'a> Syscall<'a> {
                 fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as usize,
                 *flags,
                 data.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as usize,
-            ),
+            )
+            .map(drop),
             Syscall::Chdir(path) => {
                 syscalls::syscall1(nc::SYS_CHDIR, path.to_bytes_with_nul().as_ptr() as usize)
+                    .map(drop)
             }
             Syscall::Mkdir(path, mode) => syscalls::syscall3(
                 nc::SYS_MKDIRAT,
                 nc::AT_FDCWD as usize,
                 path.to_bytes_with_nul().as_ptr() as usize,
                 *mode as usize,
-            ),
+            )
+            .map(drop),
             Syscall::PivotRoot(new_root, put_old) => syscalls::syscall2(
                 nc::SYS_PIVOT_ROOT,
                 new_root.to_bytes_with_nul().as_ptr() as usize,
                 put_old.to_bytes_with_nul().as_ptr() as usize,
-            ),
+            )
+            .map(drop),
             Syscall::Umount2(path, flags) => syscalls::syscall2(
                 nc::SYS_UMOUNT2,
                 path.to_bytes_with_nul().as_ptr() as usize,
                 *flags,
-            ),
+            )
+            .map(drop),
             Syscall::Execve(program, arguments, environment) => syscalls::syscall3(
                 nc::SYS_EXECVE,
                 program.to_bytes_with_nul().as_ptr() as usize,
                 arguments.as_ptr() as usize,
                 environment.as_ptr() as usize,
-            ),
+            )
+            .map(drop),
         }
     }
 }
