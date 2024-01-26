@@ -42,6 +42,7 @@ pub enum BrokerToClient {
 
 /// Message sent from a client to the broker. After sending the initial [`Hello`], a client will
 /// send a stream of these messages.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ClientToBroker {
     JobRequest(ClientJobId, JobSpec),
