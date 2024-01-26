@@ -1,7 +1,7 @@
 use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
 use maelstrom_base::{
-    manifest::{Identity, ManifestEntry, ManifestEntryData, ManifestReader},
+    manifest::{ManifestEntry, ManifestEntryData, ManifestReader},
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher},
     ArtifactMetadata, ArtifactType, Sha256Digest,
 };
@@ -38,14 +38,6 @@ fn add_entry_to_tar(
 ) -> Result<()> {
     let mut header = tar::Header::new_gnu();
     header.set_size(entry.metadata.size);
-    match &entry.metadata.user {
-        Identity::Id(id) => header.set_uid(*id),
-        Identity::Name(name) => header.set_username(name)?,
-    }
-    match &entry.metadata.group {
-        Identity::Id(id) => header.set_gid(*id),
-        Identity::Name(name) => header.set_groupname(name)?,
-    }
     header.set_mode(entry.metadata.mode.into());
     header.set_mtime(i64::from(entry.metadata.mtime) as u64);
 
@@ -329,10 +321,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 11,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::File(Some(digest![43])),
@@ -342,10 +330,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::File(None),
@@ -389,10 +373,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::File(None),
@@ -402,10 +382,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::Symlink(b"./a_file".into()),
@@ -415,10 +391,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::Hardlink("foobar/a_file".into()),
@@ -428,10 +400,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::Directory,
@@ -441,10 +409,6 @@ mod tests {
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
-                                // The user and group won't take effect because we don't have
-                                // permission
-                                user: Identity::Id(1001),
-                                group: Identity::Id(1002),
                                 mtime: UnixTimestamp(1705538554),
                             },
                             data: ManifestEntryData::Directory,

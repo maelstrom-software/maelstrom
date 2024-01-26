@@ -543,8 +543,8 @@ mod tests {
     use super::*;
     use maelstrom_base::{
         manifest::{
-            Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter,
-            Mode, UnixTimestamp,
+            ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
+            UnixTimestamp,
         },
         ArtifactType,
     };
@@ -1364,8 +1364,6 @@ mod tests {
             metadata: ManifestEntryMetadata {
                 size: 11,
                 mode: Mode(0o0555),
-                user: Identity::Id(1001),
-                group: Identity::Id(1002),
                 mtime: UnixTimestamp(1705538554),
             },
             data: ManifestEntryData::File(Some(digest![43])),

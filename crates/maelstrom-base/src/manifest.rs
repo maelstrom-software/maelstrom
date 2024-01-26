@@ -3,12 +3,6 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{fmt, io};
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub enum Identity {
-    Name(String),
-    Id(u64),
-}
-
 struct OctalFmt<T>(T);
 
 impl<T> fmt::Debug for OctalFmt<T>
@@ -53,8 +47,6 @@ impl From<UnixTimestamp> for i64 {
 pub struct ManifestEntryMetadata {
     pub size: u64,
     pub mode: Mode,
-    pub user: Identity,
-    pub group: Identity,
     pub mtime: UnixTimestamp,
 }
 

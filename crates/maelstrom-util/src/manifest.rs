@@ -2,7 +2,7 @@ use crate::fs::{self, Fs};
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     manifest::{
-        Identity, ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
         UnixTimestamp,
     },
     Sha256Digest, Utf8PathBuf,
@@ -19,8 +19,6 @@ fn convert_metadata(meta: &fs::Metadata) -> ManifestEntryMetadata {
     ManifestEntryMetadata {
         size: meta.is_file().then(|| meta.size()).unwrap_or(0),
         mode: Mode(meta.mode()),
-        user: Identity::Id(meta.uid() as u64),
-        group: Identity::Id(meta.gid() as u64),
         mtime: UnixTimestamp(meta.mtime()),
     }
 }
