@@ -43,11 +43,11 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    unsafe fn call(&mut self, saved: &mut usize) -> result::Result<(), Errno> {
+    unsafe fn call(&mut self, saved: &mut c_int) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|v| {
-                    *saved = v as usize;
+                    *saved = v as c_int;
                 })
             }
             Syscall::BindNetlinkUsingSavedFd(sockaddr) => {
@@ -56,12 +56,14 @@ impl<'a> Syscall<'a> {
             Syscall::SendToUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall6(nc::SYS_SENDTO, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
+                syscalls::syscall6(nc::SYS_SENDTO, *saved as usize, buf_ptr, buf_len, 0, 0, 0)
+                    .map(drop)
             }
             Syscall::RecvFromUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_mut_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall6(nc::SYS_RECVFROM, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
+                syscalls::syscall6(nc::SYS_RECVFROM, *saved as usize, buf_ptr, buf_len, 0, 0, 0)
+                    .map(drop)
             }
             Syscall::OpenAndSaveFd(filename, flags, mode) => syscalls::syscall4(
                 nc::SYS_OPENAT,
@@ -71,12 +73,12 @@ impl<'a> Syscall<'a> {
                 *mode as usize,
             )
             .map(|v| {
-                *saved = v;
+                *saved = v as c_int;
             }),
             Syscall::WriteUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall3(nc::SYS_WRITE, *saved, buf_ptr, buf_len).map(drop)
+                syscalls::syscall3(nc::SYS_WRITE, *saved as usize, buf_ptr, buf_len).map(drop)
             }
             Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
             Syscall::Dup2(from, to) => {
