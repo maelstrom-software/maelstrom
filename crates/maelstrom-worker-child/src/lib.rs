@@ -19,10 +19,10 @@ use nc::{
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
+    OpenAndSaveFd(&'a CStr, i32, mode_t),
     SocketAndSaveFd(i32, i32, i32),
     BindNetlinkUsingSavedFd(&'a sockaddr_nl_t),
     ReadUsingSavedFd(&'a mut [u8]),
-    OpenAndSaveFd(&'a CStr, i32, mode_t),
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
     Dup2(c_int, c_int),
