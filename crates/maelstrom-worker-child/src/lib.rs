@@ -62,10 +62,7 @@ impl<'a> Syscall<'a> {
             Syscall::Mount(source, target, fstype, flags, data) => {
                 linux::mount(*source, target, *fstype, *flags, *data)
             }
-            Syscall::Chdir(path) => {
-                syscalls::syscall1(nc::SYS_CHDIR, path.to_bytes_with_nul().as_ptr() as usize)
-                    .map(drop)
-            }
+            Syscall::Chdir(path) => linux::chdir(path),
             Syscall::Mkdir(path, mode) => syscalls::syscall3(
                 nc::SYS_MKDIRAT,
                 nc::AT_FDCWD as usize,

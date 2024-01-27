@@ -122,3 +122,8 @@ pub fn mount(
     }
     .map(drop)
 }
+
+pub fn chdir(path: &CStr) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr();
+    unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }.map(drop)
+}
