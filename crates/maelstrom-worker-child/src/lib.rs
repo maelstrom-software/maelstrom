@@ -10,8 +10,7 @@ use core::{
     ffi::{c_int, CStr},
     result,
 };
-use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t};
-use nc::syscalls::Errno;
+use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t, Errno};
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
@@ -73,7 +72,7 @@ impl<'a> Syscall<'a> {
 /// The guts of the child code. This function shouldn't return on success, because in that case,
 /// the last syscall should be an execve. If this function returns, than an error was encountered.
 /// In that case, the script item index and the errno will be returned.
-fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, nc::Errno) {
+fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
     let mut saved_fd = 0;
     for (index, syscall) in syscalls.iter_mut().enumerate() {
         if let Err(errno) = syscall.call(&mut saved_fd) {
