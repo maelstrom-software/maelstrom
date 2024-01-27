@@ -21,7 +21,7 @@ use nc::{
 pub enum Syscall<'a> {
     SocketAndSaveFd(i32, i32, i32),
     BindNetlinkUsingSavedFd(&'a sockaddr_nl_t),
-    RecvFromUsingSavedFd(&'a mut [u8]),
+    ReadUsingSavedFd(&'a mut [u8]),
     OpenAndSaveFd(&'a CStr, i32, mode_t),
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
@@ -52,11 +52,10 @@ impl<'a> Syscall<'a> {
             Syscall::BindNetlinkUsingSavedFd(sockaddr) => {
                 linux::bind_netlink(*saved as u32, sockaddr)
             }
-            Syscall::RecvFromUsingSavedFd(buf) => {
+            Syscall::ReadUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_mut_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall6(nc::SYS_RECVFROM, *saved as usize, buf_ptr, buf_len, 0, 0, 0)
-                    .map(drop)
+                syscalls::syscall3(nc::SYS_READ, *saved as usize, buf_ptr, buf_len).map(drop)
             }
             Syscall::OpenAndSaveFd(filename, flags, mode) => syscalls::syscall4(
                 nc::SYS_OPENAT,

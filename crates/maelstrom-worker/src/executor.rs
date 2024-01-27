@@ -384,7 +384,7 @@ impl Executor {
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
             let rtnetlink_response = bump.alloc_slice_fill_default(1024);
-            builder.push(Syscall::RecvFromUsingSavedFd(rtnetlink_response), &|err| {
+            builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
                 JobError::System(anyhow!("receiving rtnetlink message: {err}"))
             });
             // We don't need to close the socket because that will happen automatically for us when we
