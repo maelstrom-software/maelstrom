@@ -29,7 +29,7 @@ pub fn socket(domain: i32, sock_type: i32, protocol: i32) -> Result<u32, Errno> 
             protocol as usize,
         )
     }
-    .map(|ret| ret as u32)
+    .map(|fd| fd as u32)
 }
 
 pub fn bind_netlink(fd: u32, sockaddr: &sockaddr_nl_t) -> Result<(), Errno> {

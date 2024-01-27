@@ -42,25 +42,25 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    unsafe fn call(&mut self, saved: &mut c_int) -> result::Result<(), Errno> {
+    unsafe fn call(&mut self, saved_fd: &mut c_int) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
-                linux::socket(*domain, *sock_type, *protocol).map(|v| {
-                    *saved = v as c_int;
+                linux::socket(*domain, *sock_type, *protocol).map(|fd| {
+                    *saved_fd = fd as c_int;
                 })
             }
             Syscall::BindNetlinkUsingSavedFd(sockaddr) => {
-                linux::bind_netlink(*saved as u32, sockaddr)
+                linux::bind_netlink(*saved_fd as u32, sockaddr)
             }
-            Syscall::ReadUsingSavedFd(buf) => linux::read(*saved as u32, buf).map(drop),
+            Syscall::ReadUsingSavedFd(buf) => linux::read(*saved_fd as u32, buf).map(drop),
             Syscall::OpenAndSaveFd(filename, flags, mode) => linux::open(filename, *flags, *mode)
-                .map(|v| {
-                    *saved = v as c_int;
+                .map(|fd| {
+                    *saved_fd = fd as c_int;
                 }),
             Syscall::WriteUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
-                syscalls::syscall3(nc::SYS_WRITE, *saved as usize, buf_ptr, buf_len).map(drop)
+                syscalls::syscall3(nc::SYS_WRITE, *saved_fd as usize, buf_ptr, buf_len).map(drop)
             }
             Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
             Syscall::Dup2(from, to) => {
@@ -122,9 +122,9 @@ impl<'a> Syscall<'a> {
 /// the last syscall should be an execve. If this function returns, than an error was encountered.
 /// In that case, the script item index and the errno will be returned.
 fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, nc::Errno) {
-    let mut saved = 0;
+    let mut saved_fd = 0;
     for (index, syscall) in syscalls.iter_mut().enumerate() {
-        if let Err(errno) = unsafe { syscall.call(&mut saved) } {
+        if let Err(errno) = unsafe { syscall.call(&mut saved_fd) } {
             return (index, errno);
         }
     }
