@@ -2816,7 +2816,6 @@ name = "maelstrom-worker-child"
 version = "0.5.0-dev"
 dependencies = [
  "maelstrom-linux",
- "nc",
 ]
 
 [[package]]
