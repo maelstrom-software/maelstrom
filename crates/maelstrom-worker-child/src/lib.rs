@@ -19,12 +19,12 @@ use nc::{
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
-    SocketAndSave(i32, i32, i32),
-    BindNetlinkSaved(&'a sockaddr_nl_t),
-    SendToSaved(&'a [u8]),
-    RecvFromSaved(&'a mut [u8]),
-    OpenAndSave(&'a CStr, i32, mode_t),
-    WriteSaved(&'a [u8]),
+    SocketAndSaveFd(i32, i32, i32),
+    BindNetlinkUsingSavedFd(&'a sockaddr_nl_t),
+    SendToUsingSavedFd(&'a [u8]),
+    RecvFromUsingSavedFd(&'a mut [u8]),
+    OpenAndSaveFd(&'a CStr, i32, mode_t),
+    WriteUsingSavedFd(&'a [u8]),
     SetSid,
     Dup2(c_int, c_int),
     CloseRange(u32, u32, u32),
@@ -45,23 +45,25 @@ pub enum Syscall<'a> {
 impl<'a> Syscall<'a> {
     unsafe fn call(&mut self, saved: &mut usize) -> result::Result<(), Errno> {
         match self {
-            Syscall::SocketAndSave(domain, sock_type, protocol) => {
+            Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|v| {
                     *saved = v as usize;
                 })
             }
-            Syscall::BindNetlinkSaved(sockaddr) => linux::bind_netlink(*saved as u32, sockaddr),
-            Syscall::SendToSaved(buf) => {
+            Syscall::BindNetlinkUsingSavedFd(sockaddr) => {
+                linux::bind_netlink(*saved as u32, sockaddr)
+            }
+            Syscall::SendToUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
                 syscalls::syscall6(nc::SYS_SENDTO, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
             }
-            Syscall::RecvFromSaved(buf) => {
+            Syscall::RecvFromUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_mut_ptr() as usize;
                 let buf_len = buf.len();
                 syscalls::syscall6(nc::SYS_RECVFROM, *saved, buf_ptr, buf_len, 0, 0, 0).map(drop)
             }
-            Syscall::OpenAndSave(filename, flags, mode) => syscalls::syscall4(
+            Syscall::OpenAndSaveFd(filename, flags, mode) => syscalls::syscall4(
                 nc::SYS_OPENAT,
                 nc::AT_FDCWD as usize,
                 filename.to_bytes_with_nul().as_ptr() as usize,
@@ -71,7 +73,7 @@ impl<'a> Syscall<'a> {
             .map(|v| {
                 *saved = v;
             }),
-            Syscall::WriteSaved(buf) => {
+            Syscall::WriteUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();
                 syscalls::syscall3(nc::SYS_WRITE, *saved, buf_ptr, buf_len).map(drop)

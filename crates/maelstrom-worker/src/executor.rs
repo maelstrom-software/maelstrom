@@ -364,7 +364,7 @@ impl Executor {
             // In order to have a loopback network interface, we need to create a netlink socket and
             // configure things with the kernel. This creates the socket.
             builder.push(
-                Syscall::SocketAndSave(
+                Syscall::SocketAndSaveFd(
                     linux::AF_NETLINK,
                     linux::SOCK_RAW | linux::SOCK_CLOEXEC,
                     linux::NETLINK_ROUTE,
@@ -373,18 +373,18 @@ impl Executor {
             );
             // This binds the socket.
             builder.push(
-                Syscall::BindNetlinkSaved(&self.netlink_socket_addr),
+                Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
                 &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
             );
             // This sends the message to the kernel.
             builder.push(
-                Syscall::SendToSaved(self.netlink_message.as_ref()),
+                Syscall::SendToUsingSavedFd(self.netlink_message.as_ref()),
                 &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
             );
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
             let rtnetlink_response = bump.alloc_slice_fill_default(1024);
-            builder.push(Syscall::RecvFromSaved(rtnetlink_response), &|err| {
+            builder.push(Syscall::RecvFromUsingSavedFd(rtnetlink_response), &|err| {
                 JobError::System(anyhow!("receiving rtnetlink message: {err}"))
             });
             // We don't need to close the socket because that will happen automatically for us when we
@@ -398,11 +398,11 @@ impl Executor {
             .map_err(Error::new)
             .map_err(JobError::System)?;
         builder.push(
-            Syscall::OpenAndSave(c_str!("/proc/self/uid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
+            Syscall::OpenAndSaveFd(c_str!("/proc/self/uid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
         builder.push(
-            Syscall::WriteSaved(uid_map_contents.into_bump_str().as_bytes()),
+            Syscall::WriteUsingSavedFd(uid_map_contents.into_bump_str().as_bytes()),
             &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
@@ -411,14 +411,14 @@ impl Executor {
         // This set of syscalls disables setgroups, which is required for setting up the gid
         // mapping.
         builder.push(
-            Syscall::OpenAndSave(
+            Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/setgroups"),
                 nc::O_WRONLY | nc::O_TRUNC,
                 0,
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
-        builder.push(Syscall::WriteSaved(b"deny\n"), &|err| {
+        builder.push(Syscall::WriteUsingSavedFd(b"deny\n"), &|err| {
             JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
         });
         // We don't need to close the file because that will happen automatically for us when we
@@ -430,11 +430,11 @@ impl Executor {
             .map_err(Error::new)
             .map_err(JobError::System)?;
         builder.push(
-            Syscall::OpenAndSave(c_str!("/proc/self/gid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
+            Syscall::OpenAndSaveFd(c_str!("/proc/self/gid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
             &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
         builder.push(
-            Syscall::WriteSaved(gid_map_contents.into_bump_str().as_bytes()),
+            Syscall::WriteUsingSavedFd(gid_map_contents.into_bump_str().as_bytes()),
             &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
