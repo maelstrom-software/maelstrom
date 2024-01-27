@@ -11,7 +11,7 @@ use core::{
     result,
 };
 use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t};
-use nc::syscalls::{self, Errno};
+use nc::syscalls::Errno;
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
@@ -63,13 +63,9 @@ impl<'a> Syscall<'a> {
             Syscall::Mkdir(path, mode) => linux::mkdir(path, *mode),
             Syscall::PivotRoot(new_root, put_old) => linux::pivot_root(new_root, put_old),
             Syscall::Umount2(path, flags) => linux::umount2(path, *flags),
-            Syscall::Execve(program, arguments, environment) => syscalls::syscall3(
-                nc::SYS_EXECVE,
-                program.to_bytes_with_nul().as_ptr() as usize,
-                arguments.as_ptr() as usize,
-                environment.as_ptr() as usize,
-            )
-            .map(drop),
+            Syscall::Execve(program, arguments, environment) => {
+                linux::execve(program, arguments, environment)
+            }
         }
     }
 }

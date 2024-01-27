@@ -161,3 +161,18 @@ pub fn umount2(path: &CStr, flags: usize) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
     unsafe { syscalls::syscall2(nc::SYS_UMOUNT2, path_ptr as usize, flags) }.map(drop)
 }
+
+pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr();
+    let argv_ptr = argv.as_ptr();
+    let envp_ptr = envp.as_ptr();
+    unsafe {
+        syscalls::syscall3(
+            nc::SYS_EXECVE,
+            path_ptr as usize,
+            argv_ptr as usize,
+            envp_ptr as usize,
+        )
+    }
+    .map(drop)
+}
