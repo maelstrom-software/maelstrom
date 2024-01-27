@@ -81,6 +81,18 @@ pub fn write(fd: u32, buf: &[u8]) -> Result<usize, Errno> {
     unsafe { syscalls::syscall3(nc::SYS_WRITE, fd as usize, buf_ptr as usize, buf_len) }
 }
 
+pub fn close_range(first: u32, last: u32, flags: u32) -> Result<(), Errno> {
+    unsafe {
+        syscalls::syscall3(
+            nc::SYS_CLOSE_RANGE,
+            first as usize,
+            last as usize,
+            flags as usize,
+        )
+    }
+    .map(drop)
+}
+
 pub fn setsid() -> Result<(), Errno> {
     unsafe { syscalls::syscall0(nc::SYS_SETSID) }.map(drop)
 }

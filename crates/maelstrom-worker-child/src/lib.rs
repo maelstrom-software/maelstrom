@@ -58,13 +58,7 @@ impl<'a> Syscall<'a> {
             Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
             Syscall::SetSid => linux::setsid(),
             Syscall::Dup2(from, to) => linux::dup2(*from, *to).map(drop),
-            Syscall::CloseRange(first, last, flags) => syscalls::syscall3(
-                nc::SYS_CLOSE_RANGE,
-                *first as usize,
-                *last as usize,
-                *flags as usize,
-            )
-            .map(drop),
+            Syscall::CloseRange(first, last, flags) => linux::close_range(*first, *last, *flags),
             Syscall::Mount(source, target, fstype, flags, data) => syscalls::syscall5(
                 nc::SYS_MOUNT,
                 source
