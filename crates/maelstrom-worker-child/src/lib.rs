@@ -53,16 +53,10 @@ impl<'a> Syscall<'a> {
                 linux::bind_netlink(*saved as u32, sockaddr)
             }
             Syscall::ReadUsingSavedFd(buf) => linux::read(*saved as u32, buf).map(drop),
-            Syscall::OpenAndSaveFd(filename, flags, mode) => syscalls::syscall4(
-                nc::SYS_OPENAT,
-                nc::AT_FDCWD as usize,
-                filename.to_bytes_with_nul().as_ptr() as usize,
-                *flags as usize,
-                *mode as usize,
-            )
-            .map(|v| {
-                *saved = v as c_int;
-            }),
+            Syscall::OpenAndSaveFd(filename, flags, mode) => linux::open(filename, *flags, *mode)
+                .map(|v| {
+                    *saved = v as c_int;
+                }),
             Syscall::WriteUsingSavedFd(buf) => {
                 let buf_ptr = buf.as_ptr() as usize;
                 let buf_len = buf.len();

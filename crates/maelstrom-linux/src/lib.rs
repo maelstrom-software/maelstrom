@@ -1,7 +1,7 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
-use core::mem;
+use core::{ffi::CStr, mem};
 use nc::syscalls;
 
 pub type Errno = nc::Errno;
@@ -50,4 +50,19 @@ pub fn read(fd: u32, buf: &mut [u8]) -> Result<usize, Errno> {
     let buf_ptr = buf.as_mut_ptr();
     let buf_len = buf.len();
     unsafe { syscalls::syscall3(nc::SYS_READ, fd as usize, buf_ptr as usize, buf_len) }
+}
+
+pub fn open(path: &CStr, flags: i32, mode: nc::mode_t) -> Result<u32, Errno> {
+    let path = path.to_bytes_with_nul();
+    let path_ptr = path.as_ptr();
+    unsafe {
+        syscalls::syscall4(
+            nc::SYS_OPENAT, // Use SYS_OPENAT instead of SYS_OPEN because not all architectures have SYS_OPEN.
+            nc::AT_FDCWD as usize,
+            path_ptr as usize,
+            flags as usize,
+            mode as usize,
+        )
+    }
+    .map(|fd| fd as u32)
 }
