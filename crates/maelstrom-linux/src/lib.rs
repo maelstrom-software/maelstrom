@@ -1,7 +1,7 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
-use core::{ffi::CStr, mem};
+use core::{ffi::CStr, mem, ptr};
 use nc::syscalls;
 
 pub type Errno = nc::Errno;
@@ -95,4 +95,30 @@ pub fn close_range(first: u32, last: u32, flags: u32) -> Result<(), Errno> {
 
 pub fn setsid() -> Result<(), Errno> {
     unsafe { syscalls::syscall0(nc::SYS_SETSID) }.map(drop)
+}
+
+pub fn mount(
+    source: Option<&CStr>,
+    target: &CStr,
+    fstype: Option<&CStr>,
+    flags: usize,
+    data: Option<&[u8]>,
+) -> Result<(), Errno> {
+    let source_ptr = source
+        .map(|r| r.to_bytes_with_nul().as_ptr())
+        .unwrap_or(ptr::null());
+    let target_ptr = target.to_bytes_with_nul().as_ptr();
+    let fstype_ptr = fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null());
+    let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null());
+    unsafe {
+        syscalls::syscall5(
+            nc::SYS_MOUNT,
+            source_ptr as usize,
+            target_ptr as usize,
+            fstype_ptr as usize,
+            flags,
+            data_ptr as usize,
+        )
+    }
+    .map(drop)
 }

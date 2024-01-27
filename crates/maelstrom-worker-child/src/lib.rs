@@ -8,7 +8,7 @@
 
 use core::{
     ffi::{c_int, CStr},
-    ptr, result,
+    result,
 };
 use maelstrom_linux::{self as linux, sockaddr_nl_t};
 use nc::{
@@ -59,17 +59,9 @@ impl<'a> Syscall<'a> {
             Syscall::SetSid => linux::setsid(),
             Syscall::Dup2(from, to) => linux::dup2(*from, *to).map(drop),
             Syscall::CloseRange(first, last, flags) => linux::close_range(*first, *last, *flags),
-            Syscall::Mount(source, target, fstype, flags, data) => syscalls::syscall5(
-                nc::SYS_MOUNT,
-                source
-                    .map(|r| r.to_bytes_with_nul().as_ptr())
-                    .unwrap_or(ptr::null()) as usize,
-                target.to_bytes_with_nul().as_ptr() as usize,
-                fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as usize,
-                *flags,
-                data.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as usize,
-            )
-            .map(drop),
+            Syscall::Mount(source, target, fstype, flags, data) => {
+                linux::mount(*source, target, *fstype, *flags, *data)
+            }
             Syscall::Chdir(path) => {
                 syscalls::syscall1(nc::SYS_CHDIR, path.to_bytes_with_nul().as_ptr() as usize)
                     .map(drop)
