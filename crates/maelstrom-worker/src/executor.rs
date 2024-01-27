@@ -129,12 +129,12 @@ impl Executor {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
-            unsafe { nc::dup3(stdin_read_fd.as_raw_fd(), 0, 0) }.map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd() as u32, 0).map_err(Errno::from_i32)?;
             mem::forget(stdin_read_fd);
             mem::forget(stdin_write_fd);
         } else {
             // This is the normal case where neither fd is fd 0.
-            unsafe { nc::dup3(stdin_read_fd.as_raw_fd(), 0, 0) }.map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd() as u32, 0).map_err(Errno::from_i32)?;
         }
 
         let user = UserId::from(unistd::getuid().as_raw());
