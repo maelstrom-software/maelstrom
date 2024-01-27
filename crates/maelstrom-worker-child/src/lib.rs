@@ -39,7 +39,7 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    unsafe fn call(&mut self, saved_fd: &mut u32) -> result::Result<(), Errno> {
+    fn call(&mut self, saved_fd: &mut u32) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|fd| {
@@ -76,7 +76,7 @@ impl<'a> Syscall<'a> {
 fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, nc::Errno) {
     let mut saved_fd = 0;
     for (index, syscall) in syscalls.iter_mut().enumerate() {
-        if let Err(errno) = unsafe { syscall.call(&mut saved_fd) } {
+        if let Err(errno) = syscall.call(&mut saved_fd) {
             return (index, errno);
         }
     }
