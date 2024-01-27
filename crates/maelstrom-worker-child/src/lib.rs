@@ -98,5 +98,5 @@ pub fn start_and_exec_in_child(exec_result_write_fd: c_int, syscalls: &mut [Sysc
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
     let _ = linux::write(exec_result_write_fd as u32, result.to_le_bytes().as_slice());
-    unsafe { nc::exit(1) };
+    linux::exit(1);
 }

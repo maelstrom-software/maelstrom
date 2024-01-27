@@ -176,3 +176,8 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
     }
     .map(drop)
 }
+
+pub fn exit(status: usize) -> ! {
+    let _ = unsafe { syscalls::syscall1(nc::SYS_EXIT, status) };
+    unreachable!();
+}
