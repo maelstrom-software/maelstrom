@@ -10,11 +10,8 @@ use core::{
     ffi::{c_int, CStr},
     result,
 };
-use maelstrom_linux::{self as linux, sockaddr_nl_t};
-use nc::{
-    mode_t,
-    syscalls::{self, Errno},
-};
+use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t};
+use nc::syscalls::{self, Errno};
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
@@ -63,13 +60,7 @@ impl<'a> Syscall<'a> {
                 linux::mount(*source, target, *fstype, *flags, *data)
             }
             Syscall::Chdir(path) => linux::chdir(path),
-            Syscall::Mkdir(path, mode) => syscalls::syscall3(
-                nc::SYS_MKDIRAT,
-                nc::AT_FDCWD as usize,
-                path.to_bytes_with_nul().as_ptr() as usize,
-                *mode as usize,
-            )
-            .map(drop),
+            Syscall::Mkdir(path, mode) => linux::mkdir(path, *mode),
             Syscall::PivotRoot(new_root, put_old) => syscalls::syscall2(
                 nc::SYS_PIVOT_ROOT,
                 new_root.to_bytes_with_nul().as_ptr() as usize,

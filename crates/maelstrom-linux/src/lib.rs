@@ -6,6 +6,9 @@ use nc::syscalls;
 
 pub type Errno = nc::Errno;
 
+#[allow(non_camel_case_types)]
+pub type mode_t = nc::mode_t;
+
 pub const NETLINK_ROUTE: i32 = 0;
 pub const AF_NETLINK: i32 = nc::AF_NETLINK;
 pub const SOCK_RAW: i32 = nc::SOCK_RAW;
@@ -126,4 +129,17 @@ pub fn mount(
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
     unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }.map(drop)
+}
+
+pub fn mkdir(path: &CStr, mode: mode_t) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr();
+    unsafe {
+        syscalls::syscall3(
+            nc::SYS_MKDIRAT, // Use SYS_MKDIRAT instead of SYS_MKDIR because not all architectures have the latter.
+            nc::AT_FDCWD as usize,
+            path_ptr as usize,
+            mode as usize,
+        )
+    }
+    .map(drop)
 }
