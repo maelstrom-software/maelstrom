@@ -57,11 +57,7 @@ impl<'a> Syscall<'a> {
                 .map(|fd| {
                     *saved_fd = fd as c_int;
                 }),
-            Syscall::WriteUsingSavedFd(buf) => {
-                let buf_ptr = buf.as_ptr() as usize;
-                let buf_len = buf.len();
-                syscalls::syscall3(nc::SYS_WRITE, *saved_fd as usize, buf_ptr, buf_len).map(drop)
-            }
+            Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd as u32, buf).map(drop),
             Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
             Syscall::Dup2(from, to) => {
                 syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0).map(drop)

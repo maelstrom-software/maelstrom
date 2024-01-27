@@ -66,3 +66,9 @@ pub fn open(path: &CStr, flags: i32, mode: nc::mode_t) -> Result<u32, Errno> {
     }
     .map(|fd| fd as u32)
 }
+
+pub fn write(fd: u32, buf: &[u8]) -> Result<usize, Errno> {
+    let buf_ptr = buf.as_ptr();
+    let buf_len = buf.len();
+    unsafe { syscalls::syscall3(nc::SYS_WRITE, fd as usize, buf_ptr as usize, buf_len) }
+}
