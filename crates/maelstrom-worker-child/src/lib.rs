@@ -42,22 +42,20 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    unsafe fn call(&mut self, saved_fd: &mut c_int) -> result::Result<(), Errno> {
+    unsafe fn call(&mut self, saved_fd: &mut u32) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|fd| {
-                    *saved_fd = fd as c_int;
+                    *saved_fd = fd;
                 })
             }
-            Syscall::BindNetlinkUsingSavedFd(sockaddr) => {
-                linux::bind_netlink(*saved_fd as u32, sockaddr)
-            }
-            Syscall::ReadUsingSavedFd(buf) => linux::read(*saved_fd as u32, buf).map(drop),
+            Syscall::BindNetlinkUsingSavedFd(sockaddr) => linux::bind_netlink(*saved_fd, sockaddr),
+            Syscall::ReadUsingSavedFd(buf) => linux::read(*saved_fd, buf).map(drop),
             Syscall::OpenAndSaveFd(filename, flags, mode) => linux::open(filename, *flags, *mode)
                 .map(|fd| {
-                    *saved_fd = fd as c_int;
+                    *saved_fd = fd;
                 }),
-            Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd as u32, buf).map(drop),
+            Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
             Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
             Syscall::Dup2(from, to) => {
                 syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0).map(drop)
