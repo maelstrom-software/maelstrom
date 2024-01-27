@@ -156,3 +156,8 @@ pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
     }
     .map(drop)
 }
+
+pub fn umount2(path: &CStr, flags: usize) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr();
+    unsafe { syscalls::syscall2(nc::SYS_UMOUNT2, path_ptr as usize, flags) }.map(drop)
+}

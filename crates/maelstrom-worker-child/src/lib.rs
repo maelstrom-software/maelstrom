@@ -61,18 +61,8 @@ impl<'a> Syscall<'a> {
             }
             Syscall::Chdir(path) => linux::chdir(path),
             Syscall::Mkdir(path, mode) => linux::mkdir(path, *mode),
-            Syscall::PivotRoot(new_root, put_old) => syscalls::syscall2(
-                nc::SYS_PIVOT_ROOT,
-                new_root.to_bytes_with_nul().as_ptr() as usize,
-                put_old.to_bytes_with_nul().as_ptr() as usize,
-            )
-            .map(drop),
-            Syscall::Umount2(path, flags) => syscalls::syscall2(
-                nc::SYS_UMOUNT2,
-                path.to_bytes_with_nul().as_ptr() as usize,
-                *flags,
-            )
-            .map(drop),
+            Syscall::PivotRoot(new_root, put_old) => linux::pivot_root(new_root, put_old),
+            Syscall::Umount2(path, flags) => linux::umount2(path, *flags),
             Syscall::Execve(program, arguments, environment) => syscalls::syscall3(
                 nc::SYS_EXECVE,
                 program.to_bytes_with_nul().as_ptr() as usize,
