@@ -56,7 +56,7 @@ impl<'a> Syscall<'a> {
                     *saved_fd = fd;
                 }),
             Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
-            Syscall::SetSid => syscalls::syscall0(nc::SYS_SETSID).map(drop),
+            Syscall::SetSid => linux::setsid(),
             Syscall::Dup2(from, to) => {
                 syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0).map(drop)
             }

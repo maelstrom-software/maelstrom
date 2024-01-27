@@ -72,3 +72,7 @@ pub fn write(fd: u32, buf: &[u8]) -> Result<usize, Errno> {
     let buf_len = buf.len();
     unsafe { syscalls::syscall3(nc::SYS_WRITE, fd as usize, buf_ptr as usize, buf_len) }
 }
+
+pub fn setsid() -> Result<(), Errno> {
+    unsafe { syscalls::syscall0(nc::SYS_SETSID) }.map(drop)
+}
