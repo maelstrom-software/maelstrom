@@ -45,3 +45,9 @@ pub fn bind_netlink(fd: u32, sockaddr: &sockaddr_nl_t) -> Result<(), Errno> {
     }
     .map(drop)
 }
+
+pub fn read(fd: u32, buf: &mut [u8]) -> Result<usize, Errno> {
+    let buf_ptr = buf.as_mut_ptr();
+    let buf_len = buf.len();
+    unsafe { syscalls::syscall3(nc::SYS_READ, fd as usize, buf_ptr as usize, buf_len) }
+}
