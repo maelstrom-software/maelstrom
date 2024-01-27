@@ -25,7 +25,7 @@ pub enum Syscall<'a> {
     ReadUsingSavedFd(&'a mut [u8]),
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
-    Dup2(c_int, c_int),
+    Dup2(u32, u32),
     CloseRange(u32, u32, u32),
     Mount(
         Option<&'a CStr>,
@@ -57,9 +57,7 @@ impl<'a> Syscall<'a> {
                 }),
             Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
             Syscall::SetSid => linux::setsid(),
-            Syscall::Dup2(from, to) => {
-                syscalls::syscall3(nc::SYS_DUP3, *from as usize, *to as usize, 0).map(drop)
-            }
+            Syscall::Dup2(from, to) => linux::dup2(*from, *to).map(drop),
             Syscall::CloseRange(first, last, flags) => syscalls::syscall3(
                 nc::SYS_CLOSE_RANGE,
                 *first as usize,

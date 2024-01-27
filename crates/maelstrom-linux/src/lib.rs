@@ -25,12 +25,20 @@ pub fn open(path: &CStr, flags: i32, mode: nc::mode_t) -> Result<u32, Errno> {
     let path_ptr = path.as_ptr();
     unsafe {
         syscalls::syscall4(
-            nc::SYS_OPENAT, // Use SYS_OPENAT instead of SYS_OPEN because not all architectures have SYS_OPEN.
+            nc::SYS_OPENAT, // Use SYS_OPENAT instead of SYS_OPEN because not all architectures have the latter.
             nc::AT_FDCWD as usize,
             path_ptr as usize,
             flags as usize,
             mode as usize,
         )
+    }
+    .map(|fd| fd as u32)
+}
+
+pub fn dup2(from: u32, to: u32) -> Result<u32, Errno> {
+    unsafe {
+        // Use SYS_DUP3 instead of SYS_DUP2 because not all architectures have the latter.
+        syscalls::syscall3(nc::SYS_DUP3, from as usize, to as usize, 0)
     }
     .map(|fd| fd as u32)
 }

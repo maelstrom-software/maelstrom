@@ -449,12 +449,14 @@ impl Executor {
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
-        builder.push(Syscall::Dup2(stdout_write_fd.as_raw_fd(), 1), &|err| {
-            JobError::System(anyhow!("dup2-ing to stdout: {err}"))
-        });
-        builder.push(Syscall::Dup2(stderr_write_fd.as_raw_fd(), 2), &|err| {
-            JobError::System(anyhow!("dup2-ing to stderr: {err}"))
-        });
+        builder.push(
+            Syscall::Dup2(stdout_write_fd.as_raw_fd() as u32, 1),
+            &|err| JobError::System(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Dup2(stderr_write_fd.as_raw_fd() as u32, 2),
+            &|err| JobError::System(anyhow!("dup2-ing to stderr: {err}")),
+        );
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
         builder.push(
