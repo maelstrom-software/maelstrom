@@ -378,8 +378,8 @@ impl Executor {
             );
             // This sends the message to the kernel.
             builder.push(
-                Syscall::SendToUsingSavedFd(self.netlink_message.as_ref()),
-                &|err| JobError::System(anyhow!("sending rtnetlink message: {err}")),
+                Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
+                &|err| JobError::System(anyhow!("writing rtnetlink message: {err}")),
             );
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
