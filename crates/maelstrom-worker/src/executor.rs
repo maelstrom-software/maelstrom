@@ -13,7 +13,7 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketType,
+    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketProtocol, SocketType,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -369,7 +369,7 @@ impl Executor {
                 Syscall::SocketAndSaveFd(
                     SocketDomain::NETLINK,
                     SocketType::RAW | SocketType::CLOEXEC,
-                    linux::NETLINK_ROUTE,
+                    SocketProtocol::NETLINK_ROUTE,
                 ),
                 &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
             );
