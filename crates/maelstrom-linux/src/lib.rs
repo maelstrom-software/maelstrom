@@ -10,9 +10,6 @@ use nc::syscalls;
 
 pub type Errno = nc::Errno;
 
-#[allow(non_camel_case_types)]
-pub type mode_t = nc::mode_t;
-
 pub const NETLINK_ROUTE: i32 = 0;
 pub const AF_NETLINK: i32 = nc::AF_NETLINK;
 pub const SOCK_RAW: i32 = nc::SOCK_RAW;
@@ -52,7 +49,31 @@ impl OpenFlags {
     pub const TRUNC: Self = Self(nc::O_TRUNC as usize);
 }
 
-pub fn open(path: &CStr, flags: OpenFlags, mode: nc::mode_t) -> Result<Fd, Errno> {
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct FileMode(usize);
+
+impl FileMode {
+    pub const SUID: Self = Self(0o4000);
+    pub const SGID: Self = Self(0o2000);
+    pub const SVTX: Self = Self(0o1000);
+
+    pub const RWXU: Self = Self(0o0700);
+    pub const RUSR: Self = Self(0o0400);
+    pub const WUSR: Self = Self(0o0200);
+    pub const XUSR: Self = Self(0o0100);
+
+    pub const RWXG: Self = Self(0o0070);
+    pub const RGRP: Self = Self(0o0040);
+    pub const WGRP: Self = Self(0o0020);
+    pub const XGRP: Self = Self(0o0010);
+
+    pub const RWXO: Self = Self(0o0007);
+    pub const ROTH: Self = Self(0o0004);
+    pub const WOTH: Self = Self(0o0002);
+    pub const XOTH: Self = Self(0o0001);
+}
+
+pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
     let path_ptr = path.as_ptr();
     unsafe {
@@ -61,7 +82,7 @@ pub fn open(path: &CStr, flags: OpenFlags, mode: nc::mode_t) -> Result<Fd, Errno
             nc::AT_FDCWD as usize,
             path_ptr as usize,
             flags.0,
-            mode as usize,
+            mode.0,
         )
     }
     .map(|fd| fd.into())
@@ -144,14 +165,14 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
     unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }.map(drop)
 }
 
-pub fn mkdir(path: &CStr, mode: mode_t) -> Result<(), Errno> {
+pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
     unsafe {
         syscalls::syscall3(
             nc::SYS_MKDIRAT, // Use SYS_MKDIRAT instead of SYS_MKDIR because not all architectures have the latter.
             nc::AT_FDCWD as usize,
             path_ptr as usize,
-            mode as usize,
+            mode.0,
         )
     }
     .map(drop)

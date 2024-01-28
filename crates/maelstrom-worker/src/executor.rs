@@ -12,7 +12,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd, OpenFlags};
+use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -401,7 +401,7 @@ impl Executor {
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/uid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
-                0,
+                FileMode::default(),
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
@@ -418,7 +418,7 @@ impl Executor {
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/setgroups"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
-                0,
+                FileMode::default(),
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
@@ -437,7 +437,7 @@ impl Executor {
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/gid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
-                0,
+                FileMode::default(),
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
@@ -533,12 +533,14 @@ impl Executor {
                         JobError::System(anyhow!(
                             "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"))
                     });
-                builder.push(Syscall::Mkdir(self.upper_dir.as_c_str(), 0o700), &|err| {
-                    JobError::System(anyhow!("making uppderdir for overlayfs: {err}"))
-                });
-                builder.push(Syscall::Mkdir(self.work_dir.as_c_str(), 0o700), &|err| {
-                    JobError::System(anyhow!("making workdir for overlayfs: {err}"))
-                });
+                builder.push(
+                    Syscall::Mkdir(self.upper_dir.as_c_str(), FileMode::RWXU),
+                    &|err| JobError::System(anyhow!("making uppderdir for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Mkdir(self.work_dir.as_c_str(), FileMode::RWXU),
+                    &|err| JobError::System(anyhow!("making workdir for overlayfs: {err}")),
+                );
                 options.push_str(self.comma_upperdir_comma_workdir.as_str());
             }
             options.push('\0');
