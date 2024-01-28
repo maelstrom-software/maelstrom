@@ -7,13 +7,13 @@
 #![no_std]
 
 use core::{ffi::CStr, result};
-use maelstrom_linux::{self as linux, sockaddr_nl_t, Errno, Fd, FileMode, OpenFlags};
+use maelstrom_linux::{self as linux, sockaddr_nl_t, Errno, Fd, FileMode, OpenFlags, SocketDomain};
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
     OpenAndSaveFd(&'a CStr, OpenFlags, FileMode),
-    SocketAndSaveFd(i32, i32, i32),
+    SocketAndSaveFd(SocketDomain, i32, i32),
     BindNetlinkUsingSavedFd(&'a sockaddr_nl_t),
     ReadUsingSavedFd(&'a mut [u8]),
     WriteUsingSavedFd(&'a [u8]),

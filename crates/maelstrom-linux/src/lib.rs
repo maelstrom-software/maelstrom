@@ -11,7 +11,6 @@ use nc::syscalls;
 pub type Errno = nc::Errno;
 
 pub const NETLINK_ROUTE: i32 = 0;
-pub const AF_NETLINK: i32 = nc::AF_NETLINK;
 pub const SOCK_RAW: i32 = nc::SOCK_RAW;
 pub const SOCK_CLOEXEC: i32 = nc::SOCK_CLOEXEC;
 
@@ -96,11 +95,18 @@ pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
     .map(|fd| fd.into())
 }
 
-pub fn socket(domain: i32, sock_type: i32, protocol: i32) -> Result<Fd, Errno> {
+#[derive(Clone, Copy)]
+pub struct SocketDomain(usize);
+
+impl SocketDomain {
+    pub const NETLINK: Self = Self(nc::AF_NETLINK as usize);
+}
+
+pub fn socket(domain: SocketDomain, sock_type: i32, protocol: i32) -> Result<Fd, Errno> {
     unsafe {
         syscalls::syscall3(
             nc::SYS_SOCKET,
-            domain as usize,
+            domain.0,
             sock_type as usize,
             protocol as usize,
         )
