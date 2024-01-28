@@ -12,7 +12,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use maelstrom_linux::{self as linux, sockaddr_nl_t};
+use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -129,12 +129,12 @@ impl Executor {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
-            linux::dup2(stdin_read_fd.as_raw_fd() as u32, 0).map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN).map_err(Errno::from_i32)?;
             mem::forget(stdin_read_fd);
             mem::forget(stdin_write_fd);
         } else {
             // This is the normal case where neither fd is fd 0.
-            linux::dup2(stdin_read_fd.as_raw_fd() as u32, 0).map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN).map_err(Errno::from_i32)?;
         }
 
         let user = UserId::from(unistd::getuid().as_raw());
@@ -450,17 +450,17 @@ impl Executor {
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
         builder.push(
-            Syscall::Dup2(stdout_write_fd.as_raw_fd() as u32, 1),
+            Syscall::Dup2(stdout_write_fd.as_raw_fd().into(), Fd::STDOUT),
             &|err| JobError::System(anyhow!("dup2-ing to stdout: {err}")),
         );
         builder.push(
-            Syscall::Dup2(stderr_write_fd.as_raw_fd() as u32, 2),
+            Syscall::Dup2(stderr_write_fd.as_raw_fd().into(), Fd::STDERR),
             &|err| JobError::System(anyhow!("dup2-ing to stderr: {err}")),
         );
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
         builder.push(
-            Syscall::CloseRange(3, !0, nc::CLOSE_RANGE_CLOEXEC),
+            Syscall::CloseRange(Fd::FIRST_NON_SPECIAL, Fd::LAST, nc::CLOSE_RANGE_CLOEXEC),
             &|err| {
                 JobError::System(anyhow!(
                     "setting CLOEXEC on range of open file descriptors: {err}"
@@ -684,7 +684,7 @@ impl Executor {
         if child_pid == 0 {
             // This is the child process.
             maelstrom_worker_child::start_and_exec_in_child(
-                exec_result_write_fd.into_raw_fd(),
+                exec_result_write_fd.into_raw_fd().into(),
                 builder.syscalls.as_mut_slice(),
             );
         }

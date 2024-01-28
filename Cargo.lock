@@ -2703,6 +2703,7 @@ dependencies = [
 name = "maelstrom-linux"
 version = "0.5.0-dev"
 dependencies = [
+ "derive_more",
  "nc",
 ]
 

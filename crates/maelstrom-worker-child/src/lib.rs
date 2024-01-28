@@ -6,11 +6,8 @@
 //! its dependencies carefully.
 #![no_std]
 
-use core::{
-    ffi::{c_int, CStr},
-    result,
-};
-use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t, Errno};
+use core::{ffi::CStr, result};
+use maelstrom_linux::{self as linux, mode_t, sockaddr_nl_t, Errno, Fd};
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
@@ -21,8 +18,8 @@ pub enum Syscall<'a> {
     ReadUsingSavedFd(&'a mut [u8]),
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
-    Dup2(u32, u32),
-    CloseRange(u32, u32, u32),
+    Dup2(Fd, Fd),
+    CloseRange(Fd, Fd, u32),
     Mount(
         Option<&'a CStr>,
         &'a CStr,
@@ -38,7 +35,7 @@ pub enum Syscall<'a> {
 }
 
 impl<'a> Syscall<'a> {
-    fn call(&mut self, saved_fd: &mut u32) -> result::Result<(), Errno> {
+    fn call(&mut self, saved_fd: &mut Fd) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|fd| {
@@ -73,7 +70,7 @@ impl<'a> Syscall<'a> {
 /// the last syscall should be an execve. If this function returns, than an error was encountered.
 /// In that case, the script item index and the errno will be returned.
 fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
-    let mut saved_fd = 0;
+    let mut saved_fd = Fd::default();
     for (index, syscall) in syscalls.iter_mut().enumerate() {
         if let Err(errno) = syscall.call(&mut saved_fd) {
             return (index, errno);
@@ -92,11 +89,11 @@ fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
 /// The caller should ensure that `exec_result_write_fd` is marked close-on-exec. This way, upon
 /// normal completion, no bytes will be written to the file descriptor and the worker can
 /// distinguish between an error and no error.
-pub fn start_and_exec_in_child(exec_result_write_fd: c_int, syscalls: &mut [Syscall]) -> ! {
+pub fn start_and_exec_in_child(exec_result_write_fd: Fd, syscalls: &mut [Syscall]) -> ! {
     let (index, errno) = start_and_exec_in_child_inner(syscalls);
     let result = (index as u64) << 32 | (errno as u64);
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
-    let _ = linux::write(exec_result_write_fd as u32, result.to_le_bytes().as_slice());
+    let _ = linux::write(exec_result_write_fd, result.to_le_bytes().as_slice());
     linux::exit(1);
 }
