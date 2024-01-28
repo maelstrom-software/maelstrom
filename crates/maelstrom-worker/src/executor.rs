@@ -12,7 +12,9 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain};
+use maelstrom_linux::{
+    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketType,
+};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -366,7 +368,7 @@ impl Executor {
             builder.push(
                 Syscall::SocketAndSaveFd(
                     SocketDomain::NETLINK,
-                    linux::SOCK_RAW | linux::SOCK_CLOEXEC,
+                    SocketType::RAW | SocketType::CLOEXEC,
                     linux::NETLINK_ROUTE,
                 ),
                 &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),

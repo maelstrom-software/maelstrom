@@ -11,8 +11,6 @@ use nc::syscalls;
 pub type Errno = nc::Errno;
 
 pub const NETLINK_ROUTE: i32 = 0;
-pub const SOCK_RAW: i32 = nc::SOCK_RAW;
-pub const SOCK_CLOEXEC: i32 = nc::SOCK_CLOEXEC;
 
 #[derive(Clone, Copy, Default, From)]
 pub struct Fd(usize);
@@ -102,16 +100,17 @@ impl SocketDomain {
     pub const NETLINK: Self = Self(nc::AF_NETLINK as usize);
 }
 
-pub fn socket(domain: SocketDomain, sock_type: i32, protocol: i32) -> Result<Fd, Errno> {
-    unsafe {
-        syscalls::syscall3(
-            nc::SYS_SOCKET,
-            domain.0,
-            sock_type as usize,
-            protocol as usize,
-        )
-    }
-    .map(|fd| fd.into())
+#[derive(BitOr, Clone, Copy)]
+pub struct SocketType(usize);
+
+impl SocketType {
+    pub const RAW: Self = Self(nc::SOCK_RAW as usize);
+    pub const CLOEXEC: Self = Self(nc::SOCK_CLOEXEC as usize);
+}
+
+pub fn socket(domain: SocketDomain, type_: SocketType, protocol: i32) -> Result<Fd, Errno> {
+    unsafe { syscalls::syscall3(nc::SYS_SOCKET, domain.0, type_.0, protocol as usize) }
+        .map(|fd| fd.into())
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &sockaddr_nl_t) -> Result<(), Errno> {
