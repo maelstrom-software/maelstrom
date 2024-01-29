@@ -13,8 +13,8 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, Fd, FileMode, MountFlags, OpenFlags, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags,
+    self as linux, sockaddr_nl_t, CloseRangeFlags, Fd, FileMode, MountFlags, OpenFlags,
+    SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -469,7 +469,7 @@ impl Executor {
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
         builder.push(
-            Syscall::CloseRange(Fd::FIRST_NON_SPECIAL, Fd::LAST, nc::CLOSE_RANGE_CLOEXEC),
+            Syscall::CloseRange(Fd::FIRST_NON_SPECIAL, Fd::LAST, CloseRangeFlags::CLOEXEC),
             &|err| {
                 JobError::System(anyhow!(
                     "setting CLOEXEC on range of open file descriptors: {err}"

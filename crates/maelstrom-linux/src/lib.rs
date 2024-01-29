@@ -139,8 +139,15 @@ pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
     unsafe { syscalls::syscall3(nc::SYS_WRITE, fd.0, buf_ptr as usize, buf_len) }
 }
 
-pub fn close_range(first: Fd, last: Fd, flags: u32) -> Result<(), Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_CLOSE_RANGE, first.0, last.0, flags as usize) }.map(drop)
+#[derive(Clone, Copy, Default)]
+pub struct CloseRangeFlags(usize);
+
+impl CloseRangeFlags {
+    pub const CLOEXEC: Self = Self(nc::CLOSE_RANGE_CLOEXEC as usize);
+}
+
+pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Errno> {
+    unsafe { syscalls::syscall3(nc::SYS_CLOSE_RANGE, first.0, last.0, flags.0) }.map(drop)
 }
 
 pub fn setsid() -> Result<(), Errno> {
