@@ -13,7 +13,8 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketProtocol, SocketType,
+    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketProtocol,
+    SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -341,8 +342,6 @@ impl Executor {
             .map_err(JobError::System)?
             .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
 
-        const MNT_DETACH: usize = 2;
-
         // Now we set up the script. This will be run in the child where we have to follow some
         // very stringent rules to avoid deadlocking. This comes about because we're going to clone
         // in a multi-threaded program. The child program will only have one thread: this one. The
@@ -634,7 +633,7 @@ impl Executor {
         }
 
         // Unmount the old root. See man 2 pivot_root.
-        builder.push(Syscall::Umount2(c_str!("."), MNT_DETACH), &|err| {
+        builder.push(Syscall::Umount2(c_str!("."), UmountFlags::DETACH), &|err| {
             JobError::System(anyhow!("umount of old root: {err}"))
         });
 

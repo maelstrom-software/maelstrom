@@ -9,7 +9,7 @@
 use core::{ffi::CStr, result};
 use maelstrom_linux::{
     self as linux, sockaddr_nl_t, Errno, Fd, FileMode, OpenFlags, SocketDomain, SocketProtocol,
-    SocketType,
+    SocketType, UmountFlags,
 };
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
@@ -33,7 +33,7 @@ pub enum Syscall<'a> {
     Chdir(&'a CStr),
     Mkdir(&'a CStr, FileMode),
     PivotRoot(&'a CStr, &'a CStr),
-    Umount2(&'a CStr, usize),
+    Umount2(&'a CStr, UmountFlags),
     Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
 }
 
