@@ -13,8 +13,8 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, CloseRangeFlags, Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags,
-    SocketDomain, SocketProtocol, SocketType, UmountFlags,
+    self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Fd, FileMode, MountFlags,
+    NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -676,30 +676,29 @@ impl Executor {
         );
 
         // Do the clone.
-        let mut clone_args = nc::clone_args_t {
-            flags: nc::CLONE_NEWCGROUP as u64
-                | nc::CLONE_NEWIPC as u64
-                | nc::CLONE_NEWNET as u64
-                | nc::CLONE_NEWNS as u64
-                | nc::CLONE_NEWPID as u64
-                | nc::CLONE_NEWUSER as u64,
-            exit_signal: nc::SIGCHLD as u64,
-            ..Default::default()
+        let mut clone_args = CloneArgs::default()
+            .flags(
+                CloneFlags::NEWCGROUP
+                    | CloneFlags::NEWIPC
+                    | CloneFlags::NEWNET
+                    | CloneFlags::NEWNS
+                    | CloneFlags::NEWPID
+                    | CloneFlags::NEWUSER,
+            )
+            .exit_signal(nc::SIGCHLD as u64);
+        let child_pid = match linux::clone3(&mut clone_args) {
+            Ok(Some(child_pid)) => child_pid,
+            Ok(None) => {
+                // This is the child process.
+                maelstrom_worker_child::start_and_exec_in_child(
+                    exec_result_write_fd.into_raw_fd().into(),
+                    builder.syscalls.as_mut_slice(),
+                );
+            }
+            Err(err) => {
+                return Err(JobError::System(Errno::from_i32(err).into()));
+            }
         };
-        let child_pid =
-            match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) } {
-                Ok(val) => val,
-                Err(err) => {
-                    return Err(JobError::System(Errno::from_i32(err).into()));
-                }
-            };
-        if child_pid == 0 {
-            // This is the child process.
-            maelstrom_worker_child::start_and_exec_in_child(
-                exec_result_write_fd.into_raw_fd().into(),
-                builder.syscalls.as_mut_slice(),
-            );
-        }
 
         // At this point, it's still okay to return early in the parent. The child will continue to
         // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.

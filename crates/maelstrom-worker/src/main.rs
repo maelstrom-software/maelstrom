@@ -5,6 +5,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags};
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
 use nc::{syscalls, timespec_t, SYS_PPOLL};
@@ -19,7 +20,7 @@ use nix::{
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
-use std::{mem, path::PathBuf, process, slice};
+use std::{path::PathBuf, process, slice};
 use tokio::runtime::Runtime;
 
 /// The maelstrom worker. This process executes jobs as directed by the broker.
@@ -99,15 +100,12 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
         unsafe { nc::pidfd_open(parent_pid.as_raw(), 0) }.map_err(Errno::from_i32)?;
 
     // Clone a new process into new user and pid namespaces.
-    let mut clone_args = nc::clone_args_t {
-        flags: nc::CLONE_NEWUSER as u64 | nc::CLONE_NEWPID as u64,
-        exit_signal: nc::SIGCHLD as u64,
-        ..Default::default()
-    };
-    match unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) }
-        .map_err(Errno::from_i32)?
-    {
-        0 => {
+    let mut clone_args = CloneArgs::default()
+        .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID)
+        .exit_signal(nc::SIGCHLD as u64);
+    match linux::clone3(&mut clone_args) {
+        Err(e) => Err(Errno::from_i32(e).into()),
+        Ok(None) => {
             // Child.
 
             // Set parent death signal.
@@ -158,7 +156,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
             Ok(())
         }
-        child_pid => {
+        Ok(Some(child_pid)) => {
             // Parent.
 
             // The parent_pidfd is only used in the child.

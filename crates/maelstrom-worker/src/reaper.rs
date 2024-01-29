@@ -1,11 +1,12 @@
 use anyhow::{Error, Result};
 use maelstrom_base::JobStatus;
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags};
 use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
 use nix::{
     errno::Errno,
     unistd::{self, Pid},
 };
-use std::{mem, ops::ControlFlow};
+use std::ops::ControlFlow;
 
 fn clip_to_u8(val: i32) -> u8 {
     if val < 0 || val > u8::MAX as i32 {
@@ -54,18 +55,14 @@ pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
 
 pub fn clone_dummy_child() -> Result<Pid> {
     // XXX: Adding CLONE_VM causes a crash. Eventually, we should fix that and put CLONE_VM back.
-    let mut clone_args = nc::clone_args_t {
-        flags: nc::CLONE_CLEAR_SIGHAND | nc::CLONE_FILES as u64 | nc::CLONE_FS as u64,
-        exit_signal: nc::SIGCHLD as u64,
-        ..Default::default()
-    };
-    let child_pid = unsafe { nc::clone3(&mut clone_args, mem::size_of::<nc::clone_args_t>()) }
-        .map_err(|e| Error::from(Errno::from_i32(e)))?;
-    if child_pid == 0 {
-        loop {
+    let mut clone_args = CloneArgs::default()
+        .flags(CloneFlags::CLEAR_SIGHAND | CloneFlags::FILES | CloneFlags::FS)
+        .exit_signal(nc::SIGCHLD as u64);
+    match linux::clone3(&mut clone_args) {
+        Ok(Some(child_pid)) => Ok(Pid::from_raw(child_pid)),
+        Ok(None) => loop {
             unistd::pause();
-        }
-    } else {
-        Ok(Pid::from_raw(child_pid))
+        },
+        Err(e) => Err(Error::from(Errno::from_i32(e))),
     }
 }

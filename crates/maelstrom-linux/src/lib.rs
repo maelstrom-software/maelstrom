@@ -264,3 +264,51 @@ pub fn exit(status: usize) -> ! {
     let _ = unsafe { syscalls::syscall1(nc::SYS_EXIT, status) };
     unreachable!();
 }
+
+pub type Pid = nc::pid_t;
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct CloneFlags(u64);
+
+impl CloneFlags {
+    pub const CLEAR_SIGHAND: Self = Self(nc::CLONE_CLEAR_SIGHAND);
+    pub const FILES: Self = Self(nc::CLONE_FILES as u64);
+    pub const FS: Self = Self(nc::CLONE_FS as u64);
+    pub const NEWCGROUP: Self = Self(nc::CLONE_NEWCGROUP as u64);
+    pub const NEWIPC: Self = Self(nc::CLONE_NEWIPC as u64);
+    pub const NEWNET: Self = Self(nc::CLONE_NEWNET as u64);
+    pub const NEWNS: Self = Self(nc::CLONE_NEWNS as u64);
+    pub const NEWPID: Self = Self(nc::CLONE_NEWPID as u64);
+    pub const NEWUSER: Self = Self(nc::CLONE_NEWUSER as u64);
+}
+
+#[derive(Clone, Default)]
+pub struct CloneArgs(nc::clone_args_t);
+
+impl CloneArgs {
+    pub fn flags(self, flags: CloneFlags) -> Self {
+        Self(nc::clone_args_t {
+            flags: flags.0,
+            ..self.0
+        })
+    }
+
+    pub fn exit_signal(self, exit_signal: u64) -> Self {
+        Self(nc::clone_args_t {
+            exit_signal,
+            ..self.0
+        })
+    }
+}
+
+pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
+    let args_ptr = args as *mut CloneArgs;
+    let size = mem::size_of::<CloneArgs>();
+    unsafe { syscalls::syscall2(nc::SYS_CLONE3, args_ptr as usize, size) }.map(|ret| {
+        if ret == 0 {
+            None
+        } else {
+            Some(ret as Pid)
+        }
+    })
+}
