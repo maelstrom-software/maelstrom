@@ -147,11 +147,23 @@ pub fn setsid() -> Result<(), Errno> {
     unsafe { syscalls::syscall0(nc::SYS_SETSID) }.map(drop)
 }
 
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct MountFlags(usize);
+
+impl MountFlags {
+    pub const BIND: Self = Self(nc::MS_BIND);
+    pub const REMOUNT: Self = Self(nc::MS_REMOUNT);
+    pub const RDONLY: Self = Self(nc::MS_RDONLY);
+    pub const NOSUID: Self = Self(nc::MS_NOSUID);
+    pub const NOEXEC: Self = Self(nc::MS_NOEXEC);
+    pub const NODEV: Self = Self(nc::MS_NODEV);
+}
+
 pub fn mount(
     source: Option<&CStr>,
     target: &CStr,
     fstype: Option<&CStr>,
-    flags: usize,
+    flags: MountFlags,
     data: Option<&[u8]>,
 ) -> Result<(), Errno> {
     let source_ptr = source
@@ -166,7 +178,7 @@ pub fn mount(
             source_ptr as usize,
             target_ptr as usize,
             fstype_ptr as usize,
-            flags,
+            flags.0,
             data_ptr as usize,
         )
     }

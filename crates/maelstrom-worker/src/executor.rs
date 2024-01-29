@@ -13,8 +13,8 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, Fd, FileMode, OpenFlags, SocketDomain, SocketProtocol,
-    SocketType, UmountFlags,
+    self as linux, sockaddr_nl_t, Fd, FileMode, MountFlags, OpenFlags, SocketDomain,
+    SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -490,7 +490,13 @@ impl Executor {
             // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
             // pivot_root to it later.
             builder.push(
-                Syscall::Mount(Some(layer0_path), new_root_path, None, nc::MS_BIND, None),
+                Syscall::Mount(
+                    Some(layer0_path),
+                    new_root_path,
+                    None,
+                    MountFlags::BIND,
+                    None,
+                ),
                 &|err| JobError::System(anyhow!("bind mounting target root directory: {err}")),
             );
 
@@ -500,7 +506,7 @@ impl Executor {
                     None,
                     new_root_path,
                     None,
-                    nc::MS_REMOUNT | nc::MS_BIND | nc::MS_RDONLY,
+                    MountFlags::REMOUNT | MountFlags::BIND | MountFlags::RDONLY,
                     None,
                 ),
                 &|err| {
@@ -529,7 +535,7 @@ impl Executor {
             // both of them.
             if spec.enable_writable_file_system {
                 builder.push(
-                    Syscall::Mount(None, self.tmpfs_dir.as_c_str(), Some(c_str!("tmpfs")), 0, None),
+                    Syscall::Mount(None, self.tmpfs_dir.as_c_str(), Some(c_str!("tmpfs")), MountFlags::default(), None),
                     &|err| {
                         JobError::System(anyhow!(
                             "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"))
@@ -550,7 +556,7 @@ impl Executor {
                     None,
                     new_root_path,
                     Some(c_str!("overlay")),
-                    0,
+                    MountFlags::default(),
                     Some(options.into_bytes().into_bump_slice()),
                 ),
                 &|err| JobError::System(anyhow!("mounting overlayfs: {err}")),
@@ -579,7 +585,7 @@ impl Executor {
                 JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero"), "/dev/zero"),
             };
             builder.push(
-                Syscall::Mount(Some(source), target, None, nc::MS_BIND, None),
+                Syscall::Mount(Some(source), target, None, MountFlags::BIND, None),
                 // We have to be careful doing bump.alloc here with the move. The drop method is
                 // not going to be run on the closure, which means drop won't be run on any
                 // captured-and-moved variables. Since we're using a static string for
@@ -611,11 +617,11 @@ impl Executor {
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
                     c_str!("proc"),
-                    nc::MS_NOSUID | nc::MS_NOEXEC | nc::MS_NODEV,
+                    MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
                     "proc",
                 ),
-                JobMountFsType::Tmp => (c_str!("tmpfs"), 0, "tmpfs"),
-                JobMountFsType::Sys => (c_str!("sysfs"), 0, "sysfs"),
+                JobMountFsType::Tmp => (c_str!("tmpfs"), MountFlags::default(), "tmpfs"),
+                JobMountFsType::Sys => (c_str!("sysfs"), MountFlags::default(), "sysfs"),
             };
             let mount_point = mount.mount_point.as_str();
             builder.push(
