@@ -13,7 +13,7 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, CloseRangeFlags, Fd, FileMode, MountFlags, OpenFlags,
+    self as linux, CloseRangeFlags, Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags,
     SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
@@ -113,7 +113,7 @@ pub struct Executor {
     upper_dir: CString,
     work_dir: CString,
     comma_upperdir_comma_workdir: String,
-    netlink_socket_addr: sockaddr_nl_t,
+    netlink_socket_addr: NetlinkSocketAddr,
     netlink_message: Box<[u8]>,
 }
 
@@ -159,12 +159,7 @@ impl Executor {
         );
         let upper_dir = CString::new(upper_dir.as_os_str().as_bytes())?;
         let work_dir = CString::new(work_dir.as_os_str().as_bytes())?;
-        let netlink_socket_addr = sockaddr_nl_t {
-            sin_family: nc::AF_NETLINK as nc::sa_family_t,
-            nl_pad: 0,
-            nl_pid: 0, // the kernel
-            nl_groups: 0,
-        };
+        let netlink_socket_addr = NetlinkSocketAddr::default();
         let mut netlink_message = LinkMessage::default();
         netlink_message.header.index = 1;
         netlink_message.header.flags |= IFF_UP;

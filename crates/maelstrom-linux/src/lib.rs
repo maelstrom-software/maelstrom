@@ -28,12 +28,22 @@ impl From<c_int> for Fd {
 }
 
 #[repr(C)]
-#[allow(non_camel_case_types)]
-pub struct sockaddr_nl_t {
-    pub sin_family: nc::sa_family_t,
-    pub nl_pad: u16,
-    pub nl_pid: u32,
-    pub nl_groups: u32,
+pub struct NetlinkSocketAddr {
+    sin_family: nc::sa_family_t,
+    nl_pad: u16,
+    nl_pid: u32,
+    nl_groups: u32,
+}
+
+impl Default for NetlinkSocketAddr {
+    fn default() -> Self {
+        NetlinkSocketAddr {
+            sin_family: nc::AF_NETLINK as nc::sa_family_t,
+            nl_pad: 0,
+            nl_pid: 0, // the kernel
+            nl_groups: 0,
+        }
+    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -121,9 +131,9 @@ pub fn socket(
     unsafe { syscalls::syscall3(nc::SYS_SOCKET, domain.0, type_.0, protocol.0) }.map(|fd| fd.into())
 }
 
-pub fn bind_netlink(fd: Fd, sockaddr: &sockaddr_nl_t) -> Result<(), Errno> {
-    let sockaddr_ptr = sockaddr as *const sockaddr_nl_t;
-    let sockaddr_len = mem::size_of::<sockaddr_nl_t>();
+pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
+    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr;
+    let sockaddr_len = mem::size_of::<NetlinkSocketAddr>();
     unsafe { syscalls::syscall3(nc::SYS_BIND, fd.0, sockaddr_ptr as usize, sockaddr_len) }.map(drop)
 }
 

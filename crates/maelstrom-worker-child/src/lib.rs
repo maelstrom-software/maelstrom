@@ -8,7 +8,7 @@
 
 use core::{ffi::CStr, result};
 use maelstrom_linux::{
-    self as linux, sockaddr_nl_t, CloseRangeFlags, Errno, Fd, FileMode, MountFlags, OpenFlags,
+    self as linux, CloseRangeFlags, Errno, Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags,
     SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 
@@ -17,7 +17,7 @@ use maelstrom_linux::{
 pub enum Syscall<'a> {
     OpenAndSaveFd(&'a CStr, OpenFlags, FileMode),
     SocketAndSaveFd(SocketDomain, SocketType, SocketProtocol),
-    BindNetlinkUsingSavedFd(&'a sockaddr_nl_t),
+    BindNetlinkUsingSavedFd(&'a NetlinkSocketAddr),
     ReadUsingSavedFd(&'a mut [u8]),
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
