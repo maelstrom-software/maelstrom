@@ -14,7 +14,7 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Fd, FileMode, MountFlags,
-    NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType, UmountFlags,
+    NetlinkSocketAddr, OpenFlags, Signal, SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -685,7 +685,7 @@ impl Executor {
                     | CloneFlags::NEWPID
                     | CloneFlags::NEWUSER,
             )
-            .exit_signal(nc::SIGCHLD as u64);
+            .exit_signal(Signal::CHLD);
         let child_pid = match linux::clone3(&mut clone_args) {
             Ok(Some(child_pid)) => child_pid,
             Ok(None) => {

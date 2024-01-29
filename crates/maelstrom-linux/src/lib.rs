@@ -265,7 +265,12 @@ pub fn exit(status: usize) -> ! {
     unreachable!();
 }
 
-pub type Pid = nc::pid_t;
+#[derive(Clone, Copy, Default)]
+pub struct Signal(u64);
+
+impl Signal {
+    pub const CHLD: Self = Self(nc::SIGCHLD as u64);
+}
 
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct CloneFlags(u64);
@@ -293,13 +298,15 @@ impl CloneArgs {
         })
     }
 
-    pub fn exit_signal(self, exit_signal: u64) -> Self {
+    pub fn exit_signal(self, signal: Signal) -> Self {
         Self(nc::clone_args_t {
-            exit_signal,
+            exit_signal: signal.0,
             ..self.0
         })
     }
 }
+
+pub type Pid = nc::pid_t;
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs;

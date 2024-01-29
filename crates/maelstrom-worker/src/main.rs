@@ -5,7 +5,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags};
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal};
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
 use nc::{syscalls, timespec_t, SYS_PPOLL};
@@ -102,7 +102,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
     // Clone a new process into new user and pid namespaces.
     let mut clone_args = CloneArgs::default()
         .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID)
-        .exit_signal(nc::SIGCHLD as u64);
+        .exit_signal(Signal::CHLD);
     match linux::clone3(&mut clone_args) {
         Err(e) => Err(Errno::from_i32(e).into()),
         Ok(None) => {

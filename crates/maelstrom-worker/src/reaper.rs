@@ -1,6 +1,6 @@
 use anyhow::{Error, Result};
 use maelstrom_base::JobStatus;
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags};
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal};
 use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
 use nix::{
     errno::Errno,
@@ -57,7 +57,7 @@ pub fn clone_dummy_child() -> Result<Pid> {
     // XXX: Adding CLONE_VM causes a crash. Eventually, we should fix that and put CLONE_VM back.
     let mut clone_args = CloneArgs::default()
         .flags(CloneFlags::CLEAR_SIGHAND | CloneFlags::FILES | CloneFlags::FS)
-        .exit_signal(nc::SIGCHLD as u64);
+        .exit_signal(Signal::CHLD);
     match linux::clone3(&mut clone_args) {
         Ok(Some(child_pid)) => Ok(Pid::from_raw(child_pid)),
         Ok(None) => loop {
