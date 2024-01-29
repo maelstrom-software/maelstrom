@@ -27,6 +27,13 @@ impl From<c_int> for Fd {
     }
 }
 
+// XXX: Remove this when we add poll to this API.
+impl From<Fd> for i32 {
+    fn from(fd: Fd) -> i32 {
+        fd.0 as i32
+    }
+}
+
 #[repr(C)]
 pub struct NetlinkSocketAddr {
     sin_family: nc::sa_family_t,
@@ -318,4 +325,12 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
             Some(ret as Pid)
         }
     })
+}
+
+pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
+    unsafe { syscalls::syscall2(nc::SYS_PIDFD_OPEN, pid as usize, 0) }.map(|fd| fd.into())
+}
+
+pub fn close(fd: Fd) -> Result<(), Errno> {
+    unsafe { syscalls::syscall1(nc::SYS_CLOSE, fd.0) }.map(drop)
 }

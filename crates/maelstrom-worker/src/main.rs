@@ -96,8 +96,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
     // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
     // early.
-    let parent_pidfd =
-        unsafe { nc::pidfd_open(parent_pid.as_raw(), 0) }.map_err(Errno::from_i32)?;
+    let parent_pidfd = linux::pidfd_open(parent_pid.as_raw()).map_err(Errno::from_i32)?;
 
     // Clone a new process into new user and pid namespaces.
     let mut clone_args = CloneArgs::default()
@@ -114,7 +113,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
             // Check if the parent has already terminated.
             let mut pollfd = nc::pollfd_t {
-                fd: parent_pidfd,
+                fd: parent_pidfd.into(),
                 events: nc::POLLIN,
                 revents: 0,
             };
@@ -146,7 +145,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             }
 
             // We are done with the parent_pidfd now.
-            unsafe { nc::close(parent_pidfd) }.map_err(Errno::from_i32)?;
+            linux::close(parent_pidfd).map_err(Errno::from_i32)?;
 
             // Map uid and guid.
             let fs = Fs::new();
@@ -160,7 +159,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Parent.
 
             // The parent_pidfd is only used in the child.
-            unsafe { nc::close(parent_pidfd) }.unwrap_or_else(|e| {
+            linux::close(parent_pidfd).unwrap_or_else(|e| {
                 panic!("unexpected error closing pidfd: {}", Errno::from_i32(e))
             });
 
