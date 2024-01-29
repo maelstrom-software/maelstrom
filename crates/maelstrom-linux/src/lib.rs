@@ -5,7 +5,7 @@ use core::{
     ffi::{c_int, CStr},
     mem, ptr,
 };
-use derive_more::From;
+use derive_more::{BitOr, From};
 use nc::syscalls;
 
 pub type Errno = nc::Errno;
@@ -44,7 +44,15 @@ pub struct sockaddr_nl_t {
     pub nl_groups: u32,
 }
 
-pub fn open(path: &CStr, flags: i32, mode: nc::mode_t) -> Result<Fd, Errno> {
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct OpenFlags(usize);
+
+impl OpenFlags {
+    pub const WRONLY: Self = Self(nc::O_WRONLY as usize);
+    pub const TRUNC: Self = Self(nc::O_TRUNC as usize);
+}
+
+pub fn open(path: &CStr, flags: OpenFlags, mode: nc::mode_t) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
     let path_ptr = path.as_ptr();
     unsafe {
@@ -52,7 +60,7 @@ pub fn open(path: &CStr, flags: i32, mode: nc::mode_t) -> Result<Fd, Errno> {
             nc::SYS_OPENAT, // Use SYS_OPENAT instead of SYS_OPEN because not all architectures have the latter.
             nc::AT_FDCWD as usize,
             path_ptr as usize,
-            flags as usize,
+            flags.0,
             mode as usize,
         )
     }

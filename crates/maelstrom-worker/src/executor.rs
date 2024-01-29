@@ -12,7 +12,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
-use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd};
+use maelstrom_linux::{self as linux, sockaddr_nl_t, Fd, OpenFlags};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -398,7 +398,11 @@ impl Executor {
             .map_err(Error::new)
             .map_err(JobError::System)?;
         builder.push(
-            Syscall::OpenAndSaveFd(c_str!("/proc/self/uid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
+            Syscall::OpenAndSaveFd(
+                c_str!("/proc/self/uid_map"),
+                OpenFlags::WRONLY | OpenFlags::TRUNC,
+                0,
+            ),
             &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
         builder.push(
@@ -413,7 +417,7 @@ impl Executor {
         builder.push(
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/setgroups"),
-                nc::O_WRONLY | nc::O_TRUNC,
+                OpenFlags::WRONLY | OpenFlags::TRUNC,
                 0,
             ),
             &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
@@ -430,7 +434,11 @@ impl Executor {
             .map_err(Error::new)
             .map_err(JobError::System)?;
         builder.push(
-            Syscall::OpenAndSaveFd(c_str!("/proc/self/gid_map"), nc::O_WRONLY | nc::O_TRUNC, 0),
+            Syscall::OpenAndSaveFd(
+                c_str!("/proc/self/gid_map"),
+                OpenFlags::WRONLY | OpenFlags::TRUNC,
+                0,
+            ),
             &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
         builder.push(
