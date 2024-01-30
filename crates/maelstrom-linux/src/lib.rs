@@ -277,6 +277,7 @@ pub struct Signal(u64);
 
 impl Signal {
     pub const CHLD: Self = Self(nc::SIGCHLD as u64);
+    pub const KILL: Self = Self(nc::SIGKILL as u64);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -333,4 +334,18 @@ pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
     unsafe { syscalls::syscall1(nc::SYS_CLOSE, fd.0) }.map(drop)
+}
+
+pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
+    unsafe {
+        syscalls::syscall5(
+            nc::SYS_PRCTL,
+            nc::PR_SET_PDEATHSIG as usize,
+            signal.0 as usize,
+            0,
+            0,
+            0,
+        )
+    }
+    .map(drop)
 }

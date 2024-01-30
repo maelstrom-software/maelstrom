@@ -108,8 +108,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Child.
 
             // Set parent death signal.
-            unsafe { nc::prctl(nc::PR_SET_PDEATHSIG, nc::types::SIGKILL as usize, 0, 0, 0) }
-                .map_err(Errno::from_i32)?;
+            linux::prctl_set_pdeathsig(Signal::KILL).map_err(Errno::from_i32)?;
 
             // Check if the parent has already terminated.
             let mut pollfd = nc::pollfd_t {
