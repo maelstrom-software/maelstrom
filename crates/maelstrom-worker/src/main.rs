@@ -5,16 +5,12 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal};
+use maelstrom_linux::{
+    self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus, WaitpidFlags,
+};
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use nix::{
-    sys::{
-        signal,
-        wait::{self, WaitStatus},
-    },
-    unistd::{self, Pid},
-};
+use nix::{sys::signal, unistd};
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
@@ -132,20 +128,18 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 .unwrap_or_else(|err| panic!("unexpected error closing pidfd: {}", err));
 
             // Wait for the child and mimick how it terminated.
-            match wait::waitpid(Some(Pid::from_raw(child_pid)), None).unwrap_or_else(|e| {
+            match linux::waitpid(child_pid, WaitpidFlags::default()).unwrap_or_else(|e| {
                 panic!("unexpected error waiting on child process {child_pid}: {e}")
             }) {
-                WaitStatus::Exited(_, code) => {
-                    process::exit(code);
+                WaitStatus::Exited(code) => {
+                    process::exit(code.into());
                 }
-                WaitStatus::Signaled(_, signal, _) => {
+                WaitStatus::Signaled(signal) => {
+                    let signal = signal::Signal::try_from(Into::<i32>::into(signal)).unwrap();
                     signal::raise(signal).unwrap_or_else(|e| {
                         panic!("unexpected error raising signal {signal}: {e}")
                     });
                     process::abort();
-                }
-                unknown_status => {
-                    panic!("child terminated with unexpected status: {unknown_status:?}");
                 }
             }
         }

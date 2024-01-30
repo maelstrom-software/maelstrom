@@ -301,6 +301,12 @@ impl Signal {
     pub const KILL: Self = Self(nc::SIGKILL as u8);
 }
 
+impl From<Signal> for i32 {
+    fn from(signo: Signal) -> i32 {
+        signo.0.into()
+    }
+}
+
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct CloneFlags(u64);
 
@@ -434,6 +440,12 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
 #[derive(Clone, Copy, Into)]
 pub struct ExitCode(u8);
 
+impl From<ExitCode> for i32 {
+    fn from(code: ExitCode) -> i32 {
+        code.0.into()
+    }
+}
+
 #[derive(Clone, Copy)]
 pub enum WaitStatus {
     Exited(ExitCode),
@@ -446,6 +458,19 @@ pub struct WaitResult {
     pub status: WaitStatus,
 }
 
+fn extract_wait_status(status: c_int) -> WaitStatus {
+    if libc::WIFEXITED(status) {
+        WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))
+    } else if libc::WIFSIGNALED(status) {
+        WaitStatus::Signaled(Signal(libc::WTERMSIG(status).try_into().unwrap()))
+    } else {
+        panic!(
+            "neither WIFEXITED nor WIFSIGNALED true on wait status {}",
+            status
+        );
+    }
+}
+
 pub fn wait() -> Result<WaitResult, Errno> {
     let inner = |status: &mut c_int| {
         let status_ptr = status as *mut c_int;
@@ -456,16 +481,26 @@ pub fn wait() -> Result<WaitResult, Errno> {
     if pid < 0 {
         Err(Errno::from_i32(unsafe { *libc::__errno_location() }))
     } else {
-        let status = if libc::WIFEXITED(status) {
-            WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))
-        } else if libc::WIFSIGNALED(status) {
-            WaitStatus::Signaled(Signal(libc::WTERMSIG(status).try_into().unwrap()))
-        } else {
-            panic!(
-                "neither WIFEXITED nor WIFSIGNALED true on wait status {}",
-                status
-            );
-        };
-        Ok(WaitResult { pid, status })
+        Ok(WaitResult {
+            pid,
+            status: extract_wait_status(status),
+        })
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct WaitpidFlags(c_int);
+
+pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
+    let inner = |status: &mut c_int| {
+        let status_ptr = status as *mut c_int;
+        unsafe { libc::waitpid(pid, status_ptr, flags.0) }
+    };
+    let mut status = 0;
+    let pid = inner(&mut status);
+    if pid < 0 {
+        Err(Errno::from_i32(unsafe { *libc::__errno_location() }))
+    } else {
+        Ok(extract_wait_status(status))
     }
 }
