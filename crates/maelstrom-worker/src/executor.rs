@@ -20,10 +20,7 @@ use maelstrom_linux::{
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
-use nix::{
-    fcntl::{self, FcntlArg, OFlag},
-    unistd::{self},
-};
+use nix::fcntl::{self, FcntlArg, OFlag};
 use std::{
     ffi::{CStr, CString},
     fmt::Write as _,
@@ -123,7 +120,7 @@ impl Executor {
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
         let (stdin_read_fd, stdin_write_fd) =
-            unistd::pipe()?.map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+            linux::pipe()?.map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
         if stdin_read_fd.as_raw_fd() == 0 {
             // On the off chance that stdin was already closed, we may have already opened our read
             // fd onto stdin.
@@ -324,18 +321,18 @@ impl Executor {
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
-        let (stdout_read_fd, stdout_write_fd) = unistd::pipe()
+        let (stdout_read_fd, stdout_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-        let (stderr_read_fd, stderr_write_fd) = unistd::pipe()
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
+        let (stderr_read_fd, stderr_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
-        let (exec_result_read_fd, exec_result_write_fd) = unistd::pipe()
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
+        let (exec_result_read_fd, exec_result_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(|raw_fd| unsafe { OwnedFd::from_raw_fd(raw_fd) });
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
 
         // Now we set up the script. This will be run in the child where we have to follow some
         // very stringent rules to avoid deadlocking. This comes about because we're going to clone

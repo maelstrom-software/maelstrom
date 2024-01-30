@@ -20,18 +20,15 @@ impl Fd {
     pub const STDERR: Self = Self(2);
     pub const FIRST_NON_SPECIAL: Self = Self(3);
     pub const LAST: Self = Self(!0);
+
+    pub fn to_raw_fd(self) -> i32 {
+        self.0 as i32
+    }
 }
 
 impl From<c_int> for Fd {
     fn from(fd: c_int) -> Fd {
         Fd(fd as usize)
-    }
-}
-
-// XXX: Remove this when we add poll to this API.
-impl From<Fd> for i32 {
-    fn from(fd: Fd) -> i32 {
-        fd.0 as i32
     }
 }
 
@@ -521,4 +518,10 @@ pub type Gid = libc::gid_t;
 
 pub fn getgid() -> Gid {
     unsafe { libc::getgid() }
+}
+
+pub fn pipe() -> Result<(Fd, Fd), Errno> {
+    let mut fds: [c_int; 2] = [0; 2];
+    let fds_ptr = fds.as_mut_ptr() as *mut c_int;
+    Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (fds[0].into(), fds[1].into()))
 }
