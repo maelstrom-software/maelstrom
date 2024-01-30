@@ -9,7 +9,7 @@ use core::{
 use derive_more::{BitOr, From, Into};
 use nc::syscalls;
 
-pub type Errno = nc::Errno;
+pub type Errno = nix::errno::Errno;
 
 #[derive(Clone, Copy, Default, From)]
 pub struct Fd(usize);
@@ -99,6 +99,7 @@ pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> 
         )
     }
     .map(|fd| fd.into())
+    .map_err(Errno::from_i32)
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
@@ -107,6 +108,7 @@ pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
         syscalls::syscall3(nc::SYS_DUP3, from.0, to.0, 0)
     }
     .map(|fd| fd.into())
+    .map_err(Errno::from_i32)
 }
 
 #[derive(Clone, Copy)]
@@ -136,25 +138,31 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_SOCKET, domain.0, type_.0, protocol.0) }.map(|fd| fd.into())
+    unsafe { syscalls::syscall3(nc::SYS_SOCKET, domain.0, type_.0, protocol.0) }
+        .map(|fd| fd.into())
+        .map_err(Errno::from_i32)
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
     let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr;
     let sockaddr_len = mem::size_of::<NetlinkSocketAddr>();
-    unsafe { syscalls::syscall3(nc::SYS_BIND, fd.0, sockaddr_ptr as usize, sockaddr_len) }.map(drop)
+    unsafe { syscalls::syscall3(nc::SYS_BIND, fd.0, sockaddr_ptr as usize, sockaddr_len) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
     let buf_ptr = buf.as_mut_ptr();
     let buf_len = buf.len();
     unsafe { syscalls::syscall3(nc::SYS_READ, fd.0, buf_ptr as usize, buf_len) }
+        .map_err(Errno::from_i32)
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
     let buf_ptr = buf.as_ptr();
     let buf_len = buf.len();
     unsafe { syscalls::syscall3(nc::SYS_WRITE, fd.0, buf_ptr as usize, buf_len) }
+        .map_err(Errno::from_i32)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -165,11 +173,15 @@ impl CloseRangeFlags {
 }
 
 pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_CLOSE_RANGE, first.0, last.0, flags.0) }.map(drop)
+    unsafe { syscalls::syscall3(nc::SYS_CLOSE_RANGE, first.0, last.0, flags.0) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 pub fn setsid() -> Result<(), Errno> {
-    unsafe { syscalls::syscall0(nc::SYS_SETSID) }.map(drop)
+    unsafe { syscalls::syscall0(nc::SYS_SETSID) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -208,11 +220,14 @@ pub fn mount(
         )
     }
     .map(drop)
+    .map_err(Errno::from_i32)
 }
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }.map(drop)
+    unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
@@ -226,6 +241,7 @@ pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
         )
     }
     .map(drop)
+    .map_err(Errno::from_i32)
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
@@ -239,6 +255,7 @@ pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
         )
     }
     .map(drop)
+    .map_err(Errno::from_i32)
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -250,7 +267,9 @@ impl UmountFlags {
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    unsafe { syscalls::syscall2(nc::SYS_UMOUNT2, path_ptr as usize, flags.0) }.map(drop)
+    unsafe { syscalls::syscall2(nc::SYS_UMOUNT2, path_ptr as usize, flags.0) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
@@ -266,6 +285,7 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
         )
     }
     .map(drop)
+    .map_err(Errno::from_i32)
 }
 
 pub fn exit(status: usize) -> ! {
@@ -320,21 +340,21 @@ pub type Pid = nc::pid_t;
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs;
     let size = mem::size_of::<CloneArgs>();
-    unsafe { syscalls::syscall2(nc::SYS_CLONE3, args_ptr as usize, size) }.map(|ret| {
-        if ret == 0 {
-            None
-        } else {
-            Some(ret as Pid)
-        }
-    })
+    unsafe { syscalls::syscall2(nc::SYS_CLONE3, args_ptr as usize, size) }
+        .map(|ret| if ret == 0 { None } else { Some(ret as Pid) })
+        .map_err(Errno::from_i32)
 }
 
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
-    unsafe { syscalls::syscall2(nc::SYS_PIDFD_OPEN, pid as usize, 0) }.map(|fd| fd.into())
+    unsafe { syscalls::syscall2(nc::SYS_PIDFD_OPEN, pid as usize, 0) }
+        .map(|fd| fd.into())
+        .map_err(Errno::from_i32)
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
-    unsafe { syscalls::syscall1(nc::SYS_CLOSE, fd.0) }.map(drop)
+    unsafe { syscalls::syscall1(nc::SYS_CLOSE, fd.0) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
@@ -349,6 +369,7 @@ pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
         )
     }
     .map(drop)
+    .map_err(Errno::from_i32)
 }
 
 #[repr(C)]
@@ -405,6 +426,7 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
                 sigsetsize,
             )
         }
+        .map_err(Errno::from_i32)
     };
     inner(&timeout)
 }
@@ -432,7 +454,7 @@ pub fn wait() -> Result<WaitResult, Errno> {
     let mut status = 0;
     let pid = inner(&mut status);
     if pid < 0 {
-        Err(unsafe { *libc::__errno_location() })
+        Err(Errno::from_i32(unsafe { *libc::__errno_location() }))
     } else {
         let status = if libc::WIFEXITED(status) {
             WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))

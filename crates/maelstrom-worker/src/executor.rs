@@ -13,14 +13,13 @@ use maelstrom_base::{
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
-    self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Fd, FileMode, MountFlags,
+    self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Errno, Fd, FileMode, MountFlags,
     NetlinkSocketAddr, OpenFlags, Signal, SocketDomain, SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use nix::{
-    errno::Errno,
     fcntl::{self, FcntlArg, OFlag},
     unistd::{self, Pid},
 };
@@ -132,12 +131,12 @@ impl Executor {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
-            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN).map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN)?;
             mem::forget(stdin_read_fd);
             mem::forget(stdin_write_fd);
         } else {
             // This is the normal case where neither fd is fd 0.
-            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN).map_err(Errno::from_i32)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN)?;
         }
 
         let user = UserId::from(unistd::getuid().as_raw());
@@ -696,7 +695,7 @@ impl Executor {
                 );
             }
             Err(err) => {
-                return Err(JobError::System(Errno::from_i32(err).into()));
+                return Err(JobError::System(err.into()));
             }
         };
 
@@ -729,7 +728,7 @@ impl Executor {
             let index = (result >> 32) as usize;
             let errno = (result & 0xffffffff) as i32;
             return Err(builder.error_transformers[index](
-                nix::Error::from_i32(errno).desc(),
+                Errno::from_i32(errno).desc(),
             ));
         }
 

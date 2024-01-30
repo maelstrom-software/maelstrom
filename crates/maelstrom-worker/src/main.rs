@@ -9,7 +9,6 @@ use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, 
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
 use nix::{
-    errno::Errno,
     sys::{
         signal,
         wait::{self, WaitStatus},
@@ -95,30 +94,27 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
     // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
     // early.
-    let parent_pidfd = linux::pidfd_open(parent_pid.as_raw()).map_err(Errno::from_i32)?;
+    let parent_pidfd = linux::pidfd_open(parent_pid.as_raw())?;
 
     // Clone a new process into new user and pid namespaces.
     let mut clone_args = CloneArgs::default()
         .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID)
         .exit_signal(Signal::CHLD);
-    match linux::clone3(&mut clone_args) {
-        Err(e) => Err(Errno::from_i32(e).into()),
-        Ok(None) => {
+    match linux::clone3(&mut clone_args)? {
+        None => {
             // Child.
 
             // Set parent death signal.
-            linux::prctl_set_pdeathsig(Signal::KILL).map_err(Errno::from_i32)?;
+            linux::prctl_set_pdeathsig(Signal::KILL)?;
 
             // Check if the parent has already terminated.
             let mut pollfd = PollFd::new(parent_pidfd, PollEvents::IN);
-            if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO).map_err(Errno::from_i32)?
-                == 1
-            {
+            if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO)? == 1 {
                 process::abort();
             }
 
             // We are done with the parent_pidfd now.
-            linux::close(parent_pidfd).map_err(Errno::from_i32)?;
+            linux::close(parent_pidfd)?;
 
             // Map uid and guid.
             let fs = Fs::new();
@@ -128,13 +124,12 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
             Ok(())
         }
-        Ok(Some(child_pid)) => {
+        Some(child_pid) => {
             // Parent.
 
             // The parent_pidfd is only used in the child.
-            linux::close(parent_pidfd).unwrap_or_else(|e| {
-                panic!("unexpected error closing pidfd: {}", Errno::from_i32(e))
-            });
+            linux::close(parent_pidfd)
+                .unwrap_or_else(|err| panic!("unexpected error closing pidfd: {}", err));
 
             // Wait for the child and mimick how it terminated.
             match wait::waitpid(Some(Pid::from_raw(child_pid)), None).unwrap_or_else(|e| {

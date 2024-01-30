@@ -1,4 +1,4 @@
-use anyhow::{Error, Result};
+use anyhow::Result;
 use maelstrom_base::JobStatus;
 use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal, WaitStatus};
 use nix::{
@@ -18,7 +18,7 @@ pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
     let mut instruction = ControlFlow::Continue(());
     while let ControlFlow::Continue(()) = instruction {
         instruction = match linux::wait() {
-            Err(err) => deps.on_waitid_error(Errno::from_i32(err)),
+            Err(err) => deps.on_waitid_error(err),
             Ok(result) => {
                 let pid = Pid::from_raw(result.pid);
                 if pid == dummy_pid {
@@ -45,6 +45,6 @@ pub fn clone_dummy_child() -> Result<Pid> {
         Ok(None) => loop {
             unistd::pause();
         },
-        Err(e) => Err(Error::from(Errno::from_i32(e))),
+        Err(err) => Err(err.into()),
     }
 }

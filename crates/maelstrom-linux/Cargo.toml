@@ -13,3 +13,4 @@ version.workspace = true
 derive_more.workspace = true
 libc.workspace = true
 nc.workspace = true
+nix.workspace = true

@@ -2706,6 +2706,7 @@ dependencies = [
  "derive_more",
  "libc",
  "nc",
+ "nix",
 ]
 
 [[package]]
