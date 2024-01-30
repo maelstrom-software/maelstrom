@@ -810,9 +810,6 @@ mod tests {
         fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
             panic!("dummy child panicked");
         }
-        fn on_unexpected_wait_code(&mut self, _pid: Pid) -> ControlFlow<()> {
-            panic!("unexpected wait code");
-        }
         fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
             if self.pid == pid {
                 self.result = Some(status);

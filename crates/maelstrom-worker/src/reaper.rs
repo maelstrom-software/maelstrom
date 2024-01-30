@@ -7,7 +7,6 @@ use std::ops::ControlFlow;
 pub trait ReaperDeps {
     fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()>;
     fn on_dummy_child_termination(&mut self) -> ControlFlow<()>;
-    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ControlFlow<()>;
     fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()>;
 }
 

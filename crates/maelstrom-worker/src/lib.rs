@@ -189,10 +189,6 @@ impl ReaperDeps for ReaperAdapter {
     fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
         panic!("dummy child process terminated");
     }
-    fn on_unexpected_wait_code(&mut self, pid: Pid) -> ControlFlow<()> {
-        warn!(self.log, "unexpected return from waitid"; "pid" => %pid);
-        ControlFlow::Continue(())
-    }
     fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
         debug!(self.log, "waitid returned"; "pid" => %pid, "status" => ?status);
         self.sender
