@@ -477,15 +477,10 @@ pub fn wait() -> Result<WaitResult, Errno> {
         unsafe { libc::wait(status_ptr) }
     };
     let mut status = 0;
-    let pid = inner(&mut status);
-    if pid < 0 {
-        Err(Errno::from_i32(unsafe { *libc::__errno_location() }))
-    } else {
-        Ok(WaitResult {
-            pid,
-            status: extract_wait_status(status),
-        })
-    }
+    Errno::result(inner(&mut status)).map(|pid| WaitResult {
+        pid,
+        status: extract_wait_status(status),
+    })
 }
 
 #[derive(Clone, Copy, Default)]
@@ -497,10 +492,5 @@ pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
         unsafe { libc::waitpid(pid, status_ptr, flags.0) }
     };
     let mut status = 0;
-    let pid = inner(&mut status);
-    if pid < 0 {
-        Err(Errno::from_i32(unsafe { *libc::__errno_location() }))
-    } else {
-        Ok(extract_wait_status(status))
-    }
+    Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
 }
