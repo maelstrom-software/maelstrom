@@ -1,10 +1,7 @@
 use anyhow::Result;
 use maelstrom_base::JobStatus;
 use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal, WaitStatus};
-use nix::{
-    errno::Errno,
-    unistd::{self, Pid},
-};
+use nix::{errno::Errno, unistd::Pid};
 use std::ops::ControlFlow;
 
 pub trait ReaperDeps {
@@ -43,7 +40,7 @@ pub fn clone_dummy_child() -> Result<Pid> {
     match linux::clone3(&mut clone_args) {
         Ok(Some(child_pid)) => Ok(Pid::from_raw(child_pid)),
         Ok(None) => loop {
-            unistd::pause();
+            linux::pause();
         },
         Err(err) => Err(err.into()),
     }
