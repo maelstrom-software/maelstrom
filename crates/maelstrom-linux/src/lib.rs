@@ -2,8 +2,9 @@
 #![no_std]
 
 use core::{
-    ffi::{c_int, CStr},
+    ffi::{c_int, c_long, CStr},
     mem, ptr,
+    time::Duration,
 };
 use derive_more::{BitOr, From};
 use nc::syscalls;
@@ -348,4 +349,62 @@ pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
         )
     }
     .map(drop)
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Timespec {
+    sec: nc::time_t,
+    nsec: c_long, // This doesn't work for x86_64 with a target_pointer_width of 32.
+}
+
+impl From<Duration> for Timespec {
+    fn from(duration: Duration) -> Self {
+        Timespec {
+            sec: duration.as_secs() as nc::time_t,
+            nsec: duration.subsec_nanos() as c_long,
+        }
+    }
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct PollEvents(i16);
+
+impl PollEvents {
+    pub const IN: Self = Self(nc::POLLIN);
+}
+
+#[repr(C)]
+pub struct PollFd(nc::pollfd_t);
+
+impl PollFd {
+    pub fn new(fd: Fd, events: PollEvents) -> Self {
+        PollFd(nc::pollfd_t {
+            fd: fd.0 as i32,
+            events: events.0,
+            revents: 0,
+        })
+    }
+}
+
+pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
+    let fds_ptr = fds.as_mut_ptr();
+    let nfds = fds.len();
+    let timeout: Timespec = timeout.into();
+    let inner = |timeout: &Timespec| {
+        let timeout_ptr = timeout as *const Timespec;
+        let sigmask_ptr = 0;
+        let sigsetsize = 0;
+        unsafe {
+            syscalls::syscall5(
+                nc::SYS_PPOLL,
+                fds_ptr as usize,
+                nfds,
+                timeout_ptr as usize,
+                sigmask_ptr,
+                sigsetsize,
+            )
+        }
+    };
+    inner(&timeout)
 }

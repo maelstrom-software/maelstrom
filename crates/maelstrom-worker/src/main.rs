@@ -5,10 +5,9 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal};
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal};
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use nc::{syscalls, timespec_t, SYS_PPOLL};
 use nix::{
     errno::Errno,
     sys::{
@@ -20,7 +19,7 @@ use nix::{
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
-use std::{path::PathBuf, process, slice};
+use std::{path::PathBuf, process, slice, time::Duration};
 use tokio::runtime::Runtime;
 
 /// The maelstrom worker. This process executes jobs as directed by the broker.
@@ -111,33 +110,8 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             linux::prctl_set_pdeathsig(Signal::KILL).map_err(Errno::from_i32)?;
 
             // Check if the parent has already terminated.
-            let mut pollfd = nc::pollfd_t {
-                fd: parent_pidfd.into(),
-                events: nc::POLLIN,
-                revents: 0,
-            };
-            if {
-                let fds = slice::from_mut(&mut pollfd);
-                let fds_ptr = fds.as_mut_ptr() as usize;
-                let nfds = fds.len();
-                let timeout = timespec_t::default();
-                let timeout = &timeout;
-                let timeout_ptr = timeout as *const timespec_t as usize;
-                let sigmask_ptr = 0;
-                let sigsetsize = 0;
-                unsafe {
-                    syscalls::syscall5(
-                        SYS_PPOLL,
-                        fds_ptr,
-                        nfds,
-                        timeout_ptr,
-                        sigmask_ptr,
-                        sigsetsize,
-                    )
-                }
-                .map(|ret| ret as i32)
-            }
-            .map_err(Errno::from_i32)?
+            let mut pollfd = PollFd::new(parent_pidfd, PollEvents::IN);
+            if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO).map_err(Errno::from_i32)?
                 == 1
             {
                 process::abort();
