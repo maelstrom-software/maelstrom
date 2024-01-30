@@ -786,7 +786,6 @@ mod tests {
     use assert_matches::*;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
-    use nix::sys::signal::{self, Signal};
     use serial_test::serial;
     use std::ops::ControlFlow;
     use tar::Archive;
@@ -902,7 +901,7 @@ mod tests {
                 let mut adapter = ReaperAdapter::new(pid);
                 reaper::main(&mut adapter, dummy_child_pid);
                 let result = adapter.result.unwrap();
-                signal::kill(dummy_child_pid, Signal::SIGKILL).ok();
+                linux::kill(dummy_child_pid.as_raw(), Signal::KILL).ok();
                 let mut adapter = ReaperAdapter::new(dummy_child_pid);
                 reaper::main(&mut adapter, Pid::from_raw(0));
                 result

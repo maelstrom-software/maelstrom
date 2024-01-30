@@ -498,3 +498,7 @@ pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
 pub fn raise(signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::raise(signal.0 as c_int) }).map(drop)
 }
+
+pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::kill(pid, signal.0 as c_int) }).map(drop)
+}
