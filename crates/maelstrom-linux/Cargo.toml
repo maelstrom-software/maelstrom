@@ -11,6 +11,6 @@ version.workspace = true
 
 [dependencies]
 derive_more.workspace = true
-libc.workspace = true
-nc.workspace = true
-nix.workspace = true
+libc = "0.2"
+nc = { version = "0.8.18", default-features = false }
+nix = { version = "0.26.2", features = ["signal"] }
