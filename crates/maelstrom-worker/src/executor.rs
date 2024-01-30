@@ -14,14 +14,15 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Errno, Fd, FileMode, MountFlags,
-    NetlinkSocketAddr, OpenFlags, Signal, SocketDomain, SocketProtocol, SocketType, UmountFlags,
+    NetlinkSocketAddr, OpenFlags, Pid, Signal, SocketDomain, SocketProtocol, SocketType,
+    UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use nix::{
     fcntl::{self, FcntlArg, OFlag},
-    unistd::{self, Pid},
+    unistd::{self},
 };
 use std::{
     ffi::{CStr, CString},
@@ -767,7 +768,7 @@ impl Executor {
             stderr_done,
         ));
 
-        Ok(Pid::from_raw(child_pid))
+        Ok(child_pid)
     }
 }
 
@@ -898,9 +899,9 @@ mod tests {
                 let mut adapter = ReaperAdapter::new(pid);
                 reaper::main(&mut adapter, dummy_child_pid);
                 let result = adapter.result.unwrap();
-                linux::kill(dummy_child_pid.as_raw(), Signal::KILL).ok();
+                linux::kill(dummy_child_pid, Signal::KILL).ok();
                 let mut adapter = ReaperAdapter::new(dummy_child_pid);
-                reaper::main(&mut adapter, Pid::from_raw(0));
+                reaper::main(&mut adapter, 0 as Pid);
                 result
             });
             assert_eq!(reaper.await.unwrap(), self.expected_status);

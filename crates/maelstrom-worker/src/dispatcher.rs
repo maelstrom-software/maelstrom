@@ -11,8 +11,8 @@ use maelstrom_base::{
     ArtifactType, JobError, JobId, JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
     NonEmpty, Sha256Digest,
 };
+use maelstrom_linux::Pid;
 use maelstrom_util::ext::OptionExt as _;
-use nix::unistd::Pid;
 use std::{
     collections::{hash_map::Entry, HashMap, VecDeque},
     mem,
@@ -573,7 +573,7 @@ mod tests {
 
     macro_rules! pid {
         ($n:expr) => {
-            Pid::from_raw($n)
+            $n as Pid
         };
     }
 

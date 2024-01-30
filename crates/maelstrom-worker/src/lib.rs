@@ -16,13 +16,12 @@ use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
-use maelstrom_linux::{self as linux, Errno, Signal};
+use maelstrom_linux::{self as linux, Errno, Pid, Signal};
 use maelstrom_util::{
     config::{BrokerAddr, CacheRoot},
     fs::Fs,
     net, sync,
 };
-use nix::unistd::Pid;
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
 use std::{ops::ControlFlow, path::PathBuf, process, thread};
@@ -109,7 +108,7 @@ impl DispatcherDeps for DispatcherAdapter {
     }
 
     fn kill_job(&mut self, pid: Pid) {
-        linux::kill(pid.as_raw(), Signal::KILL).ok();
+        linux::kill(pid, Signal::KILL).ok();
     }
 
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf) {
