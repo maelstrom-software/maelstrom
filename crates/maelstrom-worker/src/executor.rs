@@ -20,7 +20,6 @@ use maelstrom_linux::{
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
-use nix::fcntl::{self, FcntlArg, OFlag};
 use std::{
     ffi::{CStr, CString},
     fmt::Write as _,
@@ -726,18 +725,12 @@ impl Executor {
 
         // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
         // Tokio.
-        fcntl::fcntl(
-            stdout_read_fd.as_fd().to_raw_fd(),
-            FcntlArg::F_SETFL(OFlag::O_NONBLOCK),
-        )
-        .map_err(Error::from)
-        .map_err(JobError::System)?;
-        fcntl::fcntl(
-            stderr_read_fd.as_fd().to_raw_fd(),
-            FcntlArg::F_SETFL(OFlag::O_NONBLOCK),
-        )
-        .map_err(Error::from)
-        .map_err(JobError::System)?;
+        linux::fcntl_setfl(stdout_read_fd.as_fd(), OpenFlags::NONBLOCK)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        linux::fcntl_setfl(stderr_read_fd.as_fd(), OpenFlags::NONBLOCK)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
 
         // Spawn reader tasks to consume stdout and stderr.
         task::spawn(output_reader_task_main(

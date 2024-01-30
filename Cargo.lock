@@ -2797,7 +2797,6 @@ dependencies = [
  "maelstrom-worker-child",
  "netlink-packet-core",
  "netlink-packet-route",
- "nix",
  "num_cpus",
  "rand",
  "serde",

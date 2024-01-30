@@ -78,6 +78,7 @@ pub struct OpenFlags(usize);
 impl OpenFlags {
     pub const WRONLY: Self = Self(nc::O_WRONLY as usize);
     pub const TRUNC: Self = Self(nc::O_TRUNC as usize);
+    pub const NONBLOCK: Self = Self(nc::O_NONBLOCK as usize);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -545,4 +546,10 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
     let mut fds: [c_int; 2] = [0; 2];
     let fds_ptr = fds.as_mut_ptr() as *mut c_int;
     Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (fds[0].into(), fds[1].into()))
+}
+
+pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
+    unsafe { syscalls::syscall3(nc::SYS_FCNTL, fd.0, nc::F_SETFL as usize, flags.0) }
+        .map(drop)
+        .map_err(Errno::from_i32)
 }
