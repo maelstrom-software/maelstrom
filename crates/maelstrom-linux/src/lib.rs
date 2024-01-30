@@ -3,15 +3,17 @@
 
 use core::{
     ffi::{c_int, c_long, CStr},
-    mem, ptr,
+    mem,
+    ops::Drop,
+    ptr,
     time::Duration,
 };
-use derive_more::{BitOr, Display, From, Into};
+use derive_more::{BitOr, Constructor, Display, From, Into};
 use nc::syscalls;
 
 pub type Errno = nix::errno::Errno;
 
-#[derive(Clone, Copy, Default, From)]
+#[derive(Clone, Copy, Default, Eq, From, PartialEq)]
 pub struct Fd(usize);
 
 impl Fd {
@@ -29,6 +31,25 @@ impl Fd {
 impl From<c_int> for Fd {
     fn from(fd: c_int) -> Fd {
         Fd(fd as usize)
+    }
+}
+
+#[derive(Constructor)]
+pub struct OwnedFd(Fd);
+
+impl Drop for OwnedFd {
+    fn drop(&mut self) {
+        let _ = close(self.0);
+    }
+}
+
+impl OwnedFd {
+    pub fn as_fd(&self) -> Fd {
+        self.0
+    }
+
+    pub fn into_fd(self) -> Fd {
+        self.0
     }
 }
 
