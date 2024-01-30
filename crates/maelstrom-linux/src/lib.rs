@@ -506,3 +506,7 @@ pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
 pub fn pause() {
     unsafe { libc::pause() };
 }
+
+pub fn getpid() -> Pid {
+    unsafe { libc::getpid() }
+}

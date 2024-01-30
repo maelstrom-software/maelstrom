@@ -84,13 +84,12 @@ impl CliOptions {
 ///
 /// WARNING: This function must only be called while the program is single-threaded.
 fn clone_into_pid_and_user_namespace() -> Result<()> {
-    let parent_pid = unistd::getpid();
     let parent_uid = unistd::getuid();
     let parent_gid = unistd::getgid();
 
     // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
     // early.
-    let parent_pidfd = linux::pidfd_open(parent_pid.as_raw())?;
+    let parent_pidfd = linux::pidfd_open(linux::getpid())?;
 
     // Clone a new process into new user and pid namespaces.
     let mut clone_args = CloneArgs::default()
