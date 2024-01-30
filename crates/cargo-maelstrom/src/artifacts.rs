@@ -1,15 +1,10 @@
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
-use maelstrom_base::{
-    manifest::{ManifestEntryData, ManifestReader},
-    Sha256Digest,
-};
+use maelstrom_base::Sha256Digest;
 use maelstrom_client::Client;
 use maelstrom_util::{fs::Fs, manifest::ManifestBuilder};
-use std::collections::HashSet;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt as _;
-use std::time::SystemTime;
 use std::{
     collections::{BTreeSet, HashMap},
     io,
@@ -17,71 +12,22 @@ use std::{
     sync::Mutex,
 };
 
-fn manifest_input_path_from_manifest_path(path: &Path) -> PathBuf {
+fn so_listing_path_from_binary_path(path: &Path) -> PathBuf {
     let mut path = path.to_owned();
-    path.set_extension(format!(
-        "{}.input",
-        path.extension().unwrap().to_str().unwrap()
-    ));
+    path.set_extension("so_listing");
     path
 }
 
-fn temp_path(path: &Path) -> PathBuf {
-    let mut path = path.to_owned();
-    path.set_extension(format!(
-        "{}.tmp",
-        path.extension().unwrap().to_str().unwrap()
-    ));
-    path
-}
-
-fn upload_data_from_manifest_input(
-    fs: &Fs,
-    path: &Path,
-    data_upload: &mut impl FnMut(&Path) -> Result<Sha256Digest>,
-) -> Result<HashSet<Sha256Digest>> {
-    let mut digests = HashSet::new();
-    for path in decode_paths(fs.open_file(path)?).with_context(|| path.display().to_string())? {
-        digests.insert(data_upload(&path)?);
-    }
-    Ok(digests)
-}
-
-fn verify_manifest_digests(
-    fs: &Fs,
-    path: &Path,
-    uploaded_digests: HashSet<Sha256Digest>,
-) -> Result<bool> {
-    let manifest = ManifestReader::new(fs.open_file(path)?)?;
-    for entry in manifest {
-        if let ManifestEntryData::File(Some(digest)) = entry?.data {
-            if !uploaded_digests.contains(&digest) {
-                return Ok(false);
-            }
+fn check_for_cached_so_listing(fs: &Fs, binary_path: &Path) -> Result<Option<Vec<PathBuf>>> {
+    let listing_path = so_listing_path_from_binary_path(binary_path);
+    if fs.exists(&listing_path) {
+        let listing_mtime = fs.metadata(&listing_path)?.modified()?;
+        let binary_mtime = fs.metadata(binary_path)?.modified()?;
+        if binary_mtime < listing_mtime {
+            return Ok(Some(decode_paths(fs.open_file(listing_path)?)?));
         }
     }
-    Ok(true)
-}
-
-fn check_for_cached_manifest(
-    fs: &Fs,
-    binary_mtime: SystemTime,
-    path: &Path,
-    data_upload: &mut impl FnMut(&Path) -> Result<Sha256Digest>,
-) -> Result<bool> {
-    let input_path = manifest_input_path_from_manifest_path(path);
-    if fs.exists(path) && fs.exists(&input_path) {
-        let manifest_mtime = fs.metadata(path)?.modified()?;
-        if binary_mtime < manifest_mtime {
-            let uploaded_digests = upload_data_from_manifest_input(fs, &input_path, data_upload)?;
-            if verify_manifest_digests(fs, path, uploaded_digests)
-                .with_context(|| path.display().to_string())?
-            {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
+    Ok(None)
 }
 
 fn encode_paths(paths: &[PathBuf], mut out: impl io::Write) -> Result<()> {
@@ -119,38 +65,25 @@ fn build_manifest(
     strip_prefix: impl AsRef<Path>,
     data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
 ) -> Result<()> {
-    let temp_manifest_path = temp_path(manifest_path);
-    let manifest_file = fs.create_file(&temp_manifest_path)?;
+    let manifest_file = fs.create_file(manifest_path)?;
     let mut manifest =
         ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
-
-    let manifest_input_path = manifest_input_path_from_manifest_path(manifest_path);
-    let temp_manifest_input_path = temp_path(&manifest_input_path);
 
     for path in &paths {
         manifest.add_file(path, path.strip_prefix(strip_prefix.as_ref()).unwrap())?;
     }
 
-    encode_paths(&paths, fs.create_file(&temp_manifest_input_path)?)?;
-
-    fs.rename(temp_manifest_input_path, manifest_input_path)?;
-    fs.rename(temp_manifest_path, manifest_path)?;
     Ok(())
 }
 
 fn create_artifact_for_binary(
     binary_path: &Path,
-    mut data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
 ) -> Result<PathBuf> {
     let fs = Fs::new();
 
     let mut manifest_path = PathBuf::from(binary_path);
     assert!(manifest_path.set_extension("manifest"));
-
-    let binary_mtime = fs.metadata(binary_path)?.modified()?;
-    if check_for_cached_manifest(&fs, binary_mtime, &manifest_path, &mut data_upload)? {
-        return Ok(manifest_path);
-    }
 
     build_manifest(
         &fs,
@@ -162,22 +95,13 @@ fn create_artifact_for_binary(
     Ok(manifest_path)
 }
 
-fn create_artifact_for_binary_deps(
-    binary_path: &Path,
-    mut data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
-) -> Result<PathBuf> {
-    let fs = Fs::new();
-
-    let mut manifest_path = PathBuf::from(binary_path);
-    assert!(manifest_path.set_extension("deps.manifest"));
-
-    let binary_mtime = fs.metadata(binary_path)?.modified()?;
-    if check_for_cached_manifest(&fs, binary_mtime, &manifest_path, &mut data_upload)? {
-        return Ok(manifest_path);
+fn read_shared_libraries(fs: &Fs, path: &Path) -> Result<Vec<PathBuf>> {
+    if let Some(paths) = check_for_cached_so_listing(fs, path)? {
+        return Ok(paths);
     }
 
     let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
-    let deps = dep_tree.analyze(binary_path)?;
+    let deps = dep_tree.analyze(path)?;
 
     let mut paths = BTreeSet::new();
     if let Some(p) = deps.interpreter {
@@ -202,13 +126,25 @@ fn create_artifact_for_binary_deps(
     }
     walk_deps(&deps.needed, &deps.libraries, &mut paths);
 
-    build_manifest(
-        &fs,
-        &manifest_path,
-        paths.into_iter().collect(),
-        "/",
-        data_upload,
+    Ok(paths.into_iter().collect())
+}
+
+fn create_artifact_for_binary_deps(
+    binary_path: &Path,
+    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+) -> Result<PathBuf> {
+    let fs = Fs::new();
+
+    let mut manifest_path = PathBuf::from(binary_path);
+    assert!(manifest_path.set_extension("deps.manifest"));
+
+    let paths = read_shared_libraries(&fs, binary_path)?;
+    encode_paths(
+        &paths,
+        fs.create_file(so_listing_path_from_binary_path(binary_path))?,
     )?;
+
+    build_manifest(&fs, &manifest_path, paths, "/", data_upload)?;
     Ok(manifest_path)
 }
 
