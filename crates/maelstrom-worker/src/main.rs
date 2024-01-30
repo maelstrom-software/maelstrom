@@ -10,7 +10,6 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use nix::unistd;
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
@@ -84,8 +83,8 @@ impl CliOptions {
 ///
 /// WARNING: This function must only be called while the program is single-threaded.
 fn clone_into_pid_and_user_namespace() -> Result<()> {
-    let parent_uid = unistd::getuid();
-    let parent_gid = unistd::getgid();
+    let parent_uid = linux::getuid();
+    let parent_gid = linux::getgid();
 
     // Create a parent pidfd. We'll use this in the child to see if the parent has terminated
     // early.

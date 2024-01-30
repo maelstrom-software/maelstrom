@@ -510,3 +510,15 @@ pub fn pause() {
 pub fn getpid() -> Pid {
     unsafe { libc::getpid() }
 }
+
+pub type Uid = libc::uid_t;
+
+pub fn getuid() -> Uid {
+    unsafe { libc::getuid() }
+}
+
+pub type Gid = libc::gid_t;
+
+pub fn getgid() -> Gid {
+    unsafe { libc::getgid() }
+}

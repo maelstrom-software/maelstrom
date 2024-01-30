@@ -140,8 +140,8 @@ impl Executor {
             linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN)?;
         }
 
-        let user = UserId::from(unistd::getuid().as_raw());
-        let group = GroupId::from(unistd::getgid().as_raw());
+        let user = UserId::from(linux::getuid());
+        let group = GroupId::from(linux::getgid());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
         let upper_dir = tmpfs_dir.join("upper");
         let work_dir = tmpfs_dir.join("work");
