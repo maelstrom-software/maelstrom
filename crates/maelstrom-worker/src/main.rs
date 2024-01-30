@@ -10,7 +10,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use nix::{sys::signal, unistd};
+use nix::unistd;
 use slog::{o, Drain, Level, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
@@ -135,8 +135,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                     process::exit(code.into());
                 }
                 WaitStatus::Signaled(signal) => {
-                    let signal = signal::Signal::try_from(Into::<i32>::into(signal)).unwrap();
-                    signal::raise(signal).unwrap_or_else(|e| {
+                    linux::raise(signal).unwrap_or_else(|e| {
                         panic!("unexpected error raising signal {signal}: {e}")
                     });
                     process::abort();

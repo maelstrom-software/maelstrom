@@ -6,7 +6,7 @@ use core::{
     mem, ptr,
     time::Duration,
 };
-use derive_more::{BitOr, From, Into};
+use derive_more::{BitOr, Display, From, Into};
 use nc::syscalls;
 
 pub type Errno = nix::errno::Errno;
@@ -293,7 +293,7 @@ pub fn exit(status: usize) -> ! {
     unreachable!();
 }
 
-#[derive(Clone, Copy, Default, Into)]
+#[derive(Clone, Copy, Default, Display, Into)]
 pub struct Signal(u8);
 
 impl Signal {
@@ -493,4 +493,8 @@ pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
+}
+
+pub fn raise(signal: Signal) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::raise(signal.0 as c_int) }).map(drop)
 }
