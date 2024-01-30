@@ -5,7 +5,7 @@ use nix::unistd::Pid;
 use std::ops::ControlFlow;
 
 pub trait ReaperDeps {
-    fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()>;
+    fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()>;
     fn on_dummy_child_termination(&mut self) -> ControlFlow<()>;
     fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()>;
 }
@@ -14,7 +14,7 @@ pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
     let mut instruction = ControlFlow::Continue(());
     while let ControlFlow::Continue(()) = instruction {
         instruction = match linux::wait() {
-            Err(err) => deps.on_waitid_error(err),
+            Err(err) => deps.on_wait_error(err),
             Ok(result) => {
                 let pid = Pid::from_raw(result.pid);
                 if pid == dummy_pid {

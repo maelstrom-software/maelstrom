@@ -804,7 +804,7 @@ mod tests {
     }
 
     impl ReaperDeps for &mut ReaperAdapter {
-        fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()> {
+        fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()> {
             panic!("waitid error: {err}");
         }
         fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {

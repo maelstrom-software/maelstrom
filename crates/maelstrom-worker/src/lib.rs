@@ -182,7 +182,7 @@ struct ReaperAdapter {
 }
 
 impl ReaperDeps for ReaperAdapter {
-    fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()> {
+    fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()> {
         warn!(self.log, "waitid errored"; "err" => %err);
         ControlFlow::Continue(())
     }
