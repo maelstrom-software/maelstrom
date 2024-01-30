@@ -6,7 +6,7 @@ use core::{
     mem, ptr,
     time::Duration,
 };
-use derive_more::{BitOr, From};
+use derive_more::{BitOr, From, Into};
 use nc::syscalls;
 
 pub type Errno = nc::Errno;
@@ -273,12 +273,12 @@ pub fn exit(status: usize) -> ! {
     unreachable!();
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct Signal(u64);
+#[derive(Clone, Copy, Default, Into)]
+pub struct Signal(u8);
 
 impl Signal {
-    pub const CHLD: Self = Self(nc::SIGCHLD as u64);
-    pub const KILL: Self = Self(nc::SIGKILL as u64);
+    pub const CHLD: Self = Self(nc::SIGCHLD as u8);
+    pub const KILL: Self = Self(nc::SIGKILL as u8);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -309,7 +309,7 @@ impl CloneArgs {
 
     pub fn exit_signal(self, signal: Signal) -> Self {
         Self(nc::clone_args_t {
-            exit_signal: signal.0,
+            exit_signal: signal.0 as u64,
             ..self.0
         })
     }
@@ -407,4 +407,43 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
         }
     };
     inner(&timeout)
+}
+
+#[derive(Clone, Copy, Into)]
+pub struct ExitCode(u8);
+
+#[derive(Clone, Copy)]
+pub enum WaitStatus {
+    Exited(ExitCode),
+    Signaled(Signal),
+}
+
+#[derive(Clone, Copy)]
+pub struct WaitResult {
+    pub pid: Pid,
+    pub status: WaitStatus,
+}
+
+pub fn wait() -> Result<WaitResult, Errno> {
+    let inner = |status: &mut c_int| {
+        let status_ptr = status as *mut c_int;
+        unsafe { libc::wait(status_ptr) }
+    };
+    let mut status = 0;
+    let pid = inner(&mut status);
+    if pid < 0 {
+        Err(unsafe { *libc::__errno_location() })
+    } else {
+        let status = if libc::WIFEXITED(status) {
+            WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))
+        } else if libc::WIFSIGNALED(status) {
+            WaitStatus::Signaled(Signal(libc::WTERMSIG(status).try_into().unwrap()))
+        } else {
+            panic!(
+                "neither WIFEXITED nor WIFSIGNALED true on wait status {}",
+                status
+            );
+        };
+        Ok(WaitResult { pid, status })
+    }
 }

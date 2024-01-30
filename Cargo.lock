@@ -2704,6 +2704,7 @@ name = "maelstrom-linux"
 version = "0.5.0-dev"
 dependencies = [
  "derive_more",
+ "libc",
  "nc",
 ]
 
@@ -2793,7 +2794,6 @@ dependencies = [
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",
- "nc",
  "netlink-packet-core",
  "netlink-packet-route",
  "nix",

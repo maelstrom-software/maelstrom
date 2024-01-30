@@ -58,6 +58,7 @@ hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 itertools = "0.10.5"
 lddtree = "0.3"
+libc = "0.2"
 maplit = "1"
 maelstrom-base = {  version = "0.5.0-dev", path = "crates/maelstrom-base" }
 maelstrom-broker = { version = "0.5.0-dev", path = "crates/maelstrom-broker" }

@@ -10,5 +10,6 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-nc.workspace = true
 derive_more.workspace = true
+libc.workspace = true
+nc.workspace = true

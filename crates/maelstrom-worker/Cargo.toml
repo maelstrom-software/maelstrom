@@ -26,7 +26,6 @@ maelstrom-base.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true
-nc.workspace = true
 netlink-packet-core.workspace = true
 netlink-packet-route.workspace = true
 nix.workspace = true

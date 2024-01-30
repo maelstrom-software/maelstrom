@@ -1,20 +1,11 @@
 use anyhow::{Error, Result};
 use maelstrom_base::JobStatus;
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal};
-use nc::types::{CLD_DUMPED, CLD_EXITED, CLD_KILLED};
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal, WaitStatus};
 use nix::{
     errno::Errno,
     unistd::{self, Pid},
 };
 use std::ops::ControlFlow;
-
-fn clip_to_u8(val: i32) -> u8 {
-    if val < 0 || val > u8::MAX as i32 {
-        u8::MAX
-    } else {
-        val as u8
-    }
-}
 
 pub trait ReaperDeps {
     fn on_waitid_error(&mut self, err: Errno) -> ControlFlow<()>;
@@ -26,27 +17,18 @@ pub trait ReaperDeps {
 pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
     let mut instruction = ControlFlow::Continue(());
     while let ControlFlow::Continue(()) = instruction {
-        let mut siginfo = nc::siginfo_t::default();
-        let options = nc::WEXITED;
-        let mut usage = nc::rusage_t::default();
-        instruction = match unsafe { nc::waitid(nc::P_ALL, -1, &mut siginfo, options, &mut usage) }
-        {
+        instruction = match linux::wait() {
             Err(err) => deps.on_waitid_error(Errno::from_i32(err)),
-            Ok(_) => {
-                let pid = Pid::from_raw(unsafe { siginfo.siginfo.sifields.sigchld.pid });
+            Ok(result) => {
+                let pid = Pid::from_raw(result.pid);
                 if pid == dummy_pid {
                     deps.on_dummy_child_termination()
                 } else {
-                    let child_status = unsafe { siginfo.siginfo.sifields.sigchld.status };
-                    match unsafe { siginfo.siginfo.si_code } {
-                        CLD_EXITED => deps
-                            .on_child_termination(pid, JobStatus::Exited(clip_to_u8(child_status))),
-                        CLD_KILLED | CLD_DUMPED => deps.on_child_termination(
-                            pid,
-                            JobStatus::Signaled(clip_to_u8(child_status)),
-                        ),
-                        _ => deps.on_unexpected_wait_code(pid),
-                    }
+                    let status = match result.status {
+                        WaitStatus::Exited(code) => JobStatus::Exited(code.into()),
+                        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.into()),
+                    };
+                    deps.on_child_termination(pid, status)
                 }
             }
         };
