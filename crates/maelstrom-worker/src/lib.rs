@@ -16,13 +16,13 @@ use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
 };
-use maelstrom_linux::{self as linux, Signal};
+use maelstrom_linux::{self as linux, Errno, Signal};
 use maelstrom_util::{
     config::{BrokerAddr, CacheRoot},
     fs::Fs,
     net, sync,
 };
-use nix::{errno::Errno, unistd::Pid};
+use nix::unistd::Pid;
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
 use std::{ops::ControlFlow, path::PathBuf, process, thread};

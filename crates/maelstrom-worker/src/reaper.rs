@@ -1,7 +1,7 @@
 use anyhow::Result;
 use maelstrom_base::JobStatus;
-use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Signal, WaitStatus};
-use nix::{errno::Errno, unistd::Pid};
+use maelstrom_linux::{self as linux, CloneArgs, CloneFlags, Errno, Signal, WaitStatus};
+use nix::unistd::Pid;
 use std::ops::ControlFlow;
 
 pub trait ReaperDeps {
