@@ -215,16 +215,8 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    unsafe {
-        syscalls::syscall3(
-            nc::SYS_MKDIRAT, // Use SYS_MKDIRAT instead of SYS_MKDIR because not all architectures have the latter.
-            nc::AT_FDCWD as usize,
-            path_ptr as usize,
-            mode.0,
-        )
-    }
-    .map(drop)
-    .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::mkdir(path_ptr as *const libc::c_char, mode.0 as libc::mode_t) })
+        .map(drop)
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
