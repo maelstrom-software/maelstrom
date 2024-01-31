@@ -127,11 +127,12 @@ pub fn socket(
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
-    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr;
+    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const libc::sockaddr;
     let sockaddr_len = mem::size_of::<NetlinkSocketAddr>();
-    unsafe { syscalls::syscall3(nc::SYS_BIND, fd.0, sockaddr_ptr as usize, sockaddr_len) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe {
+        libc::bind(fd.0 as c_int, sockaddr_ptr, sockaddr_len as libc::socklen_t)
+    })
+    .map(drop)
 }
 
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
