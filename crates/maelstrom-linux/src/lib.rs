@@ -92,12 +92,7 @@ pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> 
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
-    unsafe {
-        // Use SYS_DUP3 instead of SYS_DUP2 because not all architectures have the latter.
-        syscalls::syscall3(nc::SYS_DUP3, from.0, to.0, 0)
-    }
-    .map(|fd| fd.into())
-    .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::dup2(from.0 as c_int, to.0 as c_int) }).map(|fd| fd.into())
 }
 
 #[derive(Clone, Copy)]
