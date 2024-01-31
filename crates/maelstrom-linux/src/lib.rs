@@ -86,18 +86,9 @@ impl FileMode {
 
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
-    let path_ptr = path.as_ptr();
-    unsafe {
-        syscalls::syscall4(
-            nc::SYS_OPENAT, // Use SYS_OPENAT instead of SYS_OPEN because not all architectures have the latter.
-            nc::AT_FDCWD as usize,
-            path_ptr as usize,
-            flags.0,
-            mode.0,
-        )
-    }
-    .map(|fd| fd.into())
-    .map_err(Errno::from_i32)
+    let path_ptr = path.as_ptr() as *const libc::c_char;
+    Errno::result(unsafe { libc::open(path_ptr, flags.0 as c_int, mode.0 as libc::mode_t) })
+        .map(|fd| fd.into())
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
