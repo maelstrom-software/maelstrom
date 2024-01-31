@@ -373,24 +373,15 @@ impl PollFd {
 pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
     let fds_ptr = fds.as_mut_ptr();
     let nfds = fds.len();
-    let timeout: Timespec = timeout.into();
-    let inner = |timeout: &Timespec| {
-        let timeout_ptr = timeout as *const Timespec;
-        let sigmask_ptr = 0;
-        let sigsetsize = 0;
-        unsafe {
-            syscalls::syscall5(
-                nc::SYS_PPOLL,
-                fds_ptr as usize,
-                nfds,
-                timeout_ptr as usize,
-                sigmask_ptr,
-                sigsetsize,
-            )
-        }
-        .map_err(Errno::from_i32)
-    };
-    inner(&timeout)
+    let timeout = timeout.as_millis();
+    Errno::result(unsafe {
+        libc::poll(
+            fds_ptr as *mut libc::pollfd,
+            nfds as libc::nfds_t,
+            timeout as libc::c_int,
+        )
+    })
+    .map(|ret| ret as usize)
 }
 
 #[derive(Clone, Copy, Into)]
