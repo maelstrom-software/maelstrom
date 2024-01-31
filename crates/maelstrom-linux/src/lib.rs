@@ -122,9 +122,8 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_SOCKET, domain.0, type_.0, protocol.0) }
+    Errno::result(unsafe { libc::socket(domain.0 as i32, type_.0 as i32, protocol.0 as i32) })
         .map(|fd| fd.into())
-        .map_err(Errno::from_i32)
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
