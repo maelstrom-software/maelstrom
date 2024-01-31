@@ -210,9 +210,7 @@ pub fn mount(
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    unsafe { syscalls::syscall1(nc::SYS_CHDIR, path_ptr as usize) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::chdir(path_ptr as *const libc::c_char) }).map(drop)
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
