@@ -7,7 +7,6 @@ use core::{
     time::Duration,
 };
 use derive_more::{BitOr, Display, From, Into};
-use nc::syscalls;
 
 pub type Errno = nix::errno::Errno;
 
@@ -477,7 +476,12 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 }
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_FCNTL, fd.0, nc::F_SETFL as usize, flags.0) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe {
+        libc::fcntl(
+            fd.0 as libc::c_int,
+            libc::F_SETFL as libc::c_int,
+            flags.0 as libc::c_int,
+        )
+    })
+    .map(drop)
 }
