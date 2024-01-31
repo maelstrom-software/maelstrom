@@ -14,7 +14,7 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFlags, Errno, Fd, FileMode, MountFlags,
-    NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain, SocketProtocol, SocketType,
+    NetlinkSocketAddr, OpenFlags, Pid, Signal, SocketDomain, SocketProtocol, SocketType,
     UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
@@ -26,7 +26,10 @@ use std::{
     fs::File,
     io::Read as _,
     iter, mem,
-    os::{fd::FromRawFd as _, unix::ffi::OsStrExt as _},
+    os::{
+        fd::{AsRawFd as _, FromRawFd as _, IntoRawFd as _, OwnedFd},
+        unix::ffi::OsStrExt as _,
+    },
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -115,21 +118,22 @@ impl Executor {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
-        let (stdin_read_fd, stdin_write_fd) = linux::pipe()?.map(OwnedFd::new);
-        if stdin_read_fd.as_fd() == Fd::STDIN {
+        let (stdin_read_fd, stdin_write_fd) =
+            linux::pipe()?.map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
+        if stdin_read_fd.as_raw_fd() == 0 {
             // On the off chance that stdin was already closed, we may have already opened our read
             // fd onto stdin.
             mem::forget(stdin_read_fd);
-        } else if stdin_write_fd.as_fd() == Fd::STDIN {
+        } else if stdin_write_fd.as_raw_fd() == 0 {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
-            linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN)?;
             mem::forget(stdin_read_fd);
             mem::forget(stdin_write_fd);
         } else {
             // This is the normal case where neither fd is fd 0.
-            linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
+            linux::dup2(stdin_read_fd.as_raw_fd().into(), Fd::STDIN)?;
         }
 
         let user = UserId::from(linux::getuid());
@@ -319,15 +323,15 @@ impl Executor {
         let (stdout_read_fd, stdout_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(OwnedFd::new);
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
         let (stderr_read_fd, stderr_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(OwnedFd::new);
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
         let (exec_result_read_fd, exec_result_write_fd) = linux::pipe()
             .map_err(Error::from)
             .map_err(JobError::System)?
-            .map(OwnedFd::new);
+            .map(|fd| unsafe { OwnedFd::from_raw_fd(fd.to_raw_fd()) });
 
         // Now we set up the script. This will be run in the child where we have to follow some
         // very stringent rules to avoid deadlocking. This comes about because we're going to clone
@@ -445,12 +449,14 @@ impl Executor {
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
-        builder.push(Syscall::Dup2(stdout_write_fd.as_fd(), Fd::STDOUT), &|err| {
-            JobError::System(anyhow!("dup2-ing to stdout: {err}"))
-        });
-        builder.push(Syscall::Dup2(stderr_write_fd.as_fd(), Fd::STDERR), &|err| {
-            JobError::System(anyhow!("dup2-ing to stderr: {err}"))
-        });
+        builder.push(
+            Syscall::Dup2(stdout_write_fd.as_raw_fd().into(), Fd::STDOUT),
+            &|err| JobError::System(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Dup2(stderr_write_fd.as_raw_fd().into(), Fd::STDERR),
+            &|err| JobError::System(anyhow!("dup2-ing to stderr: {err}")),
+        );
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
         builder.push(
@@ -681,7 +687,7 @@ impl Executor {
             Ok(None) => {
                 // This is the child process.
                 maelstrom_worker_child::start_and_exec_in_child(
-                    exec_result_write_fd.into_fd(),
+                    exec_result_write_fd.into_raw_fd().into(),
                     builder.syscalls.as_mut_slice(),
                 );
             }
@@ -705,7 +711,7 @@ impl Executor {
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
         let mut exec_result_buf = vec![];
-        unsafe { File::from_raw_fd(exec_result_read_fd.into_fd().to_raw_fd()) }
+        File::from(exec_result_read_fd)
             .read_to_end(&mut exec_result_buf)
             .map_err(Error::from)
             .map_err(JobError::System)?;
@@ -725,10 +731,10 @@ impl Executor {
 
         // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
         // Tokio.
-        linux::fcntl_setfl(stdout_read_fd.as_fd(), OpenFlags::NONBLOCK)
+        linux::fcntl_setfl(stdout_read_fd.as_raw_fd().into(), OpenFlags::NONBLOCK)
             .map_err(Error::from)
             .map_err(JobError::System)?;
-        linux::fcntl_setfl(stderr_read_fd.as_fd(), OpenFlags::NONBLOCK)
+        linux::fcntl_setfl(stderr_read_fd.as_raw_fd().into(), OpenFlags::NONBLOCK)
             .map_err(Error::from)
             .map_err(JobError::System)?;
 
@@ -736,7 +742,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(unsafe { File::from_raw_fd(stdout_read_fd.into_fd().to_raw_fd()) })
+                AsyncFd::new(File::from(stdout_read_fd))
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),
@@ -745,7 +751,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(unsafe { File::from_raw_fd(stderr_read_fd.into_fd().to_raw_fd()) })
+                AsyncFd::new(File::from(stderr_read_fd))
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),
