@@ -330,18 +330,8 @@ pub fn close(fd: Fd) -> Result<(), Errno> {
 }
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
-    unsafe {
-        syscalls::syscall5(
-            nc::SYS_PRCTL,
-            nc::PR_SET_PDEATHSIG as usize,
-            signal.0 as usize,
-            0,
-            0,
-            0,
-        )
-    }
-    .map(drop)
-    .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal.0 as libc::c_ulong) })
+        .map(drop)
 }
 
 #[repr(C)]
