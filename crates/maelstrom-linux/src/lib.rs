@@ -14,9 +14,9 @@ pub type Errno = nix::errno::Errno;
 pub struct Fd(usize);
 
 impl Fd {
-    pub const STDIN: Self = Self(0);
-    pub const STDOUT: Self = Self(1);
-    pub const STDERR: Self = Self(2);
+    pub const STDIN: Self = Self(libc::STDIN_FILENO as usize);
+    pub const STDOUT: Self = Self(libc::STDOUT_FILENO as usize);
+    pub const STDERR: Self = Self(libc::STDERR_FILENO as usize);
     pub const FIRST_NON_SPECIAL: Self = Self(3);
     pub const LAST: Self = Self(!0);
 
@@ -39,7 +39,7 @@ impl From<libc::c_long> for Fd {
 
 #[repr(C)]
 pub struct NetlinkSocketAddr {
-    sin_family: nc::sa_family_t,
+    sin_family: libc::sa_family_t,
     nl_pad: u16,
     nl_pid: u32,
     nl_groups: u32,
@@ -48,7 +48,7 @@ pub struct NetlinkSocketAddr {
 impl Default for NetlinkSocketAddr {
     fn default() -> Self {
         NetlinkSocketAddr {
-            sin_family: nc::AF_NETLINK as nc::sa_family_t,
+            sin_family: libc::AF_NETLINK as libc::sa_family_t,
             nl_pad: 0,
             nl_pid: 0, // the kernel
             nl_groups: 0,
@@ -60,9 +60,9 @@ impl Default for NetlinkSocketAddr {
 pub struct OpenFlags(usize);
 
 impl OpenFlags {
-    pub const WRONLY: Self = Self(nc::O_WRONLY as usize);
-    pub const TRUNC: Self = Self(nc::O_TRUNC as usize);
-    pub const NONBLOCK: Self = Self(nc::O_NONBLOCK as usize);
+    pub const WRONLY: Self = Self(libc::O_WRONLY as usize);
+    pub const TRUNC: Self = Self(libc::O_TRUNC as usize);
+    pub const NONBLOCK: Self = Self(libc::O_NONBLOCK as usize);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -104,15 +104,15 @@ pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
 pub struct SocketDomain(usize);
 
 impl SocketDomain {
-    pub const NETLINK: Self = Self(nc::AF_NETLINK as usize);
+    pub const NETLINK: Self = Self(libc::AF_NETLINK as usize);
 }
 
 #[derive(BitOr, Clone, Copy)]
 pub struct SocketType(usize);
 
 impl SocketType {
-    pub const RAW: Self = Self(nc::SOCK_RAW as usize);
-    pub const CLOEXEC: Self = Self(nc::SOCK_CLOEXEC as usize);
+    pub const RAW: Self = Self(libc::SOCK_RAW as usize);
+    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC as usize);
 }
 
 #[derive(Clone, Copy)]
@@ -158,7 +158,7 @@ pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
 pub struct CloseRangeFlags(usize);
 
 impl CloseRangeFlags {
-    pub const CLOEXEC: Self = Self(nc::CLOSE_RANGE_CLOEXEC as usize);
+    pub const CLOEXEC: Self = Self(libc::CLOSE_RANGE_CLOEXEC as usize);
 }
 
 pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Errno> {
@@ -180,12 +180,12 @@ pub fn setsid() -> Result<(), Errno> {
 pub struct MountFlags(usize);
 
 impl MountFlags {
-    pub const BIND: Self = Self(nc::MS_BIND);
-    pub const REMOUNT: Self = Self(nc::MS_REMOUNT);
-    pub const RDONLY: Self = Self(nc::MS_RDONLY);
-    pub const NOSUID: Self = Self(nc::MS_NOSUID);
-    pub const NOEXEC: Self = Self(nc::MS_NOEXEC);
-    pub const NODEV: Self = Self(nc::MS_NODEV);
+    pub const BIND: Self = Self(libc::MS_BIND as usize);
+    pub const REMOUNT: Self = Self(libc::MS_REMOUNT as usize);
+    pub const RDONLY: Self = Self(libc::MS_RDONLY as usize);
+    pub const NOSUID: Self = Self(libc::MS_NOSUID as usize);
+    pub const NOEXEC: Self = Self(libc::MS_NOEXEC as usize);
+    pub const NODEV: Self = Self(libc::MS_NODEV as usize);
 }
 
 pub fn mount(
@@ -235,7 +235,7 @@ pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
 pub struct UmountFlags(usize);
 
 impl UmountFlags {
-    pub const DETACH: Self = Self(2);
+    pub const DETACH: Self = Self(libc::MNT_DETACH as usize);
 }
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
@@ -259,8 +259,8 @@ pub fn _exit(status: usize) -> ! {
 pub struct Signal(u8);
 
 impl Signal {
-    pub const CHLD: Self = Self(nc::SIGCHLD as u8);
-    pub const KILL: Self = Self(nc::SIGKILL as u8);
+    pub const CHLD: Self = Self(libc::SIGCHLD as u8);
+    pub const KILL: Self = Self(libc::SIGKILL as u8);
 }
 
 impl From<Signal> for i32 {
@@ -273,37 +273,43 @@ impl From<Signal> for i32 {
 pub struct CloneFlags(u64);
 
 impl CloneFlags {
-    pub const CLEAR_SIGHAND: Self = Self(nc::CLONE_CLEAR_SIGHAND);
-    pub const FILES: Self = Self(nc::CLONE_FILES as u64);
-    pub const FS: Self = Self(nc::CLONE_FS as u64);
-    pub const NEWCGROUP: Self = Self(nc::CLONE_NEWCGROUP as u64);
-    pub const NEWIPC: Self = Self(nc::CLONE_NEWIPC as u64);
-    pub const NEWNET: Self = Self(nc::CLONE_NEWNET as u64);
-    pub const NEWNS: Self = Self(nc::CLONE_NEWNS as u64);
-    pub const NEWPID: Self = Self(nc::CLONE_NEWPID as u64);
-    pub const NEWUSER: Self = Self(nc::CLONE_NEWUSER as u64);
+    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND as u64);
+    pub const FILES: Self = Self(libc::CLONE_FILES as u64);
+    pub const FS: Self = Self(libc::CLONE_FS as u64);
+    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP as u64);
+    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC as u64);
+    pub const NEWNET: Self = Self(libc::CLONE_NEWNET as u64);
+    pub const NEWNS: Self = Self(libc::CLONE_NEWNS as u64);
+    pub const NEWPID: Self = Self(libc::CLONE_NEWPID as u64);
+    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER as u64);
 }
 
-#[derive(Clone, Default)]
-pub struct CloneArgs(nc::clone_args_t);
+#[derive(Clone)]
+pub struct CloneArgs(libc::clone_args);
+
+impl Default for CloneArgs {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
 
 impl CloneArgs {
     pub fn flags(self, flags: CloneFlags) -> Self {
-        Self(nc::clone_args_t {
+        Self(libc::clone_args {
             flags: flags.0,
             ..self.0
         })
     }
 
     pub fn exit_signal(self, signal: Signal) -> Self {
-        Self(nc::clone_args_t {
+        Self(libc::clone_args {
             exit_signal: signal.0 as u64,
             ..self.0
         })
     }
 }
 
-pub type Pid = nc::pid_t;
+pub type Pid = libc::pid_t;
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs as *mut libc::c_void;
@@ -336,14 +342,14 @@ pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Timespec {
-    sec: nc::time_t,
+    sec: libc::time_t,
     nsec: c_long, // This doesn't work for x86_64 with a target_pointer_width of 32.
 }
 
 impl From<Duration> for Timespec {
     fn from(duration: Duration) -> Self {
         Timespec {
-            sec: duration.as_secs() as nc::time_t,
+            sec: duration.as_secs() as libc::time_t,
             nsec: duration.subsec_nanos() as c_long,
         }
     }
@@ -353,15 +359,15 @@ impl From<Duration> for Timespec {
 pub struct PollEvents(i16);
 
 impl PollEvents {
-    pub const IN: Self = Self(nc::POLLIN);
+    pub const IN: Self = Self(libc::POLLIN);
 }
 
 #[repr(C)]
-pub struct PollFd(nc::pollfd_t);
+pub struct PollFd(libc::pollfd);
 
 impl PollFd {
     pub fn new(fd: Fd, events: PollEvents) -> Self {
-        PollFd(nc::pollfd_t {
+        PollFd(libc::pollfd {
             fd: fd.0 as i32,
             events: events.0,
             revents: 0,
