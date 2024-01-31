@@ -136,10 +136,10 @@ pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
 }
 
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_mut_ptr();
+    let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
     let buf_len = buf.len();
-    unsafe { syscalls::syscall3(nc::SYS_READ, fd.0, buf_ptr as usize, buf_len) }
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::read(fd.0 as libc::c_int, buf_ptr, buf_len) })
+        .map(|ret| ret as usize)
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
