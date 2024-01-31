@@ -157,9 +157,14 @@ impl CloseRangeFlags {
 }
 
 pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Errno> {
-    unsafe { syscalls::syscall3(nc::SYS_CLOSE_RANGE, first.0, last.0, flags.0) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe {
+        libc::close_range(
+            first.0 as libc::c_uint,
+            last.0 as libc::c_uint,
+            flags.0 as libc::c_int,
+        )
+    })
+    .map(drop)
 }
 
 pub fn setsid() -> Result<(), Errno> {
