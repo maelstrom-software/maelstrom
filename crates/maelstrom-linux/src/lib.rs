@@ -301,11 +301,15 @@ impl CloneArgs {
 pub type Pid = nc::pid_t;
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
-    let args_ptr = args as *mut CloneArgs;
-    let size = mem::size_of::<CloneArgs>();
-    unsafe { syscalls::syscall2(nc::SYS_CLONE3, args_ptr as usize, size) }
-        .map(|ret| if ret == 0 { None } else { Some(ret as Pid) })
-        .map_err(Errno::from_i32)
+    let args_ptr = args as *mut CloneArgs as *mut libc::c_void;
+    let size = mem::size_of::<CloneArgs>() as libc::size_t;
+    Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) }).map(|ret| {
+        if ret == 0 {
+            None
+        } else {
+            Some(ret as Pid)
+        }
+    })
 }
 
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
