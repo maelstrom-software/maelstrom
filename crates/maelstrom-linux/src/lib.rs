@@ -222,15 +222,8 @@ pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
     let new_root_ptr = new_root.to_bytes_with_nul().as_ptr();
     let put_old_ptr = put_old.to_bytes_with_nul().as_ptr();
-    unsafe {
-        syscalls::syscall2(
-            nc::SYS_PIVOT_ROOT,
-            new_root_ptr as usize,
-            put_old_ptr as usize,
-        )
-    }
-    .map(drop)
-    .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::syscall(libc::SYS_pivot_root, new_root_ptr, put_old_ptr) })
+        .map(drop)
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
