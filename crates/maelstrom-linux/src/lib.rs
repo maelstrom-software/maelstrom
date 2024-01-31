@@ -196,18 +196,16 @@ pub fn mount(
     let target_ptr = target.to_bytes_with_nul().as_ptr();
     let fstype_ptr = fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null());
     let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null());
-    unsafe {
-        syscalls::syscall5(
-            nc::SYS_MOUNT,
-            source_ptr as usize,
-            target_ptr as usize,
-            fstype_ptr as usize,
-            flags.0,
-            data_ptr as usize,
+    Errno::result(unsafe {
+        libc::mount(
+            source_ptr as *const libc::c_char,
+            target_ptr as *const libc::c_char,
+            fstype_ptr as *const libc::c_char,
+            flags.0 as libc::c_ulong,
+            data_ptr as *const libc::c_void,
         )
-    }
+    })
     .map(drop)
-    .map_err(Errno::from_i32)
 }
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
