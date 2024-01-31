@@ -252,9 +252,8 @@ impl UmountFlags {
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    unsafe { syscalls::syscall2(nc::SYS_UMOUNT2, path_ptr as usize, flags.0) }
+    Errno::result(unsafe { libc::umount2(path_ptr as *const libc::c_char, flags.0 as libc::c_int) })
         .map(drop)
-        .map_err(Errno::from_i32)
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
