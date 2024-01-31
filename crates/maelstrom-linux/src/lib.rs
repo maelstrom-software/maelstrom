@@ -168,9 +168,7 @@ pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Er
 }
 
 pub fn setsid() -> Result<(), Errno> {
-    unsafe { syscalls::syscall0(nc::SYS_SETSID) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::setsid() }).map(drop)
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
