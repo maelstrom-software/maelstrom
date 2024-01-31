@@ -32,6 +32,12 @@ impl From<c_int> for Fd {
     }
 }
 
+impl From<libc::c_long> for Fd {
+    fn from(fd: c_long) -> Fd {
+        Fd(fd as usize)
+    }
+}
+
 #[repr(C)]
 pub struct NetlinkSocketAddr {
     sin_family: nc::sa_family_t,
@@ -313,9 +319,10 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
 }
 
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
-    unsafe { syscalls::syscall2(nc::SYS_PIDFD_OPEN, pid as usize, 0) }
-        .map(|fd| fd.into())
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe {
+        libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0 as libc::c_uint)
+    })
+    .map(|fd| fd.into())
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
