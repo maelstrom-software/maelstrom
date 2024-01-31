@@ -143,10 +143,10 @@ pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_ptr();
+    let buf_ptr = buf.as_ptr() as *const libc::c_void;
     let buf_len = buf.len();
-    unsafe { syscalls::syscall3(nc::SYS_WRITE, fd.0, buf_ptr as usize, buf_len) }
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::write(fd.0 as libc::c_int, buf_ptr, buf_len) })
+        .map(|ret| ret as usize)
 }
 
 #[derive(Clone, Copy, Default)]
