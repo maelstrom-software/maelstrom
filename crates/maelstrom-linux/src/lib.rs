@@ -240,19 +240,10 @@ pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr();
-    let argv_ptr = argv.as_ptr();
-    let envp_ptr = envp.as_ptr();
-    unsafe {
-        syscalls::syscall3(
-            nc::SYS_EXECVE,
-            path_ptr as usize,
-            argv_ptr as usize,
-            envp_ptr as usize,
-        )
-    }
-    .map(drop)
-    .map_err(Errno::from_i32)
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const libc::c_char;
+    let argv_ptr = argv.as_ptr() as *const *const libc::c_char;
+    let envp_ptr = envp.as_ptr() as *const *const libc::c_char;
+    Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
 }
 
 pub fn exit(status: usize) -> ! {
