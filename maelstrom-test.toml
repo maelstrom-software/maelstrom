@@ -24,7 +24,7 @@ filter = "package.equals(cargo-maelstrom)"
 image.name = "rust"
 image.use = ["layers", "environment"]
 enable_loopback = true
-include_shared_libraries = false
+#include_shared_libraries = false
 added_layers = ["dev-null.tar"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
