@@ -98,5 +98,5 @@ pub fn start_and_exec_in_child(exec_result_write_fd: Fd, syscalls: &mut [Syscall
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
     let _ = linux::write(exec_result_write_fd, result.to_le_bytes().as_slice());
-    linux::exit(1);
+    linux::_exit(1);
 }

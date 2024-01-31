@@ -246,9 +246,8 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
     Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
 }
 
-pub fn exit(status: usize) -> ! {
-    let _ = unsafe { syscalls::syscall1(nc::SYS_EXIT, status) };
-    unreachable!();
+pub fn _exit(status: usize) -> ! {
+    unsafe { libc::_exit(status as libc::c_int) };
 }
 
 #[derive(Clone, Copy, Default, Display, Into)]
