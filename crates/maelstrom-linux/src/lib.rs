@@ -326,9 +326,7 @@ pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
-    unsafe { syscalls::syscall1(nc::SYS_CLOSE, fd.0) }
-        .map(drop)
-        .map_err(Errno::from_i32)
+    Errno::result(unsafe { libc::close(fd.0 as libc::c_int) }).map(drop)
 }
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
