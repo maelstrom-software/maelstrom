@@ -132,7 +132,7 @@ impl Executor {
             linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
         }
 
-        let user = UserId::from(linux::getuid());
+        let user = UserId::from(linux::getuid().as_u32());
         let group = GroupId::from(linux::getgid());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
         let upper_dir = tmpfs_dir.join("upper");

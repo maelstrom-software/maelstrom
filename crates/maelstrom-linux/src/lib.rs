@@ -518,10 +518,21 @@ pub fn getpid() -> Pid {
     Pid::from_pid_t(unsafe { libc::getpid() })
 }
 
-pub type Uid = uid_t;
+#[derive(Clone, Copy, Display)]
+pub struct Uid(uid_t);
+
+impl Uid {
+    fn from_uid_t(uid: uid_t) -> Uid {
+        Self(uid)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
 
 pub fn getuid() -> Uid {
-    unsafe { libc::getuid() }
+    Uid::from_uid_t(unsafe { libc::getuid() })
 }
 
 pub type Gid = gid_t;
@@ -561,5 +572,10 @@ mod tests {
     #[test]
     fn pid_display() {
         assert_eq!(std::format!("{}", Pid(1234)).as_str(), "1234",);
+    }
+
+    #[test]
+    fn uid_display() {
+        assert_eq!(std::format!("{}", Uid(1234)).as_str(), "1234",);
     }
 }
