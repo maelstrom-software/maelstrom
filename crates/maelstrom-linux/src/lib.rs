@@ -127,10 +127,10 @@ pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
 }
 
 #[derive(Clone, Copy)]
-pub struct SocketDomain(usize);
+pub struct SocketDomain(c_int);
 
 impl SocketDomain {
-    pub const NETLINK: Self = Self(libc::AF_NETLINK as usize);
+    pub const NETLINK: Self = Self(libc::PF_NETLINK);
 }
 
 #[derive(BitOr, Clone, Copy)]
@@ -153,7 +153,7 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0 as i32, type_.0 as i32, protocol.0 as i32) })
+    Errno::result(unsafe { libc::socket(domain.0, type_.0 as i32, protocol.0 as i32) })
         .map(Fd::from_raw_fd)
 }
 
