@@ -440,12 +440,16 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
         .map(|ret| ret as usize)
 }
 
-#[derive(Clone, Copy, Into)]
-pub struct ExitCode(u8);
+#[derive(Clone, Copy)]
+pub struct ExitCode(c_int);
 
-impl From<ExitCode> for i32 {
-    fn from(code: ExitCode) -> i32 {
-        code.0.into()
+impl ExitCode {
+    pub fn as_u8(&self) -> u8 {
+        self.0 as u8
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        self.0
     }
 }
 
@@ -463,7 +467,7 @@ pub struct WaitResult {
 
 fn extract_wait_status(status: c_int) -> WaitStatus {
     if libc::WIFEXITED(status) {
-        WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))
+        WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status)))
     } else if libc::WIFSIGNALED(status) {
         WaitStatus::Signaled(Signal(libc::WTERMSIG(status)))
     } else {
