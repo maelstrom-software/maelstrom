@@ -8,8 +8,9 @@
 
 use core::{ffi::CStr, result};
 use maelstrom_linux::{
-    self as linux, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode, MountFlags,
-    NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType, UmountFlags,
+    self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
+    MountFlags, NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType,
+    UmountFlags,
 };
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
@@ -22,7 +23,7 @@ pub enum Syscall<'a> {
     WriteUsingSavedFd(&'a [u8]),
     SetSid,
     Dup2(Fd, Fd),
-    CloseRange(Fd, CloseRangeLast, CloseRangeFlags),
+    CloseRange(CloseRangeFirst, CloseRangeLast, CloseRangeFlags),
     Mount(
         Option<&'a CStr>,
         &'a CStr,

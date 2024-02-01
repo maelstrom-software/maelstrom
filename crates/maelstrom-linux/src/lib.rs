@@ -25,7 +25,6 @@ impl Fd {
     pub const STDIN: Self = Self(libc::STDIN_FILENO);
     pub const STDOUT: Self = Self(libc::STDOUT_FILENO);
     pub const STDERR: Self = Self(libc::STDERR_FILENO);
-    pub const FIRST_NON_SPECIAL: Self = Self(3);
 
     pub fn from_raw_fd(fd: RawFd) -> Self {
         Self(fd)
@@ -190,17 +189,31 @@ impl CloseRangeFlags {
 }
 
 #[derive(Clone, Copy)]
+pub enum CloseRangeFirst {
+    AfterStderr,
+    Fd(Fd),
+}
+
+#[derive(Clone, Copy)]
 pub enum CloseRangeLast {
     Max,
     Fd(Fd),
 }
 
-pub fn close_range(first: Fd, last: CloseRangeLast, flags: CloseRangeFlags) -> Result<(), Errno> {
+pub fn close_range(
+    first: CloseRangeFirst,
+    last: CloseRangeLast,
+    flags: CloseRangeFlags,
+) -> Result<(), Errno> {
+    let first = match first {
+        CloseRangeFirst::AfterStderr => (libc::STDERR_FILENO + 1) as c_uint,
+        CloseRangeFirst::Fd(fd) => fd.as_c_uint(),
+    };
     let last = match last {
         CloseRangeLast::Max => c_uint::MAX,
         CloseRangeLast::Fd(fd) => fd.as_c_uint(),
     };
-    Errno::result(unsafe { libc::close_range(first.as_c_uint(), last, flags.0 as c_int) }).map(drop)
+    Errno::result(unsafe { libc::close_range(first, last, flags.0 as c_int) }).map(drop)
 }
 
 pub fn setsid() -> Result<(), Errno> {
