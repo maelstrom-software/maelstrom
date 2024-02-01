@@ -221,15 +221,15 @@ pub fn setsid() -> Result<(), Errno> {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct MountFlags(usize);
+pub struct MountFlags(c_ulong);
 
 impl MountFlags {
-    pub const BIND: Self = Self(libc::MS_BIND as usize);
-    pub const REMOUNT: Self = Self(libc::MS_REMOUNT as usize);
-    pub const RDONLY: Self = Self(libc::MS_RDONLY as usize);
-    pub const NOSUID: Self = Self(libc::MS_NOSUID as usize);
-    pub const NOEXEC: Self = Self(libc::MS_NOEXEC as usize);
-    pub const NODEV: Self = Self(libc::MS_NODEV as usize);
+    pub const BIND: Self = Self(libc::MS_BIND);
+    pub const REMOUNT: Self = Self(libc::MS_REMOUNT);
+    pub const RDONLY: Self = Self(libc::MS_RDONLY);
+    pub const NOSUID: Self = Self(libc::MS_NOSUID);
+    pub const NOEXEC: Self = Self(libc::MS_NOEXEC);
+    pub const NODEV: Self = Self(libc::MS_NODEV);
 }
 
 pub fn mount(
@@ -250,7 +250,7 @@ pub fn mount(
             source_ptr as *const c_char,
             target_ptr as *const c_char,
             fstype_ptr as *const c_char,
-            flags.0 as c_ulong,
+            flags.0,
             data_ptr as *const c_void,
         )
     })
