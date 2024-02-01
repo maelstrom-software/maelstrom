@@ -84,12 +84,12 @@ impl Default for NetlinkSocketAddr {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct OpenFlags(usize);
+pub struct OpenFlags(c_int);
 
 impl OpenFlags {
-    pub const WRONLY: Self = Self(libc::O_WRONLY as usize);
-    pub const TRUNC: Self = Self(libc::O_TRUNC as usize);
-    pub const NONBLOCK: Self = Self(libc::O_NONBLOCK as usize);
+    pub const WRONLY: Self = Self(libc::O_WRONLY);
+    pub const TRUNC: Self = Self(libc::O_TRUNC);
+    pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -119,8 +119,7 @@ impl FileMode {
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
     let path_ptr = path.as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::open(path_ptr, flags.0 as c_int, mode.0 as mode_t) })
-        .map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0 as mode_t) }).map(Fd::from_raw_fd)
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
@@ -511,5 +510,5 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 }
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL as c_int, flags.0 as c_int) }).map(drop)
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL as c_int, flags.0) }).map(drop)
 }
