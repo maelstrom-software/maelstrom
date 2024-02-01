@@ -175,10 +175,17 @@ pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
 }
 
 #[derive(Clone, Copy, Default)]
-pub struct CloseRangeFlags(usize);
+pub struct CloseRangeFlags(c_uint);
 
 impl CloseRangeFlags {
-    pub const CLOEXEC: Self = Self(libc::CLOSE_RANGE_CLOEXEC as usize);
+    pub const CLOEXEC: Self = Self(libc::CLOSE_RANGE_CLOEXEC);
+
+    // The documentation for close_range(2) says it takes an unsigned int flags parameter. The
+    // flags are defined as unsigned ints as well. However, the close_range wrapper we get from the
+    // libc crate expects a signed int for the flags parameter.
+    fn as_c_int(&self) -> c_int {
+        self.0.try_into().unwrap()
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -206,7 +213,7 @@ pub fn close_range(
         CloseRangeLast::Max => c_uint::MAX,
         CloseRangeLast::Fd(fd) => fd.as_c_uint(),
     };
-    Errno::result(unsafe { libc::close_range(first, last, flags.0 as c_int) }).map(drop)
+    Errno::result(unsafe { libc::close_range(first, last, flags.as_c_int()) }).map(drop)
 }
 
 pub fn setsid() -> Result<(), Errno> {
