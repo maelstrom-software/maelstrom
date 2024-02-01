@@ -142,7 +142,7 @@ impl SocketType {
 }
 
 #[derive(Clone, Copy)]
-pub struct SocketProtocol(usize);
+pub struct SocketProtocol(c_int);
 
 impl SocketProtocol {
     pub const NETLINK_ROUTE: Self = Self(0);
@@ -153,8 +153,7 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0 as i32) })
-        .map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd::from_raw_fd)
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
