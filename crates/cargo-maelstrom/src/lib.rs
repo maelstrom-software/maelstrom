@@ -7,7 +7,7 @@ pub mod progress;
 pub mod test_listing;
 pub mod visitor;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use artifacts::GeneratedArtifacts;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
@@ -216,14 +216,18 @@ where
         let mut layers = test_metadata
             .layers
             .iter()
-            .map(|Layer::Tar(path)| {
-                Ok((
-                    self.client
-                        .lock()
-                        .unwrap()
-                        .add_artifact(path.as_std_path())?,
-                    ArtifactType::Tar,
-                ))
+            .map(|layer| {
+                if let Layer::Tar { path } = layer {
+                    Ok((
+                        self.client
+                            .lock()
+                            .unwrap()
+                            .add_artifact(path.as_std_path())?,
+                        ArtifactType::Tar,
+                    ))
+                } else {
+                    Err(anyhow!("manifest not implemented"))
+                }
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();

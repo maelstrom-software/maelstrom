@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context as _, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
@@ -186,11 +186,15 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = job_spec_iter_from_reader(
         reader,
-        |Layer::Tar(layer)| {
-            Ok((
-                client.borrow_mut().add_artifact(layer.as_std_path())?,
-                ArtifactType::Tar,
-            ))
+        |layer| {
+            if let Layer::Tar { path } = layer {
+                Ok((
+                    client.borrow_mut().add_artifact(path.as_std_path())?,
+                    ArtifactType::Tar,
+                ))
+            } else {
+                Err(anyhow!("manifest not implemented"))
+            }
         },
         std_env_lookup,
         image_lookup,

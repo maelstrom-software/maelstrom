@@ -192,6 +192,88 @@ macro_rules! string_nonempty {
 #[macro_export]
 macro_rules! tar_layer {
     ($path:expr) => {
-        ::maelstrom_base::Layer::Tar(::maelstrom_base::Utf8PathBuf::from($path))
+        ::maelstrom_base::Layer::Tar {
+            path: ::maelstrom_base::Utf8PathBuf::from($path),
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! glob_layer {
+    (_internal, $glob:expr, $strip_prefix:expr, $prepend_prefix:expr) => {
+        ::maelstrom_base::Layer::Glob {
+            glob: ::std::convert::Into::into($glob),
+            prefix_options: ::maelstrom_base::PrefixOptions {
+                strip_prefix: $strip_prefix,
+                prepend_prefix: $prepend_prefix,
+            },
+        }
+    };
+    ($glob:expr) => {
+        glob_layer!(_internal, $glob, None, None)
+    };
+    ($glob:expr, strip_prefix = $strip_prefix:expr) => {
+        glob_layer!(
+            _internal,
+            $glob,
+            Some(::std::convert::Into::into($strip_prefix)),
+            None
+        )
+    };
+    ($glob:expr, prepend_prefix = $prepend_prefix:expr) => {
+        glob_layer!(
+            _internal,
+            $glob,
+            None,
+            Some(::std::convert::Into::into($prepend_prefix))
+        )
+    };
+    ($glob:expr, strip_prefix = $strip_prefix:expr, prepend_prefix = $prepend_prefix:expr) => {
+        glob_layer!(
+            _internal,
+            $glob,
+            Some(::std::convert::Into::into($strip_prefix)),
+            Some(::std::convert::Into::into($prepend_prefix))
+        )
+    };
+}
+
+#[macro_export]
+macro_rules! paths_layer {
+    (_internal, [$($path:expr),*], $strip_prefix:expr, $prepend_prefix:expr) => {
+        ::maelstrom_base::Layer::Paths {
+            paths: vec![$(utf8_path_buf!($path)),*],
+            prefix_options: ::maelstrom_base::PrefixOptions {
+                strip_prefix: $strip_prefix,
+                prepend_prefix: $prepend_prefix,
+            },
+        }
+    };
+    ([$($path:expr),*]) => {
+        paths_layer!(_internal, [$($path),*], None, None)
+    };
+    ([$($path:expr),*], strip_prefix = $strip_prefix:expr) => {
+        paths_layer!(
+            _internal,
+            [$($path),*],
+            Some(::std::convert::Into::into($strip_prefix)),
+            None
+        )
+    };
+    ([$($path:expr),*], prepend_prefix = $prepend_prefix:expr) => {
+        paths_layer!(
+            _internal,
+            [$($path),*],
+            None,
+            Some(::std::convert::Into::into($prepend_prefix))
+        )
+    };
+    ([$($path:expr),*], strip_prefix = $strip_prefix:expr, prepend_prefix = $prepend_prefix:expr) => {
+        paths_layer!(
+            _internal,
+            [$($path),*],
+            Some(::std::convert::Into::into($strip_prefix)),
+            Some(::std::convert::Into::into($prepend_prefix))
+        )
     };
 }

@@ -233,7 +233,7 @@ mod test {
     use super::*;
     use anyhow::Error;
     use maelstrom_base::{enum_set, JobMountFsType};
-    use maelstrom_test::{string, tar_layer, utf8_path_buf};
+    use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {
@@ -588,7 +588,7 @@ mod test {
     }
 
     #[test]
-    fn layers() {
+    fn layers_tar() {
         assert_eq!(
             parse_test_directive(
                 r#"
@@ -598,6 +598,100 @@ mod test {
             .unwrap(),
             TestDirective {
                 layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn layers_glob() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ glob = "foo*.bin" }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![glob_layer!("foo*.bin")])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ glob = "foo*.bin", strip_prefix = "a" }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                    "foo*.bin",
+                    strip_prefix = "a"
+                )])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ glob = "foo*.bin", prepend_prefix = "b" }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                    "foo*.bin",
+                    prepend_prefix = "b"
+                )])),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn layers_paths() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ paths = ["foo.bin", "bar.bin"] }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![paths_layer!([
+                    "foo.bin", "bar.bin"
+                ])])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ paths = ["foo.bin", "bar.bin"], strip_prefix = "a" }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                    ["foo.bin", "bar.bin"],
+                    strip_prefix = "a"
+                )])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ paths = ["foo.bin", "bar.bin"], prepend_prefix = "a" }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                    ["foo.bin", "bar.bin"],
+                    prepend_prefix = "a"
+                )])),
                 ..Default::default()
             }
         );

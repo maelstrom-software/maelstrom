@@ -136,11 +136,11 @@ impl<'a> ImageOption<'a> {
             .layers
             .iter()
             .map(|p| {
-                Ok(Layer::Tar(
-                    Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
+                Ok(Layer::Tar {
+                    path: Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
                         anyhow!("image {} has a non-UTF-8 layer path {p:?}", self.name())
                     })?,
-                ))
+                })
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter())

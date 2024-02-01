@@ -361,14 +361,17 @@ impl<'de> de::Deserialize<'de> for Job {
 #[cfg(test)]
 mod test {
     use super::*;
+    use assert_matches::assert_matches;
     use maelstrom_base::{enum_set, nonempty, JobMountFsType};
     use maelstrom_test::{digest, path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
 
-    fn layer_mapper(Layer::Tar(layer): Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        Ok((
-            Sha256Digest::from(layer.as_str().parse::<u64>()?),
-            ArtifactType::Tar,
-        ))
+    fn layer_mapper(layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        assert_matches!(layer, Layer::Tar { path } => {
+            Ok((
+                Sha256Digest::from(path.as_str().parse::<u64>()?),
+                ArtifactType::Tar,
+            ))
+        })
     }
 
     fn env(var: &str) -> Result<Option<String>> {
