@@ -312,18 +312,22 @@ impl From<Signal> for i32 {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct CloneFlags(u64);
+pub struct CloneFlags(c_int);
 
 impl CloneFlags {
-    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND as u64);
-    pub const FILES: Self = Self(libc::CLONE_FILES as u64);
-    pub const FS: Self = Self(libc::CLONE_FS as u64);
-    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP as u64);
-    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC as u64);
-    pub const NEWNET: Self = Self(libc::CLONE_NEWNET as u64);
-    pub const NEWNS: Self = Self(libc::CLONE_NEWNS as u64);
-    pub const NEWPID: Self = Self(libc::CLONE_NEWPID as u64);
-    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER as u64);
+    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND);
+    pub const FILES: Self = Self(libc::CLONE_FILES);
+    pub const FS: Self = Self(libc::CLONE_FS);
+    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP);
+    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC);
+    pub const NEWNET: Self = Self(libc::CLONE_NEWNET);
+    pub const NEWNS: Self = Self(libc::CLONE_NEWNS);
+    pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
+    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
+
+    fn as_u64(&self) -> u64 {
+        self.0.try_into().unwrap()
+    }
 }
 
 #[derive(Clone)]
@@ -338,7 +342,7 @@ impl Default for CloneArgs {
 impl CloneArgs {
     pub fn flags(self, flags: CloneFlags) -> Self {
         Self(libc::clone_args {
-            flags: flags.0,
+            flags: flags.as_u64(),
             ..self.0
         })
     }
