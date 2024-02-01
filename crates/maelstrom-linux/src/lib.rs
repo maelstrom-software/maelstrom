@@ -93,33 +93,33 @@ impl OpenFlags {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct FileMode(usize);
+pub struct FileMode(mode_t);
 
 impl FileMode {
-    pub const SUID: Self = Self(0o4000);
-    pub const SGID: Self = Self(0o2000);
-    pub const SVTX: Self = Self(0o1000);
+    pub const SUID: Self = Self(libc::S_ISUID);
+    pub const SGID: Self = Self(libc::S_ISGID);
+    pub const SVTX: Self = Self(libc::S_ISVTX);
 
-    pub const RWXU: Self = Self(0o0700);
-    pub const RUSR: Self = Self(0o0400);
-    pub const WUSR: Self = Self(0o0200);
-    pub const XUSR: Self = Self(0o0100);
+    pub const RWXU: Self = Self(libc::S_IRWXU);
+    pub const RUSR: Self = Self(libc::S_IRUSR);
+    pub const WUSR: Self = Self(libc::S_IWUSR);
+    pub const XUSR: Self = Self(libc::S_IXUSR);
 
-    pub const RWXG: Self = Self(0o0070);
-    pub const RGRP: Self = Self(0o0040);
-    pub const WGRP: Self = Self(0o0020);
-    pub const XGRP: Self = Self(0o0010);
+    pub const RWXG: Self = Self(libc::S_IRWXG);
+    pub const RGRP: Self = Self(libc::S_IRGRP);
+    pub const WGRP: Self = Self(libc::S_IWGRP);
+    pub const XGRP: Self = Self(libc::S_IXGRP);
 
-    pub const RWXO: Self = Self(0o0007);
-    pub const ROTH: Self = Self(0o0004);
-    pub const WOTH: Self = Self(0o0002);
-    pub const XOTH: Self = Self(0o0001);
+    pub const RWXO: Self = Self(libc::S_IRWXO);
+    pub const ROTH: Self = Self(libc::S_IROTH);
+    pub const WOTH: Self = Self(libc::S_IWOTH);
+    pub const XOTH: Self = Self(libc::S_IXOTH);
 }
 
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
     let path_ptr = path.as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0 as mode_t) }).map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd::from_raw_fd)
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
@@ -258,7 +258,7 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    Errno::result(unsafe { libc::mkdir(path_ptr as *const c_char, mode.0 as mode_t) }).map(drop)
+    Errno::result(unsafe { libc::mkdir(path_ptr as *const c_char, mode.0) }).map(drop)
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
