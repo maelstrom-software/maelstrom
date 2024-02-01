@@ -95,7 +95,7 @@ fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
 /// distinguish between an error and no error.
 pub fn start_and_exec_in_child(exec_result_write_fd: Fd, syscalls: &mut [Syscall]) -> ! {
     let (index, errno) = start_and_exec_in_child_inner(syscalls);
-    let result = (index as u64) << 32 | (errno as u64);
+    let result = (index as u64) << 32 | errno.as_u64();
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
     let _ = linux::write(exec_result_write_fd, result.to_le_bytes().as_slice());

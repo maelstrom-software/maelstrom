@@ -11,6 +11,12 @@ use libc::{
     sa_family_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
+extern "C" {
+    fn sigabbrev_np(sig: c_int) -> *const c_char;
+    fn strerrorname_np(errnum: c_int) -> *const c_char;
+    fn strerrordesc_np(errnum: c_int) -> *const c_char;
+}
+
 #[derive(Clone)]
 pub struct CloneArgs(libc::clone_args);
 
@@ -81,7 +87,106 @@ pub enum CloseRangeLast {
     Fd(Fd),
 }
 
-pub type Errno = nix::errno::Errno;
+pub struct Errno(c_int);
+
+impl Errno {
+    pub fn from_u64(errno: u64) -> Self {
+        Errno(errno.try_into().unwrap())
+    }
+
+    pub fn as_u64(&self) -> u64 {
+        self.0.try_into().unwrap()
+    }
+
+    pub fn name(&self) -> Option<&'static str> {
+        let errno = unsafe { strerrorname_np(self.0) };
+        if errno.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
+        }
+    }
+
+    pub fn desc(&self) -> Option<&'static str> {
+        let errno = unsafe { strerrordesc_np(self.0) };
+        if errno.is_null() {
+            None
+        } else {
+            Some(unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
+        }
+    }
+
+    /// Returns `Ok(value)` if it does not contain the sentinel value. This
+    /// should not be used when `-1` is not the errno sentinel value.
+    fn result<S: ErrnoSentinel + PartialEq<S>>(value: S) -> Result<S, Errno> {
+        if value == S::sentinel() {
+            Err(Errno(unsafe { *libc::__errno_location() }))
+        } else {
+            Ok(value)
+        }
+    }
+}
+
+impl fmt::Debug for Errno {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.name() {
+            Some(name) => write!(f, "{}", name),
+            None => write!(f, "UNKNOWN({})", self.0),
+        }
+    }
+}
+
+impl fmt::Display for Errno {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.name(), self.desc()) {
+            (Some(name), Some(desc)) => {
+                write!(f, "{}: {}", name, desc)
+            }
+            _ => {
+                write!(f, "{}: Unknown error", self.0)
+            }
+        }
+    }
+}
+
+#[cfg(feature = "std")]
+impl std::error::Error for Errno {}
+
+/// The sentinel value indicates that a function failed and more detailed
+/// information about the error can be found in `errno`
+pub trait ErrnoSentinel: Sized {
+    fn sentinel() -> Self;
+}
+
+impl ErrnoSentinel for isize {
+    fn sentinel() -> Self {
+        -1
+    }
+}
+
+impl ErrnoSentinel for i32 {
+    fn sentinel() -> Self {
+        -1
+    }
+}
+
+impl ErrnoSentinel for i64 {
+    fn sentinel() -> Self {
+        -1
+    }
+}
+
+impl ErrnoSentinel for *mut c_void {
+    fn sentinel() -> Self {
+        -1isize as *mut c_void
+    }
+}
+
+impl ErrnoSentinel for libc::sighandler_t {
+    fn sentinel() -> Self {
+        libc::SIG_ERR
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct ExitCode(c_int);
@@ -259,10 +364,6 @@ impl Signal {
     fn as_c_ulong(&self) -> c_ulong {
         self.0.try_into().unwrap()
     }
-}
-
-extern "C" {
-    fn sigabbrev_np(sig: c_int) -> *const c_char;
 }
 
 impl fmt::Display for Signal {
@@ -556,16 +657,42 @@ mod tests {
 
     #[test]
     fn pid_display() {
-        assert_eq!(std::format!("{}", Pid(1234)).as_str(), "1234",);
+        assert_eq!(std::format!("{}", Pid(1234)).as_str(), "1234");
     }
 
     #[test]
     fn uid_display() {
-        assert_eq!(std::format!("{}", Uid(1234)).as_str(), "1234",);
+        assert_eq!(std::format!("{}", Uid(1234)).as_str(), "1234");
     }
 
     #[test]
     fn gid_display() {
-        assert_eq!(std::format!("{}", Gid(1234)).as_str(), "1234",);
+        assert_eq!(std::format!("{}", Gid(1234)).as_str(), "1234");
+    }
+
+    #[test]
+    fn errno_display() {
+        assert_eq!(
+            std::format!("{}", Errno(libc::EPERM)).as_str(),
+            "EPERM: Operation not permitted"
+        );
+    }
+
+    #[test]
+    fn invalid_errno_display() {
+        assert_eq!(
+            std::format!("{}", Errno(1000)).as_str(),
+            "1000: Unknown error"
+        );
+    }
+
+    #[test]
+    fn errno_debug() {
+        assert_eq!(std::format!("{:?}", Errno(libc::EPERM)).as_str(), "EPERM");
+    }
+
+    #[test]
+    fn invalid_errno_debug() {
+        assert_eq!(std::format!("{:?}", Errno(1000)).as_str(), "UNKNOWN(1000)");
     }
 }

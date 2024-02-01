@@ -2708,7 +2708,6 @@ version = "0.5.0-dev"
 dependencies = [
  "derive_more",
  "libc",
- "nix",
 ]
 
 [[package]]
@@ -3001,7 +3000,6 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset 0.7.1",
- "pin-utils",
 ]
 
 [[package]]

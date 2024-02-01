@@ -722,9 +722,9 @@ impl Executor {
             }
             let result = u64::from_le_bytes(exec_result_buf.try_into().unwrap());
             let index = (result >> 32) as usize;
-            let errno = (result & 0xffffffff) as i32;
+            let errno = result & 0xffffffff;
             return Err(builder.error_transformers[index](
-                Errno::from_i32(errno).desc(),
+                Errno::from_u64(errno).desc().unwrap_or("Unknown error"),
             ));
         }
 
