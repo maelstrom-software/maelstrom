@@ -275,15 +275,15 @@ pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct UmountFlags(usize);
+pub struct UmountFlags(c_int);
 
 impl UmountFlags {
-    pub const DETACH: Self = Self(libc::MNT_DETACH as usize);
+    pub const DETACH: Self = Self(libc::MNT_DETACH);
 }
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    Errno::result(unsafe { libc::umount2(path_ptr as *const c_char, flags.0 as c_int) }).map(drop)
+    Errno::result(unsafe { libc::umount2(path_ptr as *const c_char, flags.0) }).map(drop)
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
