@@ -573,7 +573,7 @@ mod tests {
 
     macro_rules! pid {
         ($n:expr) => {
-            $n as Pid
+            Pid::new_for_test($n)
         };
     }
 

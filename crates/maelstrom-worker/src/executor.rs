@@ -890,7 +890,7 @@ mod tests {
                 let result = adapter.result.unwrap();
                 linux::kill(dummy_child_pid, Signal::KILL).ok();
                 let mut adapter = ReaperAdapter::new(dummy_child_pid);
-                reaper::main(&mut adapter, 0 as Pid);
+                reaper::main(&mut adapter, Pid::new_for_test(0));
                 result
             });
             assert_eq!(reaper.await.unwrap(), self.expected_status);

@@ -5,7 +5,7 @@
 extern crate std;
 
 use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
-use derive_more::{BitOr, Into};
+use derive_more::{BitOr, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
     sa_family_t, size_t, sockaddr, socklen_t, time_t, uid_t,
@@ -369,7 +369,23 @@ impl CloneArgs {
     }
 }
 
-pub type Pid = pid_t;
+#[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq)]
+pub struct Pid(pid_t);
+
+impl Pid {
+    fn from_pid_t(pid: pid_t) -> Self {
+        Self(pid)
+    }
+
+    fn from_c_long(pid: c_long) -> Self {
+        Self::from_pid_t(pid.try_into().unwrap())
+    }
+
+    // XXX This shouldn't be public in non-test configurations.
+    pub fn new_for_test(pid: pid_t) -> Self {
+        Self(pid)
+    }
+}
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs as *mut c_void;
@@ -378,13 +394,13 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
         if ret == 0 {
             None
         } else {
-            Some(ret as Pid)
+            Some(Pid::from_c_long(ret))
         }
     })
 }
 
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid as pid_t, 0 as c_uint) })
+    Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid.0, 0 as c_uint) })
         .map(Fd::from_c_long)
 }
 
@@ -481,7 +497,7 @@ pub fn wait() -> Result<WaitResult, Errno> {
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|pid| WaitResult {
-        pid,
+        pid: Pid::from_pid_t(pid),
         status: extract_wait_status(status),
     })
 }
@@ -492,7 +508,7 @@ pub struct WaitpidFlags(c_int);
 pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
     let inner = |status: &mut c_int| {
         let status_ptr = status as *mut c_int;
-        unsafe { libc::waitpid(pid, status_ptr, flags.0) }
+        unsafe { libc::waitpid(pid.0, status_ptr, flags.0) }
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
@@ -503,7 +519,7 @@ pub fn raise(signal: Signal) -> Result<(), Errno> {
 }
 
 pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::kill(pid, signal.0 as c_int) }).map(drop)
+    Errno::result(unsafe { libc::kill(pid.0, signal.0 as c_int) }).map(drop)
 }
 
 pub fn pause() {
@@ -511,7 +527,7 @@ pub fn pause() {
 }
 
 pub fn getpid() -> Pid {
-    unsafe { libc::getpid() }
+    Pid::from_pid_t(unsafe { libc::getpid() })
 }
 
 pub type Uid = uid_t;
@@ -552,5 +568,10 @@ mod tests {
             std::format!("{}", Signal(1234)).as_str(),
             "Invalid Signal 1234",
         );
+    }
+
+    #[test]
+    fn pid_display() {
+        assert_eq!(std::format!("{}", Pid(1234)).as_str(), "1234",);
     }
 }
