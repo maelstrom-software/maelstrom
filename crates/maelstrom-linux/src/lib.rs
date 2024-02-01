@@ -8,7 +8,7 @@ use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
 use derive_more::{BitOr, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
-    sa_family_t, size_t, sockaddr, socklen_t, time_t, uid_t,
+    sa_family_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
 pub type Errno = nix::errno::Errno;
@@ -410,22 +410,6 @@ pub fn close(fd: Fd) -> Result<(), Errno> {
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal.0 as c_ulong) }).map(drop)
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-pub struct Timespec {
-    sec: time_t,
-    nsec: c_long, // This doesn't work for x86_64 with a target_pointer_width of 32.
-}
-
-impl From<Duration> for Timespec {
-    fn from(duration: Duration) -> Self {
-        Timespec {
-            sec: duration.as_secs() as time_t,
-            nsec: duration.subsec_nanos() as c_long,
-        }
-    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
