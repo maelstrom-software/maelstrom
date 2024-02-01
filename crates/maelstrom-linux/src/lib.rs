@@ -32,7 +32,7 @@ impl Fd {
         Self::from_raw_fd(fd.try_into().unwrap())
     }
 
-    pub fn as_raw_fd(self) -> RawFd {
+    fn as_raw_fd(self) -> RawFd {
         self.0
     }
 
@@ -56,6 +56,10 @@ impl OwnedFd {
         let fd = self.0;
         mem::forget(self);
         fd
+    }
+
+    pub fn into_raw_fd(self) -> RawFd {
+        self.into_fd().as_raw_fd()
     }
 }
 
