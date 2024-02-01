@@ -4,8 +4,8 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-use core::{ffi::CStr, mem, ptr, time::Duration};
-use derive_more::{BitOr, Display, Into};
+use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
+use derive_more::{BitOr, Into};
 use libc::{
     c_char, c_int, c_long, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
     sa_family_t, size_t, sockaddr, socklen_t, time_t, uid_t,
@@ -297,7 +297,7 @@ pub fn _exit(status: usize) -> ! {
     unsafe { libc::_exit(status as c_int) };
 }
 
-#[derive(Clone, Copy, Default, Display, Into)]
+#[derive(Clone, Copy, Default, Into)]
 pub struct Signal(c_int);
 
 impl Signal {
@@ -306,6 +306,22 @@ impl Signal {
 
     pub fn as_u8(&self) -> u8 {
         self.0.try_into().unwrap()
+    }
+}
+
+extern "C" {
+    fn sigabbrev_np(sig: c_int) -> *const c_char;
+}
+
+impl fmt::Display for Signal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let abbrev = unsafe { sigabbrev_np(self.0) };
+        if abbrev.is_null() {
+            write!(f, "Invalid Signal {}", self.0)
+        } else {
+            let abbrev = unsafe { CStr::from_ptr(abbrev) }.to_str().unwrap();
+            write!(f, "SIG{}", abbrev)
+        }
     }
 }
 
@@ -519,4 +535,22 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL as c_int, flags.0) }).map(drop)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signal_display() {
+        assert_eq!(std::format!("{}", Signal::CHLD).as_str(), "SIGCHLD",);
+    }
+
+    #[test]
+    fn invalid_signal_display() {
+        assert_eq!(
+            std::format!("{}", Signal(1234)).as_str(),
+            "Invalid Signal 1234",
+        );
+    }
 }
