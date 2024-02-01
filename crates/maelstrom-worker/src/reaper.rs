@@ -20,7 +20,7 @@ pub fn main(mut deps: impl ReaperDeps, dummy_pid: Pid) {
                 } else {
                     let status = match result.status {
                         WaitStatus::Exited(code) => JobStatus::Exited(code.into()),
-                        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.into()),
+                        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
                     };
                     deps.on_child_termination(result.pid, status)
                 }

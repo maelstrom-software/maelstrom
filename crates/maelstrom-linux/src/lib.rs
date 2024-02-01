@@ -298,16 +298,14 @@ pub fn _exit(status: usize) -> ! {
 }
 
 #[derive(Clone, Copy, Default, Display, Into)]
-pub struct Signal(u8);
+pub struct Signal(c_int);
 
 impl Signal {
-    pub const CHLD: Self = Self(libc::SIGCHLD as u8);
-    pub const KILL: Self = Self(libc::SIGKILL as u8);
-}
+    pub const CHLD: Self = Self(libc::SIGCHLD);
+    pub const KILL: Self = Self(libc::SIGKILL);
 
-impl From<Signal> for i32 {
-    fn from(signo: Signal) -> i32 {
-        signo.0.into()
+    pub fn as_u8(&self) -> u8 {
+        self.0.try_into().unwrap()
     }
 }
 
@@ -451,7 +449,7 @@ fn extract_wait_status(status: c_int) -> WaitStatus {
     if libc::WIFEXITED(status) {
         WaitStatus::Exited(ExitCode(libc::WEXITSTATUS(status).try_into().unwrap()))
     } else if libc::WIFSIGNALED(status) {
-        WaitStatus::Signaled(Signal(libc::WTERMSIG(status).try_into().unwrap()))
+        WaitStatus::Signaled(Signal(libc::WTERMSIG(status)))
     } else {
         panic!(
             "neither WIFEXITED nor WIFSIGNALED true on wait status {}",
