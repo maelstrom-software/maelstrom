@@ -1,12 +1,12 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
-use core::{
-    ffi::{c_int, c_long, CStr},
-    mem, ptr,
-    time::Duration,
-};
+use core::{ffi::CStr, mem, ptr, time::Duration};
 use derive_more::{BitOr, Display, From, Into};
+use libc::{
+    c_char, c_int, c_long, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
+    sa_family_t, size_t, sockaddr, socklen_t, time_t, uid_t,
+};
 
 pub type Errno = nix::errno::Errno;
 
@@ -31,7 +31,7 @@ impl From<c_int> for Fd {
     }
 }
 
-impl From<libc::c_long> for Fd {
+impl From<c_long> for Fd {
     fn from(fd: c_long) -> Fd {
         Fd(fd as usize)
     }
@@ -39,7 +39,7 @@ impl From<libc::c_long> for Fd {
 
 #[repr(C)]
 pub struct NetlinkSocketAddr {
-    sin_family: libc::sa_family_t,
+    sin_family: sa_family_t,
     nl_pad: u16,
     nl_pid: u32,
     nl_groups: u32,
@@ -48,7 +48,7 @@ pub struct NetlinkSocketAddr {
 impl Default for NetlinkSocketAddr {
     fn default() -> Self {
         NetlinkSocketAddr {
-            sin_family: libc::AF_NETLINK as libc::sa_family_t,
+            sin_family: libc::AF_NETLINK as sa_family_t,
             nl_pad: 0,
             nl_pid: 0, // the kernel
             nl_groups: 0,
@@ -91,8 +91,8 @@ impl FileMode {
 
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
-    let path_ptr = path.as_ptr() as *const libc::c_char;
-    Errno::result(unsafe { libc::open(path_ptr, flags.0 as c_int, mode.0 as libc::mode_t) })
+    let path_ptr = path.as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::open(path_ptr, flags.0 as c_int, mode.0 as mode_t) })
         .map(|fd| fd.into())
 }
 
@@ -132,26 +132,22 @@ pub fn socket(
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
-    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const libc::sockaddr;
+    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const sockaddr;
     let sockaddr_len = mem::size_of::<NetlinkSocketAddr>();
-    Errno::result(unsafe {
-        libc::bind(fd.0 as c_int, sockaddr_ptr, sockaddr_len as libc::socklen_t)
-    })
-    .map(drop)
+    Errno::result(unsafe { libc::bind(fd.0 as c_int, sockaddr_ptr, sockaddr_len as socklen_t) })
+        .map(drop)
 }
 
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
+    let buf_ptr = buf.as_mut_ptr() as *mut c_void;
     let buf_len = buf.len();
-    Errno::result(unsafe { libc::read(fd.0 as libc::c_int, buf_ptr, buf_len) })
-        .map(|ret| ret as usize)
+    Errno::result(unsafe { libc::read(fd.0 as c_int, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_ptr() as *const libc::c_void;
+    let buf_ptr = buf.as_ptr() as *const c_void;
     let buf_len = buf.len();
-    Errno::result(unsafe { libc::write(fd.0 as libc::c_int, buf_ptr, buf_len) })
-        .map(|ret| ret as usize)
+    Errno::result(unsafe { libc::write(fd.0 as c_int, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -163,11 +159,7 @@ impl CloseRangeFlags {
 
 pub fn close_range(first: Fd, last: Fd, flags: CloseRangeFlags) -> Result<(), Errno> {
     Errno::result(unsafe {
-        libc::close_range(
-            first.0 as libc::c_uint,
-            last.0 as libc::c_uint,
-            flags.0 as libc::c_int,
-        )
+        libc::close_range(first.0 as c_uint, last.0 as c_uint, flags.0 as c_int)
     })
     .map(drop)
 }
@@ -203,11 +195,11 @@ pub fn mount(
     let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null());
     Errno::result(unsafe {
         libc::mount(
-            source_ptr as *const libc::c_char,
-            target_ptr as *const libc::c_char,
-            fstype_ptr as *const libc::c_char,
-            flags.0 as libc::c_ulong,
-            data_ptr as *const libc::c_void,
+            source_ptr as *const c_char,
+            target_ptr as *const c_char,
+            fstype_ptr as *const c_char,
+            flags.0 as c_ulong,
+            data_ptr as *const c_void,
         )
     })
     .map(drop)
@@ -215,13 +207,12 @@ pub fn mount(
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    Errno::result(unsafe { libc::chdir(path_ptr as *const libc::c_char) }).map(drop)
+    Errno::result(unsafe { libc::chdir(path_ptr as *const c_char) }).map(drop)
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    Errno::result(unsafe { libc::mkdir(path_ptr as *const libc::c_char, mode.0 as libc::mode_t) })
-        .map(drop)
+    Errno::result(unsafe { libc::mkdir(path_ptr as *const c_char, mode.0 as mode_t) }).map(drop)
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
@@ -240,19 +231,18 @@ impl UmountFlags {
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     let path_ptr = path.to_bytes_with_nul().as_ptr();
-    Errno::result(unsafe { libc::umount2(path_ptr as *const libc::c_char, flags.0 as libc::c_int) })
-        .map(drop)
+    Errno::result(unsafe { libc::umount2(path_ptr as *const c_char, flags.0 as c_int) }).map(drop)
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const libc::c_char;
-    let argv_ptr = argv.as_ptr() as *const *const libc::c_char;
-    let envp_ptr = envp.as_ptr() as *const *const libc::c_char;
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let argv_ptr = argv.as_ptr() as *const *const c_char;
+    let envp_ptr = envp.as_ptr() as *const *const c_char;
     Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
 }
 
 pub fn _exit(status: usize) -> ! {
-    unsafe { libc::_exit(status as libc::c_int) };
+    unsafe { libc::_exit(status as c_int) };
 }
 
 #[derive(Clone, Copy, Default, Display, Into)]
@@ -309,11 +299,11 @@ impl CloneArgs {
     }
 }
 
-pub type Pid = libc::pid_t;
+pub type Pid = pid_t;
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
-    let args_ptr = args as *mut CloneArgs as *mut libc::c_void;
-    let size = mem::size_of::<CloneArgs>() as libc::size_t;
+    let args_ptr = args as *mut CloneArgs as *mut c_void;
+    let size = mem::size_of::<CloneArgs>() as size_t;
     Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) }).map(|ret| {
         if ret == 0 {
             None
@@ -324,32 +314,29 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
 }
 
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
-    Errno::result(unsafe {
-        libc::syscall(libc::SYS_pidfd_open, pid as libc::pid_t, 0 as libc::c_uint)
-    })
-    .map(|fd| fd.into())
+    Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid as pid_t, 0 as c_uint) })
+        .map(|fd| fd.into())
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::close(fd.0 as libc::c_int) }).map(drop)
+    Errno::result(unsafe { libc::close(fd.0 as c_int) }).map(drop)
 }
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal.0 as libc::c_ulong) })
-        .map(drop)
+    Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal.0 as c_ulong) }).map(drop)
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
 pub struct Timespec {
-    sec: libc::time_t,
+    sec: time_t,
     nsec: c_long, // This doesn't work for x86_64 with a target_pointer_width of 32.
 }
 
 impl From<Duration> for Timespec {
     fn from(duration: Duration) -> Self {
         Timespec {
-            sec: duration.as_secs() as libc::time_t,
+            sec: duration.as_secs() as time_t,
             nsec: duration.subsec_nanos() as c_long,
         }
     }
@@ -363,11 +350,11 @@ impl PollEvents {
 }
 
 #[repr(C)]
-pub struct PollFd(libc::pollfd);
+pub struct PollFd(pollfd);
 
 impl PollFd {
     pub fn new(fd: Fd, events: PollEvents) -> Self {
-        PollFd(libc::pollfd {
+        PollFd(pollfd {
             fd: fd.0 as i32,
             events: events.0,
             revents: 0,
@@ -379,14 +366,8 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
     let fds_ptr = fds.as_mut_ptr();
     let nfds = fds.len();
     let timeout = timeout.as_millis();
-    Errno::result(unsafe {
-        libc::poll(
-            fds_ptr as *mut libc::pollfd,
-            nfds as libc::nfds_t,
-            timeout as libc::c_int,
-        )
-    })
-    .map(|ret| ret as usize)
+    Errno::result(unsafe { libc::poll(fds_ptr as *mut pollfd, nfds as nfds_t, timeout as c_int) })
+        .map(|ret| ret as usize)
 }
 
 #[derive(Clone, Copy, Into)]
@@ -463,13 +444,13 @@ pub fn getpid() -> Pid {
     unsafe { libc::getpid() }
 }
 
-pub type Uid = libc::uid_t;
+pub type Uid = uid_t;
 
 pub fn getuid() -> Uid {
     unsafe { libc::getuid() }
 }
 
-pub type Gid = libc::gid_t;
+pub type Gid = gid_t;
 
 pub fn getgid() -> Gid {
     unsafe { libc::getgid() }
@@ -482,12 +463,6 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 }
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
-    Errno::result(unsafe {
-        libc::fcntl(
-            fd.0 as libc::c_int,
-            libc::F_SETFL as libc::c_int,
-            flags.0 as libc::c_int,
-        )
-    })
-    .map(drop)
+    Errno::result(unsafe { libc::fcntl(fd.0 as c_int, libc::F_SETFL as c_int, flags.0 as c_int) })
+        .map(drop)
 }
