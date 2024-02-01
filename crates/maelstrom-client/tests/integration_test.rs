@@ -3,7 +3,7 @@ use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
     digest,
-    fake_broker::{BrokerState, FakeBroker, JobAction, JobSpecMatcher},
+    fake_broker::{BrokerState, FakeBroker, FakeBrokerJobAction, JobSpecMatcher},
     utf8_path_buf,
 };
 use maelstrom_util::fs::Fs;
@@ -32,7 +32,7 @@ fn basic_add_job() {
             JobSpecMatcher {
                 binary: "foo".into(),
                 first_arg: "bar".into(),
-            } => JobAction::Respond(Ok(test_job_result.clone())),
+            } => FakeBrokerJobAction::Respond(Ok(test_job_result.clone())),
         },
         ..Default::default()
     };

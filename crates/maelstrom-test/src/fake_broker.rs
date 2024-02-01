@@ -110,11 +110,11 @@ impl FakeBrokerConnection {
                 ClientToBroker::JobRequest(id, spec) => {
                     let job_spec_matcher = job_spec_matcher(&spec);
                     match self.state.job_responses.remove(&job_spec_matcher).unwrap() {
-                        JobAction::Respond(res) => send_message(
+                        FakeBrokerJobAction::Respond(res) => send_message(
                             &self.messages.stream,
                             &BrokerToClient::JobResponse(id, res),
                         ),
-                        JobAction::Ignore => (),
+                        FakeBrokerJobAction::Ignore => (),
                     }
                 }
                 ClientToBroker::JobStateCountsRequest => send_message(
@@ -129,13 +129,13 @@ impl FakeBrokerConnection {
 }
 
 #[derive(Clone)]
-pub enum JobAction {
+pub enum FakeBrokerJobAction {
     Ignore,
     Respond(JobStringResult),
 }
 
 #[derive(Default, Clone)]
 pub struct BrokerState {
-    pub job_responses: HashMap<JobSpecMatcher, JobAction>,
+    pub job_responses: HashMap<JobSpecMatcher, FakeBrokerJobAction>,
     pub job_states: JobStateCounts,
 }

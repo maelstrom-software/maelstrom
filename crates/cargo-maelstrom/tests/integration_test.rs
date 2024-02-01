@@ -17,7 +17,7 @@ use maelstrom_base::{
 use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
-    fake_broker::{BrokerState, FakeBroker, JobAction, JobSpecMatcher},
+    fake_broker::{BrokerState, FakeBroker, FakeBrokerJobAction, JobSpecMatcher},
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -322,7 +322,7 @@ fn run_or_list_all_tests_sync(
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
-            JobAction::Respond(Ok(JobSuccess {
+            FakeBrokerJobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(0),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
@@ -859,7 +859,7 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
-            JobAction::Respond(Ok(JobSuccess {
+            FakeBrokerJobAction::Respond(Ok(JobSuccess {
                 status: JobStatus::Exited(1),
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::Inline(Box::new(*b"error output")),
@@ -932,14 +932,16 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         if test.desired_state == JobState::Complete {
             state.job_responses.insert(
                 test_path,
-                JobAction::Respond(Ok(JobSuccess {
+                FakeBrokerJobAction::Respond(Ok(JobSuccess {
                     status: JobStatus::Exited(0),
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::None,
                 })),
             );
         } else {
-            state.job_responses.insert(test_path, JobAction::Ignore);
+            state
+                .job_responses
+                .insert(test_path, FakeBrokerJobAction::Ignore);
         }
         state.job_states[test.desired_state] += 1;
     }
