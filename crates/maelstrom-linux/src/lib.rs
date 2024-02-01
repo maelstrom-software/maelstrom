@@ -34,10 +34,6 @@ impl Fd {
         Self::from_raw_fd(fd.try_into().unwrap())
     }
 
-    fn as_raw_fd(self) -> RawFd {
-        self.0
-    }
-
     fn as_c_uint(self) -> c_uint {
         self.0.try_into().unwrap()
     }
@@ -128,7 +124,7 @@ pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> 
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::dup2(from.as_raw_fd(), to.as_raw_fd()) }).map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd::from_raw_fd)
 }
 
 #[derive(Clone, Copy)]
@@ -165,20 +161,19 @@ pub fn socket(
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
     let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const sockaddr;
     let sockaddr_len = mem::size_of::<NetlinkSocketAddr>();
-    Errno::result(unsafe { libc::bind(fd.as_raw_fd(), sockaddr_ptr, sockaddr_len as socklen_t) })
-        .map(drop)
+    Errno::result(unsafe { libc::bind(fd.0, sockaddr_ptr, sockaddr_len as socklen_t) }).map(drop)
 }
 
 pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
     let buf_ptr = buf.as_mut_ptr() as *mut c_void;
     let buf_len = buf.len();
-    Errno::result(unsafe { libc::read(fd.as_raw_fd(), buf_ptr, buf_len) }).map(|ret| ret as usize)
+    Errno::result(unsafe { libc::read(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
     let buf_ptr = buf.as_ptr() as *const c_void;
     let buf_len = buf.len();
-    Errno::result(unsafe { libc::write(fd.as_raw_fd(), buf_ptr, buf_len) }).map(|ret| ret as usize)
+    Errno::result(unsafe { libc::write(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -371,7 +366,7 @@ pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::close(fd.as_raw_fd()) }).map(drop)
+    Errno::result(unsafe { libc::close(fd.0) }).map(drop)
 }
 
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
@@ -407,7 +402,7 @@ pub struct PollFd(pollfd);
 impl PollFd {
     pub fn new(fd: Fd, events: PollEvents) -> Self {
         PollFd(pollfd {
-            fd: fd.as_raw_fd(),
+            fd: fd.0,
             events: events.0,
             revents: 0,
         })
@@ -516,6 +511,5 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 }
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFL as c_int, flags.0 as c_int) })
-        .map(drop)
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL as c_int, flags.0 as c_int) }).map(drop)
 }
