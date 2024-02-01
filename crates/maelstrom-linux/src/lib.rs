@@ -26,12 +26,8 @@ impl Fd {
     pub const STDOUT: Self = Self(libc::STDOUT_FILENO);
     pub const STDERR: Self = Self(libc::STDERR_FILENO);
 
-    pub fn from_raw_fd(fd: RawFd) -> Self {
-        Self(fd)
-    }
-
     fn from_c_long(fd: c_long) -> Self {
-        Self::from_raw_fd(fd.try_into().unwrap())
+        Self(fd.try_into().unwrap())
     }
 
     fn as_c_uint(self) -> c_uint {
@@ -119,11 +115,11 @@ impl FileMode {
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
     let path = path.to_bytes_with_nul();
     let path_ptr = path.as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd)
 }
 
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd)
 }
 
 #[derive(Clone, Copy)]
@@ -153,7 +149,7 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd::from_raw_fd)
+    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd)
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
@@ -373,12 +369,8 @@ impl CloneArgs {
 pub struct Pid(pid_t);
 
 impl Pid {
-    fn from_pid_t(pid: pid_t) -> Self {
-        Self(pid)
-    }
-
     fn from_c_long(pid: c_long) -> Self {
-        Self::from_pid_t(pid.try_into().unwrap())
+        Self(pid.try_into().unwrap())
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -485,7 +477,7 @@ pub fn wait() -> Result<WaitResult, Errno> {
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|pid| WaitResult {
-        pid: Pid::from_pid_t(pid),
+        pid: Pid(pid),
         status: extract_wait_status(status),
     })
 }
@@ -515,48 +507,39 @@ pub fn pause() {
 }
 
 pub fn getpid() -> Pid {
-    Pid::from_pid_t(unsafe { libc::getpid() })
+    Pid(unsafe { libc::getpid() })
 }
 
 #[derive(Clone, Copy, Display)]
 pub struct Uid(uid_t);
 
 impl Uid {
-    fn from_uid_t(uid: uid_t) -> Uid {
-        Self(uid)
-    }
-
     pub fn as_u32(&self) -> u32 {
         self.0
     }
 }
 
 pub fn getuid() -> Uid {
-    Uid::from_uid_t(unsafe { libc::getuid() })
+    Uid(unsafe { libc::getuid() })
 }
 
 #[derive(Clone, Copy, Display)]
 pub struct Gid(gid_t);
 
 impl Gid {
-    fn from_gid_t(gid: gid_t) -> Gid {
-        Self(gid)
-    }
-
     pub fn as_u32(&self) -> u32 {
         self.0
     }
 }
 
 pub fn getgid() -> Gid {
-    Gid::from_gid_t(unsafe { libc::getgid() })
+    Gid(unsafe { libc::getgid() })
 }
 
 pub fn pipe() -> Result<(Fd, Fd), Errno> {
     let mut fds: [c_int; 2] = [0; 2];
     let fds_ptr = fds.as_mut_ptr() as *mut c_int;
-    Errno::result(unsafe { libc::pipe(fds_ptr) })
-        .map(|_| (Fd::from_raw_fd(fds[0]), Fd::from_raw_fd(fds[1])))
+    Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (Fd(fds[0]), Fd(fds[1])))
 }
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
