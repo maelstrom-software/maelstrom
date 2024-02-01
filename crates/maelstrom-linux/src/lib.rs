@@ -7,7 +7,7 @@ extern crate std;
 use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
 use derive_more::{BitOr, Display, Into};
 use libc::{
-    c_char, c_int, c_long, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
+    c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
     sa_family_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
@@ -413,7 +413,7 @@ pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct PollEvents(i16);
+pub struct PollEvents(c_short);
 
 impl PollEvents {
     pub const IN: Self = Self(libc::POLLIN);
