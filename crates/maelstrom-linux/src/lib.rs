@@ -10,6 +10,9 @@ use libc::{
 
 pub type Errno = nix::errno::Errno;
 
+/// This should be the same as [`std::os::fd::RawFd`]. We don't have access to that type since
+/// we're in `no_std`. This type is used when converting from our [`Fd`] to system file descriptors
+/// in `std` code.
 pub type RawFd = c_int;
 
 #[derive(Clone, Copy)]
