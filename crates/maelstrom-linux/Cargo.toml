@@ -16,3 +16,4 @@ nix = { version = "0.26.2", features = ["signal"] }
 
 [features]
 std = []
+test = []

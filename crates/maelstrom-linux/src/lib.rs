@@ -381,7 +381,7 @@ impl Pid {
         Self::from_pid_t(pid.try_into().unwrap())
     }
 
-    // XXX This shouldn't be public in non-test configurations.
+    #[cfg(any(test, feature = "test"))]
     pub fn new_for_test(pid: pid_t) -> Self {
         Self(pid)
     }
