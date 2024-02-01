@@ -3,7 +3,7 @@ use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
     digest,
-    fake_broker::{BrokerState, FakeBroker, FakeBrokerJobAction, JobSpecMatcher},
+    fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
     utf8_path_buf,
 };
 use maelstrom_util::fs::Fs;
@@ -27,7 +27,7 @@ fn basic_add_job() {
         stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
     };
 
-    let state = BrokerState {
+    let state = FakeBrokerState {
         job_responses: hashmap! {
             JobSpecMatcher {
                 binary: "foo".into(),

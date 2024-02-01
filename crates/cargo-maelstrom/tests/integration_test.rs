@@ -17,7 +17,7 @@ use maelstrom_base::{
 use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
-    fake_broker::{BrokerState, FakeBroker, FakeBrokerJobAction, JobSpecMatcher},
+    fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -232,7 +232,7 @@ fn run_app(
     term: InMemoryTerm,
     fake_tests: FakeTests,
     workspace_root: &Path,
-    state: BrokerState,
+    state: FakeBrokerState,
     cargo: String,
     stdout_tty: bool,
     quiet: Quiet,
@@ -318,7 +318,7 @@ fn run_or_list_all_tests_sync(
     exclude_filter: Vec<String>,
     list: Option<ListAction>,
 ) -> String {
-    let mut state = BrokerState::default();
+    let mut state = FakeBrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
@@ -855,7 +855,7 @@ fn two_tests_all_tests_sync_quiet() {
 fn run_failed_tests(fake_tests: FakeTests) -> String {
     let tmp_dir = tempdir().unwrap();
 
-    let mut state = BrokerState::default();
+    let mut state = FakeBrokerState::default();
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
@@ -927,7 +927,7 @@ fn failed_tests() {
 fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
 
-    let mut state = BrokerState::default();
+    let mut state = FakeBrokerState::default();
     for (test, test_path) in fake_tests.all_test_paths() {
         if test.desired_state == JobState::Complete {
             state.job_responses.insert(

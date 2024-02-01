@@ -56,17 +56,17 @@ impl MessageStream {
 pub struct FakeBroker {
     #[allow(dead_code)]
     listener: TcpListener,
-    state: BrokerState,
+    state: FakeBrokerState,
     address: BrokerAddr,
 }
 
 pub struct FakeBrokerConnection {
     messages: MessageStream,
-    state: BrokerState,
+    state: FakeBrokerState,
 }
 
 impl FakeBroker {
-    pub fn new(state: BrokerState) -> Self {
+    pub fn new(state: FakeBrokerState) -> Self {
         let listener =
             TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
         let address = BrokerAddr::new(listener.local_addr().unwrap());
@@ -135,7 +135,7 @@ pub enum FakeBrokerJobAction {
 }
 
 #[derive(Default, Clone)]
-pub struct BrokerState {
+pub struct FakeBrokerState {
     pub job_responses: HashMap<JobSpecMatcher, FakeBrokerJobAction>,
     pub job_states: JobStateCounts,
 }
