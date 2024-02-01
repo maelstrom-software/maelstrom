@@ -41,6 +41,30 @@ impl Fd {
     }
 }
 
+pub struct OwnedFd(Fd);
+
+impl OwnedFd {
+    pub fn from_fd(fd: Fd) -> Self {
+        Self(fd)
+    }
+
+    pub fn as_fd(&self) -> Fd {
+        self.0
+    }
+
+    pub fn into_fd(self) -> Fd {
+        let fd = self.0;
+        mem::forget(self);
+        fd
+    }
+}
+
+impl Drop for OwnedFd {
+    fn drop(&mut self) {
+        let _ = close(self.0);
+    }
+}
+
 #[repr(C)]
 pub struct NetlinkSocketAddr {
     sin_family: sa_family_t,
