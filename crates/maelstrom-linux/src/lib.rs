@@ -15,7 +15,7 @@ pub type Errno = nix::errno::Errno;
 /// in `std` code.
 pub type RawFd = c_int;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Fd(RawFd);
 
 impl Fd {

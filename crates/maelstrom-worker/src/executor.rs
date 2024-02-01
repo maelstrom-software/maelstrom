@@ -116,11 +116,11 @@ impl Executor {
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
         let (stdin_read_fd, stdin_write_fd) = linux::pipe()?.map(OwnedFd::from_fd);
-        if stdin_read_fd.as_fd().as_raw_fd() == 0 {
+        if stdin_read_fd.as_fd() == Fd::STDIN {
             // On the off chance that stdin was already closed, we may have already opened our read
             // fd onto stdin.
             mem::forget(stdin_read_fd);
-        } else if stdin_write_fd.as_fd().as_raw_fd() == 0 {
+        } else if stdin_write_fd.as_fd() == Fd::STDIN {
             // This would be a really weird scenario. Somehow we got the read end of the pipe to
             // not be fd 0, but the write end is. We can just dup the read end onto fd 0 and be
             // done.
