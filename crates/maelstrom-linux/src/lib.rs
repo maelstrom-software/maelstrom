@@ -28,18 +28,14 @@ impl Default for CloneArgs {
 }
 
 impl CloneArgs {
-    pub fn flags(self, flags: CloneFlags) -> Self {
-        Self(libc::clone_args {
-            flags: flags.as_u64(),
-            ..self.0
-        })
+    pub fn flags(mut self, flags: CloneFlags) -> Self {
+        self.0.flags = flags.as_u64();
+        self
     }
 
-    pub fn exit_signal(self, signal: Signal) -> Self {
-        Self(libc::clone_args {
-            exit_signal: signal.0 as u64,
-            ..self.0
-        })
+    pub fn exit_signal(mut self, signal: Signal) -> Self {
+        self.0.exit_signal = signal.0 as u64;
+        self
     }
 }
 
