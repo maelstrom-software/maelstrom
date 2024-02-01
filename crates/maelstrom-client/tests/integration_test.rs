@@ -3,7 +3,7 @@ use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
     digest,
-    fake_broker::{BrokerState, FakeBroker, JobAction, TestPath},
+    fake_broker::{BrokerState, FakeBroker, JobAction, JobSpecMatcher},
     utf8_path_buf,
 };
 use maelstrom_util::fs::Fs;
@@ -29,9 +29,9 @@ fn basic_add_job() {
 
     let state = BrokerState {
         job_responses: hashmap! {
-            TestPath {
+            JobSpecMatcher {
                 binary: "foo".into(),
-                test_name: "bar".into(),
+                first_arg: "bar".into(),
             } => JobAction::Respond(Ok(test_job_result.clone())),
         },
         ..Default::default()

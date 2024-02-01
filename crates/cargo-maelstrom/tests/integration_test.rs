@@ -17,7 +17,7 @@ use maelstrom_base::{
 use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
-    fake_broker::{BrokerState, FakeBroker, JobAction, TestPath},
+    fake_broker::{BrokerState, FakeBroker, JobAction, JobSpecMatcher},
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -174,14 +174,14 @@ impl FakeTests {
 }
 
 impl FakeTests {
-    fn all_test_paths(&self) -> impl Iterator<Item = (&FakeTestCase, TestPath)> + '_ {
+    fn all_test_paths(&self) -> impl Iterator<Item = (&FakeTestCase, JobSpecMatcher)> + '_ {
         self.test_binaries.iter().flat_map(|b| {
             b.tests.iter().filter(|&t| !t.ignored).map(|t| {
                 (
                     t,
-                    TestPath {
+                    JobSpecMatcher {
                         binary: b.name.clone(),
-                        test_name: t.name.clone(),
+                        first_arg: t.name.clone(),
                     },
                 )
             })

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
 
-fn test_path(spec: &JobSpec) -> TestPath {
+fn job_spec_matcher(spec: &JobSpec) -> JobSpecMatcher {
     let binary = spec
         .program
         .as_str()
@@ -27,13 +27,16 @@ fn test_path(spec: &JobSpec) -> TestPath {
         .find(|a| !a.starts_with('-'))
         .unwrap()
         .clone();
-    TestPath { binary, test_name }
+    JobSpecMatcher {
+        binary,
+        first_arg: test_name,
+    }
 }
 
 #[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-pub struct TestPath {
+pub struct JobSpecMatcher {
     pub binary: String,
-    pub test_name: String,
+    pub first_arg: String,
 }
 
 struct MessageStream {
@@ -105,8 +108,8 @@ impl FakeBrokerConnection {
             let msg = self.messages.next::<ClientToBroker>().unwrap();
             match msg {
                 ClientToBroker::JobRequest(id, spec) => {
-                    let test_path = test_path(&spec);
-                    match self.state.job_responses.remove(&test_path).unwrap() {
+                    let job_spec_matcher = job_spec_matcher(&spec);
+                    match self.state.job_responses.remove(&job_spec_matcher).unwrap() {
                         JobAction::Respond(res) => send_message(
                             &self.messages.stream,
                             &BrokerToClient::JobResponse(id, res),
@@ -133,6 +136,6 @@ pub enum JobAction {
 
 #[derive(Default, Clone)]
 pub struct BrokerState {
-    pub job_responses: HashMap<TestPath, JobAction>,
+    pub job_responses: HashMap<JobSpecMatcher, JobAction>,
     pub job_states: JobStateCounts,
 }
