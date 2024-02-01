@@ -134,11 +134,11 @@ impl SocketDomain {
 }
 
 #[derive(BitOr, Clone, Copy)]
-pub struct SocketType(usize);
+pub struct SocketType(c_int);
 
 impl SocketType {
-    pub const RAW: Self = Self(libc::SOCK_RAW as usize);
-    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC as usize);
+    pub const RAW: Self = Self(libc::SOCK_RAW);
+    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
 }
 
 #[derive(Clone, Copy)]
@@ -153,7 +153,7 @@ pub fn socket(
     type_: SocketType,
     protocol: SocketProtocol,
 ) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0, type_.0 as i32, protocol.0 as i32) })
+    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0 as i32) })
         .map(Fd::from_raw_fd)
 }
 
