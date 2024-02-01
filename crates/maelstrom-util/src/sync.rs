@@ -22,7 +22,7 @@ mod tests {
         let (_, rx) = mpsc::unbounded_channel::<u8>();
         let mut vec = vec![];
         channel_reader(rx, |s| vec.push(s)).await;
-        assert_eq!(vec, vec![]);
+        assert!(vec.is_empty(), "{vec:?}");
     }
 
     #[tokio::test]

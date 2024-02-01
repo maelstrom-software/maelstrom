@@ -125,7 +125,7 @@ fn test_chunked_reader(input: &[u8], expected: &[&[u8]]) -> io::Result<()> {
 
     let mut rest = vec![];
     reader.read_to_end(&mut rest)?;
-    assert_eq!(rest, vec![]);
+    assert!(rest.is_empty(), "{rest:?}");
 
     Ok(())
 }

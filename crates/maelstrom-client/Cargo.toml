@@ -36,3 +36,5 @@ tuple.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true
+maplit.workspace = true
+nonempty.workspace = true

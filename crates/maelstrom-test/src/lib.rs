@@ -1,3 +1,6 @@
+pub mod client_driver;
+pub mod fake_broker;
+
 #[macro_export]
 macro_rules! cjid {
     [$n:expr] => {

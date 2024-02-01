@@ -1,5 +1,4 @@
 use anyhow::Result;
-use assert_matches::assert_matches;
 use cargo_maelstrom::test_listing::{
     load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
     LAST_TEST_LISTING_NAME,
@@ -12,22 +11,18 @@ use cargo_maelstrom::{
 };
 use indicatif::InMemoryTerm;
 use maelstrom_base::{
-    proto::{BrokerToClient, ClientToBroker, Hello},
     stats::{JobState, JobStateCounts},
-    JobOutputResult, JobSpec, JobStatus, JobStringResult, JobSuccess,
+    JobOutputResult, JobStatus, JobSuccess,
 };
-use maelstrom_client::{Client, ClientDeps, ClientDriver};
-use maelstrom_util::{config::BrokerAddr, fs::Fs};
-use serde::{de::DeserializeOwned, Serialize};
+use maelstrom_client::Client;
+use maelstrom_test::{
+    client_driver::TestClientDriver,
+    fake_broker::{BrokerState, FakeBroker, JobAction, TestPath},
+};
+use maelstrom_util::fs::Fs;
 use std::{
-    cell::RefCell,
-    collections::HashMap,
-    io::{self, Read as _, Write as _},
-    net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream},
-    os::unix::fs::PermissionsExt as _,
-    path::Path,
-    rc::Rc,
-    sync::{Arc, Mutex},
+    cell::RefCell, io::Write as _, os::unix::fs::PermissionsExt as _, path::Path, rc::Rc,
+    sync::Mutex,
 };
 use tempfile::{tempdir, TempDir};
 
@@ -120,123 +115,6 @@ fn generate_cargo_project(tmp_dir: &TempDir, fake_tests: &FakeTests) -> String {
     cargo_path.display().to_string()
 }
 
-struct MessageStream {
-    stream: TcpStream,
-}
-
-impl MessageStream {
-    fn next<T: DeserializeOwned>(&mut self) -> io::Result<T> {
-        let mut msg_len: [u8; 4] = [0; 4];
-        self.stream.read_exact(&mut msg_len)?;
-        let mut buf = vec![0; u32::from_le_bytes(msg_len) as usize];
-        self.stream.read_exact(&mut buf).unwrap();
-        Ok(bincode::deserialize_from(&buf[..]).unwrap())
-    }
-}
-
-fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
-    let buf = bincode::serialize(msg).unwrap();
-    stream.write_all(&(buf.len() as u32).to_le_bytes()).unwrap();
-    stream.write_all(&buf[..]).unwrap();
-}
-
-fn test_path(spec: &JobSpec) -> TestPath {
-    let binary = spec
-        .program
-        .as_str()
-        .split('/')
-        .last()
-        .unwrap()
-        .split('-')
-        .next()
-        .unwrap()
-        .into();
-    let test_name = spec
-        .arguments
-        .iter()
-        .find(|a| !a.starts_with('-'))
-        .unwrap()
-        .clone();
-    TestPath { binary, test_name }
-}
-
-struct FakeBroker {
-    #[allow(dead_code)]
-    listener: TcpListener,
-    state: BrokerState,
-    address: BrokerAddr,
-}
-
-struct FakeBrokerConnection {
-    messages: MessageStream,
-    state: BrokerState,
-}
-
-impl FakeBroker {
-    fn new(state: BrokerState) -> Self {
-        let listener =
-            TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
-        let address = BrokerAddr::new(listener.local_addr().unwrap());
-
-        Self {
-            listener,
-            state,
-            address,
-        }
-    }
-
-    fn accept(&mut self) -> FakeBrokerConnection {
-        let (stream, _) = self.listener.accept().unwrap();
-        let mut messages = MessageStream { stream };
-
-        let msg: Hello = messages.next().unwrap();
-        assert_matches!(msg, Hello::Client);
-
-        FakeBrokerConnection {
-            messages,
-            state: self.state.clone(),
-        }
-    }
-}
-
-impl FakeBrokerConnection {
-    fn process(&mut self, count: usize) {
-        for _ in 0..count {
-            let msg = self.messages.next::<ClientToBroker>().unwrap();
-            match msg {
-                ClientToBroker::JobRequest(id, spec) => {
-                    let test_path = test_path(&spec);
-                    match self.state.job_responses.remove(&test_path).unwrap() {
-                        JobAction::Respond(res) => send_message(
-                            &self.messages.stream,
-                            &BrokerToClient::JobResponse(id, res),
-                        ),
-                        JobAction::Ignore => (),
-                    }
-                }
-                ClientToBroker::JobStateCountsRequest => send_message(
-                    &self.messages.stream,
-                    &BrokerToClient::JobStateCountsResponse(self.state.job_states),
-                ),
-
-                _ => (),
-            }
-        }
-    }
-}
-
-#[derive(Clone)]
-enum JobAction {
-    Ignore,
-    Respond(JobStringResult),
-}
-
-#[derive(Default, Clone)]
-struct BrokerState {
-    job_responses: HashMap<TestPath, JobAction>,
-    job_states: JobStateCounts,
-}
-
 #[derive(Clone)]
 struct FakeTestCase {
     name: String,
@@ -295,12 +173,6 @@ impl FakeTests {
     }
 }
 
-#[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
-struct TestPath {
-    binary: String,
-    test_name: String,
-}
-
 impl FakeTests {
     fn all_test_paths(&self) -> impl Iterator<Item = (&FakeTestCase, TestPath)> + '_ {
         self.test_binaries.iter().flat_map(|b| {
@@ -323,39 +195,6 @@ impl FakeTests {
             .find(|b| b.name == package_name)
             .unwrap();
         binary.tests.iter().find(|t| t.name == case).unwrap()
-    }
-}
-
-#[derive(Default, Clone)]
-struct TestClientDriver {
-    deps: Arc<Mutex<Option<ClientDeps>>>,
-}
-
-impl ClientDriver for TestClientDriver {
-    fn drive(&mut self, deps: ClientDeps) {
-        *self.deps.lock().unwrap() = Some(deps);
-    }
-
-    fn stop(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-impl TestClientDriver {
-    fn process_broker_msg(&self, count: usize) {
-        let mut locked_deps = self.deps.lock().unwrap();
-        let deps = locked_deps.as_mut().unwrap();
-
-        for _ in 0..count {
-            deps.socket_reader.process_one();
-            deps.dispatcher.try_process_one().unwrap();
-        }
-    }
-
-    fn process_client_messages(&self) {
-        let mut locked_deps = self.deps.lock().unwrap();
-        let deps = locked_deps.as_mut().unwrap();
-        while deps.dispatcher.try_process_one().is_ok() {}
     }
 }
 
@@ -420,7 +259,7 @@ fn run_app(
         false, // stderr_color
         &workspace_root,
         &cargo_metadata.workspace_packages(),
-        b.address,
+        b.address().clone(),
         client_driver.clone(),
     )
     .unwrap();

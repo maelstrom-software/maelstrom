@@ -2645,6 +2645,8 @@ dependencies = [
  "maelstrom-container",
  "maelstrom-test",
  "maelstrom-util",
+ "maplit",
+ "nonempty",
  "regex",
  "serde",
  "serde_json",
@@ -2726,6 +2728,15 @@ dependencies = [
 [[package]]
 name = "maelstrom-test"
 version = "0.5.0-dev"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "bincode",
+ "maelstrom-base",
+ "maelstrom-client",
+ "maelstrom-util",
+ "serde",
+]
 
 [[package]]
 name = "maelstrom-util"
