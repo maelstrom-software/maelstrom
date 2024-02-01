@@ -1,14 +1,17 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    proto::{BrokerToClient, ClientToBroker, Hello},
+    proto::{
+        ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
+    },
     stats::JobStateCounts,
-    JobSpec, JobStringResult,
+    ClientJobId, JobSpec, JobStringResult,
 };
-use maelstrom_util::config::BrokerAddr;
+use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader};
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::io::{self, Read as _, Write as _};
 use std::net::{Ipv6Addr, SocketAddrV6, TcpListener, TcpStream};
+use std::path::Path;
 
 fn job_spec_matcher(spec: &JobSpec) -> JobSpecMatcher {
     let binary = spec
@@ -51,6 +54,10 @@ impl MessageStream {
         self.stream.read_exact(&mut buf).unwrap();
         Ok(bincode::deserialize_from(&buf[..]).unwrap())
     }
+
+    fn into_inner(self) -> TcpStream {
+        self.stream
+    }
 }
 
 pub struct FakeBroker {
@@ -63,6 +70,7 @@ pub struct FakeBroker {
 pub struct FakeBrokerConnection {
     messages: MessageStream,
     state: FakeBrokerState,
+    pending_response: Option<(ClientJobId, FakeBrokerJobAction)>,
 }
 
 impl FakeBroker {
@@ -92,7 +100,25 @@ impl FakeBroker {
         FakeBrokerConnection {
             messages,
             state: self.state.clone(),
+            pending_response: None,
         }
+    }
+
+    pub fn receive_artifact(&mut self, digest_dir: &Path) {
+        let (stream, _) = self.listener.accept().unwrap();
+        let mut messages = MessageStream { stream };
+
+        let msg: Hello = messages.next().unwrap();
+        assert_matches!(msg, Hello::ArtifactPusher);
+
+        let ArtifactPusherToBroker(digest, size) = messages.next().unwrap();
+        let destination = digest_dir.join(digest.to_string());
+
+        let fs = Fs::new();
+        let mut stream = messages.into_inner();
+        let mut file = fs.create_file(destination).unwrap();
+        io::copy(&mut FixedSizeReader::new(&mut stream, size), &mut file).unwrap();
+        send_message(&stream, &BrokerToArtifactPusher(Ok(())));
     }
 }
 
@@ -103,13 +129,42 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
 }
 
 impl FakeBrokerConnection {
-    pub fn process(&mut self, count: usize) {
+    fn fetch_layers(&self, spec: &JobSpec) {
+        for (digest, _type) in &spec.layers {
+            send_message(
+                &self.messages.stream,
+                &BrokerToClient::TransferArtifact(digest.clone()),
+            );
+        }
+    }
+
+    pub fn process(&mut self, count: usize, fetch_layers: bool) {
         for _ in 0..count {
+            if let Some((id, response)) = self.pending_response.take() {
+                match response {
+                    FakeBrokerJobAction::Respond(res) => {
+                        send_message(&self.messages.stream, &BrokerToClient::JobResponse(id, res))
+                    }
+                    FakeBrokerJobAction::Ignore => (),
+                }
+                continue;
+            }
+
             let msg = self.messages.next::<ClientToBroker>().unwrap();
             match msg {
                 ClientToBroker::JobRequest(id, spec) => {
                     let job_spec_matcher = job_spec_matcher(&spec);
-                    match self.state.job_responses.remove(&job_spec_matcher).unwrap() {
+                    let response = self.state.job_responses.remove(&job_spec_matcher).unwrap();
+
+                    if fetch_layers {
+                        self.fetch_layers(&spec);
+                        self.pending_response
+                            .replace((id, response))
+                            .assert_is_none();
+                        continue;
+                    }
+
+                    match response {
                         FakeBrokerJobAction::Respond(res) => send_message(
                             &self.messages.stream,
                             &BrokerToClient::JobResponse(id, res),

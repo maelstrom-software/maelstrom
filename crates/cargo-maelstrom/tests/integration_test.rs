@@ -280,7 +280,7 @@ fn run_app(
 
         // process job enqueuing
         client_driver.process_client_messages();
-        b_conn.process(1);
+        b_conn.process(1, false /* fetch_layers */);
         if test.desired_state == JobState::Complete {
             client_driver.process_broker_msg(1);
         }
@@ -294,7 +294,7 @@ fn run_app(
         client_driver.process_client_messages();
 
         // process job state request
-        b_conn.process(1);
+        b_conn.process(1, false /* fetch_layers */);
         client_driver.process_broker_msg(1);
 
         prog_driver.update(counts.try_recv().unwrap()).unwrap();

@@ -144,7 +144,13 @@ impl Dispatcher {
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                let path = self.artifacts.get(&digest).unwrap().clone();
+                let path = self
+                    .artifacts
+                    .get(&digest)
+                    .unwrap_or_else(|| {
+                        panic!("got request for unknown artifact with digest {digest}")
+                    })
+                    .clone();
                 self.artifact_pusher
                     .send(ArtifactPushRequest { path, digest })?;
             }
