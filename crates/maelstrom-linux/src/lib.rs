@@ -11,7 +11,90 @@ use libc::{
     sa_family_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
+#[derive(Clone)]
+pub struct CloneArgs(libc::clone_args);
+
+impl Default for CloneArgs {
+    fn default() -> Self {
+        unsafe { mem::zeroed() }
+    }
+}
+
+impl CloneArgs {
+    pub fn flags(self, flags: CloneFlags) -> Self {
+        Self(libc::clone_args {
+            flags: flags.as_u64(),
+            ..self.0
+        })
+    }
+
+    pub fn exit_signal(self, signal: Signal) -> Self {
+        Self(libc::clone_args {
+            exit_signal: signal.0 as u64,
+            ..self.0
+        })
+    }
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct CloneFlags(c_int);
+
+impl CloneFlags {
+    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND);
+    pub const FILES: Self = Self(libc::CLONE_FILES);
+    pub const FS: Self = Self(libc::CLONE_FS);
+    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP);
+    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC);
+    pub const NEWNET: Self = Self(libc::CLONE_NEWNET);
+    pub const NEWNS: Self = Self(libc::CLONE_NEWNS);
+    pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
+    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
+
+    fn as_u64(&self) -> u64 {
+        self.0.try_into().unwrap()
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct CloseRangeFlags(c_uint);
+
+impl CloseRangeFlags {
+    pub const CLOEXEC: Self = Self(libc::CLOSE_RANGE_CLOEXEC);
+
+    // The documentation for close_range(2) says it takes an unsigned int flags parameter. The
+    // flags are defined as unsigned ints as well. However, the close_range wrapper we get from the
+    // libc crate expects a signed int for the flags parameter.
+    fn as_c_int(&self) -> c_int {
+        self.0.try_into().unwrap()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub enum CloseRangeFirst {
+    AfterStderr,
+    Fd(Fd),
+}
+
+#[derive(Clone, Copy)]
+pub enum CloseRangeLast {
+    Max,
+    Fd(Fd),
+}
+
 pub type Errno = nix::errno::Errno;
+
+#[derive(Clone, Copy)]
+pub struct ExitCode(c_int);
+
+impl ExitCode {
+    pub fn as_u8(&self) -> u8 {
+        self.0 as u8
+    }
+
+    pub fn as_i32(&self) -> i32 {
+        self.0
+    }
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct Fd(c_int);
@@ -30,29 +113,49 @@ impl Fd {
     }
 }
 
-pub struct OwnedFd(Fd);
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct FileMode(mode_t);
 
-impl OwnedFd {
-    pub fn from_fd(fd: Fd) -> Self {
-        Self(fd)
-    }
+impl FileMode {
+    pub const SUID: Self = Self(libc::S_ISUID);
+    pub const SGID: Self = Self(libc::S_ISGID);
+    pub const SVTX: Self = Self(libc::S_ISVTX);
 
-    pub fn as_fd(&self) -> Fd {
+    pub const RWXU: Self = Self(libc::S_IRWXU);
+    pub const RUSR: Self = Self(libc::S_IRUSR);
+    pub const WUSR: Self = Self(libc::S_IWUSR);
+    pub const XUSR: Self = Self(libc::S_IXUSR);
+
+    pub const RWXG: Self = Self(libc::S_IRWXG);
+    pub const RGRP: Self = Self(libc::S_IRGRP);
+    pub const WGRP: Self = Self(libc::S_IWGRP);
+    pub const XGRP: Self = Self(libc::S_IXGRP);
+
+    pub const RWXO: Self = Self(libc::S_IRWXO);
+    pub const ROTH: Self = Self(libc::S_IROTH);
+    pub const WOTH: Self = Self(libc::S_IWOTH);
+    pub const XOTH: Self = Self(libc::S_IXOTH);
+}
+
+#[derive(Clone, Copy, Display)]
+pub struct Gid(gid_t);
+
+impl Gid {
+    pub fn as_u32(&self) -> u32 {
         self.0
-    }
-
-    #[cfg(feature = "std")]
-    pub fn into_file(self) -> std::fs::File {
-        let raw_fd = self.0 .0;
-        mem::forget(self);
-        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_fd) }
     }
 }
 
-impl Drop for OwnedFd {
-    fn drop(&mut self) {
-        let _ = close(self.0);
-    }
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct MountFlags(c_ulong);
+
+impl MountFlags {
+    pub const BIND: Self = Self(libc::MS_BIND);
+    pub const REMOUNT: Self = Self(libc::MS_REMOUNT);
+    pub const RDONLY: Self = Self(libc::MS_RDONLY);
+    pub const NOSUID: Self = Self(libc::MS_NOSUID);
+    pub const NOEXEC: Self = Self(libc::MS_NOEXEC);
+    pub const NODEV: Self = Self(libc::MS_NODEV);
 }
 
 #[repr(C)]
@@ -83,201 +186,63 @@ impl OpenFlags {
     pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
 }
 
-#[derive(BitOr, Clone, Copy, Default)]
-pub struct FileMode(mode_t);
+pub struct OwnedFd(Fd);
 
-impl FileMode {
-    pub const SUID: Self = Self(libc::S_ISUID);
-    pub const SGID: Self = Self(libc::S_ISGID);
-    pub const SVTX: Self = Self(libc::S_ISVTX);
+impl OwnedFd {
+    pub fn from_fd(fd: Fd) -> Self {
+        Self(fd)
+    }
 
-    pub const RWXU: Self = Self(libc::S_IRWXU);
-    pub const RUSR: Self = Self(libc::S_IRUSR);
-    pub const WUSR: Self = Self(libc::S_IWUSR);
-    pub const XUSR: Self = Self(libc::S_IXUSR);
+    pub fn as_fd(&self) -> Fd {
+        self.0
+    }
 
-    pub const RWXG: Self = Self(libc::S_IRWXG);
-    pub const RGRP: Self = Self(libc::S_IRGRP);
-    pub const WGRP: Self = Self(libc::S_IWGRP);
-    pub const XGRP: Self = Self(libc::S_IXGRP);
-
-    pub const RWXO: Self = Self(libc::S_IRWXO);
-    pub const ROTH: Self = Self(libc::S_IROTH);
-    pub const WOTH: Self = Self(libc::S_IWOTH);
-    pub const XOTH: Self = Self(libc::S_IXOTH);
-}
-
-pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd)
-}
-
-pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd)
-}
-
-#[derive(Clone, Copy)]
-pub struct SocketDomain(c_int);
-
-impl SocketDomain {
-    pub const NETLINK: Self = Self(libc::PF_NETLINK);
-}
-
-#[derive(BitOr, Clone, Copy)]
-pub struct SocketType(c_int);
-
-impl SocketType {
-    pub const RAW: Self = Self(libc::SOCK_RAW);
-    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
-}
-
-#[derive(Clone, Copy)]
-pub struct SocketProtocol(c_int);
-
-impl SocketProtocol {
-    pub const NETLINK_ROUTE: Self = Self(0);
-}
-
-pub fn socket(
-    domain: SocketDomain,
-    type_: SocketType,
-    protocol: SocketProtocol,
-) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd)
-}
-
-pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
-    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const sockaddr;
-    let sockaddr_len = mem::size_of::<NetlinkSocketAddr>() as socklen_t;
-    Errno::result(unsafe { libc::bind(fd.0, sockaddr_ptr, sockaddr_len) }).map(drop)
-}
-
-pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_mut_ptr() as *mut c_void;
-    let buf_len = buf.len();
-    Errno::result(unsafe { libc::read(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
-}
-
-pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
-    let buf_ptr = buf.as_ptr() as *const c_void;
-    let buf_len = buf.len();
-    Errno::result(unsafe { libc::write(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
-}
-
-#[derive(Clone, Copy, Default)]
-pub struct CloseRangeFlags(c_uint);
-
-impl CloseRangeFlags {
-    pub const CLOEXEC: Self = Self(libc::CLOSE_RANGE_CLOEXEC);
-
-    // The documentation for close_range(2) says it takes an unsigned int flags parameter. The
-    // flags are defined as unsigned ints as well. However, the close_range wrapper we get from the
-    // libc crate expects a signed int for the flags parameter.
-    fn as_c_int(&self) -> c_int {
-        self.0.try_into().unwrap()
+    #[cfg(feature = "std")]
+    pub fn into_file(self) -> std::fs::File {
+        let raw_fd = self.0 .0;
+        mem::forget(self);
+        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_fd) }
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum CloseRangeFirst {
-    AfterStderr,
-    Fd(Fd),
+impl Drop for OwnedFd {
+    fn drop(&mut self) {
+        let _ = close(self.0);
+    }
 }
 
-#[derive(Clone, Copy)]
-pub enum CloseRangeLast {
-    Max,
-    Fd(Fd),
-}
+#[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq)]
+pub struct Pid(pid_t);
 
-pub fn close_range(
-    first: CloseRangeFirst,
-    last: CloseRangeLast,
-    flags: CloseRangeFlags,
-) -> Result<(), Errno> {
-    let first = match first {
-        CloseRangeFirst::AfterStderr => (libc::STDERR_FILENO + 1) as c_uint,
-        CloseRangeFirst::Fd(fd) => fd.as_c_uint(),
-    };
-    let last = match last {
-        CloseRangeLast::Max => c_uint::MAX,
-        CloseRangeLast::Fd(fd) => fd.as_c_uint(),
-    };
-    let flags = flags.as_c_int();
-    Errno::result(unsafe { libc::close_range(first, last, flags) }).map(drop)
-}
+impl Pid {
+    fn from_c_long(pid: c_long) -> Self {
+        Self(pid.try_into().unwrap())
+    }
 
-pub fn setsid() -> Result<(), Errno> {
-    Errno::result(unsafe { libc::setsid() }).map(drop)
+    #[cfg(any(test, feature = "test"))]
+    pub fn new_for_test(pid: pid_t) -> Self {
+        Self(pid)
+    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct MountFlags(c_ulong);
+pub struct PollEvents(c_short);
 
-impl MountFlags {
-    pub const BIND: Self = Self(libc::MS_BIND);
-    pub const REMOUNT: Self = Self(libc::MS_REMOUNT);
-    pub const RDONLY: Self = Self(libc::MS_RDONLY);
-    pub const NOSUID: Self = Self(libc::MS_NOSUID);
-    pub const NOEXEC: Self = Self(libc::MS_NOEXEC);
-    pub const NODEV: Self = Self(libc::MS_NODEV);
+impl PollEvents {
+    pub const IN: Self = Self(libc::POLLIN);
 }
 
-pub fn mount(
-    source: Option<&CStr>,
-    target: &CStr,
-    fstype: Option<&CStr>,
-    flags: MountFlags,
-    data: Option<&[u8]>,
-) -> Result<(), Errno> {
-    let source_ptr = source
-        .map(|r| r.to_bytes_with_nul().as_ptr())
-        .unwrap_or(ptr::null()) as *const c_char;
-    let target_ptr = target.to_bytes_with_nul().as_ptr() as *const c_char;
-    let fstype_ptr = fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_char;
-    let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_void;
-    Errno::result(unsafe { libc::mount(source_ptr, target_ptr, fstype_ptr, flags.0, data_ptr) })
-        .map(drop)
-}
+#[repr(C)]
+pub struct PollFd(pollfd);
 
-pub fn chdir(path: &CStr) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::chdir(path_ptr) }).map(drop)
-}
-
-pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::mkdir(path_ptr, mode.0) }).map(drop)
-}
-
-pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
-    let new_root_ptr = new_root.to_bytes_with_nul().as_ptr() as *const c_char;
-    let put_old_ptr = put_old.to_bytes_with_nul().as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::syscall(libc::SYS_pivot_root, new_root_ptr, put_old_ptr) })
-        .map(drop)
-}
-
-#[derive(BitOr, Clone, Copy, Default)]
-pub struct UmountFlags(c_int);
-
-impl UmountFlags {
-    pub const DETACH: Self = Self(libc::MNT_DETACH);
-}
-
-pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
-    Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
-}
-
-pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
-    let argv_ptr = argv.as_ptr() as *const *const c_char;
-    let envp_ptr = envp.as_ptr() as *const *const c_char;
-    Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
-}
-
-pub fn _exit(status: c_int) -> ! {
-    unsafe { libc::_exit(status) };
+impl PollFd {
+    pub fn new(fd: Fd, events: PollEvents) -> Self {
+        PollFd(pollfd {
+            fd: fd.0,
+            events: events.0,
+            revents: 0,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Default, Into)]
@@ -312,62 +277,68 @@ impl fmt::Display for Signal {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct SocketDomain(c_int);
+
+impl SocketDomain {
+    pub const NETLINK: Self = Self(libc::PF_NETLINK);
+}
+
+#[derive(Clone, Copy)]
+pub struct SocketProtocol(c_int);
+
+impl SocketProtocol {
+    pub const NETLINK_ROUTE: Self = Self(0);
+}
+
+#[derive(BitOr, Clone, Copy)]
+pub struct SocketType(c_int);
+
+impl SocketType {
+    pub const RAW: Self = Self(libc::SOCK_RAW);
+    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
+}
+
+#[derive(Clone, Copy, Display)]
+pub struct Uid(uid_t);
+
+impl Uid {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(BitOr, Clone, Copy, Default)]
-pub struct CloneFlags(c_int);
+pub struct UmountFlags(c_int);
 
-impl CloneFlags {
-    pub const CLEAR_SIGHAND: Self = Self(libc::CLONE_CLEAR_SIGHAND);
-    pub const FILES: Self = Self(libc::CLONE_FILES);
-    pub const FS: Self = Self(libc::CLONE_FS);
-    pub const NEWCGROUP: Self = Self(libc::CLONE_NEWCGROUP);
-    pub const NEWIPC: Self = Self(libc::CLONE_NEWIPC);
-    pub const NEWNET: Self = Self(libc::CLONE_NEWNET);
-    pub const NEWNS: Self = Self(libc::CLONE_NEWNS);
-    pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
-    pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
-
-    fn as_u64(&self) -> u64 {
-        self.0.try_into().unwrap()
-    }
+impl UmountFlags {
+    pub const DETACH: Self = Self(libc::MNT_DETACH);
 }
 
-#[derive(Clone)]
-pub struct CloneArgs(libc::clone_args);
-
-impl Default for CloneArgs {
-    fn default() -> Self {
-        unsafe { mem::zeroed() }
-    }
+#[derive(Clone, Copy)]
+pub struct WaitResult {
+    pub pid: Pid,
+    pub status: WaitStatus,
 }
 
-impl CloneArgs {
-    pub fn flags(self, flags: CloneFlags) -> Self {
-        Self(libc::clone_args {
-            flags: flags.as_u64(),
-            ..self.0
-        })
-    }
+#[derive(Clone, Copy, Default)]
+pub struct WaitpidFlags(c_int);
 
-    pub fn exit_signal(self, signal: Signal) -> Self {
-        Self(libc::clone_args {
-            exit_signal: signal.0 as u64,
-            ..self.0
-        })
-    }
+#[derive(Clone, Copy)]
+pub enum WaitStatus {
+    Exited(ExitCode),
+    Signaled(Signal),
 }
 
-#[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq)]
-pub struct Pid(pid_t);
+pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
+    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const sockaddr;
+    let sockaddr_len = mem::size_of::<NetlinkSocketAddr>() as socklen_t;
+    Errno::result(unsafe { libc::bind(fd.0, sockaddr_ptr, sockaddr_len) }).map(drop)
+}
 
-impl Pid {
-    fn from_c_long(pid: c_long) -> Self {
-        Self(pid.try_into().unwrap())
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn new_for_test(pid: pid_t) -> Self {
-        Self(pid)
-    }
+pub fn chdir(path: &CStr) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::chdir(path_ptr) }).map(drop)
 }
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
@@ -382,38 +353,105 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     })
 }
 
+pub fn close(fd: Fd) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::close(fd.0) }).map(drop)
+}
+
+pub fn close_range(
+    first: CloseRangeFirst,
+    last: CloseRangeLast,
+    flags: CloseRangeFlags,
+) -> Result<(), Errno> {
+    let first = match first {
+        CloseRangeFirst::AfterStderr => (libc::STDERR_FILENO + 1) as c_uint,
+        CloseRangeFirst::Fd(fd) => fd.as_c_uint(),
+    };
+    let last = match last {
+        CloseRangeLast::Max => c_uint::MAX,
+        CloseRangeLast::Fd(fd) => fd.as_c_uint(),
+    };
+    let flags = flags.as_c_int();
+    Errno::result(unsafe { libc::close_range(first, last, flags) }).map(drop)
+}
+
+pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
+    Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd)
+}
+
+pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let argv_ptr = argv.as_ptr() as *const *const c_char;
+    let envp_ptr = envp.as_ptr() as *const *const c_char;
+    Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
+}
+
+pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
+}
+
+pub fn getgid() -> Gid {
+    Gid(unsafe { libc::getgid() })
+}
+
+pub fn getpid() -> Pid {
+    Pid(unsafe { libc::getpid() })
+}
+
+pub fn getuid() -> Uid {
+    Uid(unsafe { libc::getuid() })
+}
+
+pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::kill(pid.0, signal.0) }).map(drop)
+}
+
+pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::mkdir(path_ptr, mode.0) }).map(drop)
+}
+
+pub fn mount(
+    source: Option<&CStr>,
+    target: &CStr,
+    fstype: Option<&CStr>,
+    flags: MountFlags,
+    data: Option<&[u8]>,
+) -> Result<(), Errno> {
+    let source_ptr = source
+        .map(|r| r.to_bytes_with_nul().as_ptr())
+        .unwrap_or(ptr::null()) as *const c_char;
+    let target_ptr = target.to_bytes_with_nul().as_ptr() as *const c_char;
+    let fstype_ptr = fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_char;
+    let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_void;
+    Errno::result(unsafe { libc::mount(source_ptr, target_ptr, fstype_ptr, flags.0, data_ptr) })
+        .map(drop)
+}
+
+pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd)
+}
+
+pub fn pause() {
+    unsafe { libc::pause() };
+}
+
 pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
     let flags = 0 as c_uint;
     Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid.0, flags) }).map(Fd::from_c_long)
 }
 
-pub fn close(fd: Fd) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::close(fd.0) }).map(drop)
+pub fn pipe() -> Result<(Fd, Fd), Errno> {
+    let mut fds: [c_int; 2] = [0; 2];
+    let fds_ptr = fds.as_mut_ptr() as *mut c_int;
+    Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (Fd(fds[0]), Fd(fds[1])))
 }
 
-pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
-    let signal = signal.as_c_ulong();
-    Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) }).map(drop)
-}
-
-#[derive(BitOr, Clone, Copy, Default)]
-pub struct PollEvents(c_short);
-
-impl PollEvents {
-    pub const IN: Self = Self(libc::POLLIN);
-}
-
-#[repr(C)]
-pub struct PollFd(pollfd);
-
-impl PollFd {
-    pub fn new(fd: Fd, events: PollEvents) -> Self {
-        PollFd(pollfd {
-            fd: fd.0,
-            events: events.0,
-            revents: 0,
-        })
-    }
+pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
+    let new_root_ptr = new_root.to_bytes_with_nul().as_ptr() as *const c_char;
+    let put_old_ptr = put_old.to_bytes_with_nul().as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::syscall(libc::SYS_pivot_root, new_root_ptr, put_old_ptr) })
+        .map(drop)
 }
 
 pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
@@ -423,29 +461,40 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
     Errno::result(unsafe { libc::poll(fds_ptr, nfds, timeout) }).map(|ret| ret as usize)
 }
 
-#[derive(Clone, Copy)]
-pub struct ExitCode(c_int);
-
-impl ExitCode {
-    pub fn as_u8(&self) -> u8 {
-        self.0 as u8
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        self.0
-    }
+pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
+    let signal = signal.as_c_ulong();
+    Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) }).map(drop)
 }
 
-#[derive(Clone, Copy)]
-pub enum WaitStatus {
-    Exited(ExitCode),
-    Signaled(Signal),
+pub fn raise(signal: Signal) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::raise(signal.0) }).map(drop)
 }
 
-#[derive(Clone, Copy)]
-pub struct WaitResult {
-    pub pid: Pid,
-    pub status: WaitStatus,
+pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
+    let buf_ptr = buf.as_mut_ptr() as *mut c_void;
+    let buf_len = buf.len();
+    Errno::result(unsafe { libc::read(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
+}
+
+pub fn setsid() -> Result<(), Errno> {
+    Errno::result(unsafe { libc::setsid() }).map(drop)
+}
+
+pub fn socket(
+    domain: SocketDomain,
+    type_: SocketType,
+    protocol: SocketProtocol,
+) -> Result<Fd, Errno> {
+    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd)
+}
+
+pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
+    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
+}
+
+pub fn _exit(status: c_int) -> ! {
+    unsafe { libc::_exit(status) };
 }
 
 fn extract_wait_status(status: c_int) -> WaitStatus {
@@ -473,9 +522,6 @@ pub fn wait() -> Result<WaitResult, Errno> {
     })
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct WaitpidFlags(c_int);
-
 pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
     let inner = |status: &mut c_int| {
         let status_ptr = status as *mut c_int;
@@ -485,56 +531,10 @@ pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
 }
 
-pub fn raise(signal: Signal) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::raise(signal.0) }).map(drop)
-}
-
-pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::kill(pid.0, signal.0) }).map(drop)
-}
-
-pub fn pause() {
-    unsafe { libc::pause() };
-}
-
-pub fn getpid() -> Pid {
-    Pid(unsafe { libc::getpid() })
-}
-
-#[derive(Clone, Copy, Display)]
-pub struct Uid(uid_t);
-
-impl Uid {
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
-}
-
-pub fn getuid() -> Uid {
-    Uid(unsafe { libc::getuid() })
-}
-
-#[derive(Clone, Copy, Display)]
-pub struct Gid(gid_t);
-
-impl Gid {
-    pub fn as_u32(&self) -> u32 {
-        self.0
-    }
-}
-
-pub fn getgid() -> Gid {
-    Gid(unsafe { libc::getgid() })
-}
-
-pub fn pipe() -> Result<(Fd, Fd), Errno> {
-    let mut fds: [c_int; 2] = [0; 2];
-    let fds_ptr = fds.as_mut_ptr() as *mut c_int;
-    Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (Fd(fds[0]), Fd(fds[1])))
-}
-
-pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
+pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
+    let buf_ptr = buf.as_ptr() as *const c_void;
+    let buf_len = buf.len();
+    Errno::result(unsafe { libc::write(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
 #[cfg(test)]
