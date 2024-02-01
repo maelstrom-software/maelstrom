@@ -14,7 +14,7 @@ itself, and optionally dependencies for the test binary.
 ## The `layers` Field
 ```toml
 [[directives]]
-layers = ["layers/foo.tar", "layers/bar.tar"]
+layers = [{ tar = "layers/foo.tar" }, { tar = "layers/bar.tar" }]
 ```
 
 This field provides an ordered list of `.tar` files to be used when creating the

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec, Layer,
     NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
@@ -20,7 +20,7 @@ impl<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> Iterator
     for JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT>
 where
     InnerT: Iterator<Item = serde_json::Result<Job>>,
-    LayerMapperT: Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
+    LayerMapperT: Fn(Layer) -> Result<(Sha256Digest, ArtifactType)>,
     EnvLookupT: Fn(&str) -> Result<Option<String>>,
     ImageLookupT: FnMut(&str) -> Result<ImageConfig>,
 {
@@ -41,7 +41,7 @@ where
 
 pub fn job_spec_iter_from_reader(
     reader: impl Read,
-    layer_mapper: impl Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
+    layer_mapper: impl Fn(Layer) -> Result<(Sha256Digest, ArtifactType)>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
     image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
 ) -> impl Iterator<Item = Result<JobSpec>> {
@@ -60,8 +60,8 @@ struct Job {
     arguments: Option<Vec<String>>,
     environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     added_environment: BTreeMap<String, String>,
-    layers: PossiblyImage<NonEmpty<String>>,
-    added_layers: Vec<String>,
+    layers: PossiblyImage<NonEmpty<Layer>>,
+    added_layers: Vec<Layer>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
     mounts: Option<Vec<JobMount>>,
     enable_loopback: Option<bool>,
@@ -74,7 +74,7 @@ struct Job {
 
 impl Job {
     #[cfg(test)]
-    fn new(program: Utf8PathBuf, layers: NonEmpty<String>) -> Self {
+    fn new(program: Utf8PathBuf, layers: NonEmpty<Layer>) -> Self {
         Job {
             program,
             layers: PossiblyImage::Explicit(layers),
@@ -95,7 +95,7 @@ impl Job {
 
     fn into_job_spec(
         self,
-        layer_mapper: impl Fn(String) -> Result<(Sha256Digest, ArtifactType)>,
+        layer_mapper: impl Fn(Layer) -> Result<(Sha256Digest, ArtifactType)>,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<JobSpec> {
@@ -362,12 +362,13 @@ impl<'de> de::Deserialize<'de> for Job {
 mod test {
     use super::*;
     use maelstrom_base::{enum_set, nonempty, JobMountFsType};
-    use maelstrom_test::{
-        digest, path_buf_vec, string, string_nonempty, string_vec, utf8_path_buf,
-    };
+    use maelstrom_test::{digest, path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
 
-    fn layer_mapper(layer: String) -> Result<(Sha256Digest, ArtifactType)> {
-        Ok((Sha256Digest::from(layer.parse::<u64>()?), ArtifactType::Tar))
+    fn layer_mapper(Layer::Tar(layer): Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        Ok((
+            Sha256Digest::from(layer.as_str().parse::<u64>()?),
+            ArtifactType::Tar,
+        ))
     }
 
     fn env(var: &str) -> Result<Option<String>> {
@@ -397,7 +398,7 @@ mod test {
     #[test]
     fn minimum_into_job_spec() {
         assert_eq!(
-            Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
+            Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
                 .into_job_spec(layer_mapper, env, images)
                 .unwrap(),
             JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)]),
@@ -421,7 +422,7 @@ mod test {
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
-                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
+                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -444,7 +445,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_loopback: Some(true),
-                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
+                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -458,7 +459,7 @@ mod test {
         assert_eq!(
             Job {
                 enable_writable_file_system: Some(true),
-                ..Job::new(utf8_path_buf!("program"), string_nonempty!["1"])
+                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
             .into_job_spec(layer_mapper, env, images)
             .unwrap(),
@@ -493,7 +494,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ]
+                    "layers": [ { "tar": "1" } ]
                 }"#
             )
             .unwrap()
@@ -511,7 +512,7 @@ mod test {
         assert_error(
             parse_job(
                 r#"{
-                    "layers": [ "1" ]
+                    "layers": [ { "tar": "1" } ]
                 }"#,
             )
             .unwrap_err(),
@@ -600,7 +601,7 @@ mod test {
                         "name": "image1",
                         "use": [ "layers" ]
                     },
-                    "layers": [ "1" ]
+                    "layers": [ { "tar": "1" } ]
                 }"#,
             )
             .unwrap_err(),
@@ -614,7 +615,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": {
                         "name": "image1",
                         "use": [ "layers" ]
@@ -636,7 +637,7 @@ mod test {
                         "name": "image1",
                         "use": [ "layers" ]
                     },
-                    "added_layers": [ "1" ]
+                    "added_layers": [ { "tar": "1" } ]
                 }"#
             )
             .unwrap()
@@ -659,7 +660,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "added_layers": [ "1" ]
+                    "added_layers": [ { "tar": "1" } ]
                 }"#,
             )
             .unwrap_err(),
@@ -673,8 +674,8 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "added_layers": [ "3" ],
-                    "layers": [ "1", "2" ]
+                    "added_layers": [ { "tar": "3" } ],
+                    "layers": [ { "tar": "1" }, { "tar": "2" } ]
                 }"#,
             )
             .unwrap_err(),
@@ -688,8 +689,8 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1", "2" ],
-                    "added_layers": [ "3" ]
+                    "layers": [ { "tar": "1" }, { "tar": "2" } ],
+                    "added_layers": [ { "tar": "3" } ]
                 }"#,
             )
             .unwrap_err(),
@@ -718,7 +719,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "arguments": [ "-e", "echo foo" ]
                 }"#,
             )
@@ -739,7 +740,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
             )
@@ -760,7 +761,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "environment": { "FOO": "pre-$env{FOO}-post", "BAR": "bar" }
                 }"#,
             )
@@ -781,7 +782,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "environment": { "FOO": "pre-$prev{FOO:-no-prev}-post", "BAR": "bar" }
                 }"#,
             )
@@ -802,7 +803,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": { "name": "image1", "use": [ "environment" ] }
                 }"#,
             )
@@ -823,7 +824,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": { "name": "image-with-env-substitutions", "use": [ "environment" ] }
                 }"#,
             )
@@ -844,7 +845,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "environment": { "FOO": "foo", "BAR": "bar" },
                     "image": { "name": "image1", "use": [ "environment" ] }
                 }"#,
@@ -860,7 +861,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": { "name": "image1", "use": [ "environment" ] },
                     "environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
@@ -876,7 +877,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": { "name": "image1", "use": [ "environment" ] },
                     "added_environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
@@ -898,7 +899,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": { "name": "image1", "use": [ "environment" ] },
                     "added_environment": {
                         "FOO": "$env{FOO:-no-env-foo}:$prev{FOO:-no-prev-foo}",
@@ -928,7 +929,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "added_environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
             )
@@ -943,7 +944,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "added_environment": { "FOO": "foo", "BAR": "bar" },
                     "image": { "name": "image1", "use": [ "environment" ] }
                 }"#,
@@ -959,7 +960,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "added_environment": { "FOO": "foo", "BAR": "bar" },
                     "environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
@@ -975,7 +976,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "environment": { "FOO": "foo", "BAR": "bar" },
                     "added_environment": { "FOO": "foo", "BAR": "bar" }
                 }"#,
@@ -991,7 +992,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "devices": [ "null", "zero" ]
                 }"#,
             )
@@ -1012,7 +1013,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "mounts": [
                         { "fs_type": "tmp", "mount_point": "/tmp" }
                     ]
@@ -1038,7 +1039,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "enable_loopback": true
                 }"#,
             )
@@ -1059,7 +1060,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "enable_writable_file_system": true
                 }"#,
             )
@@ -1080,7 +1081,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "working_directory": "/foo/bar"
                 }"#,
             )
@@ -1101,7 +1102,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": {
                         "name": "image1",
                         "use": [ "working_directory" ]
@@ -1125,7 +1126,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "working_directory": "/foo/bar",
                     "image": {
                         "name": "image1",
@@ -1144,7 +1145,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "image": {
                         "name": "image1",
                         "use": [ "working_directory" ]
@@ -1163,7 +1164,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "user": 1234
                 }"#,
             )
@@ -1184,7 +1185,7 @@ mod test {
             parse_job(
                 r#"{
                     "program": "/bin/sh",
-                    "layers": [ "1" ],
+                    "layers": [ { "tar": "1" } ],
                     "group": 4321
                 }"#,
             )

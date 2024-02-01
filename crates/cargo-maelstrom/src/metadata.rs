@@ -3,8 +3,7 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
-use maelstrom_base::Utf8PathBuf;
-use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, UserId};
+use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, Layer, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, PossiblyImage};
 use maelstrom_util::fs::Fs;
 use serde::Deserialize;
@@ -24,7 +23,7 @@ pub struct TestMetadata {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
-    pub layers: Vec<String>,
+    pub layers: Vec<Layer>,
     environment: BTreeMap<String, String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
@@ -214,7 +213,7 @@ impl AllMetadata {
 mod test {
     use super::*;
     use maelstrom_base::{enum_set, JobMountFsType};
-    use maelstrom_test::{path_buf_vec, string, string_vec, utf8_path_buf};
+    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -252,7 +251,7 @@ mod test {
             r#"
             [[directives]]
             filter = "package.equals(package1)"
-            layers = ["layer1"]
+            layers = [{ tar = "layer1" }]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
@@ -284,7 +283,7 @@ mod test {
             [[directives]]
             filter = "package.equals(package1)"
             include_shared_libraries = true
-            layers = ["layer1"]
+            layers = [{ tar = "layer1" }]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
@@ -504,7 +503,7 @@ mod test {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            layers = ["layer1", "layer2"]
+            layers = [{ tar = "layer1" }, { tar = "layer2" }]
 
             [[directives]]
             filter = "package.equals(package1)"
@@ -518,7 +517,7 @@ mod test {
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test2)"
-            layers = ["layer3", "layer4"]
+            layers = [{ tar = "layer3" }, { tar = "layer4" }]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test3)"
@@ -531,31 +530,31 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            string_vec!["layer11", "layer12"],
+            vec![tar_layer!("layer11"), tar_layer!("layer12")],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            string_vec!["layer3", "layer4"],
+            vec![tar_layer!("layer3"), tar_layer!("layer4")],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test3"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            Vec::<String>::default(),
+            vec![]
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test4"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            string_vec!["layer21", "layer22"],
+            vec![tar_layer!("layer21"), tar_layer!("layer22")],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, image_lookup)
                 .unwrap()
                 .layers,
-            string_vec!["layer1", "layer2"],
+            vec![tar_layer!("layer1"), tar_layer!("layer2")],
         );
     }
 
@@ -564,16 +563,16 @@ mod test {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            added_layers = ["added-layer1", "added-layer2"]
+            added_layers = [{ tar = "added-layer1" }, { tar = "added-layer2" }]
 
             [[directives]]
             filter = "package.equals(package1)"
-            layers = ["layer1", "layer2"]
-            added_layers = ["added-layer3", "added-layer4"]
+            layers = [{tar = "layer1" }, { tar = "layer2" }]
+            added_layers = [{ tar = "added-layer3" }, { tar = "added-layer4" }]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
-            added_layers = ["added-layer5", "added-layer6"]
+            added_layers = [{tar = "added-layer5" }, { tar = "added-layer6" }]
             "#,
         )
         .unwrap();
@@ -581,26 +580,31 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            string_vec![
-                "layer1",
-                "layer2",
-                "added-layer3",
-                "added-layer4",
-                "added-layer5",
-                "added-layer6",
+            vec![
+                tar_layer!("layer1"),
+                tar_layer!("layer2"),
+                tar_layer!("added-layer3"),
+                tar_layer!("added-layer4"),
+                tar_layer!("added-layer5"),
+                tar_layer!("added-layer6"),
             ],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            string_vec!["layer1", "layer2", "added-layer3", "added-layer4",],
+            vec![
+                tar_layer!("layer1"),
+                tar_layer!("layer2"),
+                tar_layer!("added-layer3"),
+                tar_layer!("added-layer4")
+            ],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
                 .unwrap()
                 .layers,
-            string_vec!["added-layer1", "added-layer2"],
+            vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
         );
     }
 

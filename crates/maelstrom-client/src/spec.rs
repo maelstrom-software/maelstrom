@@ -8,7 +8,7 @@ pub mod substitute;
 
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
-use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{Layer, Utf8PathBuf};
 use serde::{de, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -131,14 +131,16 @@ impl<'a> ImageOption<'a> {
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
     /// empty.
-    pub fn layers(&self) -> Result<impl Iterator<Item = String>> {
+    pub fn layers(&self) -> Result<impl Iterator<Item = Layer>> {
         Ok(self
             .layers
             .iter()
             .map(|p| {
-                p.as_os_str().to_str().map(str::to_string).ok_or_else(|| {
-                    anyhow!("image {} has a non-UTF-8 layer path {p:?}", self.name())
-                })
+                Ok(Layer::Tar(
+                    Utf8PathBuf::from_path_buf(p.to_owned()).map_err(|_| {
+                        anyhow!("image {} has a non-UTF-8 layer path {p:?}", self.name())
+                    })?,
+                ))
             })
             .collect::<Result<Vec<_>>>()?
             .into_iter())
@@ -179,7 +181,7 @@ impl<'a> ImageOption<'a> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use maelstrom_test::{path_buf_vec, string, string_vec};
+    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer};
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
     #[test]
@@ -243,7 +245,7 @@ mod test {
         assert_eq!(io.name(), "image1");
         assert_eq!(
             Vec::from_iter(io.layers().unwrap()),
-            string_vec!["42", "43"],
+            vec![tar_layer!("42"), tar_layer!("43")],
         );
         assert_eq!(
             io.environment().unwrap(),

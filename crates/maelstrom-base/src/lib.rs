@@ -99,6 +99,12 @@ pub struct JobMount {
     pub mount_point: Utf8PathBuf,
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Layer {
+    Tar(Utf8PathBuf),
+}
+
 /// ID of a user. This should be compatible with uid_t.
 #[derive(
     Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,

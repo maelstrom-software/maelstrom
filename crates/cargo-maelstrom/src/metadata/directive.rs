@@ -1,7 +1,7 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, Layer, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
@@ -17,8 +17,8 @@ pub struct TestDirective {
     pub enable_writable_file_system: Option<bool>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
-    pub layers: Option<PossiblyImage<Vec<String>>>,
-    pub added_layers: Vec<String>,
+    pub layers: Option<PossiblyImage<Vec<Layer>>>,
+    pub added_layers: Vec<Layer>,
     pub mounts: Option<Vec<JobMount>>,
     pub added_mounts: Vec<JobMount>,
     pub devices: Option<EnumSet<JobDevice>>,
@@ -233,7 +233,7 @@ mod test {
     use super::*;
     use anyhow::Error;
     use maelstrom_base::{enum_set, JobMountFsType};
-    use maelstrom_test::{string, string_vec, utf8_path_buf};
+    use maelstrom_test::{string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective> {
@@ -592,12 +592,12 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                layers = ["foo.tar"]
+                layers = [{ tar = "foo.tar" }]
                 "#
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
+                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
                 ..Default::default()
             }
         );
@@ -627,14 +627,14 @@ mod test {
             parse_test_directive(
                 r#"
                 image = { name = "rust", use = ["working_directory"] }
-                layers = ["foo.tar"]
+                layers = [{ tar = "foo.tar" }]
                 "#
             )
             .unwrap(),
             TestDirective {
                 image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
+                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
                 ..Default::default()
             }
         );
@@ -645,7 +645,7 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                layers = ["foo.tar"]
+                layers = [{ tar = "foo.tar" }]
                 image = { name = "rust", use = ["working_directory"] }
                 "#
             )
@@ -653,7 +653,7 @@ mod test {
             TestDirective {
                 image: Some(string!("rust")),
                 working_directory: Some(PossiblyImage::Image),
-                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
+                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
                 ..Default::default()
             }
         );
@@ -665,7 +665,7 @@ mod test {
             parse_test_directive(
                 r#"
                 image = { name = "rust", use = ["layers", "working_directory"] }
-                layers = ["foo.tar"]
+                layers = [{ tar = "foo.tar" }]
                 "#,
             )
             .unwrap_err(),
@@ -678,7 +678,7 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                layers = ["foo.tar"]
+                layers = [{ tar = "foo.tar" }]
                 image = { name = "rust", use = ["layers", "working_directory"] }
                 "#,
             )
@@ -692,12 +692,12 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                added_layers = ["foo.tar"]
+                added_layers = [{ tar = "foo.tar" }]
                 "#
             )
             .unwrap(),
             TestDirective {
-                added_layers: string_vec!["foo.tar"],
+                added_layers: vec![tar_layer!("foo.tar")],
                 ..Default::default()
             }
         );
@@ -708,14 +708,14 @@ mod test {
         assert_eq!(
             parse_test_directive(
                 r#"
-                layers = ["foo.tar"]
-                added_layers = ["bar.tar"]
+                layers = [{ tar = "foo.tar" }]
+                added_layers = [{ tar = "bar.tar" }]
                 "#
             )
             .unwrap(),
             TestDirective {
-                layers: Some(PossiblyImage::Explicit(string_vec!["foo.tar"])),
-                added_layers: string_vec!["bar.tar"],
+                layers: Some(PossiblyImage::Explicit(vec![tar_layer!("foo.tar")])),
+                added_layers: vec![tar_layer!("bar.tar")],
                 ..Default::default()
             }
         );
@@ -727,14 +727,14 @@ mod test {
             parse_test_directive(
                 r#"
                 image = { name = "rust", use = ["layers"] }
-                added_layers = ["foo.tar"]
+                added_layers = [{ tar = "foo.tar" }]
                 "#
             )
             .unwrap(),
             TestDirective {
                 image: Some(string!("rust")),
                 layers: Some(PossiblyImage::Image),
-                added_layers: string_vec!["foo.tar"],
+                added_layers: vec![tar_layer!("foo.tar")],
                 ..Default::default()
             }
         );
@@ -745,8 +745,8 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                added_layers = ["bar.tar"]
-                layers = ["foo.tar"]
+                added_layers = [{ tar = "bar.tar" }]
+                layers = [{ tar = "foo.tar" }]
                 "#,
             )
             .unwrap_err(),
@@ -759,7 +759,7 @@ mod test {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                added_layers = ["bar.tar"]
+                added_layers = [{ tar = "bar.tar" }]
                 image = { name = "rust", use = ["layers"] }
                 "#,
             )

@@ -3,7 +3,7 @@ include_shared_libraries = true
 
 [[directives]]
 filter = "package.equals(maelstrom-worker) && name.starts_with(executor::)"
-layers = ["proc-and-tmp.tar"]
+layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "proc", mount_point = "/proc" },
@@ -13,7 +13,7 @@ devices = ["full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 filter = "package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)"
-layers = ["proc-and-tmp.tar"]
+layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "proc", mount_point = "/proc" },
@@ -25,7 +25,7 @@ image.name = "rust"
 image.use = ["layers", "environment"]
 enable_loopback = true
 #include_shared_libraries = false
-added_layers = ["dev-null.tar"]
+added_layers = [{ tar = "dev-null.tar" }]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "tmp", mount_point = "/root" },
@@ -34,17 +34,17 @@ mounts = [
 
 [[directives]]
 filter = "package.equals(maelstrom-container)"
-layers = ["proc-and-tmp.tar"]
+layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 filter = "package.equals(maelstrom-client)"
-layers = ["proc-and-tmp.tar"]
+layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 filter = "package.equals(maelstrom-util) && name.starts_with(manifest::)"
-layers = ["proc-and-tmp.tar"]
+layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]

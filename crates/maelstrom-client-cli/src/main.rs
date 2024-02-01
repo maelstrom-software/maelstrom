@@ -8,6 +8,7 @@ use figment::{
 use indicatif::ProgressBar;
 use maelstrom_base::{
     ArtifactType, ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+    Layer,
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
@@ -23,7 +24,7 @@ use serde_with::skip_serializing_none;
 use std::{
     cell::RefCell,
     io::{self, Read, Write as _},
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -185,9 +186,9 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = job_spec_iter_from_reader(
         reader,
-        |layer| {
+        |Layer::Tar(layer)| {
             Ok((
-                client.borrow_mut().add_artifact(Path::new(&layer))?,
+                client.borrow_mut().add_artifact(layer.as_std_path())?,
                 ArtifactType::Tar,
             ))
         },

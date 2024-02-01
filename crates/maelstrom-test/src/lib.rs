@@ -188,3 +188,10 @@ macro_rules! string_nonempty {
         nonempty![$($e.to_string()),*]
     };
 }
+
+#[macro_export]
+macro_rules! tar_layer {
+    ($path:expr) => {
+        ::maelstrom_base::Layer::Tar(::maelstrom_base::Utf8PathBuf::from($path))
+    };
+}
