@@ -133,7 +133,7 @@ impl Executor {
         }
 
         let user = UserId::from(linux::getuid().as_u32());
-        let group = GroupId::from(linux::getgid());
+        let group = GroupId::from(linux::getgid().as_u32());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
         let upper_dir = tmpfs_dir.join("upper");
         let work_dir = tmpfs_dir.join("work");
