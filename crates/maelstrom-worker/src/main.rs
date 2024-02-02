@@ -6,7 +6,7 @@ use figment::{
     Figment,
 };
 use maelstrom_linux::{
-    self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus, WaitpidFlags,
+    self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
 };
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
@@ -126,7 +126,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 .unwrap_or_else(|err| panic!("unexpected error closing pidfd: {}", err));
 
             // Wait for the child and mimick how it terminated.
-            match linux::waitpid(child_pid, WaitpidFlags::default()).unwrap_or_else(|e| {
+            match linux::waitpid(child_pid).unwrap_or_else(|e| {
                 panic!("unexpected error waiting on child process {child_pid}: {e}")
             }) {
                 WaitStatus::Exited(code) => {

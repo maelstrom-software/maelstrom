@@ -398,9 +398,6 @@ pub struct WaitResult {
     pub status: WaitStatus,
 }
 
-#[derive(Clone, Copy, Default)]
-pub struct WaitpidFlags(c_int);
-
 #[derive(Clone, Copy)]
 pub enum WaitStatus {
     Exited(ExitCode),
@@ -596,10 +593,11 @@ pub fn wait() -> Result<WaitResult, Errno> {
     })
 }
 
-pub fn waitpid(pid: Pid, flags: WaitpidFlags) -> Result<WaitStatus, Errno> {
+pub fn waitpid(pid: Pid) -> Result<WaitStatus, Errno> {
     let inner = |status: &mut c_int| {
         let status_ptr = status as *mut c_int;
-        unsafe { libc::waitpid(pid.0, status_ptr, flags.0) }
+        let flags = 0 as c_int;
+        unsafe { libc::waitpid(pid.0, status_ptr, flags) }
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
