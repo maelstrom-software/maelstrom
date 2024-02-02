@@ -411,7 +411,7 @@ pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
 }
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::chdir(path_ptr) }).map(drop)
 }
 
@@ -453,7 +453,7 @@ pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
 }
 
 pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let path_ptr = path.as_ptr();
     let argv_ptr = argv.as_ptr() as *const *const c_char;
     let envp_ptr = envp.as_ptr() as *const *const c_char;
     Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
@@ -480,7 +480,7 @@ pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::mkdir(path_ptr, mode.0) }).map(drop)
 }
 
@@ -491,18 +491,16 @@ pub fn mount(
     flags: MountFlags,
     data: Option<&[u8]>,
 ) -> Result<(), Errno> {
-    let source_ptr = source
-        .map(|r| r.to_bytes_with_nul().as_ptr())
-        .unwrap_or(ptr::null()) as *const c_char;
-    let target_ptr = target.to_bytes_with_nul().as_ptr() as *const c_char;
-    let fstype_ptr = fstype.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_char;
+    let source_ptr = source.map(CStr::as_ptr).unwrap_or(ptr::null());
+    let target_ptr = target.as_ptr();
+    let fstype_ptr = fstype.map(CStr::as_ptr).unwrap_or(ptr::null());
     let data_ptr = data.map(|r| r.as_ptr()).unwrap_or(ptr::null()) as *const c_void;
     Errno::result(unsafe { libc::mount(source_ptr, target_ptr, fstype_ptr, flags.0, data_ptr) })
         .map(drop)
 }
 
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd)
 }
 
@@ -522,8 +520,8 @@ pub fn pipe() -> Result<(Fd, Fd), Errno> {
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
-    let new_root_ptr = new_root.to_bytes_with_nul().as_ptr() as *const c_char;
-    let put_old_ptr = put_old.to_bytes_with_nul().as_ptr() as *const c_char;
+    let new_root_ptr = new_root.as_ptr();
+    let put_old_ptr = put_old.as_ptr();
     Errno::result(unsafe { libc::syscall(libc::SYS_pivot_root, new_root_ptr, put_old_ptr) })
         .map(drop)
 }
@@ -563,7 +561,7 @@ pub fn socket(
 }
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
-    let path_ptr = path.to_bytes_with_nul().as_ptr() as *const c_char;
+    let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
 }
 
