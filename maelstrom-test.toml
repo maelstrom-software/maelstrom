@@ -39,6 +39,11 @@ mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 filter = "package.equals(maelstrom-client)"
+layers = [{ tar = "proc-and-tmp.tar" }]
+mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+
+[[directives]]
+filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
 image.name = "alpine"
 image.use = ["layers", "environment"]
 enable_loopback = true
