@@ -97,20 +97,12 @@ impl Errno {
 
     pub fn name(&self) -> Option<&'static str> {
         let errno = unsafe { strerrorname_np(self.0) };
-        if errno.is_null() {
-            None
-        } else {
-            Some(unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
-        }
+        (!errno.is_null()).then(|| unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
     }
 
     pub fn desc(&self) -> Option<&'static str> {
         let errno = unsafe { strerrordesc_np(self.0) };
-        if errno.is_null() {
-            None
-        } else {
-            Some(unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
-        }
+        (!errno.is_null()).then(|| unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
     }
 
     /// Returns `Ok(value)` if it does not contain the sentinel value. This
