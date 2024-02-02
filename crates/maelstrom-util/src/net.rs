@@ -14,7 +14,7 @@ use tokio::{
 fn write_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
     let msg_len = bincode::serialized_size(&msg)? as u32;
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
-    Write::write_all(&mut buf, &msg_len.to_le_bytes())?;
+    Write::write_all(&mut buf, &msg_len.to_be_bytes())?;
     bincode::serialize_into(&mut buf, &msg)?;
     Ok(buf)
 }
@@ -42,7 +42,7 @@ where
 {
     let mut msg_len: [u8; 4] = [0; 4];
     stream.read_exact(&mut msg_len)?;
-    let mut buf = vec![0; u32::from_le_bytes(msg_len) as usize];
+    let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf)?;
     Ok(bincode::deserialize_from(&mut &buf[..])?)
 }
@@ -57,7 +57,7 @@ where
 {
     let mut msg_len: [u8; 4] = [0; 4];
     stream.read_exact(&mut msg_len).await?;
-    let mut buf = vec![0; u32::from_le_bytes(msg_len) as usize];
+    let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf).await?;
     Ok(bincode::deserialize_from(&mut &buf[..])?)
 }

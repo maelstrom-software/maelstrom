@@ -50,7 +50,7 @@ impl MessageStream {
     fn next<T: DeserializeOwned>(&mut self) -> io::Result<T> {
         let mut msg_len: [u8; 4] = [0; 4];
         self.stream.read_exact(&mut msg_len)?;
-        let mut buf = vec![0; u32::from_le_bytes(msg_len) as usize];
+        let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
         self.stream.read_exact(&mut buf).unwrap();
         Ok(bincode::deserialize_from(&buf[..]).unwrap())
     }
@@ -124,7 +124,7 @@ impl FakeBroker {
 
 fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
     let buf = bincode::serialize(msg).unwrap();
-    stream.write_all(&(buf.len() as u32).to_le_bytes()).unwrap();
+    stream.write_all(&(buf.len() as u32).to_be_bytes()).unwrap();
     stream.write_all(&buf[..]).unwrap();
 }
 
