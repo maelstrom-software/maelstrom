@@ -720,7 +720,7 @@ impl Executor {
                     "couldn't parse exec result pipe's contents: {exec_result_buf:?}"
                 )));
             }
-            let result = u64::from_le_bytes(exec_result_buf.try_into().unwrap());
+            let result = u64::from_ne_bytes(exec_result_buf.try_into().unwrap());
             let index = (result >> 32) as usize;
             let errno = result & 0xffffffff;
             return Err(builder.error_transformers[index](
