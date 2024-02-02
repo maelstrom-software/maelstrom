@@ -13,3 +13,6 @@ version.workspace = true
 derive_more.workspace = true
 libc = "0.2"
 nix = { version = "0.26.2", features = ["signal"] }
+
+[features]
+std = []

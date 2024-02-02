@@ -1,6 +1,9 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
+#[cfg(feature = "std")]
+extern crate std;
+
 use core::{ffi::CStr, mem, ptr, time::Duration};
 use derive_more::{BitOr, Display, Into};
 use libc::{
@@ -52,14 +55,11 @@ impl OwnedFd {
         self.0
     }
 
-    pub fn into_fd(self) -> Fd {
-        let fd = self.0;
+    #[cfg(feature = "std")]
+    pub fn into_file(self) -> std::fs::File {
+        let raw_fd = self.0 .0;
         mem::forget(self);
-        fd
-    }
-
-    pub fn into_raw_fd(self) -> RawFd {
-        self.into_fd().as_raw_fd()
+        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_fd) }
     }
 }
 

@@ -26,7 +26,7 @@ use std::{
     fs::File,
     io::Read as _,
     iter, mem,
-    os::{fd::FromRawFd, unix::ffi::OsStrExt as _},
+    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -685,7 +685,7 @@ impl Executor {
             Ok(None) => {
                 // This is the child process.
                 maelstrom_worker_child::start_and_exec_in_child(
-                    exec_result_write_fd.into_fd(),
+                    exec_result_write_fd.as_fd(),
                     builder.syscalls.as_mut_slice(),
                 );
             }
@@ -709,7 +709,8 @@ impl Executor {
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
         let mut exec_result_buf = vec![];
-        unsafe { File::from_raw_fd(exec_result_read_fd.into_fd().as_raw_fd()) }
+        exec_result_read_fd
+            .into_file()
             .read_to_end(&mut exec_result_buf)
             .map_err(Error::from)
             .map_err(JobError::System)?;
@@ -740,7 +741,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(unsafe { File::from_raw_fd(stdout_read_fd.into_fd().as_raw_fd()) })
+                AsyncFd::new(stdout_read_fd.into_file())
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),
@@ -749,7 +750,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(unsafe { File::from_raw_fd(stderr_read_fd.into_fd().as_raw_fd()) })
+                AsyncFd::new(stderr_read_fd.into_file())
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),

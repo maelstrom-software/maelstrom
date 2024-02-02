@@ -23,7 +23,7 @@ figment.workspace = true
 futures.workspace = true
 gethostname.workspace = true
 maelstrom-base.workspace = true
-maelstrom-linux.workspace = true
+maelstrom-linux = { workspace = true, features = ["std"] }
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true
 netlink-packet-core.workspace = true
