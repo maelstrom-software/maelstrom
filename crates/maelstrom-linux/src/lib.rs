@@ -169,6 +169,10 @@ impl ErrnoSentinel for i64 {
 pub struct ExitCode(c_int);
 
 impl ExitCode {
+    pub fn from_u8(code: u8) -> Self {
+        Self(code.into())
+    }
+
     pub fn as_u8(&self) -> u8 {
         self.0 as u8
     }
@@ -564,8 +568,8 @@ pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
 }
 
-pub fn _exit(status: c_int) -> ! {
-    unsafe { libc::_exit(status) };
+pub fn _exit(status: ExitCode) -> ! {
+    unsafe { libc::_exit(status.0) };
 }
 
 fn extract_wait_status(status: c_int) -> WaitStatus {
