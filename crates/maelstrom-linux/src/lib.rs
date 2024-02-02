@@ -374,7 +374,6 @@ pub struct SocketType(c_int);
 
 impl SocketType {
     pub const RAW: Self = Self(libc::SOCK_RAW);
-    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
 }
 
 #[derive(Clone, Copy, Display)]

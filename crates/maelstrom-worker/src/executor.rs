@@ -354,7 +354,7 @@ impl Executor {
             builder.push(
                 Syscall::SocketAndSaveFd(
                     SocketDomain::NETLINK,
-                    SocketType::RAW | SocketType::CLOEXEC,
+                    SocketType::RAW,
                     SocketProtocol::NETLINK_ROUTE,
                 ),
                 &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
