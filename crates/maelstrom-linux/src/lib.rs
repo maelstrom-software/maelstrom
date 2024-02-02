@@ -532,7 +532,7 @@ pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {
 pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
     let fds_ptr = fds.as_mut_ptr() as *mut pollfd;
     let nfds = fds.len() as nfds_t;
-    let timeout = timeout.as_millis() as c_int;
+    let timeout = c_int::try_from(timeout.as_millis()).unwrap();
     Errno::result(unsafe { libc::poll(fds_ptr, nfds, timeout) }).map(|ret| ret as usize)
 }
 
