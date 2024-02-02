@@ -422,13 +422,8 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs as *mut c_void;
     let size = mem::size_of::<CloneArgs>() as size_t;
-    Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) }).map(|ret| {
-        if ret == 0 {
-            None
-        } else {
-            Some(Pid::from_c_long(ret))
-        }
-    })
+    Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) })
+        .map(|ret| (ret != 0).then_some(Pid::from_c_long(ret)))
 }
 
 pub fn close(fd: Fd) -> Result<(), Errno> {
