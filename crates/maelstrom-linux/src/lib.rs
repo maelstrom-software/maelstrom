@@ -119,7 +119,7 @@ impl Errno {
 impl fmt::Debug for Errno {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.name() {
-            Some(name) => write!(f, "{}", name),
+            Some(name) => write!(f, "{name}"),
             None => write!(f, "UNKNOWN({})", self.0),
         }
     }
@@ -129,7 +129,7 @@ impl fmt::Display for Errno {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.name(), self.desc()) {
             (Some(name), Some(desc)) => {
-                write!(f, "{}: {}", name, desc)
+                write!(f, "{name}: {desc}")
             }
             _ => {
                 write!(f, "{}: Unknown error", self.0)
@@ -362,7 +362,7 @@ impl fmt::Display for Signal {
             write!(f, "Invalid Signal {}", self.0)
         } else {
             let abbrev = unsafe { CStr::from_ptr(abbrev) }.to_str().unwrap();
-            write!(f, "SIG{}", abbrev)
+            write!(f, "SIG{abbrev}")
         }
     }
 }
@@ -593,10 +593,7 @@ fn extract_wait_status(status: c_int) -> WaitStatus {
     } else if libc::WIFSIGNALED(status) {
         WaitStatus::Signaled(Signal(libc::WTERMSIG(status)))
     } else {
-        panic!(
-            "neither WIFEXITED nor WIFSIGNALED true on wait status {}",
-            status
-        );
+        panic!("neither WIFEXITED nor WIFSIGNALED true on wait status {status}");
     }
 }
 
