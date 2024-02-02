@@ -34,7 +34,7 @@ impl CloneArgs {
     }
 
     pub fn exit_signal(mut self, signal: Signal) -> Self {
-        self.0.exit_signal = signal.0 as u64;
+        self.0.exit_signal = signal.as_u64();
         self
     }
 }
@@ -339,6 +339,10 @@ impl Signal {
     }
 
     fn as_c_ulong(&self) -> c_ulong {
+        self.0.try_into().unwrap()
+    }
+
+    fn as_u64(&self) -> u64 {
         self.0.try_into().unwrap()
     }
 }
