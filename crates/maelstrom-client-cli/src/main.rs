@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{Context as _, Result};
 use clap::Parser;
 use figment::{
     error::Kind,
@@ -7,8 +7,7 @@ use figment::{
 };
 use indicatif::ProgressBar;
 use maelstrom_base::{
-    ArtifactType, ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
-    Layer,
+    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
@@ -186,16 +185,7 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = job_spec_iter_from_reader(
         reader,
-        |layer| {
-            if let Layer::Tar { path } = layer {
-                Ok((
-                    client.borrow_mut().add_artifact(path.as_std_path())?,
-                    ArtifactType::Tar,
-                ))
-            } else {
-                Err(anyhow!("manifest not implemented"))
-            }
-        },
+        |layer| client.borrow_mut().add_layer(layer),
         std_env_lookup,
         image_lookup,
     );
