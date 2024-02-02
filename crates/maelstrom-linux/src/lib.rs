@@ -653,8 +653,8 @@ mod tests {
     #[test]
     fn invalid_errno_display() {
         assert_eq!(
-            std::format!("{}", Errno(1000)).as_str(),
-            "1000: Unknown error"
+            std::format!("{}", Errno(1234)).as_str(),
+            "1234: Unknown error"
         );
     }
 
@@ -665,6 +665,6 @@ mod tests {
 
     #[test]
     fn invalid_errno_debug() {
-        assert_eq!(std::format!("{:?}", Errno(1000)).as_str(), "UNKNOWN(1000)");
+        assert_eq!(std::format!("{:?}", Errno(1234)).as_str(), "UNKNOWN(1234)");
     }
 }
