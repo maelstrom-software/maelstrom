@@ -301,7 +301,7 @@ impl Pid {
         Self(pid.try_into().unwrap())
     }
 
-    #[cfg(any(test, feature = "test"))]
+    #[cfg(feature = "test")]
     pub fn new_for_test(pid: pid_t) -> Self {
         Self(pid)
     }
