@@ -95,7 +95,7 @@ fn basic_job_test(
 }
 
 #[test]
-fn basic_job_with_tar_artifact() {
+fn basic_job_with_add_artifact_tar() {
     let fs = Fs::new();
     basic_job_test(
         |client, artifact_dir| {
@@ -116,7 +116,7 @@ fn basic_job_with_tar_artifact() {
 }
 
 #[test]
-fn basic_job_with_manifest_layer_tar() {
+fn basic_job_with_add_layer_tar() {
     let fs = Fs::new();
     basic_job_test(
         |client, artifact_dir| {
@@ -148,7 +148,7 @@ fn hash_data(data: &[u8]) -> Sha256Digest {
 }
 
 #[test]
-fn basic_job_with_manifest_layer_paths() {
+fn basic_job_with_add_layer_paths() {
     let fs = Fs::new();
     basic_job_test(
         |client, artifact_dir| {
