@@ -1,6 +1,7 @@
 //! Functions that are useful for reading/writing messages from/to sockets.
 
 use anyhow::Result;
+use maelstrom_base::proto;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     io::{Read, Write},
@@ -12,10 +13,10 @@ use tokio::{
 };
 
 fn write_message_to_vec(msg: impl Serialize) -> Result<Vec<u8>> {
-    let msg_len = bincode::serialized_size(&msg)? as u32;
+    let msg_len = proto::serialized_size(&msg)? as u32;
     let mut buf = Vec::<u8>::with_capacity(msg_len as usize + 4);
     Write::write_all(&mut buf, &msg_len.to_be_bytes())?;
-    bincode::serialize_into(&mut buf, &msg)?;
+    proto::serialize_into(&mut buf, &msg)?;
     Ok(buf)
 }
 
@@ -44,7 +45,7 @@ where
     stream.read_exact(&mut msg_len)?;
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf)?;
-    Ok(bincode::deserialize_from(&mut &buf[..])?)
+    Ok(proto::deserialize_from(&mut &buf[..])?)
 }
 
 /// Read a message from a Tokio input stream. The framing must match that of
@@ -59,7 +60,7 @@ where
     stream.read_exact(&mut msg_len).await?;
     let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
     stream.read_exact(&mut buf).await?;
-    Ok(bincode::deserialize_from(&mut &buf[..])?)
+    Ok(proto::deserialize_from(&mut &buf[..])?)
 }
 
 /// Loop, reading messages from a channel and writing them to a socket. The `log` parameter is used

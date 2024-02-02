@@ -18,7 +18,10 @@ use futures::{
 };
 use hyper::{server::conn::Http, service::Service, upgrade::Upgraded, Body, Request, Response};
 use hyper_tungstenite::{tungstenite, HyperWebsocket, WebSocketStream};
-use maelstrom_base::{proto::BrokerToClient, ClientId};
+use maelstrom_base::{
+    proto::{self, BrokerToClient},
+    ClientId,
+};
 use maelstrom_web::WASM_TAR;
 use slog::{debug, error, o, Logger};
 use std::{
@@ -100,7 +103,7 @@ async fn websocket_writer(
 ) {
     while let Some(msg) = scheduler_receiver.recv().await {
         if socket
-            .send(Message::binary(bincode::serialize(&msg).unwrap()))
+            .send(Message::binary(proto::serialize(&msg).unwrap()))
             .await
             .is_err()
         {
@@ -117,7 +120,7 @@ async fn websocket_reader(
     id: ClientId,
 ) {
     while let Some(Ok(Message::Binary(msg))) = socket.next().await {
-        let Ok(msg) = bincode::deserialize(&msg) else {
+        let Ok(msg) = proto::deserialize(&msg) else {
             break;
         };
         if scheduler_sender

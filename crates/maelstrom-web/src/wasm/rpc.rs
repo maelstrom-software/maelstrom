@@ -5,7 +5,7 @@ use futures::{
 };
 use gloo_net::websocket::{futures::WebSocket, Message};
 use gloo_utils::errors::JsError;
-use maelstrom_base::proto::{BrokerToClient, ClientToBroker};
+use maelstrom_base::proto::{self, BrokerToClient, ClientToBroker};
 use std::cell::RefCell;
 use wasm_bindgen_futures::spawn_local;
 
@@ -54,13 +54,13 @@ impl ClientConnection for RpcConnection {
     fn send(&self, message: ClientToBroker) -> Result<()> {
         self.send
             .borrow_mut()
-            .try_send(Message::Bytes(bincode::serialize(&message).unwrap()))?;
+            .try_send(Message::Bytes(proto::serialize(&message).unwrap()))?;
         Ok(())
     }
 
     fn try_recv(&self) -> Result<Option<BrokerToClient>> {
         match self.recv.borrow_mut().try_next() {
-            Ok(Some(Message::Bytes(b))) => Ok(Some(bincode::deserialize(&b)?)),
+            Ok(Some(Message::Bytes(b))) => Ok(Some(proto::deserialize(&b)?)),
             Ok(Some(Message::Text(_))) => Err(anyhow!("Unexpected Message::Text")),
             Ok(None) => Err(anyhow!("websocket closed")),
             Err(_) => Ok(None),

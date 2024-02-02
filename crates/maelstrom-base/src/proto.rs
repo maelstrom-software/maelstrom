@@ -75,3 +75,28 @@ pub struct BrokerToArtifactPusher(pub Result<(), String>);
 /// with a [`BrokerToArtifactPusher`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
+
+pub fn serialize<T: ?Sized + Serialize>(value: &T) -> bincode::Result<Vec<u8>> {
+    bincode::serialize(value)
+}
+
+pub fn serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
+    writer: W,
+    value: &T,
+) -> bincode::Result<()> {
+    bincode::serialize_into(writer, value)
+}
+
+pub fn serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64> {
+    bincode::serialized_size(value)
+}
+
+pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
+    bincode::deserialize(bytes)
+}
+
+pub fn deserialize_from<R: std::io::Read, T: serde::de::DeserializeOwned>(
+    reader: R,
+) -> bincode::Result<T> {
+    bincode::deserialize_from(reader)
+}

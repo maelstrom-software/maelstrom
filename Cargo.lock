@@ -764,7 +764,6 @@ version = "0.5.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
- "bincode",
  "byteorder",
  "cargo_metadata",
  "clap",
@@ -2603,7 +2602,6 @@ version = "0.5.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
- "bincode",
  "bytesize",
  "clap",
  "colored-diff",
@@ -2730,7 +2728,6 @@ version = "0.5.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
- "bincode",
  "maelstrom-base",
  "maelstrom-client",
  "maelstrom-util",
@@ -2742,7 +2739,6 @@ name = "maelstrom-util"
 version = "0.5.0-dev"
 dependencies = [
  "anyhow",
- "bincode",
  "byteorder",
  "bytesize",
  "clap",
@@ -2765,7 +2761,6 @@ name = "maelstrom-web"
 version = "0.5.0-dev"
 dependencies = [
  "anyhow",
- "bincode",
  "cargo_metadata",
  "console_error_panic_hook",
  "eframe",

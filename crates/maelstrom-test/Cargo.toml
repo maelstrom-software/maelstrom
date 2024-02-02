@@ -12,7 +12,6 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 assert_matches.workspace = true
-bincode.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
 maelstrom-util.workspace = true

@@ -1,4 +1,4 @@
-use crate::{Sha256Digest, Utf8PathBuf};
+use crate::{proto, Sha256Digest, Utf8PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{fmt, io};
@@ -77,8 +77,8 @@ impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
         let stream_end = r.stream_position()?;
         r.seek(io::SeekFrom::Start(stream_start))?;
 
-        let version: ManifestVersion = bincode::deserialize_from(&mut r)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let version: ManifestVersion =
+            proto::deserialize_from(&mut r).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         if version != ManifestVersion::default() {
             return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
         }
@@ -91,7 +91,7 @@ impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
             return Ok(None);
         }
         Ok(Some(
-            bincode::deserialize_from(&mut self.r)
+            proto::deserialize_from(&mut self.r)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
         ))
     }
@@ -111,13 +111,13 @@ pub struct ManifestWriter<WriteT> {
 
 impl<WriteT: io::Write> ManifestWriter<WriteT> {
     pub fn new(mut w: WriteT) -> io::Result<Self> {
-        bincode::serialize_into(&mut w, &ManifestVersion::default())
+        proto::serialize_into(&mut w, &ManifestVersion::default())
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(Self { w })
     }
 
     pub fn write_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
-        bincode::serialize_into(&mut self.w, entry)
+        proto::serialize_into(&mut self.w, entry)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         Ok(())
     }

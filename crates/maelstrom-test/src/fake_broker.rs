@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
     proto::{
-        ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
+        self, ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
     ClientJobId, JobSpec, JobStringResult,
@@ -52,7 +52,7 @@ impl MessageStream {
         self.stream.read_exact(&mut msg_len)?;
         let mut buf = vec![0; u32::from_be_bytes(msg_len) as usize];
         self.stream.read_exact(&mut buf).unwrap();
-        Ok(bincode::deserialize_from(&buf[..]).unwrap())
+        Ok(proto::deserialize_from(&buf[..]).unwrap())
     }
 
     fn into_inner(self) -> TcpStream {
@@ -123,7 +123,7 @@ impl FakeBroker {
 }
 
 fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
-    let buf = bincode::serialize(msg).unwrap();
+    let buf = proto::serialize(msg).unwrap();
     stream.write_all(&(buf.len() as u32).to_be_bytes()).unwrap();
     stream.write_all(&buf[..]).unwrap();
 }
