@@ -7,13 +7,13 @@ pub mod progress;
 pub mod test_listing;
 pub mod visitor;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
-use maelstrom_base::{ArtifactType, JobSpec, Layer, NonEmpty, Sha256Digest};
+use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest};
 use maelstrom_client::{spec::ImageConfig, Client, ClientDriver};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
@@ -216,19 +216,7 @@ where
         let mut layers = test_metadata
             .layers
             .iter()
-            .map(|layer| {
-                if let Layer::Tar { path } = layer {
-                    Ok((
-                        self.client
-                            .lock()
-                            .unwrap()
-                            .add_artifact(path.as_std_path())?,
-                        ArtifactType::Tar,
-                    ))
-                } else {
-                    Err(anyhow!("manifest not implemented"))
-                }
-            })
+            .map(|layer| self.client.lock().unwrap().add_layer(layer.clone()))
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
         if test_metadata.include_shared_libraries() {
