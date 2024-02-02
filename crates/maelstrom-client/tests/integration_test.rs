@@ -1,4 +1,7 @@
-use maelstrom_base::{ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Sha256Digest};
+use maelstrom_base::{
+    manifest::{ManifestEntryData, ManifestReader},
+    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, Sha256Digest,
+};
 use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
@@ -8,6 +11,7 @@ use maelstrom_test::{
 use maelstrom_util::fs::Fs;
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};
+use sha2::{Digest as _, Sha256};
 use std::path::Path;
 use std::sync::mpsc;
 use tempfile::tempdir;
@@ -107,6 +111,67 @@ fn basic_job_with_tar_artifact() {
                     .unwrap(),
                 "hello world"
             );
+        },
+    );
+}
+
+#[test]
+fn basic_job_with_manifest_layer_tar() {
+    let fs = Fs::new();
+    basic_job_test(
+        |client, artifact_dir| {
+            let test_artifact = artifact_dir.join("test_artifact");
+            fs.write(&test_artifact, b"hello world").unwrap();
+
+            let digest_and_type = client
+                .add_layer(Layer::Tar {
+                    path: test_artifact.try_into().unwrap(),
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            assert_eq!(
+                fs.read_to_string(&artifact_dir.join(digest.to_string()))
+                    .unwrap(),
+                "hello world"
+            );
+        },
+    );
+}
+
+fn hash_data(data: &[u8]) -> Sha256Digest {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    Sha256Digest::new(hasher.finalize().into())
+}
+
+#[test]
+fn basic_job_with_manifest_layer_paths() {
+    let fs = Fs::new();
+    basic_job_test(
+        |client, artifact_dir| {
+            let test_artifact = artifact_dir.join("test_artifact");
+            fs.write(&test_artifact, b"hello world").unwrap();
+
+            let digest_and_type = client
+                .add_layer(Layer::Paths {
+                    paths: vec![test_artifact.try_into().unwrap()],
+                    prefix_options: Default::default(),
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            let manifest_path = artifact_dir.join(digest.to_string());
+            let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
+            let entries = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
+            assert_eq!(entries.len(), 1, "{entries:?}");
+            let entry = &entries[0];
+            let expected_digest = hash_data(b"hello world");
+            assert_eq!(entry.data, ManifestEntryData::File(Some(expected_digest)));
         },
     );
 }

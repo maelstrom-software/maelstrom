@@ -1272,5 +1272,8 @@ fn filtering_none_does_not_build() {
         .unwrap()
         .map(|e| path_file_name(&e.unwrap().path()))
         .collect();
-    assert_eq!(entries, vec![LAST_TEST_LISTING_NAME.to_owned()]);
+    assert_eq!(
+        entries,
+        vec![LAST_TEST_LISTING_NAME.to_owned(), "manifests".to_owned()]
+    );
 }

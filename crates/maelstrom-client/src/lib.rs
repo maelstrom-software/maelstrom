@@ -7,10 +7,14 @@ use maelstrom_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobSpec, JobStringResult, Sha256Digest,
+    ArtifactType, ClientJobId, JobSpec, JobStringResult, Layer, PrefixOptions, Sha256Digest,
+    Utf8PathBuf,
 };
 use maelstrom_container::ContainerImageDepot;
-use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader, net};
+use maelstrom_util::{
+    config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader,
+    manifest::ManifestBuilder, net,
+};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
@@ -385,6 +389,14 @@ impl ClientDriver for DefaultClientDriver {
     }
 }
 
+fn path_hash(paths: &[Utf8PathBuf]) -> Sha256Digest {
+    let mut hasher = Sha256::new();
+    for p in paths {
+        hasher.update(p.as_str().as_bytes());
+    }
+    Sha256Digest::new(hasher.finalize().into())
+}
+
 pub type JobResponseHandler =
     Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
 
@@ -394,6 +406,7 @@ pub struct Client {
     digest_repo: DigestRespository,
     container_image_depot: ContainerImageDepot,
     processed_artifact_paths: HashSet<PathBuf>,
+    cache_dir: PathBuf,
 }
 
 impl Client {
@@ -407,12 +420,16 @@ impl Client {
         let dispatcher_sender = deps.dispatcher_sender.clone();
         driver.drive(deps);
 
+        let fs = Fs::new();
+        fs.create_dir_all(cache_dir.as_ref().join("manifests"))?;
+
         Ok(Client {
             dispatcher_sender,
             driver: Box::new(driver),
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             processed_artifact_paths: HashSet::default(),
+            cache_dir: cache_dir.as_ref().to_owned(),
         })
     }
 
@@ -433,6 +450,49 @@ impl Client {
             self.processed_artifact_paths.insert(path);
         }
         Ok(digest)
+    }
+
+    fn manifest_path(&self, paths: &[Utf8PathBuf]) -> PathBuf {
+        let hash = path_hash(paths);
+        self.cache_dir
+            .join("manifests")
+            .join(format!("{hash}.manifest"))
+    }
+
+    fn build_manifest(
+        &mut self,
+        paths: &[Utf8PathBuf],
+        prefix_options: PrefixOptions,
+    ) -> Result<PathBuf> {
+        if prefix_options != Default::default() {
+            return Err(anyhow!("prefix options not implemented"));
+        }
+
+        let fs = Fs::new();
+        let manifest_path = self.manifest_path(paths);
+        let manifest_file = fs.create_file(&manifest_path)?;
+        let data_upload = |path: &_| self.add_artifact(path);
+        let mut builder =
+            ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
+        for path in paths {
+            builder.add_file(path, path)?;
+        }
+
+        Ok(manifest_path)
+    }
+
+    pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        match layer {
+            Layer::Tar { path } => Ok((self.add_artifact(path.as_std_path())?, ArtifactType::Tar)),
+            Layer::Paths {
+                paths,
+                prefix_options,
+            } => {
+                let manifest_path = self.build_manifest(&paths, prefix_options)?;
+                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+            }
+            _ => Err(anyhow!("unimplemented layer type")),
+        }
     }
 
     pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
