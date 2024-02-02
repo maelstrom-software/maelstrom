@@ -33,12 +33,10 @@ mounts = [
 ]
 
 [[directives]]
-filter = "package.equals(maelstrom-container)"
-layers = [{ tar = "proc-and-tmp.tar" }]
-mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
-
-[[directives]]
-filter = "package.equals(maelstrom-client)"
+filter = """
+package.equals(maelstrom-container) ||
+package.equals(maelstrom-client) ||
+package.equals(maelstrom-util) && (name.starts_with(manifest::) || name.starts_with(fs::))"""
 layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
@@ -52,11 +50,6 @@ mounts = [
     { fs_type = "tmp", mount_point = "/root" },
     { fs_type = "proc", mount_point = "/proc" },
 ]
-
-[[directives]]
-filter = "package.equals(maelstrom-util) && (name.starts_with(manifest::) || name.starts_with(fs::))"
-layers = [{ tar = "proc-and-tmp.tar" }]
-mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
 added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
