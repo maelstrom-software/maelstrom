@@ -1,5 +1,5 @@
 use crate::wasm::rpc::ClientConnection;
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use eframe::{App, CreationContext, Frame};
 use egui::{Align2, CentralPanel, CollapsingHeader, Color32, Context, ScrollArea, Ui};
 use egui_gauge::Gauge;
@@ -224,7 +224,7 @@ impl<RpcConnectionT: ClientConnection> UiHandler<RpcConnectionT> {
             if let Some(msg) = rpc.try_recv()? {
                 match msg {
                     BrokerToClient::StatisticsResponse(stats) => self.stats = Some(stats),
-                    r => return Err(anyhow!("unexpected response: {r:?}")),
+                    r => bail!("unexpected response: {r:?}"),
                 }
             }
         }

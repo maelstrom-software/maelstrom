@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
 use maelstrom_client::Client;
@@ -52,7 +52,7 @@ fn decode_paths(mut input: impl io::Read) -> Result<Vec<PathBuf>> {
 
     let extra = std::io::copy(&mut input, &mut std::io::sink())?;
     if extra > 0 {
-        return Err(anyhow!("unknown trailing data"));
+        bail!("unknown trailing data")
     }
 
     Ok(paths)

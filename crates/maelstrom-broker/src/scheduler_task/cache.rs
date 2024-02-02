@@ -4,7 +4,7 @@
 //! worker may query the broker to fill in holes in its own cache. The broker's cache is filled, on
 //! request, by the client.
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{manifest::ManifestReader, ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
@@ -208,7 +208,7 @@ fn try_read_cache_file(fs: &mut impl CacheFs, path: &Path) -> Result<(Sha256Dige
     let path_str = path.file_name().unwrap().to_string_lossy();
     let (left, right) = path_str.split_once('.').ok_or(anyhow!("bad filename"))?;
     if right != "bin" {
-        return Err(anyhow!("bad extension"));
+        bail!("bad extension")
     }
     let digest = left.parse::<Sha256Digest>()?;
     let size = fs.file_size(path);

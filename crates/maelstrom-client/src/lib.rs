@@ -1,6 +1,6 @@
 pub mod spec;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use chrono::{DateTime, Utc};
 use maelstrom_base::{
     proto::{
@@ -465,7 +465,7 @@ impl Client {
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
         if prefix_options != Default::default() {
-            return Err(anyhow!("prefix options not implemented"));
+            bail!("prefix options not implemented")
         }
 
         let fs = Fs::new();
