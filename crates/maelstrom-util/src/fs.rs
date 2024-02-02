@@ -302,6 +302,89 @@ impl Fs {
     pub fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
         path.as_ref().exists()
     }
+
+    pub fn glob_walk<'fs, 'glob, P: AsRef<Path>>(
+        &'fs self,
+        path: P,
+        glob: &'glob globset::GlobSet,
+    ) -> GlobWalker<'fs, 'glob> {
+        GlobWalker::new(self, path.as_ref(), glob)
+    }
+}
+
+pub struct GlobWalker<'fs, 'glob> {
+    start_path: PathBuf,
+    fs_walker: walkdir::IntoIter,
+    glob: &'glob globset::GlobSet,
+    #[allow(dead_code)]
+    fs: &'fs Fs,
+}
+
+impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
+    fn new(fs: &'fs Fs, path: &Path, glob: &'glob globset::GlobSet) -> Self {
+        Self {
+            start_path: path.to_owned(),
+            fs_walker: walkdir::WalkDir::new(path).into_iter(),
+            glob,
+            fs,
+        }
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        self.glob.is_match_candidate(&globset::Candidate::new(
+            path.strip_prefix(&self.start_path).unwrap(),
+        ))
+    }
+}
+
+impl<'fs, 'glob> Iterator for GlobWalker<'fs, 'glob> {
+    type Item = Result<PathBuf>;
+
+    fn next(&mut self) -> Option<Result<PathBuf>> {
+        loop {
+            match self.fs_walker.next()? {
+                Ok(entry) if self.matches(entry.path()) => return Some(Ok(entry.into_path())),
+                Err(err) => return Some(Err(err.into())),
+                _ => continue,
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+fn glob_walker_test(glob: &str, input: Vec<&str>, expected: Vec<&str>) {
+    use globset::{Glob, GlobSet};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let fs = Fs::new();
+    for p in input {
+        let path = temp_dir.path().join(p);
+        fs.create_dir_all(path.parent().unwrap()).unwrap();
+        fs.write(path, b"").unwrap();
+    }
+
+    let mut builder = GlobSet::builder();
+    builder.add(Glob::new(glob).unwrap());
+    let glob = builder.build().unwrap();
+
+    let paths = Vec::from_iter(fs.glob_walk(temp_dir.path(), &glob).map(|e| e.unwrap()));
+
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|e| temp_dir.path().join(e))
+        .collect();
+    assert_eq!(paths, expected);
+}
+
+#[test]
+fn glob_walker_basic() {
+    glob_walker_test("*.txt", vec!["a.txt", "b.bin"], vec!["a.txt"]);
+    glob_walker_test("foo/*", vec!["foo/a", "bar/b"], vec!["foo/a"]);
+    glob_walker_test(
+        "foo/**",
+        vec!["foo/bar/baz", "bar/b"],
+        vec!["foo/bar", "foo/bar/baz"],
+    );
 }
 
 #[cfg(unix)]

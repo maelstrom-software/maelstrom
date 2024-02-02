@@ -2749,6 +2749,7 @@ dependencies = [
  "concat-idents",
  "derive_more",
  "fs2",
+ "globset",
  "maelstrom-base",
  "maelstrom-test",
  "rand",
@@ -2756,6 +2757,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "walkdir",
 ]
 
 [[package]]

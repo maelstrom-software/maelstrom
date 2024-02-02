@@ -49,7 +49,7 @@ mounts = [
 ]
 
 [[directives]]
-filter = "package.equals(maelstrom-util) && name.starts_with(manifest::)"
+filter = "package.equals(maelstrom-util) && (name.starts_with(manifest::) || name.starts_with(fs::))"
 layers = [{ tar = "proc-and-tmp.tar" }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
