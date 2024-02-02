@@ -1,6 +1,7 @@
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestReader},
-    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, Sha256Digest,
+    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, PrefixOptions,
+    Sha256Digest,
 };
 use maelstrom_client::Client;
 use maelstrom_test::{
@@ -12,7 +13,7 @@ use maelstrom_util::fs::Fs;
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};
 use sha2::{Digest as _, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use tempfile::tempdir;
 
@@ -147,12 +148,27 @@ fn hash_data(data: &[u8]) -> Sha256Digest {
     Sha256Digest::new(hasher.finalize().into())
 }
 
+fn verify_single_entry_manifest(
+    manifest_path: &Path,
+    expected_entry_path: &Path,
+    expected_entry_data: ManifestEntryData,
+) {
+    let fs = Fs::new();
+    let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
+    let entries = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
+    assert_eq!(entries.len(), 1, "{entries:?}");
+    let entry = &entries[0];
+
+    assert_eq!(expected_entry_data, entry.data);
+    assert_eq!(entry.path, expected_entry_path);
+}
+
 #[test]
 fn basic_job_with_add_layer_paths() {
-    let fs = Fs::new();
     basic_job_test(
         |client, artifact_dir| {
             let test_artifact = artifact_dir.join("test_artifact");
+            let fs = Fs::new();
             fs.write(&test_artifact, b"hello world").unwrap();
 
             let digest_and_type = client
@@ -165,13 +181,73 @@ fn basic_job_with_add_layer_paths() {
         },
         |artifact_dir, layers| {
             let digest = &layers[0].0;
-            let manifest_path = artifact_dir.join(digest.to_string());
-            let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
-            let entries = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
-            assert_eq!(entries.len(), 1, "{entries:?}");
-            let entry = &entries[0];
-            let expected_digest = hash_data(b"hello world");
-            assert_eq!(entry.data, ManifestEntryData::File(Some(expected_digest)));
+            verify_single_entry_manifest(
+                &artifact_dir.join(digest.to_string()),
+                &artifact_dir.join("test_artifact"),
+                ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            )
         },
     );
+}
+
+fn basic_job_with_add_layer_paths_and_prefix(
+    prefix_options_factory: impl FnOnce(&Path) -> PrefixOptions,
+    expected_path_factory: impl FnOnce(&Path) -> PathBuf,
+) {
+    basic_job_test(
+        |client, artifact_dir| {
+            let test_artifact = artifact_dir.join("test_artifact");
+            let fs = Fs::new();
+            fs.write(&test_artifact, b"hello world").unwrap();
+
+            let digest_and_type = client
+                .add_layer(Layer::Paths {
+                    paths: vec![test_artifact.try_into().unwrap()],
+                    prefix_options: prefix_options_factory(artifact_dir),
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            verify_single_entry_manifest(
+                &artifact_dir.join(digest.to_string()),
+                &expected_path_factory(&artifact_dir.join("test_artifact")),
+                ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            )
+        },
+    );
+}
+
+#[test]
+fn prefix_options_both() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |artifact_dir| PrefixOptions {
+            strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
+            prepend_prefix: Some("foo/".into()),
+        },
+        |artifact_path| Path::new("foo/").join(artifact_path.file_name().unwrap()),
+    )
+}
+
+#[test]
+fn prefix_options_strip_not_found() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |_| PrefixOptions {
+            strip_prefix: Some("not_there/".into()),
+            prepend_prefix: None,
+        },
+        |artifact_path| artifact_path.to_owned(),
+    )
+}
+
+#[test]
+fn prefix_options_prepend_absolute() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |_| PrefixOptions {
+            strip_prefix: None,
+            prepend_prefix: Some("foo/bar".into()),
+        },
+        |artifact_path| Path::new("foo/bar").join(artifact_path),
+    )
 }

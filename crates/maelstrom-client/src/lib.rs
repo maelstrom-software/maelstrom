@@ -1,6 +1,6 @@
 pub mod spec;
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use maelstrom_base::{
     proto::{
@@ -8,7 +8,7 @@ use maelstrom_base::{
     },
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobSpec, JobStringResult, Layer, PrefixOptions, Sha256Digest,
-    Utf8PathBuf,
+    Utf8Path, Utf8PathBuf,
 };
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::{
@@ -397,6 +397,19 @@ fn path_hash(paths: &[Utf8PathBuf]) -> Sha256Digest {
     Sha256Digest::new(hasher.finalize().into())
 }
 
+fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions) -> Utf8PathBuf {
+    let mut path = path.to_owned();
+    if let Some(prefix) = &prefix_options.strip_prefix {
+        if let Ok(new_path) = path.strip_prefix(prefix) {
+            path = new_path.to_owned();
+        }
+    }
+    if let Some(prefix) = &prefix_options.prepend_prefix {
+        path = prefix.join(path);
+    }
+    path
+}
+
 pub type JobResponseHandler =
     Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
 
@@ -464,10 +477,6 @@ impl Client {
         paths: &[Utf8PathBuf],
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
-        if prefix_options != Default::default() {
-            bail!("prefix options not implemented")
-        }
-
         let fs = Fs::new();
         let manifest_path = self.manifest_path(paths);
         let manifest_file = fs.create_file(&manifest_path)?;
@@ -475,7 +484,8 @@ impl Client {
         let mut builder =
             ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
         for path in paths {
-            builder.add_file(path, path)?;
+            let dest = calculate_manifest_entry_path(path, &prefix_options);
+            builder.add_file(path, dest)?;
         }
 
         Ok(manifest_path)
