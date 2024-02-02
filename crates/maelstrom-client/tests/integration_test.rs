@@ -1,4 +1,4 @@
-use maelstrom_base::{ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess};
+use maelstrom_base::{ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Sha256Digest};
 use maelstrom_client::Client;
 use maelstrom_test::{
     client_driver::TestClientDriver,
@@ -7,12 +7,15 @@ use maelstrom_test::{
 };
 use maelstrom_util::fs::Fs;
 use maplit::hashmap;
-use nonempty::nonempty;
+use nonempty::{nonempty, NonEmpty};
+use std::path::Path;
 use std::sync::mpsc;
 use tempfile::tempdir;
 
-#[test]
-fn basic_add_job() {
+fn basic_job_test(
+    add_artifacts: impl FnOnce(&mut Client, &Path) -> NonEmpty<(Sha256Digest, ArtifactType)>,
+    verify_artifacts: impl FnOnce(&Path, &NonEmpty<(Sha256Digest, ArtifactType)>),
+) {
     let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
     let project_dir = tmp_dir.path().join("project");
@@ -48,17 +51,14 @@ fn basic_add_job() {
     .unwrap();
     let mut broker_conn = broker.accept();
 
-    let test_artifact = artifact_dir.join("test_artifact");
-    fs.write(&test_artifact, b"hello world").unwrap();
-
-    let digest = client.add_artifact(&test_artifact).unwrap();
+    let layers = add_artifacts(&mut client, &artifact_dir);
     client_driver.process_client_messages();
 
     let spec = JobSpec {
         program: utf8_path_buf!("foo"),
         arguments: vec!["bar".into()],
         environment: vec![],
-        layers: nonempty![(digest.clone(), ArtifactType::Tar)],
+        layers: layers.clone(),
         devices: Default::default(),
         mounts: vec![],
         enable_loopback: false,
@@ -75,18 +75,38 @@ fn basic_add_job() {
 
     client_driver.process_client_messages();
     broker_conn.process(1, true /* fetch_layers */);
-    client_driver.process_broker_msg(1);
 
-    client_driver.process_artifact(|| broker.receive_artifact(&artifact_dir));
-    assert_eq!(
-        fs.read_to_string(&artifact_dir.join(digest.to_string()))
-            .unwrap(),
-        "hello world"
-    );
+    for _ in 0..layers.len() {
+        client_driver.process_broker_msg(1);
+        client_driver.process_artifact(|| broker.receive_artifact(&artifact_dir));
+    }
+
+    verify_artifacts(&artifact_dir, &layers);
 
     broker_conn.process(1, true /* fetch_layers */);
     client_driver.process_broker_msg(1);
 
     let (_id, result) = recv.recv().unwrap();
     assert_eq!(test_job_result, result.unwrap());
+}
+
+#[test]
+fn basic_job_with_tar_artifact() {
+    let fs = Fs::new();
+    basic_job_test(
+        |client, artifact_dir| {
+            let test_artifact = artifact_dir.join("test_artifact");
+            fs.write(&test_artifact, b"hello world").unwrap();
+            let digest = client.add_artifact(&test_artifact).unwrap();
+            nonempty![(digest.clone(), ArtifactType::Tar)]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            assert_eq!(
+                fs.read_to_string(&artifact_dir.join(digest.to_string()))
+                    .unwrap(),
+                "hello world"
+            );
+        },
+    );
 }
