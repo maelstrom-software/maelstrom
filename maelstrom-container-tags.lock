@@ -1,5 +1,8 @@
 version = 0
 
+[alpine]
+latest = "sha256:6457d53fb065d6f250e1504b9bc42d5b6c65941d57532c072d929dd0628977d0"
+
 [busybox]
 latest = "sha256:538721340ded10875f4710cad688c70e5d0ecb4dcd5e7d0c161f301f36f79414"
 
