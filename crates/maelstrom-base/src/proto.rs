@@ -4,6 +4,7 @@ use crate::{
     stats::{BrokerStatistics, JobStateCounts},
     ArtifactType, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest,
 };
+use bincode::Options;
 use serde::{Deserialize, Serialize};
 
 /// The first message sent by a connector to the broker. It identifies what the connector is, and
@@ -76,27 +77,31 @@ pub struct BrokerToArtifactPusher(pub Result<(), String>);
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ArtifactPusherToBroker(pub Sha256Digest, pub u64);
 
+fn bincode() -> impl Options {
+    bincode::options().with_big_endian()
+}
+
 pub fn serialize<T: ?Sized + Serialize>(value: &T) -> bincode::Result<Vec<u8>> {
-    bincode::serialize(value)
+    bincode().serialize(value)
 }
 
 pub fn serialize_into<W: std::io::Write, T: ?Sized + Serialize>(
     writer: W,
     value: &T,
 ) -> bincode::Result<()> {
-    bincode::serialize_into(writer, value)
+    bincode().serialize_into(writer, value)
 }
 
 pub fn serialized_size<T: ?Sized + Serialize>(value: &T) -> bincode::Result<u64> {
-    bincode::serialized_size(value)
+    bincode().serialized_size(value)
 }
 
 pub fn deserialize<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> bincode::Result<T> {
-    bincode::deserialize(bytes)
+    bincode().deserialize(bytes)
 }
 
 pub fn deserialize_from<R: std::io::Read, T: serde::de::DeserializeOwned>(
     reader: R,
 ) -> bincode::Result<T> {
-    bincode::deserialize_from(reader)
+    bincode().deserialize_from(reader)
 }
