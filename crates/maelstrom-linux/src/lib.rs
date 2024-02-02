@@ -165,18 +165,6 @@ impl ErrnoSentinel for i64 {
     }
 }
 
-impl ErrnoSentinel for *mut c_void {
-    fn sentinel() -> Self {
-        -1isize as *mut c_void
-    }
-}
-
-impl ErrnoSentinel for libc::sighandler_t {
-    fn sentinel() -> Self {
-        libc::SIG_ERR
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct ExitCode(c_int);
 
