@@ -130,7 +130,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
                 panic!("unexpected error waiting on child process {child_pid}: {e}")
             }) {
                 WaitStatus::Exited(code) => {
-                    process::exit(code.as_i32());
+                    process::exit(code.as_u8().into());
                 }
                 WaitStatus::Signaled(signal) => {
                     linux::raise(signal).unwrap_or_else(|e| {

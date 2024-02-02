@@ -169,16 +169,13 @@ impl ErrnoSentinel for i64 {
 pub struct ExitCode(c_int);
 
 impl ExitCode {
+    // Only 8 bits of exit code is actually stored by the kernel.
     pub fn from_u8(code: u8) -> Self {
         Self(code.into())
     }
 
     pub fn as_u8(&self) -> u8 {
         self.0 as u8
-    }
-
-    pub fn as_i32(&self) -> i32 {
-        self.0
     }
 }
 
