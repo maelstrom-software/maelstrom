@@ -18,6 +18,7 @@ extern "C" {
 }
 
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct CloneArgs(libc::clone_args);
 
 impl Default for CloneArgs {
@@ -337,7 +338,7 @@ impl PollEvents {
     pub const IN: Self = Self(libc::POLLIN);
 }
 
-#[repr(C)]
+#[repr(transparent)]
 pub struct PollFd(pollfd);
 
 impl PollFd {
