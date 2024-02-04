@@ -21,6 +21,7 @@ use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest as _, Sha256};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    fmt,
     io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     net::TcpStream,
     path::{Path, PathBuf},
@@ -408,12 +409,6 @@ impl PathHasher {
     }
 }
 
-fn path_hash(paths: &[Utf8PathBuf]) -> Sha256Digest {
-    let mut h = PathHasher::new();
-    paths.iter().for_each(|p| h.hash_path(p));
-    h.finish()
-}
-
 fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions) -> Utf8PathBuf {
     let mut path = path.to_owned();
     if let Some(prefix) = &prefix_options.strip_prefix {
@@ -482,11 +477,10 @@ impl Client {
         Ok(digest)
     }
 
-    fn manifest_path(&self, paths: &[Utf8PathBuf]) -> PathBuf {
-        let hash = path_hash(paths);
+    fn build_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join("manifests")
-            .join(format!("{hash}.manifest"))
+            .join(format!("{name}.manifest"))
     }
 
     fn build_manifest(
@@ -495,16 +489,21 @@ impl Client {
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
         let fs = Fs::new();
-        let manifest_path = self.manifest_path(paths);
-        let manifest_file = fs.create_file(&manifest_path)?;
+        let tmp_file_path = self.build_manifest_path(&".temp");
+        let manifest_file = fs.create_file(&tmp_file_path)?;
         let data_upload = |path: &_| self.add_artifact(path);
         let mut builder =
             ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
+        let mut path_hasher = PathHasher::new();
         for path in paths {
+            path_hasher.hash_path(path);
             let dest = calculate_manifest_entry_path(path, &prefix_options);
             builder.add_file(path, dest)?;
         }
+        drop(builder);
 
+        let manifest_path = self.build_manifest_path(&path_hasher.finish());
+        fs.rename(tmp_file_path, &manifest_path)?;
         Ok(manifest_path)
     }
 
