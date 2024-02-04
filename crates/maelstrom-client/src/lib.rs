@@ -389,12 +389,29 @@ impl ClientDriver for DefaultClientDriver {
     }
 }
 
-fn path_hash(paths: &[Utf8PathBuf]) -> Sha256Digest {
-    let mut hasher = Sha256::new();
-    for p in paths {
-        hasher.update(p.as_str().as_bytes());
+#[derive(Default)]
+struct PathHasher {
+    hasher: Sha256,
+}
+
+impl PathHasher {
+    fn new() -> Self {
+        Self::default()
     }
-    Sha256Digest::new(hasher.finalize().into())
+
+    fn hash_path(&mut self, path: &Utf8Path) {
+        self.hasher.update(path.as_str().as_bytes());
+    }
+
+    fn finish(self) -> Sha256Digest {
+        Sha256Digest::new(self.hasher.finalize().into())
+    }
+}
+
+fn path_hash(paths: &[Utf8PathBuf]) -> Sha256Digest {
+    let mut h = PathHasher::new();
+    paths.iter().for_each(|p| h.hash_path(p));
+    h.finish()
 }
 
 fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions) -> Utf8PathBuf {
