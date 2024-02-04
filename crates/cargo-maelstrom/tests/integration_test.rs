@@ -1267,13 +1267,17 @@ fn filtering_none_does_not_build() {
 
     let fs = Fs::new();
     let target_dir = tmp_dir.path().join("workspace/target");
-    let entries: Vec<_> = fs
+    let mut entries: Vec<_> = fs
         .read_dir(target_dir)
         .unwrap()
         .map(|e| path_file_name(&e.unwrap().path()))
         .collect();
+    entries.sort();
     assert_eq!(
         entries,
-        vec![LAST_TEST_LISTING_NAME.to_owned(), "manifests".to_owned()]
+        vec![
+            maelstrom_client::MANIFEST_DIR.to_owned(),
+            LAST_TEST_LISTING_NAME.to_owned(),
+        ]
     );
 }

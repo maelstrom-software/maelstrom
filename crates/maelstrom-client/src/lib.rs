@@ -425,6 +425,8 @@ fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions
 pub type JobResponseHandler =
     Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
 
+pub const MANIFEST_DIR: &str = "maelstrom-manifests";
+
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     driver: Box<dyn ClientDriver + Send + Sync>,
@@ -446,7 +448,7 @@ impl Client {
         driver.drive(deps);
 
         let fs = Fs::new();
-        fs.create_dir_all(cache_dir.as_ref().join("manifests"))?;
+        fs.create_dir_all(cache_dir.as_ref().join(MANIFEST_DIR))?;
 
         Ok(Client {
             dispatcher_sender,
@@ -479,7 +481,7 @@ impl Client {
 
     fn build_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
-            .join("manifests")
+            .join(MANIFEST_DIR)
             .join(format!("{name}.manifest"))
     }
 
