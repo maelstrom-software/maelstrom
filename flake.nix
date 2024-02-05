@@ -17,6 +17,9 @@
           inherit system;
         };
 
+        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+          targets = [ "wasm32-unknown-unknown" ];
+        };
         craneLib = crane.lib.${system};
         all = craneLib.buildPackage {
           # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
