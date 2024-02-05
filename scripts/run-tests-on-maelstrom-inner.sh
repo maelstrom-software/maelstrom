@@ -2,6 +2,9 @@
 
 set -x
 
+echo $PATH
+which cargo
+
 if ! cargo build --release; then
 	exit $!
 fi
