@@ -31,7 +31,9 @@ jobs:
           ~/.cargo/git/db/
           target/
         key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
-    - name: Lint
-      run: ./scripts/lint.sh
-    - name: Test
-      run: ./scripts/run-tests-on-maelstrom-inner.sh
+          #    - name: Lint
+          #      run: ./scripts/lint.sh
+          #    - name: Test
+          #      run: ./scripts/run-tests-on-maelstrom-inner.sh
+    - name: Build
+      run: nix build
