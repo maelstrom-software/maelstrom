@@ -4,8 +4,10 @@ set -x
 
 echo $PATH
 
-if ! cargo build --release; then
-	exit $!
+cargo build --release
+STATUS=$?
+if [ $STATUS -ne 0 ]; then
+	exit $STATUS
 fi
 
 TEMPFILE=$(mktemp --tmpdir run-tests-on-maelstrom-broker-stderr.XXXXXX)
@@ -25,6 +27,4 @@ if [ $CARGO_MAELSTROM_STATUS != 0 ]; then
 	exit $CARGO_MAELSTROM_STATUS
 fi
 
-if ! cargo test --doc; then
-	exit $!
-fi
+exec cargo test --doc
