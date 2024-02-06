@@ -2,4 +2,4 @@
 
 set -ex
 
-nix develop --ignore-environment --keep TERM --command ${0%%.sh}-inner.sh
+nix develop -v -v -v --ignore-environment --keep TERM --command ${0%%.sh}-inner.sh

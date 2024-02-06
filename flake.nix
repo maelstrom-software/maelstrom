@@ -26,14 +26,10 @@
           overlays = [ (import rust-overlay) ];
         };
 
-        rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+        rustToolchain = pkgs.rust-bin.stable."1.75.0".default.override {
           targets = [ "wasm32-unknown-unknown" ];
         };
-        craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain).overrideScope' (_final: _prev: {
-          # The version of wasm-bindgen-cli needs to match the version in Cargo.lock. You
-          # can unpin this if your nixpkgs commit contains the appropriate wasm-bindgen-cli version
-#          inherit (import nixpkgs-for-wasm-bindgen { inherit system; }) wasm-bindgen-cli;
-        });
+        craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain);
         all = craneLib.buildPackage {
           # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
