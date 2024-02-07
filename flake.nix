@@ -27,6 +27,7 @@
         };
 
         rustToolchain = pkgs.rust-bin.stable."1.75.0".default.override {
+	  extensions = [ "rust-src" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
         craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain);
