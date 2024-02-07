@@ -3,4 +3,4 @@
 set -ex
 
 pwd
-ls -lR .
+ls -laR ~
