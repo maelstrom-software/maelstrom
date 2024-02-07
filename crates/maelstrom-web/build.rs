@@ -11,6 +11,7 @@ fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
         .current_dir(dir)
         .status()
         .unwrap();
+    println!("cargo:warning=PATH={}", std::env::var("PATH").unwrap());
     assert!(status.success(), "{cmd:?} failed with status: {status:?}");
 }
 
