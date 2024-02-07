@@ -11,8 +11,6 @@ jobs:
     name: Build and Test Maelstrom
     runs-on: ubuntu-latest
     steps:
-    - name: Print CI environment.
-      run: ./scripts/print-ci-env.sh
     - name: Get Repository from Git
       uses: actions/checkout@v3
     - name: Install Nix
