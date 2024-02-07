@@ -21,15 +21,15 @@ jobs:
     # up prepended to PATH, which then causes problems.
     - name: Remove Rust provided by GitHub.
       run: rm -rf ~/.cargo ~/.rustup
-    - name: Set up Rust Cache
-      uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          target/
-        key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
+#   - name: Set up Rust Cache
+#     uses: actions/cache@v3
+#     with:
+#       path: |
+#         ~/.cargo/registry/index/
+#         ~/.cargo/registry/cache/
+#         ~/.cargo/git/db/
+#         target/
+#       key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
     - name: Cat .profile
       run: cat ~/.profile
     - name: Cat .bashrc
