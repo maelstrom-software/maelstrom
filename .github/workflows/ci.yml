@@ -21,6 +21,8 @@ jobs:
       uses: DeterminateSystems/flake-checker-action@main
       with:
         fail-mode: true
+    - name: Print CI environment.
+      run: ./scripts/print-ci-env.sh
     - name: Remove any cargo stuff.
       run: rm -rf .cargo
     - name: Remove any cargo stuff.
