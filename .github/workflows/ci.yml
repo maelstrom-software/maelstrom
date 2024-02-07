@@ -31,7 +31,7 @@ jobs:
 #         target/
 #       key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
     - name: Insert Warning
-      run: echo 'cargo:warning=In .profile.' >> ~/.profile
+      run: echo 'echo "cargo:warning=In .profile."' >> ~/.profile
     - name: Cat .profile
       run: cat ~/.profile
     - name: Cat .bashrc
