@@ -21,6 +21,10 @@ jobs:
       uses: DeterminateSystems/flake-checker-action@main
       with:
         fail-mode: true
+    - name: Remove any cargo stuff.
+      run: rm -rf .cargo
+    - name: Remove any cargo stuff.
+      run: rm -rf ~/.cargo
 #   - name: Set up Rust Cache
 #     uses: actions/cache@v3
 #     with:
