@@ -2,8 +2,6 @@
 
 set -x
 
-echo $PATH
-
 cargo build --release
 STATUS=$?
 if [ $STATUS -ne 0 ]; then
