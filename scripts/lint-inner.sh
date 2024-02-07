@@ -3,4 +3,5 @@
 set -ex
 
 cargo fmt --check
+cargo build
 cargo clippy
