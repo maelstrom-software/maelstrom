@@ -3,5 +3,5 @@
 set -ex
 
 cargo fmt --check
-cargo build
+cargo build --lib --package crates/maelstrom-web --target wasm32-dev-dev
 cargo clippy
