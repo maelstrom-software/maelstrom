@@ -34,6 +34,8 @@ jobs:
       run: cat ~/.profile
     - name: Cat .bashrc
       run: cat ~/.bashrc
+    - name: Insert warning
+      run: echo 'cargo:warning=In .profile.' >> ~/.profile
     - name: Lint
       run: ./scripts/lint.sh
     - name: Test
