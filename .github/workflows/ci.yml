@@ -39,6 +39,6 @@ jobs:
     - name: Lint
       run: ./scripts/lint.sh
     - name: Test
-      run: ./scripts/run-tests-on-maelstrom-inner.sh
+      run: ./scripts/run-tests-on-maelstrom.sh
     - name: Build
       run: nix build
