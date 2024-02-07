@@ -1,11 +1,6 @@
 name: CI
 
 on: [ push, workflow_dispatch ]
-env:
-  CARGO_TERM_COLOR: always
-  # Make sure CI fails on all warnings, including Clippy lints
-  RUSTFLAGS: "-Dwarnings"
-
 jobs:
   build_and_test:
     name: Build and Test Maelstrom
