@@ -2,6 +2,8 @@
 
 set -x
 
+echo $PATH
+
 if ! cargo build --release; then
 	exit $!
 fi

@@ -5,16 +5,6 @@ use std::process::Command;
 use wasm_bindgen_cli_support::Bindgen;
 
 fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
-    let path = std::env::var("PATH").unwrap();
-    let first_component = path.split(':').next().unwrap();
-    if !first_component.starts_with("/nix/store") {
-        let maybe_cargo = Path::new(first_component).join("cargo");
-        println!("cargo:warning=PATH starts with {first_component} which isn't in /nix/store");
-        if maybe_cargo.exists() {
-            println!("cargo:warning=A cargo binary exists in {first_component}");
-        }
-    }
-
     let cmd: Vec<&str> = cmd.into_iter().collect();
     let status = Command::new(cmd[0])
         .args(&cmd[1..])

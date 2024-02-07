@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-echo $PATH
-
 set -ex
+
+echo $PATH
 
 cargo fmt --check
 cargo clippy
