@@ -30,12 +30,12 @@ jobs:
 #         ~/.cargo/git/db/
 #         target/
 #       key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
+    - name: Insert Warning
+      run: echo 'cargo:warning=In .profile.' >> ~/.profile
     - name: Cat .profile
       run: cat ~/.profile
     - name: Cat .bashrc
       run: cat ~/.bashrc
-    - name: Insert warning
-      run: echo 'cargo:warning=In .profile.' >> ~/.profile
     - name: Lint
       run: ./scripts/lint.sh
     - name: Test
