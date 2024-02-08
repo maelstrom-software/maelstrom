@@ -2,7 +2,7 @@ name: CI
 
 on: [ push, workflow_dispatch ]
 jobs:
-  build_and_test:
+  check_nix_packages:
     name: Build and Test Maelstrom
     runs-on: ubuntu-latest
     steps:
@@ -16,11 +16,40 @@ jobs:
       uses: DeterminateSystems/flake-checker-action@main
       with:
         fail-mode: true
+
+  lint:
+    name: Run Rustfmt and Clippy on Rust
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get Repository from Git
+      uses: actions/checkout@v3
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+    - name: Set up Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
     # For some reason, GitHub provides Rust for us. The problem is that, when
     # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
     # up prepended to PATH, which then causes problems.
     - name: Remove Rust provided by GitHub.
       run: rm -rf ~/.cargo ~/.rustup
+    - name: Lint
+      run: ./scripts/lint.sh
+
+  run_all_tests_on_maelstrom:
+    name: Run All Maelstrom Tests on Maelstrom
+    runs-on: ubuntu-latest
+    steps:
+    - name: Get Repository from Git
+      uses: actions/checkout@v3
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+    - name: Set up Nix Cache
+      uses: DeterminateSystems/magic-nix-cache-action@main
+    # For some reason, GitHub provides Rust for us. The problem is that, when
+    # executing the recursive cargo invocation, the cargo in ~/.cargo/bin ends
+    # up prepended to PATH, which then causes problems.
+    - name: Remove Rust provided by GitHub.
+      run: rm -rf ~/.cargo/bin ~/.rustup
     - name: Set up Rust Cache
       uses: actions/cache@v3
       with:
@@ -30,8 +59,6 @@ jobs:
           ~/.cargo/git/db/
           target/
         key: maelstrom-${{ hashFiles('**/Cargo.lock') }}
-    - name: Lint
-      run: ./scripts/lint.sh
     - name: Test
       run: ./scripts/run-tests-on-maelstrom.sh
 
