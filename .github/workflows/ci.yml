@@ -3,11 +3,11 @@ name: CI
 on: [ push, workflow_dispatch ]
 jobs:
   check_nix_packages:
-    name: Build and Test Maelstrom
+    name: Check Nix Flake
     runs-on: ubuntu-latest
     steps:
     - name: Get Repository from Git
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
     - name: Set up Nix Cache
@@ -22,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Get Repository from Git
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
     - name: Set up Nix Cache
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Get Repository from Git
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
     - name: Set up Nix Cache
