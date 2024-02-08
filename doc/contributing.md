@@ -32,7 +32,7 @@ nix profile install 'nixpkgs#direnv'
 nix profile install 'nixpkgs#nix-direnv'
 ```
 
-Next, [set up `direnv`]().
+Next, [set up `direnv`](https://direnv.net/docs/hook.html).
 
 You now need to set up `nix-direnv`:
 ```bash
