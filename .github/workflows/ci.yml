@@ -85,7 +85,7 @@ jobs:
       - name: Set up Pages
         uses: actions/configure-pages@v4
       - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v1
+        uses: actions/upload-pages-artifact@v2
         with:
           # Upload entire repository
           path: 'site/book'
