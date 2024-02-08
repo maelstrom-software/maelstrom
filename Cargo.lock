@@ -760,7 +760,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-maelstrom"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2581,7 +2581,7 @@ checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
 name = "maelstrom-base"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "bincode",
  "camino",
@@ -2598,7 +2598,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-broker"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2629,7 +2629,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client-cli"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-container"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -2702,7 +2702,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-linux"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "derive_more",
  "libc",
@@ -2710,21 +2710,21 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-plot"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "maelstrom-simex"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "num",
 ]
 
 [[package]]
 name = "maelstrom-test"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2736,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-util"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-web"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -2782,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2821,7 +2821,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker-child"
-version = "0.5.0"
+version = "0.6.0-dev"
 dependencies = [
  "maelstrom-linux",
 ]
