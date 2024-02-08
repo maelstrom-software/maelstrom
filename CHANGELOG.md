@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Added
 
-- Crates.io publishing for Maelstrom. `cargo install cargo-maelstrom` now works.
-- Internal documentation for how to cut a release and for how to set up a
-  development environment.
+- Crates.io publishing for Maelstrom. `cargo install cargo-maelstrom` now
+  works. See: [cargo-maelstrom](https://crates.io/crates/cargo-maelstrom),
+  [maelstrom-worker](https://crates.io/crates/maelstrom-worker),
+  [maelstrom-broker](https://crates.io/crates/maelstrom-broker), etc.
+- [Internal documentation](doc/contributing.md) for how to cut a release and
+  for how to set up a development environment.
 - [A community Discord server](https://discord.gg/gcNEdpjr).
 - Support for Aarch64. The whole project can run on Arm or Intel/AMD processors
   now.
@@ -21,16 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file except that it only contains metadata. File contents are represented as
   SHA-256 digests. The consumer of a manifest must request the individual file
   contents separately, based on their SHA-256 digests. Manifests offer a number
-  of advantages over tar files in some cases:
+  of advantages over tar files:
   - When generating a manifest, the client only needs to compute checksums for
     those files that have actually changed.
   - Individual files can be cached on the broker, reducing the amount of data
-    that needs to be transferred from the clien to the broker.
+    that needs to be transferred from the client to the broker.
   - It is a lot easier for the client to generate a manifest without first
     copying all of the contents.
-- Scripts for doing CI steps locally. Now, a developer should be able to test
-  CI scripts locally on their own machines. These scripts use `nix develop`
-  under the hood.
+- [Scripts](scripts/) for doing CI steps locally. Now, a developer should be
+  able to test CI scripts locally on their own machines. These scripts use `nix
+  develop` under the hood.
 
 ### `cargo-maelstrom`
 
@@ -65,7 +68,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Changed
 
-- The way syscalls are done. We created a new package -- `maelstrom-linux` to
+- The way syscalls are done. We created a new package &mdash `maelstrom-linux` &mdash to
   encapsulate all of the syscalls we use. This crate directly uses `libc`
   instead of depending on `nix` and `nc`. This was motivated by adding Aarch64
   support.
