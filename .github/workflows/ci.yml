@@ -49,7 +49,7 @@ jobs:
     - name: Remove Rust provided by GitHub.
       run: rm -rf ~/.cargo/bin ~/.rustup
     - name: Set up Rust Cache
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cargo/registry/index/
@@ -85,10 +85,10 @@ jobs:
       - name: Set up Pages
         uses: actions/configure-pages@v4
       - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v2
         with:
           # Upload entire repository
           path: 'site/book'
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v1
