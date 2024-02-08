@@ -82,6 +82,7 @@
             pkgs.cargo-edit
             pkgs.cargo-nextest
             pkgs.cargo-watch
+	    pkgs.gh
             pkgs.ripgrep
             pkgs.rust-analyzer
             pkgs.stgit
