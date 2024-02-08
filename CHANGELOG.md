@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### General
+
+#### Added
+
+- Crates.io publishing for Maelstrom. `cargo install cargo-maelstrom` now works.
+- Internal documentation for how to cut a release and for how to set up a
+  development environment.
+- [A community Discord server](https://discord.gg/gcNEdpjr).
+- Support for Aarch64. The whole project can run on Arm or Intel/AMD processors
+  now.
+- Support for specifying layers using "manifests". A manifest is like a tar
+  file except that it only contains metadata. File contents are represented as
+  SHA-256 digests. The consumer of a manifest must request the individual file
+  contents separately, based on their SHA-256 digests. Manifests offer a number
+  of advantages over tar files in some cases:
+  - When generating a manifest, the client only needs to compute checksums for
+    those files that have actually changed.
+  - Individual files can be cached on the broker, reducing the amount of data
+    that needs to be transferred from the clien to the broker.
+  - It is a lot easier for the client to generate a manifest without first
+    copying all of the contents.
+- Scripts for doing CI steps locally. Now, a developer should be able to test
+  CI scripts locally on their own machines. These scripts use `nix develop`
+  under the hood.
+
+### `cargo-maelstrom`
+
+#### Changed
+
+- The way layers are submitted to take advantage of manifests. The new way is a
+  lot faster and also more space-efficient. Before, the whole layer was
+  constructed into a separate tar file, then checksummed. This resulted in a
+  lot of extra disk usage and wasted time. Now, files are checksummed in place,
+  and the checksum is cached.
+- The syntax for specifying layers. A layer now is a table/dictionary, and it
+  must be of one of two types.
+  - Tar layers have a `tar` string attribute.
+  - Paths layers have a `paths` string vector attribute, which is a list of
+    files to include from the client. Optional `strip_prefix` or
+    `prepend_prefix` attributes can be specified to determine the paths of the
+    specified files that the job sees.
+
+### `maelstrom-client-cli`
+
+#### Changed
+
+- The layer syntax has been changed in the same was as for `cargo-maelstrom`.
+
+### `maelstrom-broker`
+
+#### Fixed
+
+- A bug where duplicate layers would cause the broker to crash.
+
+### `maelstrom-worker`
+
+#### Changed
+
+- The way syscalls are done. We created a new package -- `maelstrom-linux` to
+  encapsulate all of the syscalls we use. This crate directly uses `libc`
+  instead of depending on `nix` and `nc`. This was motivated by adding Aarch64
+  support.
+
 ## [0.4.0] - 2024-01-19
 
 ### General
