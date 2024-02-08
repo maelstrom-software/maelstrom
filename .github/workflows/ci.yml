@@ -85,9 +85,9 @@ jobs:
           cd site
           mdbook build
       - name: Set up Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v2
       - name: Upload Artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v1
         with:
           # Upload entire repository
           path: 'site/book'
