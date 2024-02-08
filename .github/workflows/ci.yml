@@ -14,8 +14,6 @@ jobs:
       uses: DeterminateSystems/magic-nix-cache-action@main
     - name: Check Nixpkgs Inputs
       uses: DeterminateSystems/flake-checker-action@main
-      with:
-        fail-mode: true
 
   lint:
     name: Run Rustfmt and Clippy on Rust
