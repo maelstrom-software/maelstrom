@@ -438,6 +438,7 @@ pub struct Client {
     container_image_depot: ContainerImageDepot,
     processed_artifact_paths: HashSet<PathBuf>,
     cache_dir: PathBuf,
+    project_dir: PathBuf,
 }
 
 impl Client {
@@ -461,6 +462,7 @@ impl Client {
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             processed_artifact_paths: HashSet::default(),
             cache_dir: cache_dir.as_ref().to_owned(),
+            project_dir: project_dir.as_ref().to_owned(),
         })
     }
 

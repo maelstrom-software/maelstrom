@@ -23,8 +23,6 @@ fn basic_job_test(
 ) {
     let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
-    let project_dir = tmp_dir.path().join("project");
-    fs.create_dir(&project_dir).unwrap();
     let cache_dir = tmp_dir.path().join("cache");
     fs.create_dir(&cache_dir).unwrap();
     let artifact_dir = tmp_dir.path().join("artifacts");
@@ -50,7 +48,7 @@ fn basic_job_test(
     let mut client = Client::new(
         client_driver.clone(),
         broker.address().clone(),
-        project_dir,
+        &artifact_dir,
         cache_dir,
     )
     .unwrap();
