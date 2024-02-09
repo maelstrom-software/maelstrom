@@ -248,6 +248,6 @@ fn prefix_options_prepend_absolute() {
             strip_prefix: None,
             prepend_prefix: Some("foo/bar".into()),
         },
-        |artifact_path| Path::new("foo/bar").join(artifact_path),
+        |artifact_path| Path::new("foo/bar").join(artifact_path.strip_prefix("/").unwrap()),
     )
 }

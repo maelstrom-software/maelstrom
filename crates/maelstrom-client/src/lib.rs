@@ -417,7 +417,11 @@ fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions
         }
     }
     if let Some(prefix) = &prefix_options.prepend_prefix {
-        path = prefix.join(path);
+        if path.is_absolute() {
+            path = prefix.join(path.strip_prefix("/").unwrap());
+        } else {
+            path = prefix.join(path);
+        }
     }
     path
 }
