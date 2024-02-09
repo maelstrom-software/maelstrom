@@ -2638,6 +2638,7 @@ dependencies = [
  "enumset",
  "figment",
  "gethostname 0.4.3",
+ "globset",
  "indicatif",
  "maelstrom-base",
  "maelstrom-container",

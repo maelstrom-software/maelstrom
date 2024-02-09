@@ -13,6 +13,7 @@ use maelstrom_util::fs::Fs;
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};
 use sha2::{Digest as _, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use tempfile::tempdir;
@@ -161,6 +162,13 @@ fn verify_single_entry_manifest(
     assert_eq!(entry.path, expected_entry_path);
 }
 
+fn verify_empty_manifest(manifest_path: &Path) {
+    let fs = Fs::new();
+    let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
+    let entries = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
+    assert_eq!(entries, vec![]);
+}
+
 #[test]
 fn basic_job_with_add_layer_paths() {
     basic_job_test(
@@ -297,4 +305,131 @@ fn paths_prefix_prepend_relative() {
         },
         |_| Path::new("foo/bar/test_artifact").to_owned(),
     )
+}
+
+fn basic_job_with_add_layer_glob_and_prefix(
+    glob_factory: impl FnOnce(&Path) -> String,
+    input_files: HashMap<&str, &str>,
+    prefix_options_factory: impl FnOnce(&Path) -> PrefixOptions,
+    expected_path: &Path,
+) {
+    basic_job_test(
+        |client, artifact_dir| {
+            let fs = Fs::new();
+            for (path, contents) in input_files {
+                let artifact = artifact_dir.join(path);
+                fs.create_dir_all(artifact.parent().unwrap()).unwrap();
+                fs.write(artifact, contents.as_bytes()).unwrap();
+            }
+
+            let digest_and_type = client
+                .add_layer(Layer::Glob {
+                    glob: glob_factory(&artifact_dir),
+                    prefix_options: prefix_options_factory(artifact_dir),
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            verify_single_entry_manifest(
+                &artifact_dir.join(digest.to_string()),
+                expected_path,
+                ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            )
+        },
+    );
+}
+
+#[test]
+fn glob_basic_relative() {
+    basic_job_with_add_layer_glob_and_prefix(
+        |_| "*.txt".into(),
+        hashmap! {
+            "foo.txt" => "hello world",
+            "bar.bin" => "hello world",
+        },
+        |_| PrefixOptions::default(),
+        &Path::new("foo.txt"),
+    )
+}
+
+#[test]
+fn glob_strip_and_prepend_prefix_relative() {
+    basic_job_with_add_layer_glob_and_prefix(
+        |_| "*.txt".into(),
+        hashmap! {
+            "foo.txt" => "hello world",
+            "bar.bin" => "hello world",
+        },
+        |artifact_dir| PrefixOptions {
+            strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
+            prepend_prefix: Some("foo/bar".into()),
+        },
+        &Path::new("foo/bar/foo.txt"),
+    )
+}
+
+#[test]
+fn glob_strip_prefix_relative() {
+    basic_job_with_add_layer_glob_and_prefix(
+        |_| "*.txt".into(),
+        hashmap! {
+            "foo.txt" => "hello world",
+            "bar.bin" => "hello world",
+        },
+        |artifact_dir| PrefixOptions {
+            strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
+            prepend_prefix: None,
+        },
+        &Path::new("foo.txt"),
+    )
+}
+
+#[test]
+fn glob_prepend_prefix_relative() {
+    basic_job_with_add_layer_glob_and_prefix(
+        |_| "*.txt".into(),
+        hashmap! {
+            "foo.txt" => "hello world",
+            "bar.bin" => "hello world",
+        },
+        |_| PrefixOptions {
+            strip_prefix: None,
+            prepend_prefix: Some("foo/".into()),
+        },
+        &Path::new("foo/foo.txt"),
+    )
+}
+
+#[test]
+fn glob_sub_dir_relative() {
+    basic_job_with_add_layer_glob_and_prefix(
+        |_| "foo/*".into(),
+        hashmap! {
+            "foo/bar.txt" => "hello world",
+            "bar.bin" => "hello world",
+        },
+        |_| PrefixOptions::default(),
+        &Path::new("foo/bar.txt"),
+    )
+}
+
+#[test]
+fn glob_no_files_relative() {
+    basic_job_test(
+        |client, _artifact_dir| {
+            let digest_and_type = client
+                .add_layer(Layer::Glob {
+                    glob: "*.txt".into(),
+                    prefix_options: Default::default(),
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            verify_empty_manifest(&artifact_dir.join(digest.to_string()))
+        },
+    );
 }

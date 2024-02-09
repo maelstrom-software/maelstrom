@@ -539,7 +539,21 @@ impl Client {
                     self.build_manifest(paths.iter().map(|p| Ok(p)), prefix_options)?;
                 Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
             }
-            _ => Err(anyhow!("unimplemented layer type")),
+            Layer::Glob {
+                glob,
+                prefix_options,
+            } => {
+                let mut glob_builder = globset::GlobSet::builder();
+                glob_builder.add(globset::Glob::new(&glob)?);
+                let fs = Fs::new();
+                let project_dir = self.project_dir.clone();
+                let manifest_path = self.build_manifest(
+                    fs.glob_walk(&self.project_dir, &glob_builder.build()?)
+                        .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
+                    prefix_options,
+                )?;
+                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+            }
         }
     }
 

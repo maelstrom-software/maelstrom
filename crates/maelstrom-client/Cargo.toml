@@ -19,6 +19,7 @@ directories.workspace = true
 enumset.workspace = true
 figment.workspace = true
 gethostname.workspace = true
+globset.workspace = true
 indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-util.workspace = true
