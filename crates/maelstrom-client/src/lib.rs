@@ -491,7 +491,7 @@ impl Client {
 
     fn build_manifest(
         &mut self,
-        paths: impl Iterator<Item = impl AsRef<Utf8Path>>,
+        paths: impl Iterator<Item = Result<impl AsRef<Path>>>,
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
         let fs = Fs::new();
@@ -502,9 +502,12 @@ impl Client {
             ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
         let mut path_hasher = PathHasher::new();
         for path in paths {
-            path_hasher.hash_path(path.as_ref());
-            let dest = calculate_manifest_entry_path(path.as_ref(), &prefix_options);
-            builder.add_file(path.as_ref(), dest)?;
+            let std_path = path?;
+            let path =
+                Utf8Path::from_path(std_path.as_ref()).ok_or_else(|| anyhow!("non-utf8 path"))?;
+            path_hasher.hash_path(path);
+            let dest = calculate_manifest_entry_path(path, &prefix_options);
+            builder.add_file(path, dest)?;
         }
         drop(builder);
 
@@ -520,7 +523,8 @@ impl Client {
                 paths,
                 prefix_options,
             } => {
-                let manifest_path = self.build_manifest(paths.iter(), prefix_options)?;
+                let manifest_path =
+                    self.build_manifest(paths.iter().map(|p| Ok(p)), prefix_options)?;
                 Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
             }
             _ => Err(anyhow!("unimplemented layer type")),
