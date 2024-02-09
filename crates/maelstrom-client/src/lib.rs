@@ -516,7 +516,7 @@ impl Client {
             let entry_path = if input_path_relative {
                 utf8_path.strip_prefix(&project_dir).unwrap()
             } else {
-                &utf8_path
+                utf8_path
             };
             let dest = calculate_manifest_entry_path(entry_path, &prefix_options);
             builder.add_file(utf8_path, dest)?;
@@ -535,8 +535,7 @@ impl Client {
                 paths,
                 prefix_options,
             } => {
-                let manifest_path =
-                    self.build_manifest(paths.iter().map(|p| Ok(p)), prefix_options)?;
+                let manifest_path = self.build_manifest(paths.iter().map(Ok), prefix_options)?;
                 Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
             }
             Layer::Glob {
