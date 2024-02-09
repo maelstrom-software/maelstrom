@@ -128,7 +128,8 @@ These are the steps to take:
 ## Update `version` in `[workspace.package]` in `Cargo.toml`
 
 This is a bit tricky because you have to update the version itself as well as
-all internal dependencies:
+all internal dependencies. Thus, we use the `cargo-set-version` tool to make
+sure we get it right:
 ```bash
 cargo set-version $VERSION
 ```
@@ -164,7 +165,7 @@ published before the package itself. We'll automate this at some point, but for
 now:
 
 ```bash
-for i in crates/{maelstrom-{base,linux,plot,simex,test,worker-child,util,web,worker,broker,container,client,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
+for i in crates/{maelstrom-{base,linux,plot,simex,util,container,worker-child,client,test,web,worker,broker,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
 ```
 
 To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and
