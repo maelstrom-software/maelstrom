@@ -70,12 +70,12 @@ These are the items we need to do to release:
   - Tag previous changeset with the version tag.
   - Push changesets and tags.
   - Publish to crates.io.
+  - Create GitHub release.
   - Update `CHANGELOG.md` for unreleased changes.
   - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
   - Commit above changes.
   - Push changesets.
   - Unset environment variables.
-  - Create GitHub release.
   - Update GitHub milestones.
 
 ## Set Environment Variables
@@ -172,6 +172,19 @@ To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and
 that secret must allow you to publish these crates. If that is not the case,
 ask Neal for the secret and then run `cargo login`.
 
+## Create GitHub Release
+
+There is a cli for GitHub that we use:
+
+```bash
+gh release create "v$VERSION" -F <(./scripts/extract-from-changelog.sh "$VERSION" < CHANGELOG.md)
+```
+
+For this to work, you must have logged in with `gh auth login`.
+
+The subcommand (./scripts/extract-from-changelog.sh) extracts just the relevant
+part of the CHANGELOG to use as the release notes.
+
 ## Update `CHANGELOG.md` for Unreleased Changes
 
 Add the `[Unreleased]` section into `CHANGELOG.md`. This should look like:
@@ -221,11 +234,6 @@ git push
 ```bash
 unset VERSION NEXT_VERSION
 ```
-
-## Create GitHub Release
-
-Go to the [GitHub releases page](https://github.com/maelstrom-software/maelstrom/releases). Click `Draft a
-new release`. Use the tag you just crated to draft the release.
 
 ## Update GitHub Milestones
 
