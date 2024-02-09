@@ -189,18 +189,24 @@ fn basic_job_with_add_layer_paths() {
 }
 
 fn basic_job_with_add_layer_paths_and_prefix(
+    input_path_factory: impl FnOnce(&Path) -> PathBuf,
     prefix_options_factory: impl FnOnce(&Path) -> PrefixOptions,
     expected_path_factory: impl FnOnce(&Path) -> PathBuf,
 ) {
     basic_job_test(
         |client, artifact_dir| {
-            let test_artifact = artifact_dir.join("test_artifact");
+            let input_path = input_path_factory(&artifact_dir);
+            let mut artifact_path = input_path.clone();
+            if artifact_path.is_relative() {
+                artifact_path = artifact_dir.join(artifact_path);
+            }
             let fs = Fs::new();
-            fs.write(&test_artifact, b"hello world").unwrap();
+            fs.create_dir_all(artifact_path.parent().unwrap()).unwrap();
+            fs.write(&artifact_path, b"hello world").unwrap();
 
             let digest_and_type = client
                 .add_layer(Layer::Paths {
-                    paths: vec![test_artifact.try_into().unwrap()],
+                    paths: vec![input_path.try_into().unwrap()],
                     prefix_options: prefix_options_factory(artifact_dir),
                 })
                 .unwrap();
@@ -210,7 +216,7 @@ fn basic_job_with_add_layer_paths_and_prefix(
             let digest = &layers[0].0;
             verify_single_entry_manifest(
                 &artifact_dir.join(digest.to_string()),
-                &expected_path_factory(&artifact_dir.join("test_artifact")),
+                &expected_path_factory(&artifact_dir),
                 ManifestEntryData::File(Some(hash_data(b"hello world"))),
             )
         },
@@ -218,34 +224,77 @@ fn basic_job_with_add_layer_paths_and_prefix(
 }
 
 #[test]
-fn prefix_options_both() {
+fn paths_prefix_strip_and_prepend_absolute() {
     basic_job_with_add_layer_paths_and_prefix(
+        |artifact_dir| artifact_dir.join("test_artifact"),
         |artifact_dir| PrefixOptions {
             strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
             prepend_prefix: Some("foo/".into()),
         },
-        |artifact_path| Path::new("foo/").join(artifact_path.file_name().unwrap()),
+        |_| Path::new("foo/test_artifact").to_owned(),
     )
 }
 
 #[test]
-fn prefix_options_strip_not_found() {
+fn paths_prefix_strip_and_prepend_relative() {
     basic_job_with_add_layer_paths_and_prefix(
+        |_| Path::new("bar/test_artifact").to_owned(),
+        |_| PrefixOptions {
+            strip_prefix: Some("bar".into()),
+            prepend_prefix: Some("foo/".into()),
+        },
+        |_| Path::new("foo/test_artifact").to_owned(),
+    )
+}
+
+#[test]
+fn paths_prefix_strip_not_found_absolute() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |artifact_dir| artifact_dir.join("test_artifact"),
         |_| PrefixOptions {
             strip_prefix: Some("not_there/".into()),
             prepend_prefix: None,
         },
-        |artifact_path| artifact_path.to_owned(),
+        |artifact_dir| artifact_dir.join("test_artifact"),
     )
 }
 
 #[test]
-fn prefix_options_prepend_absolute() {
+fn paths_prefix_strip_not_found_relative() {
     basic_job_with_add_layer_paths_and_prefix(
+        |_| Path::new("test_artifact").to_owned(),
+        |_| PrefixOptions {
+            strip_prefix: Some("not_there/".into()),
+            prepend_prefix: None,
+        },
+        |_| Path::new("test_artifact").to_owned(),
+    )
+}
+
+#[test]
+fn paths_prefix_prepend_absolute() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |artifact_dir| artifact_dir.join("test_artifact"),
         |_| PrefixOptions {
             strip_prefix: None,
             prepend_prefix: Some("foo/bar".into()),
         },
-        |artifact_path| Path::new("foo/bar").join(artifact_path.strip_prefix("/").unwrap()),
+        |artifact_dir| {
+            Path::new("foo/bar")
+                .join(artifact_dir.strip_prefix("/").unwrap())
+                .join("test_artifact")
+        },
+    )
+}
+
+#[test]
+fn paths_prefix_prepend_relative() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |_| Path::new("test_artifact").to_owned(),
+        |_| PrefixOptions {
+            strip_prefix: None,
+            prepend_prefix: Some("foo/bar".into()),
+        },
+        |_| Path::new("foo/bar/test_artifact").to_owned(),
     )
 }

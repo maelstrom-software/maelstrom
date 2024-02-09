@@ -497,19 +497,29 @@ impl Client {
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
         let fs = Fs::new();
+        let project_dir = self.project_dir.clone();
         let tmp_file_path = self.build_manifest_path(&".temp");
         let manifest_file = fs.create_file(&tmp_file_path)?;
         let data_upload = |path: &_| self.add_artifact(path);
         let mut builder =
             ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
         let mut path_hasher = PathHasher::new();
-        for path in paths {
-            let std_path = path?;
-            let path =
-                Utf8Path::from_path(std_path.as_ref()).ok_or_else(|| anyhow!("non-utf8 path"))?;
-            path_hasher.hash_path(path);
-            let dest = calculate_manifest_entry_path(path, &prefix_options);
-            builder.add_file(path, dest)?;
+        for maybe_path in paths {
+            let mut path = maybe_path?.as_ref().to_owned();
+            let input_path_relative = path.is_relative();
+            if input_path_relative {
+                path = project_dir.join(path);
+            }
+            let utf8_path = Utf8Path::from_path(&path).ok_or_else(|| anyhow!("non-utf8 path"))?;
+            path_hasher.hash_path(utf8_path);
+
+            let entry_path = if input_path_relative {
+                utf8_path.strip_prefix(&project_dir).unwrap()
+            } else {
+                &utf8_path
+            };
+            let dest = calculate_manifest_entry_path(entry_path, &prefix_options);
+            builder.add_file(utf8_path, dest)?;
         }
         drop(builder);
 
