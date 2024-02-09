@@ -278,6 +278,7 @@ impl Fs {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(path)
                 .with_context(|| format!("open_or_create(\"{}\")", path.display()))?,
             path: path.into(),

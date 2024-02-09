@@ -172,8 +172,7 @@ impl<'a> ImageOption<'a> {
     /// this will return an error.
     pub fn working_directory(&self) -> Result<Utf8PathBuf> {
         self.working_directory
-            .as_ref()
-            .map(Clone::clone)
+            .clone()
             .ok_or_else(|| anyhow!("image {} has no working directory to use", self.name()))
     }
 }

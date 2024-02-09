@@ -382,9 +382,7 @@ impl<'a> Simulation<'a> {
     /// ```
     pub fn choose_unknown_size<T: IntoIterator>(&mut self, i: T) -> Option<T::Item> {
         let mut iter = i.into_iter();
-        let Some(mut a) = iter.next() else {
-            return None;
-        };
+        let mut a = iter.next()?;
         for b in iter {
             if self.choose_bool() {
                 a = b;
