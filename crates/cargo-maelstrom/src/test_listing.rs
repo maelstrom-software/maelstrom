@@ -98,10 +98,9 @@ fn filter_case(
 }
 
 impl TestListing {
-    pub fn add_cases(&mut self, artifact: &CargoArtifact, cases: &[String]) {
-        let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+    pub fn add_cases(&mut self, package_name: &str, artifact: &CargoArtifact, cases: &[String]) {
         let artifact_key = ArtifactKey::from_target(&artifact.target);
-        let package = self.packages.entry(package_name).or_default();
+        let package = self.packages.entry(package_name.into()).or_default();
         package.artifacts.insert(
             artifact_key,
             ArtifactCases {

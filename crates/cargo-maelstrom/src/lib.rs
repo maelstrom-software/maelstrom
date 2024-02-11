@@ -10,7 +10,7 @@ pub mod visitor;
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
-use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
+use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest};
@@ -22,7 +22,7 @@ use progress::{
     TestListingProgress, TestListingProgressNoSpinner,
 };
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     io,
     path::{Path, PathBuf},
     str,
@@ -51,10 +51,14 @@ fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
 }
 
 /// Returns `true` if the given `CargoArtifact` and case matches the given pattern
-fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bool {
-    let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+fn filter_case(
+    package_name: &str,
+    artifact: &CargoArtifact,
+    case: &str,
+    p: &pattern::Pattern,
+) -> bool {
     let c = pattern::Context {
-        package: package_name,
+        package: package_name.into(),
         artifact: Some(pattern::Artifact::from_target(&artifact.target)),
         case: Some(pattern::Case { name: case.into() }),
     };
@@ -68,7 +72,7 @@ fn filter_case(artifact: &CargoArtifact, case: &str, p: &pattern::Pattern) -> bo
 /// This object is separate from `MainAppDeps` because it is lent to `JobQueuing`
 struct JobQueuingDeps<StdErrT> {
     cargo: String,
-    packages: Vec<CargoPackage>,
+    packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
     stderr: Mutex<StdErrT>,
     stderr_color: bool,
@@ -84,7 +88,7 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         cargo: String,
-        packages: Vec<CargoPackage>,
+        packages: BTreeMap<PackageId, CargoPackage>,
         filter: pattern::Pattern,
         stderr: StdErrT,
         stderr_color: bool,
@@ -156,9 +160,9 @@ where
     let mut cases = get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_deps.test_listing.lock().unwrap();
-    listing.add_cases(artifact, &cases[..]);
+    listing.add_cases(package_name, artifact, &cases[..]);
 
-    cases.retain(|c| filter_case(artifact, c, &queuing_deps.filter));
+    cases.retain(|c| filter_case(package_name, artifact, c, &queuing_deps.filter));
     Ok(TestListingResult {
         cases,
         ignored_cases,
@@ -350,7 +354,7 @@ where
     ) -> Result<Self> {
         let package_names: Vec<_> = queuing_deps
             .packages
-            .iter()
+            .values()
             .map(|p| p.name.clone())
             .collect();
 
@@ -389,14 +393,20 @@ where
         };
         let artifact = artifact?;
 
-        let package_name = artifact.package_id.repr.split(' ').next().unwrap().into();
+        let package_name = &self
+            .queuing_deps
+            .packages
+            .get(&artifact.package_id)
+            .expect("artifact for unknown package")
+            .name;
+
         self.artifact_queuing = Some(ArtifactQueuing::new(
             self.queuing_deps,
             self.client,
             self.width,
             self.ind.clone(),
             artifact,
-            package_name,
+            package_name.into(),
         )?);
 
         Ok(true)
@@ -483,7 +493,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         let selected_packages = workspace_packages
             .iter()
             .filter(|p| filter_package(p, &filter))
-            .map(|&p| p.clone())
+            .map(|&p| (p.id.clone(), p.clone()))
             .collect();
 
         Ok(Self {
@@ -618,20 +628,24 @@ where
     }
 }
 
-fn list_packages<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
-where
+fn list_packages<ProgressIndicatorT>(
+    ind: &ProgressIndicatorT,
+    packages: &BTreeMap<PackageId, CargoPackage>,
+) where
     ProgressIndicatorT: ProgressIndicator,
 {
-    for pkg in packages {
+    for pkg in packages.values() {
         ind.println(format!("package {}", &pkg.name));
     }
 }
 
-fn list_binaries<ProgressIndicatorT>(ind: &ProgressIndicatorT, packages: &[CargoPackage])
-where
+fn list_binaries<ProgressIndicatorT>(
+    ind: &ProgressIndicatorT,
+    packages: &BTreeMap<PackageId, CargoPackage>,
+) where
     ProgressIndicatorT: ProgressIndicator,
 {
-    for pkg in packages {
+    for pkg in packages.values() {
         for tgt in &pkg.targets {
             if tgt.test {
                 let pkg_kind = pattern::ArtifactKind::from_target(tgt);
