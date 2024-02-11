@@ -1,7 +1,7 @@
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestReader},
     ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, PrefixOptions,
-    Sha256Digest,
+    Sha256Digest, SymlinkSpec,
 };
 use maelstrom_client::Client;
 use maelstrom_test::{
@@ -463,4 +463,29 @@ fn stub_file_test() {
 #[test]
 fn stub_dir_test() {
     stubs_test("/foo/", ManifestEntryData::Directory);
+}
+
+#[test]
+fn symlink_test() {
+    basic_job_test(
+        |client, _| {
+            let digest_and_type = client
+                .add_layer(Layer::Symlinks {
+                    symlinks: vec![SymlinkSpec {
+                        link: utf8_path_buf!("/foo"),
+                        target: utf8_path_buf!("/bar"),
+                    }],
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            verify_single_entry_manifest(
+                &artifact_dir.join(digest.to_string()),
+                &Path::new("/foo"),
+                ManifestEntryData::Symlink(b"/bar".to_vec()),
+            )
+        },
+    );
 }

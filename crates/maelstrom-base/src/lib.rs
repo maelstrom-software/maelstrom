@@ -100,10 +100,15 @@ pub struct JobMount {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
 pub struct PrefixOptions {
     pub strip_prefix: Option<Utf8PathBuf>,
     pub prepend_prefix: Option<Utf8PathBuf>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct SymlinkSpec {
+    pub link: Utf8PathBuf,
+    pub target: Utf8PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -125,6 +130,9 @@ pub enum Layer {
     },
     Stubs {
         stubs: Vec<Utf8PathBuf>,
+    },
+    Symlinks {
+        symlinks: Vec<SymlinkSpec>,
     },
 }
 

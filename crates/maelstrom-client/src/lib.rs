@@ -12,7 +12,7 @@ use maelstrom_base::{
     },
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobSpec, JobStringResult, Layer, PrefixOptions, Sha256Digest,
-    Utf8Path, Utf8PathBuf,
+    SymlinkSpec, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::{
@@ -440,6 +440,7 @@ pub type JobResponseHandler =
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
+pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
@@ -464,8 +465,9 @@ impl Client {
         driver.drive(deps);
 
         let fs = Fs::new();
-        fs.create_dir_all(cache_dir.as_ref().join(MANIFEST_DIR))?;
-        fs.create_dir_all(cache_dir.as_ref().join(STUB_MANIFEST_DIR))?;
+        for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
+            fs.create_dir_all(cache_dir.as_ref().join(d))?;
+        }
 
         Ok(Client {
             dispatcher_sender,
@@ -507,6 +509,12 @@ impl Client {
     fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(STUB_MANIFEST_DIR)
+            .join(format!("{name}.manifest"))
+    }
+
+    fn build_symlink_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
+        self.cache_dir
+            .join(SYMLINK_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
     }
 
@@ -577,6 +585,33 @@ impl Client {
         Ok(manifest_path)
     }
 
+    fn build_symlink_manifest(&mut self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
+        let fs = Fs::new();
+        let tmp_file_path = self.build_manifest_path(&".temp");
+        let mut writer = ManifestWriter::new(fs.create_file(&tmp_file_path)?)?;
+        let mut path_hasher = PathHasher::new();
+        for SymlinkSpec { link, target } in symlinks {
+            path_hasher.hash_path(&link);
+            path_hasher.hash_path(&target);
+            let data = ManifestEntryData::Symlink(target.into_string().into_bytes());
+            let metadata = ManifestEntryMetadata {
+                size: 0,
+                mode: Mode(0o555),
+                mtime: ARBITRARY_TIME,
+            };
+            let entry = ManifestEntry {
+                path: link,
+                metadata,
+                data,
+            };
+            writer.write_entry(&entry)?;
+        }
+
+        let manifest_path = self.build_symlink_manifest_path(&path_hasher.finish());
+        fs.rename(tmp_file_path, &manifest_path)?;
+        Ok(manifest_path)
+    }
+
     pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         if let Some(l) = self.cached_layers.get(&layer) {
             return Ok(l.clone());
@@ -608,6 +643,10 @@ impl Client {
             }
             Layer::Stubs { stubs } => {
                 let manifest_path = self.build_stub_manifest(stubs)?;
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
+            }
+            Layer::Symlinks { symlinks } => {
+                let manifest_path = self.build_symlink_manifest(symlinks)?;
                 (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
         };
