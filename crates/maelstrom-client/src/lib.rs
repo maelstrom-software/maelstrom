@@ -449,6 +449,7 @@ pub struct Client {
     processed_artifact_paths: HashSet<PathBuf>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
+    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
 }
 
 impl Client {
@@ -474,6 +475,7 @@ impl Client {
             processed_artifact_paths: HashSet::default(),
             cache_dir: cache_dir.as_ref().to_owned(),
             project_dir: project_dir.as_ref().to_owned(),
+            cached_layers: HashMap::new(),
         })
     }
 
@@ -576,14 +578,18 @@ impl Client {
     }
 
     pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        match layer {
-            Layer::Tar { path } => Ok((self.add_artifact(path.as_std_path())?, ArtifactType::Tar)),
+        if let Some(l) = self.cached_layers.get(&layer) {
+            return Ok(l.clone());
+        }
+
+        let res = match layer.clone() {
+            Layer::Tar { path } => (self.add_artifact(path.as_std_path())?, ArtifactType::Tar),
             Layer::Paths {
                 paths,
                 prefix_options,
             } => {
                 let manifest_path = self.build_manifest(paths.iter().map(Ok), prefix_options)?;
-                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
             Layer::Glob {
                 glob,
@@ -598,13 +604,16 @@ impl Client {
                         .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
                     prefix_options,
                 )?;
-                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
             Layer::Stubs { stubs } => {
                 let manifest_path = self.build_stub_manifest(stubs)?;
-                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
-        }
+        };
+
+        self.cached_layers.insert(layer, res.clone());
+        Ok(res)
     }
 
     pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {

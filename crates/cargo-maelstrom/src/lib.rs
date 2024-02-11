@@ -263,6 +263,8 @@ where
             .queuing_deps
             .test_metadata
             .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
+        self.ind
+            .update_enqueue_status(format!("calculating layers for {case_str}"));
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
