@@ -123,6 +123,9 @@ pub enum Layer {
         #[serde(flatten)]
         prefix_options: PrefixOptions,
     },
+    Stubs {
+        stubs: Vec<Utf8PathBuf>,
+    },
 }
 
 /// ID of a user. This should be compatible with uid_t.

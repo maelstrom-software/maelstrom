@@ -3,6 +3,10 @@ pub mod spec;
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use maelstrom_base::{
+    manifest::{
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
+        UnixTimestamp,
+    },
     proto::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
@@ -426,10 +430,16 @@ fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions
     path
 }
 
+/// Having some deterministic time-stamp for files we create in manifests is useful for testing and
+/// potentially caching.
+/// I picked this time arbitrarily 2024-1-11 11:11:11
+const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
+
 pub type JobResponseHandler =
     Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
+pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
 
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
@@ -454,6 +464,7 @@ impl Client {
 
         let fs = Fs::new();
         fs.create_dir_all(cache_dir.as_ref().join(MANIFEST_DIR))?;
+        fs.create_dir_all(cache_dir.as_ref().join(STUB_MANIFEST_DIR))?;
 
         Ok(Client {
             dispatcher_sender,
@@ -488,6 +499,12 @@ impl Client {
     fn build_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(MANIFEST_DIR)
+            .join(format!("{name}.manifest"))
+    }
+
+    fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
+        self.cache_dir
+            .join(STUB_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
     }
 
@@ -528,6 +545,36 @@ impl Client {
         Ok(manifest_path)
     }
 
+    fn build_stub_manifest(&mut self, stubs: Vec<Utf8PathBuf>) -> Result<PathBuf> {
+        let fs = Fs::new();
+        let tmp_file_path = self.build_manifest_path(&".temp");
+        let mut writer = ManifestWriter::new(fs.create_file(&tmp_file_path)?)?;
+        let mut path_hasher = PathHasher::new();
+        for stub in stubs {
+            path_hasher.hash_path(&stub);
+            let data = if stub.as_str().ends_with('/') {
+                ManifestEntryData::Directory
+            } else {
+                ManifestEntryData::File(None)
+            };
+            let metadata = ManifestEntryMetadata {
+                size: 0,
+                mode: Mode(0o555),
+                mtime: ARBITRARY_TIME,
+            };
+            let entry = ManifestEntry {
+                path: stub,
+                metadata,
+                data,
+            };
+            writer.write_entry(&entry)?;
+        }
+
+        let manifest_path = self.build_stub_manifest_path(&path_hasher.finish());
+        fs.rename(tmp_file_path, &manifest_path)?;
+        Ok(manifest_path)
+    }
+
     pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         match layer {
             Layer::Tar { path } => Ok((self.add_artifact(path.as_std_path())?, ArtifactType::Tar)),
@@ -551,6 +598,10 @@ impl Client {
                         .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
                     prefix_options,
                 )?;
+                Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
+            }
+            Layer::Stubs { stubs } => {
+                let manifest_path = self.build_stub_manifest(stubs)?;
                 Ok((self.add_artifact(&manifest_path)?, ArtifactType::Manifest))
             }
         }

@@ -433,3 +433,34 @@ fn glob_no_files_relative() {
         },
     );
 }
+
+fn stubs_test(path: &str, expected_data: ManifestEntryData) {
+    basic_job_test(
+        |client, _| {
+            let digest_and_type = client
+                .add_layer(Layer::Stubs {
+                    stubs: vec![utf8_path_buf!(path)],
+                })
+                .unwrap();
+            nonempty![digest_and_type]
+        },
+        |artifact_dir, layers| {
+            let digest = &layers[0].0;
+            verify_single_entry_manifest(
+                &artifact_dir.join(digest.to_string()),
+                &Path::new(path),
+                expected_data,
+            )
+        },
+    );
+}
+
+#[test]
+fn stub_file_test() {
+    stubs_test("/foo", ManifestEntryData::File(None));
+}
+
+#[test]
+fn stub_dir_test() {
+    stubs_test("/foo/", ManifestEntryData::Directory);
+}

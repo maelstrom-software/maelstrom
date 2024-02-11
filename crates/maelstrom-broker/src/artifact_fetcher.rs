@@ -41,30 +41,31 @@ fn add_entry_to_tar(
     header.set_mode(entry.metadata.mode.into());
     header.set_mtime(i64::from(entry.metadata.mtime) as u64);
 
+    let path = entry.path.as_str().trim_start_matches('/');
     match &entry.data {
         ManifestEntryData::File(Some(digest)) => {
             header.set_entry_type(tar::EntryType::Regular);
             let (mut f, size) = get_file(fs, digest, scheduler_sender)?;
-            tar.append_data(&mut header, &entry.path, &mut f)?;
+            tar.append_data(&mut header, path, &mut f)?;
             assert_eq!(f.stream_position()?, size);
             scheduler_sender.send(SchedulerMessage::DecrementRefcount(digest.clone()))?;
         }
         ManifestEntryData::File(None) => {
             header.set_entry_type(tar::EntryType::Regular);
-            tar.append_data(&mut header, &entry.path, io::empty())?;
+            tar.append_data(&mut header, path, io::empty())?;
         }
         ManifestEntryData::Directory => {
             header.set_entry_type(tar::EntryType::Directory);
-            tar.append_data(&mut header, &entry.path, io::empty())?;
+            tar.append_data(&mut header, path, io::empty())?;
         }
         ManifestEntryData::Symlink(data) => {
             header.set_entry_type(tar::EntryType::Symlink);
             let target = str::from_utf8(data)?;
-            tar.append_link(&mut header, &entry.path, target)?;
+            tar.append_link(&mut header, path, target)?;
         }
         ManifestEntryData::Hardlink(target) => {
             header.set_entry_type(tar::EntryType::Link);
-            tar.append_link(&mut header, &entry.path, target)?;
+            tar.append_link(&mut header, path, target)?;
         }
     }
 
@@ -352,7 +353,7 @@ mod tests {
                     &mut receiver,
                     vec![
                         ManifestEntry {
-                            path: "foobar/a_file".into(),
+                            path: "/foobar/a_file".into(),
                             metadata: ManifestEntryMetadata {
                                 size: 0,
                                 mode: Mode(0o0555),
