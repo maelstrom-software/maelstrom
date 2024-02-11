@@ -231,8 +231,21 @@ where
         Ok(NonEmpty::try_from(layers).unwrap())
     }
 
+    fn format_case_str(&self, case: &str) -> String {
+        let mut s = self.package_name.to_string();
+        s += " ";
+
+        let artifact_name = &self.artifact.target.name;
+        if artifact_name != &self.package_name {
+            s += artifact_name;
+            s += " ";
+        }
+        s += case;
+        s
+    }
+
     fn queue_job_from_case(&mut self, case: &str) -> Result<EnqueueResult> {
-        let case_str = format!("{} {case}", &self.package_name);
+        let case_str = self.format_case_str(case);
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
 
