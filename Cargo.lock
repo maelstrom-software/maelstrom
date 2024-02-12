@@ -2756,7 +2756,6 @@ dependencies = [
  "fs2",
  "globset",
  "maelstrom-base",
- "maelstrom-test",
  "rand",
  "serde",
  "sha2",

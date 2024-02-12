@@ -92,7 +92,6 @@ mod tests {
     use super::*;
     use crate::fs::Fs;
     use maelstrom_base::manifest::ManifestReader;
-    use maelstrom_test::*;
     use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
 
@@ -122,7 +121,7 @@ mod tests {
     ) {
         let mut buffer = vec![];
         let mut builder =
-            ManifestBuilder::new(&mut buffer, follow_symlinks, |_| Ok(digest![42])).unwrap();
+            ManifestBuilder::new(&mut buffer, follow_symlinks, |_| Ok(42u64.into())).unwrap();
 
         let mut fixture = Fixture::new();
         build(&mut fixture, &mut builder);
@@ -161,7 +160,7 @@ mod tests {
             false, /* follow_symlinks */
             "foo/bar.txt",
             6,
-            ManifestEntryData::File(Some(digest![42])),
+            ManifestEntryData::File(Some(42u64.into())),
         );
     }
 
@@ -207,7 +206,7 @@ mod tests {
             true, /* follow_symlinks */
             "foo/bar.txt",
             6,
-            ManifestEntryData::File(Some(digest![42])),
+            ManifestEntryData::File(Some(42u64.into())),
         );
     }
 }
