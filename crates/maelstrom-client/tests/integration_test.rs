@@ -238,6 +238,7 @@ fn paths_prefix_strip_and_prepend_absolute() {
         |artifact_dir| PrefixOptions {
             strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
             prepend_prefix: Some("foo/".into()),
+            ..Default::default()
         },
         |_| Path::new("foo/test_artifact").to_owned(),
     )
@@ -250,6 +251,7 @@ fn paths_prefix_strip_and_prepend_relative() {
         |_| PrefixOptions {
             strip_prefix: Some("bar".into()),
             prepend_prefix: Some("foo/".into()),
+            ..Default::default()
         },
         |_| Path::new("foo/test_artifact").to_owned(),
     )
@@ -261,7 +263,7 @@ fn paths_prefix_strip_not_found_absolute() {
         |artifact_dir| artifact_dir.join("test_artifact"),
         |_| PrefixOptions {
             strip_prefix: Some("not_there/".into()),
-            prepend_prefix: None,
+            ..Default::default()
         },
         |artifact_dir| artifact_dir.join("test_artifact"),
     )
@@ -273,7 +275,7 @@ fn paths_prefix_strip_not_found_relative() {
         |_| Path::new("test_artifact").to_owned(),
         |_| PrefixOptions {
             strip_prefix: Some("not_there/".into()),
-            prepend_prefix: None,
+            ..Default::default()
         },
         |_| Path::new("test_artifact").to_owned(),
     )
@@ -284,8 +286,8 @@ fn paths_prefix_prepend_absolute() {
     basic_job_with_add_layer_paths_and_prefix(
         |artifact_dir| artifact_dir.join("test_artifact"),
         |_| PrefixOptions {
-            strip_prefix: None,
             prepend_prefix: Some("foo/bar".into()),
+            ..Default::default()
         },
         |artifact_dir| {
             Path::new("foo/bar")
@@ -300,10 +302,34 @@ fn paths_prefix_prepend_relative() {
     basic_job_with_add_layer_paths_and_prefix(
         |_| Path::new("test_artifact").to_owned(),
         |_| PrefixOptions {
-            strip_prefix: None,
             prepend_prefix: Some("foo/bar".into()),
+            ..Default::default()
         },
         |_| Path::new("foo/bar/test_artifact").to_owned(),
+    )
+}
+
+#[test]
+fn paths_prefix_canonicalize_relative() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |_| Path::new("test_artifact").to_owned(),
+        |_| PrefixOptions {
+            canonicalize: true,
+            ..Default::default()
+        },
+        |artifact_dir| artifact_dir.join("test_artifact"),
+    )
+}
+
+#[test]
+fn paths_prefix_canonicalize_absolute() {
+    basic_job_with_add_layer_paths_and_prefix(
+        |artifact_dir| artifact_dir.join("test_artifact"),
+        |_| PrefixOptions {
+            canonicalize: true,
+            ..Default::default()
+        },
+        |artifact_dir| artifact_dir.join("test_artifact"),
     )
 }
 
@@ -365,6 +391,7 @@ fn glob_strip_and_prepend_prefix_relative() {
         |artifact_dir| PrefixOptions {
             strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
             prepend_prefix: Some("foo/bar".into()),
+            ..Default::default()
         },
         &Path::new("foo/bar/foo.txt"),
     )
@@ -380,7 +407,7 @@ fn glob_strip_prefix_relative() {
         },
         |artifact_dir| PrefixOptions {
             strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
-            prepend_prefix: None,
+            ..Default::default()
         },
         &Path::new("foo.txt"),
     )
@@ -395,8 +422,8 @@ fn glob_prepend_prefix_relative() {
             "bar.bin" => "hello world",
         },
         |_| PrefixOptions {
-            strip_prefix: None,
             prepend_prefix: Some("foo/".into()),
+            ..Default::default()
         },
         &Path::new("foo/foo.txt"),
     )

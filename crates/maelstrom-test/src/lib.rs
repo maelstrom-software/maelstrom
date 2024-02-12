@@ -203,24 +203,32 @@ macro_rules! tar_layer {
 
 #[macro_export]
 macro_rules! glob_layer {
-    (_internal, $glob:expr, $strip_prefix:expr, $prepend_prefix:expr) => {
+    (
+        _internal,
+        $glob:expr,
+        $strip_prefix:expr,
+        $prepend_prefix:expr,
+        $canonicalize:expr
+    ) => {
         ::maelstrom_base::Layer::Glob {
             glob: ::std::convert::Into::into($glob),
             prefix_options: ::maelstrom_base::PrefixOptions {
                 strip_prefix: $strip_prefix,
                 prepend_prefix: $prepend_prefix,
+                canonicalize: $canonicalize,
             },
         }
     };
     ($glob:expr) => {
-        glob_layer!(_internal, $glob, None, None)
+        glob_layer!(_internal, $glob, None, None, false)
     };
     ($glob:expr, strip_prefix = $strip_prefix:expr) => {
         glob_layer!(
             _internal,
             $glob,
             Some(::std::convert::Into::into($strip_prefix)),
-            None
+            None,
+            false
         )
     };
     ($glob:expr, prepend_prefix = $prepend_prefix:expr) => {
@@ -228,39 +236,57 @@ macro_rules! glob_layer {
             _internal,
             $glob,
             None,
-            Some(::std::convert::Into::into($prepend_prefix))
+            Some(::std::convert::Into::into($prepend_prefix)),
+            false
         )
     };
-    ($glob:expr, strip_prefix = $strip_prefix:expr, prepend_prefix = $prepend_prefix:expr) => {
+    ($glob:expr, canonicalize = $canonicalize:expr) => {
+        glob_layer!(_internal, $glob, None, None, $canonicalize)
+    };
+    (
+        $glob:expr,
+        strip_prefix = $strip_prefix:expr,
+        prepend_prefix = $prepend_prefix:expr,
+        canonicalize = $canonicalize:expr
+    ) => {
         glob_layer!(
             _internal,
             $glob,
             Some(::std::convert::Into::into($strip_prefix)),
-            Some(::std::convert::Into::into($prepend_prefix))
+            Some(::std::convert::Into::into($prepend_prefix)),
+            $canonicalize
         )
     };
 }
 
 #[macro_export]
 macro_rules! paths_layer {
-    (_internal, [$($path:expr),*], $strip_prefix:expr, $prepend_prefix:expr) => {
+    (
+        _internal,
+        [$($path:expr),*],
+        $strip_prefix:expr,
+        $prepend_prefix:expr,
+        $canonicalize:expr
+    ) => {
         ::maelstrom_base::Layer::Paths {
             paths: vec![$(utf8_path_buf!($path)),*],
             prefix_options: ::maelstrom_base::PrefixOptions {
                 strip_prefix: $strip_prefix,
                 prepend_prefix: $prepend_prefix,
+                canonicalize: $canonicalize,
             },
         }
     };
     ([$($path:expr),*]) => {
-        paths_layer!(_internal, [$($path),*], None, None)
+        paths_layer!(_internal, [$($path),*], None, None, false)
     };
     ([$($path:expr),*], strip_prefix = $strip_prefix:expr) => {
         paths_layer!(
             _internal,
             [$($path),*],
             Some(::std::convert::Into::into($strip_prefix)),
-            None
+            None,
+            false
         )
     };
     ([$($path:expr),*], prepend_prefix = $prepend_prefix:expr) => {
@@ -268,15 +294,31 @@ macro_rules! paths_layer {
             _internal,
             [$($path),*],
             None,
-            Some(::std::convert::Into::into($prepend_prefix))
+            Some(::std::convert::Into::into($prepend_prefix)),
+            false
         )
     };
-    ([$($path:expr),*], strip_prefix = $strip_prefix:expr, prepend_prefix = $prepend_prefix:expr) => {
+    ([$($path:expr),*], canonicalize = $canonicalize:expr) => {
+        paths_layer!(
+            _internal,
+            [$($path),*],
+            None,
+            None,
+            $canonicalize
+        )
+    };
+    (
+        [$($path:expr),*],
+        strip_prefix = $strip_prefix:expr,
+        prepend_prefix = $prepend_prefix:expr,
+        canonicalize = $canonicalize:expr
+    ) => {
         paths_layer!(
             _internal,
             [$($path),*],
             Some(::std::convert::Into::into($strip_prefix)),
-            Some(::std::convert::Into::into($prepend_prefix))
+            Some(::std::convert::Into::into($prepend_prefix)),
+            $canonicalize
         )
     };
 }

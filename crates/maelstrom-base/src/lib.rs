@@ -103,6 +103,8 @@ pub struct JobMount {
 pub struct PrefixOptions {
     pub strip_prefix: Option<Utf8PathBuf>,
     pub prepend_prefix: Option<Utf8PathBuf>,
+    #[serde(default)]
+    pub canonicalize: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]

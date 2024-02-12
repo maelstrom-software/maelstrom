@@ -413,8 +413,19 @@ impl PathHasher {
     }
 }
 
-fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions) -> Utf8PathBuf {
+fn calculate_manifest_entry_path(
+    path: &Utf8Path,
+    root: &Path,
+    prefix_options: &PrefixOptions,
+) -> Result<Utf8PathBuf> {
     let mut path = path.to_owned();
+    if prefix_options.canonicalize {
+        let mut input = path.into_std_path_buf();
+        if input.is_relative() {
+            input = root.join(input);
+        }
+        path = Utf8PathBuf::try_from(input.canonicalize()?)?;
+    }
     if let Some(prefix) = &prefix_options.strip_prefix {
         if let Ok(new_path) = path.strip_prefix(prefix) {
             path = new_path.to_owned();
@@ -427,7 +438,7 @@ fn calculate_manifest_entry_path(path: &Utf8Path, prefix_options: &PrefixOptions
             path = prefix.join(path);
         }
     }
-    path
+    Ok(path)
 }
 
 /// Having some deterministic time-stamp for files we create in manifests is useful for testing and
@@ -545,7 +556,7 @@ impl Client {
             } else {
                 utf8_path
             };
-            let dest = calculate_manifest_entry_path(entry_path, &prefix_options);
+            let dest = calculate_manifest_entry_path(entry_path, &project_dir, &prefix_options)?;
             builder.add_file(utf8_path, dest)?;
         }
         drop(builder);

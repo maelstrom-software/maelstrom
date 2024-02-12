@@ -647,6 +647,21 @@ mod test {
                 ..Default::default()
             }
         );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ glob = "foo*.bin", canonicalize = true }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![glob_layer!(
+                    "foo*.bin",
+                    canonicalize = true
+                )])),
+                ..Default::default()
+            }
+        );
     }
 
     #[test]
@@ -691,6 +706,21 @@ mod test {
                 layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
                     ["foo.bin", "bar.bin"],
                     prepend_prefix = "a"
+                )])),
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ paths = ["foo.bin", "bar.bin"], canonicalize = true }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![paths_layer!(
+                    ["foo.bin", "bar.bin"],
+                    canonicalize = true
                 )])),
                 ..Default::default()
             }
