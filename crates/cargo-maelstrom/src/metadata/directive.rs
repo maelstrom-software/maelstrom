@@ -232,7 +232,7 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 mod test {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, JobMountFsType};
+    use maelstrom_base::{enum_set, JobMountFsType, SymlinkSpec};
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
@@ -722,6 +722,45 @@ mod test {
                     ["foo.bin", "bar.bin"],
                     canonicalize = true
                 )])),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn layers_stubs() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ stubs = ["/foo/bar", "/bin/{baz,qux}/"] }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![Layer::Stubs {
+                    stubs: vec!["/foo/bar".into(), "/bin/{baz,qux}/".into()]
+                }])),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn layers_symlinks() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                layers = [{ symlinks = [{ link = "/hi", target = "/there" }] }]
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                layers: Some(PossiblyImage::Explicit(vec![Layer::Symlinks {
+                    symlinks: vec![SymlinkSpec {
+                        link: "/hi".into(),
+                        target: "/there".into()
+                    }],
+                }])),
                 ..Default::default()
             }
         );
