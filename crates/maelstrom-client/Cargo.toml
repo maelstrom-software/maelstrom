@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+bracoxide.workspace = true
 chrono.workspace = true
 clap.workspace = true
 directories.workspace = true
@@ -21,6 +22,7 @@ figment.workspace = true
 gethostname.workspace = true
 globset.workspace = true
 indicatif.workspace = true
+itertools.workspace = true
 maelstrom-base.workspace = true
 maelstrom-util.workspace = true
 maelstrom-container.workspace = true

@@ -131,7 +131,7 @@ pub enum Layer {
         prefix_options: PrefixOptions,
     },
     Stubs {
-        stubs: Vec<Utf8PathBuf>,
+        stubs: Vec<String>,
     },
     Symlinks {
         symlinks: Vec<SymlinkSpec>,

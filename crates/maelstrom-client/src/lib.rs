@@ -2,6 +2,7 @@ pub mod spec;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
+use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{
         ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
@@ -441,6 +442,14 @@ fn calculate_manifest_entry_path(
     Ok(path)
 }
 
+fn expand_braces(expr: &str) -> Result<Vec<String>> {
+    if expr.contains('{') {
+        bracoxide::explode(expr).map_err(|e| anyhow!("{e}"))
+    } else {
+        Ok(vec![expr.to_owned()])
+    }
+}
+
 /// Having some deterministic time-stamp for files we create in manifests is useful for testing and
 /// potentially caching.
 /// I picked this time arbitrarily 2024-1-11 11:11:11
@@ -566,12 +575,13 @@ impl Client {
         Ok(manifest_path)
     }
 
-    fn build_stub_manifest(&mut self, stubs: Vec<Utf8PathBuf>) -> Result<PathBuf> {
+    fn build_stub_manifest(&mut self, stubs: Vec<String>) -> Result<PathBuf> {
         let fs = Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
         let mut writer = ManifestWriter::new(fs.create_file(&tmp_file_path)?)?;
         let mut path_hasher = PathHasher::new();
-        for stub in stubs {
+        for maybe_stub in stubs.iter().map(|s| expand_braces(s)).flatten_ok() {
+            let stub = Utf8PathBuf::from(maybe_stub?);
             path_hasher.hash_path(&stub);
             let data = if stub.as_str().ends_with('/') {
                 ManifestEntryData::Directory

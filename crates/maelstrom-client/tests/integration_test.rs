@@ -1,7 +1,7 @@
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestReader},
     ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, PrefixOptions,
-    Sha256Digest, SymlinkSpec,
+    Sha256Digest, SymlinkSpec, Utf8Path,
 };
 use maelstrom_client::Client;
 use maelstrom_test::{
@@ -145,6 +145,25 @@ fn hash_data(data: &[u8]) -> Sha256Digest {
     let mut hasher = Sha256::new();
     hasher.update(data);
     Sha256Digest::new(hasher.finalize().into())
+}
+
+fn verify_manifest(manifest_path: &Path, expected: Vec<(&Utf8Path, ManifestEntryData)>) {
+    let fs = Fs::new();
+    let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
+    let actual = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
+    assert_eq!(
+        actual.len(),
+        expected.len(),
+        "expected = {expected:?}, actual = {actual:?}"
+    );
+
+    let actual_map: HashMap<_, _> = actual.iter().map(|e| (e.path.as_path(), &e.data)).collect();
+    for (path, expected_data) in expected {
+        let data = actual_map
+            .get(path)
+            .expect(&format!("{path:?} not found in {actual_map:?}"));
+        assert_eq!(*data, &expected_data);
+    }
 }
 
 fn verify_single_entry_manifest(
@@ -461,35 +480,59 @@ fn glob_no_files_relative() {
     );
 }
 
-fn stubs_test(path: &str, expected_data: ManifestEntryData) {
+fn stubs_test(path: &str, expected: Vec<(&Utf8Path, ManifestEntryData)>) {
     basic_job_test(
         |client, _| {
             let digest_and_type = client
                 .add_layer(Layer::Stubs {
-                    stubs: vec![utf8_path_buf!(path)],
+                    stubs: vec![path.to_owned()],
                 })
                 .unwrap();
             nonempty![digest_and_type]
         },
         |artifact_dir, layers| {
             let digest = &layers[0].0;
-            verify_single_entry_manifest(
-                &artifact_dir.join(digest.to_string()),
-                &Path::new(path),
-                expected_data,
-            )
+            verify_manifest(&artifact_dir.join(digest.to_string()), expected)
         },
     );
 }
 
 #[test]
 fn stub_file_test() {
-    stubs_test("/foo", ManifestEntryData::File(None));
+    stubs_test(
+        "/foo",
+        vec![(Utf8Path::new("/foo"), ManifestEntryData::File(None))],
+    );
+}
+
+#[test]
+fn stub_expanded_file_test() {
+    stubs_test(
+        "/foo/{bar,baz}",
+        vec![
+            (Utf8Path::new("/foo/bar"), ManifestEntryData::File(None)),
+            (Utf8Path::new("/foo/baz"), ManifestEntryData::File(None)),
+        ],
+    );
 }
 
 #[test]
 fn stub_dir_test() {
-    stubs_test("/foo/", ManifestEntryData::Directory);
+    stubs_test(
+        "/foo/",
+        vec![(Utf8Path::new("/foo/"), ManifestEntryData::Directory)],
+    );
+}
+
+#[test]
+fn stub_expanded_dir_test() {
+    stubs_test(
+        "/foo/{bar,baz}/",
+        vec![
+            (Utf8Path::new("/foo/bar/"), ManifestEntryData::Directory),
+            (Utf8Path::new("/foo/baz/"), ManifestEntryData::Directory),
+        ],
+    );
 }
 
 #[test]
