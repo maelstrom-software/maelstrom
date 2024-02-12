@@ -188,6 +188,14 @@ impl SimulationExplorer {
         }
     }
 
+    /// Run all simulations by providing successive [`Simulation`]s to the given closure.
+    pub fn for_each<F, T>(&mut self, f: F)
+    where
+        F: for<'b> FnMut(Simulation<'b>) -> T,
+    {
+        self.map(f).for_each(|_| ())
+    }
+
     /// Provide successive [`Simulation`]s to the given closure, and provide an iterator over the
     /// results.
     pub fn map<F, T>(&mut self, f: F) -> Map<'_, F>
@@ -789,6 +797,13 @@ mod tests {
         assert_eq!(iter.next(), None);
         assert_eq!(iter.next(), None);
         assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn for_each() {
+        let mut vec = vec![];
+        SimulationExplorer::default().for_each(|mut sim| vec.push(sim.choose_integer(1, 5)));
+        assert_eq!(vec, vec![1, 2, 3, 4, 5]);
     }
 
     #[test]
