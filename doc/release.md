@@ -63,7 +63,8 @@ cargo set-version "$VERSION"
 This commit should only include the mechanical changes to `CHANGELOG.md`,
 `Cargo.toml`, and `Cargo.lock`.
 ```bash
-git commit -am "Version $VERSION"
+git status
+git commit -am "Version $VERSION."
 ```
 
 ## Tag Previous Changeset with the Version Tag
