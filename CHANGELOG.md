@@ -14,8 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### `cargo-maelstrom`
 #### Changed
 #### Added
+- New `glob` layer type added which accepts a glob pattern. Matching files are added to that layer.
+- New `stubs` layer type added. This makes it easy to create empty directories and files in a layer.
+- New `symlinks` layer type added. This makes it easy to create symlinks in a layer.
 #### Removed
 #### Fixed
+### `maelstrom-client-cli`
+#### Changed
+- The new layer types from `cargo-maelstrom` have also been added.
 
 ## [0.5.0] - 2024-02-08
 

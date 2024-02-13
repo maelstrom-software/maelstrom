@@ -14,12 +14,32 @@ itself, and optionally dependencies for the test binary.
 ## The `layers` Field
 ```toml
 [[directives]]
-layers = [{ tar = "layers/foo.tar" }, { tar = "layers/bar.tar" }]
+layers = [
+    { tar = "layers/foo.tar" },
+    { paths = ["layers/a/b.bin", "layers/a/c.bin"] },
+    { glob = "layers/b/**" },
+    { stubs = ["/dev/{null, full}", "/proc/"] },
+    { symlinks = [{ link = "/dev/stdout", target = "/proc/self/fd/1" }] }
+]
 ```
 
-This field provides an ordered list of `.tar` files to be used when creating the
-file-system for the test container. The `.tar` files are layered on top of
-each other in the order provided.
+This field provides an ordered list of layers. A layer is a description of files to place in the
+lightweight container. It can be a description of files to create, or just the location of local
+files and where to place them.
+
+There are a few different layer types that can be provided
+
+- `tar` a path to a local tar file which will be expanded
+- `paths` a list of local paths to upload
+    - If the path is relative, it is relative from the workspace root.
+- `glob` a glob pattern of local paths to upload
+    - The pattern is always relative from the workspace root, it doesn't support absolute paths
+- `stubs` a list of paths in the container where either an empty directory or file
+    - The paths support brace expansion. If the path ends in a `/`, it will be created as a
+      directory, otherwise it will be an empty file.
+- `symlinks` a list of symlinks to create in the container.
+    - They are specified as a pair of `link` and `target`. `link` is the path in the container, and
+      `target` is the destination of the symlink
 
 This field can't be used together with the `image` field, since the `image`
 field sets the layers itself. The `added_layers` field can still be used though.
