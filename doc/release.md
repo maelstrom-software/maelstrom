@@ -1,23 +1,5 @@
 # Releasing
 
-These are the items we're going to do:
-  - Set environment variables.
-  - Update `CHANGELOG.md`.
-    - Add missing items.
-    - Change headings and links.
-  - Update `version` in `[workspace.package]` in `Cargo.toml`.
-  - Commit above changes.
-  - Tag previous changeset with the version tag.
-  - Push changesets and tags.
-  - Publish to crates.io.
-  - Create GitHub release.
-  - Update `CHANGELOG.md` for unreleased changes.
-  - Update `version` in `[workspace.package]` in `Cargo.toml` to next dev version.
-  - Commit above changes.
-  - Push changesets.
-  - Unset environment variables.
-  - Update GitHub milestones.
-
 ## Set Environment Variables
 
 Set two environment variables so we can cut and paste below:
@@ -25,6 +7,8 @@ Set two environment variables so we can cut and paste below:
 VERSION=1.2.0
 NEXT_VERSION=1.3.0
 ```
+
+Obviously, you should choose the correct version strings.
 
 ## Update `CHANGELOG.md`
 
