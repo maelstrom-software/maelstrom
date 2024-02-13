@@ -1,8 +1,10 @@
 # Releasing
 
-These are the items we need to do to release:
+These are the items we're going to do:
   - Set environment variables.
   - Update `CHANGELOG.md`.
+    - Add missing items.
+    - Change headings and links.
   - Update `version` in `[workspace.package]` in `Cargo.toml`.
   - Commit above changes.
   - Tag previous changeset with the version tag.
@@ -18,7 +20,7 @@ These are the items we need to do to release:
 
 ## Set Environment Variables
 
-If you want to be able to cut and past below, set `VERSION` and `NEXT_VERSION`:
+Set two environment variables so we can cut and paste below:
 ```bash
 VERSION=1.2.0
 NEXT_VERSION=1.3.0
@@ -26,29 +28,29 @@ NEXT_VERSION=1.3.0
 
 ## Update `CHANGELOG.md`
 
-To update `CHANGELOG.md`, we need to first add missing items, and then change
-the headings to reflect the new release.
+We need to update `CHANGELOG.md`, first to add missing items, and then to
+change the headings and links to reflect the new release.
 
 ### Add Missing Items
 
-The first thing to do when updating the `CHANGELOG.md` is to ensure it is complete.
-To do this, look at the `[Unreleased]` link at the bottom of the file in your
-browser and fill in the missing items in the `[Unreleaed]` section. If there is
-no `[Unreleased]` section yet, create one, then fill it in. Cross-reference
-these changes to the closed issues in GitHub for the release. Make sure you add
-links to issues when appropriate.
+The first thing to do is to ensure that `CHANGELOG.md` is accurate and
+complete. To do this, look at the `[Unreleased]` link at the bottom of the file
+in your editor and fill in the missing items. If there is no `[Unreleased]`
+section yet, create one first. Cross-reference these changes to the closed
+issues in GitHub for the release. Make sure you add links to issues when
+appropriate.
 
 Generally, only add things to `CHANGELOG.md` that you think users would care
 about. There need not be an entry for every changeset or even issue.
 
-You should set commit these changes in a separate changeset.
+You should commit these changes in their own separate changeset.
 
 ```bash
 $EDITOR CHANGELOG.md
-git commit -am "Update CHANGELOG.md for version $VERSION"
+git commit -am "Update CHANGELOG.md for version $VERSION."
 ```
 
-### Change Headings
+### Change Headings and Links
 
 The second thing to do is to update the headers in `CHANGELOG.md`. This is
 mechanical. In the future, we will do this using a tool.
@@ -66,10 +68,10 @@ These are the steps to take:
 ## Update `version` in `[workspace.package]` in `Cargo.toml`
 
 This is a bit tricky because you have to update the version itself as well as
-all internal dependencies. Thus, we use the `cargo-set-version` tool to make
-sure we get it right:
+all internal dependencies, so we use the `cargo-set-version` tool to make: sure
+we get it right:
 ```bash
-cargo set-version $VERSION
+cargo set-version "$VERSION"
 ```
 
 ## Commit Above Changes
@@ -84,7 +86,7 @@ git commit -am "Version $VERSION"
 
 Tag the last committed changeset with the release's tag.
 ```bash
-git tag v$VERSION
+git tag "v$VERSION"
 ```
 
 ## Push Changesets and Tags
@@ -92,36 +94,47 @@ git tag v$VERSION
 Ensure that you push, and that you push the tags along with the changesets. We
 can do that atomically like this:
 ```bash
-git push --atomic origin main v$VERSION
+git push --atomic origin main "v$VERSION"
 ```
 
 ## Publish to Crates.io
 
-Packages are published to crates.io individually. Moreover, they have to be
-published in the right order, such that all a package's depdendencies are
-published before the package itself. We'll automate this at some point, but for
-now:
+Publishing to crates.io correctly is a bit of a pain, so we wrote an xtask action to automate it.
 
+First, make sure you're logged in to cargo:
 ```bash
-for i in crates/{maelstrom-{base,linux,plot,simex,util,container,worker-child,client,test,web,worker,broker,client-cli},cargo-maelstrom}; do (cd $i && cargo publish); done
+cat ~/.cargo/credentials
 ```
 
-To do this, you must have a secret stored in `~/.cargo/credentials.toml`, and
-that secret must allow you to publish these crates. If that is not the case,
-ask Neal for the secret and then run `cargo login`.
+You should see something like this:
+```
+[registry]
+token = "abcdefg1234567ABCDEFG123456abcdefg1"
+```
+
+If you don't have a token, then get a token from Neal and run:
+```bash
+cargo login
+```
+
+After you're sure you're logged in, run:
+```bash
+cargo xtask publish
+```
+
+This will publish all of the packages.
 
 ## Create GitHub Release
 
-There is a cli for GitHub that we use:
-
+There is a cli for GitHub that we use called `gh`. First, make sure you're logged in:
 ```bash
-gh release create "v$VERSION" -F <(./scripts/extract-from-changelog.sh "$VERSION" < CHANGELOG.md)
+gh auth status
 ```
 
-For this to work, you must have logged in with `gh auth login`.
-
-The subcommand (./scripts/extract-from-changelog.sh) extracts just the relevant
-part of the CHANGELOG to use as the release notes.
+Then, create the GitHub release:
+```bash
+gh release create "v$VERSION" -F <(cargo xtask extract-release-notes "$VERSION")
+```
 
 ## Update `CHANGELOG.md` for Unreleased Changes
 
@@ -149,7 +162,7 @@ At the bottom of the file, add a link like this:
 
 Use `cargo set-version` again:
 ```bash
-cargo set-version $NEXT_VERSION-dev
+cargo set-version "$NEXT_VERSION-dev"
 ```
 
 ## Commit Above Changes
@@ -158,7 +171,7 @@ It's important to commit these new changes right away, so that nothing other tha
 actual version has the given version string.
 
 ```bash
-git commit -am "Update CHANGELOG.md for version $NEXT_VERSION"
+git commit -am "Update CHANGELOG.md for version $NEXT_VERSION."
 ```
 
 ## Push Changesets and Tags
