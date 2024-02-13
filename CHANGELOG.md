@@ -207,7 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--version` flag.
 - Ability to specify what to include from an image: layers, environment, and/or
   working directory.
-  [Issue #90](https://github.com/maelstrom-software/maelstrom/issues/90).
+  \[[90](https://github.com/maelstrom-software/maelstrom/issues/90)\]
 
 #### Fixed
 
