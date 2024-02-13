@@ -94,37 +94,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - We renamed the project from "meticulous" to "maelstrom". All uses of
   "meticulous" changed accordingly. We renamed `cargo-metest` to
   `cargo-maelstrom`.
-  [Issue #121](https://github.com/maelstrom-software/maelstrom/issues/121)
-  [Issue #124](https://github.com/maelstrom-software/maelstrom/issues/124)
+  \[[121](https://github.com/maelstrom-software/maelstrom/issues/121)\]
+  \[[124](https://github.com/maelstrom-software/maelstrom/issues/124)\]
 - We changed the licensing to use dual license using Apache 2.0 and MIT instead
   of the BSD 2-clause license. This brings us into line with the Rust community.
-  [Issue #134](https://github.com/maelstrom-software/maelstrom/issues/134)
-  [Issue #135](https://github.com/maelstrom-software/maelstrom/issues/135)
+  \[[134](https://github.com/maelstrom-software/maelstrom/issues/134)\]
+  \[[135](https://github.com/maelstrom-software/maelstrom/issues/135)\]
 
 #### Added
 - The start of documentation. The (alpha version) docs can be found
   [here](https://https://maelstrom-software.github.io/maelstrom/).
-  [Issue #139](https://github.com/maelstrom-software/maelstrom/issues/139)
+  \[[139](https://github.com/maelstrom-software/maelstrom/issues/139)\]
 - CI for the project on GitHub.
-  [Issue #141](https://github.com/maelstrom-software/maelstrom/issues/141)
+  \[[141](https://github.com/maelstrom-software/maelstrom/issues/141)\]
 
 ### `cargo-maelstrom`
 
 #### Added
 - The `--include` and `--exclude` long option names for `-i` and `-x`.
-  [Issue #119](https://github.com/maelstrom-software/maelstrom/issues/119)
+  \[[119](https://github.com/maelstrom-software/maelstrom/issues/119)\]
 - The `-l` short option for `--list-tests`.
-  [Issue #110](https://github.com/maelstrom-software/maelstrom/issues/110)
+  \[[110](https://github.com/maelstrom-software/maelstrom/issues/110)\]
 
 #### Changed
 
 - The `--list-packages` option has been renamed to `--list-binaries`, since it
   shows all of the test executables that can be run, and there can be multiple
   executables in a package.
-  [Issue #111](https://github.com/maelstrom-software/maelstrom/issues/111)
+  \[[111](https://github.com/maelstrom-software/maelstrom/issues/111)\]
 - A new `--list-packages` option has been added that just shows selected
   packages.
-  [Issue #113](https://github.com/maelstrom-software/maelstrom/issues/113)
+  \[[113](https://github.com/maelstrom-software/maelstrom/issues/113)\]
 - Clarified the help message for `-i` and `-x`.
 - To subcommands. There are now two subcommands: `run` and `list`. `run`
   takes `-q`, `-i`, `-x`, and `-P` flags. `list` takes `-i`, `-x`, and `-P`
@@ -132,16 +132,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type of artifact to list. The `-v`, `-h`, and `-b` flags remain at the top
   level. The `quiet` configuration option also has moved into a new sub-section
   for the run command in `cargo-maelstrom.toml`.
-  [Issue #118](https://github.com/maelstrom-software/maelstrom/issues/118)
+  \[[118](https://github.com/maelstrom-software/maelstrom/issues/118)\]
 
 #### Fixed
 
 - A bug in `--list-binaries` (previously `--list-packages`) has been fixed that
   could lead to duplicate listings of the same type.
-  [Issue #112](https://github.com/maelstrom-software/maelstrom/issues/112)
+  \[[112](https://github.com/maelstrom-software/maelstrom/issues/112)\]
 - A bug when listing or running when the filter patterns exclude everything.
   Work was still done when no work should have been done.
-  [Issue #120](https://github.com/maelstrom-software/maelstrom/issues/120)
+  \[[120](https://github.com/maelstrom-software/maelstrom/issues/120)\]
 
 ## [0.3.0] - 2024-01-09
 
@@ -158,12 +158,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A new test pattern language. The language can be used to select which test
   cases to run and which test binaries to build.
-  [Issue #91](https://github.com/maelstrom-software/maelstrom/issues/91)
+  \[[91](https://github.com/maelstrom-software/maelstrom/issues/91)\]
 - New `-i` and `-x` options to specify include and exclude filters.
-  [Issue #92](https://github.com/maelstrom-software/maelstrom/issues/92)
+  \[[92](https://github.com/maelstrom-software/maelstrom/issues/92)\]
 - New `--list-tests` option to list which tests would be run without actually
   running them. This may cause some test binaries to be built.
-  [Issue #93](https://github.com/maelstrom-software/maelstrom/issues/93)
+  \[[93](https://github.com/maelstrom-software/maelstrom/issues/93)\]
 - New `--list-packages` option to list which packages match the given filters.
   This will not build any test binaries.
 
@@ -180,7 +180,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The JSON language used to specify jobs. This now has all of the features of
   the language used by `cargo-metest`, including specifying parts of an image
   to use.
-  [Issue #103](https://github.com/maelstrom-software/maelstrom/issues/103)
+  \[[103](https://github.com/maelstrom-software/maelstrom/issues/103)\]
 
 ## [0.2.0] - 2023-12-15
 
@@ -191,14 +191,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - This CHANGELOG file.
 - Ability to set working directory for jobs. This can be specified in
   `cargo metest` and `meticulous-client`.
-  [Issue #89](https://github.com/maelstrom-software/maelstrom/issues/89).
+  \[[89](https://github.com/maelstrom-software/maelstrom/issues/89)\]
 - Ability to specify uid and gid for jobs. This can be specified in `cargo
   metest` and `meticulous-client`.
-  [Issue #51](https://github.com/maelstrom-software/maelstrom/issues/51).
+  \[[51](https://github.com/maelstrom-software/maelstrom/issues/51)\]
 - Ability to specify a writable root file system. Any changes made will be
   discarded when the job completes. This can be specified in `cargo metest` and
   `meticulous-client`.
-  [Issue #70](https://github.com/maelstrom-software/maelstrom/issues/70).
+  \[[70](https://github.com/maelstrom-software/maelstrom/issues/70)\]
 
 ### `cargo-metest`
 
