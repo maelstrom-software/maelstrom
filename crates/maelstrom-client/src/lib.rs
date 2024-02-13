@@ -623,7 +623,7 @@ impl Client {
             let data = ManifestEntryData::Symlink(target.into_string().into_bytes());
             let metadata = ManifestEntryMetadata {
                 size: 0,
-                mode: Mode(0o555),
+                mode: Mode(0o444),
                 mtime: ARBITRARY_TIME,
             };
             let entry = ManifestEntry {

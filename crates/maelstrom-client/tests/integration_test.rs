@@ -581,10 +581,13 @@ fn symlink_test() {
         },
         |artifact_dir, layers| {
             let digest = &layers[0].0;
-            verify_single_entry_manifest(
+            verify_manifest(
                 &artifact_dir.join(digest.to_string()),
-                &Path::new("/foo"),
-                ManifestEntryData::Symlink(b"/bar".to_vec()),
+                vec![ExpectedManifestEntry::new(
+                    "/foo",
+                    0o444,
+                    ManifestEntryData::Symlink(b"/bar".to_vec()),
+                )],
             )
         },
     );
