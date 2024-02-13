@@ -57,6 +57,7 @@ hex = "0.4.3"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
 indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
+indoc = "2.0.4"
 itertools = "0.10.5"
 lddtree = "0.3"
 libc = "0.2"

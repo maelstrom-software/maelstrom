@@ -9,11 +9,13 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+camino.workspace = true
 clap.workspace = true
 cargo_metadata.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+indoc.workspace = true
 maelstrom-simex.workspace = true
 maelstrom-util.workspace = true

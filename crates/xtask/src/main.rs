@@ -1,3 +1,4 @@
+mod extract_release_notes;
 mod publish;
 
 use anyhow::Result;
@@ -14,11 +15,13 @@ struct CliArgs {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    ExtractReleaseNotes(extract_release_notes::CliArgs),
     Publish(publish::CliArgs),
 }
 
 fn main() -> Result<()> {
     match CliArgs::parse().command {
+        Command::ExtractReleaseNotes(options) => extract_release_notes::main(options),
         Command::Publish(options) => publish::main(options),
     }
 }
