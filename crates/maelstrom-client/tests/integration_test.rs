@@ -3,12 +3,14 @@ use maelstrom_base::{
     ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, PrefixOptions,
     Sha256Digest, SymlinkSpec, Utf8Path,
 };
-use maelstrom_client::Client;
-use maelstrom_test::{
-    client_driver::TestClientDriver,
-    fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    utf8_path_buf,
+use maelstrom_client::{
+    test::{
+        client_driver::TestClientDriver,
+        fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
+    },
+    Client,
 };
+use maelstrom_test::utf8_path_buf;
 use maelstrom_util::fs::Fs;
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};

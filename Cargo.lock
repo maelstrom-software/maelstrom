@@ -2638,6 +2638,7 @@ name = "maelstrom-client"
 version = "0.6.0-dev"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "bracoxide",
  "chrono",
  "clap",
@@ -2736,9 +2737,7 @@ name = "maelstrom-test"
 version = "0.6.0-dev"
 dependencies = [
  "anyhow",
- "assert_matches",
  "maelstrom-base",
- "maelstrom-client",
  "maelstrom-util",
  "serde",
 ]

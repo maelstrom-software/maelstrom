@@ -1,4 +1,5 @@
 pub mod spec;
+pub mod test;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};

@@ -14,10 +14,12 @@ use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     JobOutputResult, JobStatus, JobSuccess,
 };
-use maelstrom_client::Client;
-use maelstrom_test::{
-    client_driver::TestClientDriver,
-    fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
+use maelstrom_client::{
+    test::{
+        client_driver::TestClientDriver,
+        fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
+    },
+    Client,
 };
 use maelstrom_util::fs::Fs;
 use std::{
