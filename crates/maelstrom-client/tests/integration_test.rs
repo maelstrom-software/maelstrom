@@ -1,6 +1,7 @@
 use maelstrom_base::{
-    manifest::{ManifestEntryData, ManifestReader},
+    manifest::{ManifestEntry, ManifestEntryData, ManifestReader, Mode},
     ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Sha256Digest, Utf8Path,
+    Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
@@ -149,7 +150,24 @@ fn hash_data(data: &[u8]) -> Sha256Digest {
     Sha256Digest::new(hasher.finalize().into())
 }
 
-fn verify_manifest(manifest_path: &Path, expected: Vec<(&Utf8Path, ManifestEntryData)>) {
+#[derive(Debug)]
+struct ExpectedManifestEntry {
+    pub path: Utf8PathBuf,
+    pub mode: Mode,
+    pub data: ManifestEntryData,
+}
+
+impl ExpectedManifestEntry {
+    fn new(path: &str, mode: u32, data: ManifestEntryData) -> Self {
+        Self {
+            path: Utf8PathBuf::from(path),
+            mode: Mode(mode),
+            data,
+        }
+    }
+}
+
+fn verify_manifest(manifest_path: &Path, expected: Vec<ExpectedManifestEntry>) {
     let fs = Fs::new();
     let entry_iter = ManifestReader::new(fs.open_file(manifest_path).unwrap()).unwrap();
     let actual = Vec::from_iter(entry_iter.map(|e| e.unwrap()));
@@ -159,12 +177,14 @@ fn verify_manifest(manifest_path: &Path, expected: Vec<(&Utf8Path, ManifestEntry
         "expected = {expected:?}, actual = {actual:?}"
     );
 
-    let actual_map: HashMap<_, _> = actual.iter().map(|e| (e.path.as_path(), &e.data)).collect();
-    for (path, expected_data) in expected {
-        let data = actual_map
-            .get(path)
+    let actual_map: HashMap<&Utf8Path, &ManifestEntry> =
+        actual.iter().map(|e| (e.path.as_path(), e)).collect();
+    for ExpectedManifestEntry { path, mode, data } in expected {
+        let actual_data = actual_map
+            .get(path.as_path())
             .expect(&format!("{path:?} not found in {actual_map:?}"));
-        assert_eq!(*data, &expected_data);
+        assert_eq!(mode, actual_data.metadata.mode);
+        assert_eq!(&data, &actual_data.data);
     }
 }
 
@@ -482,7 +502,7 @@ fn glob_no_files_relative() {
     );
 }
 
-fn stubs_test(path: &str, expected: Vec<(&Utf8Path, ManifestEntryData)>) {
+fn stubs_test(path: &str, expected: Vec<ExpectedManifestEntry>) {
     basic_job_test(
         |client, _| {
             let digest_and_type = client
@@ -503,7 +523,11 @@ fn stubs_test(path: &str, expected: Vec<(&Utf8Path, ManifestEntryData)>) {
 fn stub_file_test() {
     stubs_test(
         "/foo",
-        vec![(Utf8Path::new("/foo"), ManifestEntryData::File(None))],
+        vec![ExpectedManifestEntry::new(
+            "/foo",
+            0o444,
+            ManifestEntryData::File(None),
+        )],
     );
 }
 
@@ -512,8 +536,8 @@ fn stub_expanded_file_test() {
     stubs_test(
         "/foo/{bar,baz}",
         vec![
-            (Utf8Path::new("/foo/bar"), ManifestEntryData::File(None)),
-            (Utf8Path::new("/foo/baz"), ManifestEntryData::File(None)),
+            ExpectedManifestEntry::new("/foo/bar", 0o444, ManifestEntryData::File(None)),
+            ExpectedManifestEntry::new("/foo/baz", 0o444, ManifestEntryData::File(None)),
         ],
     );
 }
@@ -522,7 +546,11 @@ fn stub_expanded_file_test() {
 fn stub_dir_test() {
     stubs_test(
         "/foo/",
-        vec![(Utf8Path::new("/foo/"), ManifestEntryData::Directory)],
+        vec![ExpectedManifestEntry::new(
+            "/foo/",
+            0o555,
+            ManifestEntryData::Directory,
+        )],
     );
 }
 
@@ -531,8 +559,8 @@ fn stub_expanded_dir_test() {
     stubs_test(
         "/foo/{bar,baz}/",
         vec![
-            (Utf8Path::new("/foo/bar/"), ManifestEntryData::Directory),
-            (Utf8Path::new("/foo/baz/"), ManifestEntryData::Directory),
+            ExpectedManifestEntry::new("/foo/bar/", 0o555, ManifestEntryData::Directory),
+            ExpectedManifestEntry::new("/foo/baz/", 0o555, ManifestEntryData::Directory),
         ],
     );
 }

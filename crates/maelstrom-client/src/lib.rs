@@ -588,14 +588,15 @@ impl Client {
         for maybe_stub in stubs.iter().map(|s| expand_braces(s)).flatten_ok() {
             let stub = Utf8PathBuf::from(maybe_stub?);
             path_hasher.hash_path(&stub);
-            let data = if stub.as_str().ends_with('/') {
+            let is_dir = stub.as_str().ends_with('/');
+            let data = if is_dir {
                 ManifestEntryData::Directory
             } else {
                 ManifestEntryData::File(None)
             };
             let metadata = ManifestEntryMetadata {
                 size: 0,
-                mode: Mode(0o555),
+                mode: Mode(0o444 | if is_dir { 0o111 } else { 0 }),
                 mtime: ARBITRARY_TIME,
             };
             let entry = ManifestEntry {
