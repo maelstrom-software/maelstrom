@@ -72,7 +72,7 @@ mod tests {
 
     fn filter_test(version: &str, input: &str, expected_output: &str) {
         let mut output = vec![];
-        filter(version, Cursor::new(input), Cursor::new(&mut output));
+        filter(version, Cursor::new(input), Cursor::new(&mut output)).unwrap();
         assert_eq!(str::from_utf8(&output).unwrap(), expected_output);
     }
 
