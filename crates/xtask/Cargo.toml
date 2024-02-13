@@ -1,0 +1,19 @@
+[package]
+name = "xtask"
+description = "Tasks for building, testing, maintaining, and publishing Maelsrom."
+publish = false
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+cargo_metadata.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+maelstrom-simex.workspace = true
+maelstrom-util.workspace = true

@@ -1,2 +1,5 @@
+[alias]
+xtask = "run --quiet --package xtask --"
+
 #[build]
 #rustdocflags = ["--document-private-items"]

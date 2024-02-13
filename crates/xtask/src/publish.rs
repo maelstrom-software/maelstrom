@@ -1,0 +1,524 @@
+use anyhow::{anyhow, Result};
+use cargo_metadata::{camino::Utf8Path, semver::Version, Metadata, MetadataCommand};
+use clap::{ArgAction::Count, Parser};
+use reqwest::blocking::Client;
+use std::{collections::HashMap, process::Command};
+
+#[derive(Debug, Eq, PartialEq)]
+struct PackageInfo<'a> {
+    to_publish: bool,
+    path: &'a Utf8Path,
+    version: &'a Version,
+    dependencies: Vec<&'a str>, // Only intra-workspace dependencies are included.
+}
+
+type Packages<'a> = HashMap<&'a str, PackageInfo<'a>>;
+
+/// Return a map from all of the packages in the workspace to some relevant information about them.
+/// Only intra-workspace dependencies are included.
+fn extract_workspace_packages(metadata: &Metadata) -> Packages {
+    let mut packages = metadata
+        .workspace_packages()
+        .iter()
+        .map(|pkg| {
+            (
+                pkg.name.as_str(),
+                PackageInfo {
+                    to_publish: !matches!(&pkg.publish, Some(v) if v.is_empty()),
+                    path: pkg.manifest_path.parent().unwrap(),
+                    version: &pkg.version,
+                    dependencies: pkg.dependencies.iter().map(|d| d.name.as_str()).collect(),
+                },
+            )
+        })
+        .collect::<Packages>();
+    let workspace_packages = Vec::from_iter(packages.keys().copied());
+    for info in packages.values_mut() {
+        info.dependencies
+            .retain(|pkg| workspace_packages.contains(pkg));
+    }
+    packages
+}
+
+/// Return a vector of packages that aren't marked as `publish = false`. Return an error if any
+/// publishable package has a depdendency that is unpublishable.
+fn get_publishable_packages<'a>(packages: &Packages<'a>) -> Result<Vec<&'a str>> {
+    packages
+        .iter()
+        .filter(|(_, info)| info.to_publish)
+        .map(|(package, _)| {
+            for dependency in &packages.get(package).unwrap().dependencies {
+                // Some dependencies may be to packages outside of the workspace.
+                if !packages.get(dependency).unwrap().to_publish {
+                        return Err(anyhow!(
+                            "cannot publish {package} because its dependency {dependency} isn't publishable",
+                        ));
+                }
+            }
+            Ok(*package)
+        })
+        .collect()
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum TopologicalSortResult<T> {
+    Ordering(Vec<T>),
+    Cycle(Vec<T>),
+}
+
+fn topological_sort<T, I, F>(items: I, get_dependencies: F) -> TopologicalSortResult<T>
+where
+    I: IntoIterator<Item = T>,
+    F: Fn(&T) -> Vec<T>,
+    T: Eq + Clone,
+{
+    struct StackEntry<T> {
+        item: T,
+        remaining_dependencies: Vec<T>,
+        path: Vec<T>,
+    }
+
+    let mut stack = Vec::from_iter(items.into_iter().map(|item| {
+        let remaining_dependencies = get_dependencies(&item);
+        let path = vec![item.clone()];
+        StackEntry {
+            item,
+            remaining_dependencies,
+            path,
+        }
+    }));
+
+    let mut emitted = Vec::new();
+
+    while let Some(mut entry) = stack.pop() {
+        if emitted.contains(&entry.item) {
+            continue;
+        }
+        match entry.remaining_dependencies.pop() {
+            None => {
+                emitted.push(entry.item);
+            }
+            Some(dependency) => {
+                let dependency_path = [entry.path.as_slice(), &[dependency.clone()]].concat();
+
+                // Make sure we don't have a cycle.
+                let dependency_first_pos_in_path = dependency_path
+                    .iter()
+                    .position(|item| item == &dependency)
+                    .unwrap();
+                if dependency_first_pos_in_path < dependency_path.len() - 1 {
+                    return TopologicalSortResult::Cycle(
+                        dependency_path
+                            .into_iter()
+                            .skip(dependency_first_pos_in_path)
+                            .collect(),
+                    );
+                }
+
+                // Re-push this node before pushing the dependency so that we maintain DFS.
+                stack.push(entry);
+                let dependency_dependencies = get_dependencies(&dependency);
+                stack.push(StackEntry {
+                    item: dependency,
+                    remaining_dependencies: dependency_dependencies,
+                    path: dependency_path,
+                });
+            }
+        }
+    }
+
+    TopologicalSortResult::Ordering(emitted)
+}
+
+/// Return true if version `version` of package `name` is published.
+fn package_published(name: &str, version: &Version) -> Result<bool> {
+    Ok(Client::builder()
+        .user_agent("maelstrom xtask")
+        .build()?
+        .get(format!("https://crates.io/api/v1/crates/{name}/{version}"))
+        .send()?
+        .json::<serde_json::Value>()?
+        .get("version")
+        .is_some())
+}
+
+/// Publish all of the packages in the workspace.
+///
+/// Packaged marked with publish = false are not published.
+///
+/// If there is a dependency cycle, or if a publish package depends on an unpublished package, the
+/// program will exit with an error.
+#[derive(Debug, Parser)]
+pub struct CliArgs {
+    /// Don't try to publish, just check for dependency cycles and unpublished dependencies
+    #[arg(long)]
+    lint: bool,
+
+    /// Don't verify the contents of packages by building them
+    #[arg(long)]
+    no_verify: bool,
+
+    /// Allow package with dirty working directories to be published
+    #[arg(long)]
+    allow_dirty: bool,
+
+    /// Do not print cargo log messages (-qq don't print current package)
+    #[arg(long, short, action = Count)]
+    quiet: u8,
+
+    /// Use verbose output (-vv very verbose/build.rs output)
+    #[arg(long, short, action = Count)]
+    verbose: u8,
+}
+
+pub fn main(args: CliArgs) -> Result<()> {
+    let metadata = MetadataCommand::new().no_deps().exec()?;
+    let packages = extract_workspace_packages(&metadata);
+    let to_publish = get_publishable_packages(&packages)?;
+    let ordering = match topological_sort(to_publish, |package| {
+        packages.get(package).unwrap().dependencies.clone()
+    }) {
+        TopologicalSortResult::Ordering(ordering) => ordering,
+        TopologicalSortResult::Cycle(cycle) => {
+            let cycle = cycle.into_iter().fold(String::new(), |mut pre, post| {
+                if !pre.is_empty() {
+                    pre.push_str(" -> ");
+                }
+                pre.push_str(post);
+                pre
+            });
+            return Err(anyhow!("found dependency cycle: {cycle}"));
+        }
+    };
+
+    if args.lint {
+        return Ok(());
+    }
+
+    let mut cargo_args = vec!["publish"];
+    args.no_verify.then(|| cargo_args.push("--no-verify"));
+    args.allow_dirty.then(|| cargo_args.push("--allow-dirty"));
+    (args.quiet > 0).then(|| cargo_args.push("--quiet"));
+    cargo_args.extend(vec!["--verbose"; args.verbose.into()]);
+
+    for package in ordering {
+        let info = packages.get(package).unwrap();
+        if !info.version.pre.is_empty() {
+            return Err(anyhow!(
+                "cannot publish pre-release version {}",
+                info.version
+            ));
+        }
+        if package_published(package, info.version)? {
+            (args.quiet < 2).then(|| println!("Package {package} already published."));
+            continue;
+        }
+        match args.quiet {
+            0 => println!("Publishing {package}:"),
+            1 => println!("Publishing {package}."),
+            _ => {}
+        };
+        if !Command::new("cargo")
+            .args(cargo_args.clone())
+            .current_dir(info.path)
+            .status()?
+            .success()
+        {
+            return Err(anyhow!("cargo publish exited with non-zero status"));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use maelstrom_simex::{Simulation, SimulationExplorer};
+    use maelstrom_util::ext::BoolExt as _;
+    use std::collections::HashSet;
+
+    fn topological_sort_test<F>(max_item_count: usize, mut f: F)
+    where
+        F: for<'a, 'b> FnMut(usize, usize, &'a mut Simulation<'b>) -> bool,
+    {
+        SimulationExplorer::default().for_each(|mut simulation| {
+            let item_count = simulation.choose_integer(1, max_item_count);
+            let items = 0..item_count;
+            let order = Vec::from_iter(
+                items
+                    .clone()
+                    .flat_map(|item| items.clone().map(move |dependency| (item, dependency)))
+                    .map(|(item, dependency)| f(item, dependency, &mut simulation)),
+            );
+            let depends_on = |item: usize, dependency: usize| order[item * item_count + dependency];
+
+            let result = super::topological_sort(items.clone(), |item| {
+                items
+                    .clone()
+                    .filter(|dependency| depends_on(*item, *dependency))
+                    .collect()
+            });
+
+            match result {
+                TopologicalSortResult::Ordering(ordering) => {
+                    // To check that our ordering does not conflict with our order, visit each
+                    // item in order and make sure all of its dependencies have already been
+                    // visited.
+                    let mut visited = HashSet::<usize>::new();
+                    for item in ordering {
+                        for dependency in items.clone() {
+                            assert!(!depends_on(item, dependency) || visited.contains(&dependency));
+                        }
+                        visited.insert(item).assert_is_true();
+                    }
+                    assert_eq!(HashSet::from_iter(items), visited);
+                }
+                TopologicalSortResult::Cycle(cycle) => {
+                    // First, check that this cycle is syntactically correct.
+                    assert!(cycle.len() > 1);
+                    assert!(cycle[0] == cycle[cycle.len() - 1]);
+                    assert!(HashSet::<&usize>::from_iter(cycle.iter()).len() == cycle.len() - 1);
+
+                    // Second, check that every edge in the cycle is actually in our order.
+                    for window in cycle.windows(2) {
+                        assert!(depends_on(window[0], window[1]));
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn topological_sort() {
+        topological_sort_test(4, |_: usize, _: usize, simulation: &mut Simulation| {
+            simulation.choose_bool()
+        });
+    }
+
+    #[test]
+    fn topological_sort_no_cycles() {
+        topological_sort_test(6, |item: usize, dependency, simulation: &mut Simulation| {
+            item < dependency && simulation.choose_bool()
+        });
+    }
+
+    #[test]
+    fn extract_workspace_packages() {
+        let metadata = r###"{
+          "packages": [
+            {
+              "name": "in-workspace-1",
+              "version": "0.6.0-dev",
+              "id": "in-workspace-1 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-1)",
+              "dependencies": [
+                {
+                  "name": "anyhow",
+                  "source": "registry+https://github.com/rust-lang/crates.io-index",
+                  "req": "^1.0.71",
+                  "kind": null,
+                  "optional": false,
+                  "uses_default_features": true,
+                  "features": []
+                },
+                {
+                  "name": "in-workspace-2",
+                  "source": null,
+                  "req": "^0.6.0-dev",
+                  "kind": null,
+                  "optional": false,
+                  "uses_default_features": true,
+                  "features": [],
+                  "path": "/home/user/workspace/crates/in-workspace-2"
+                }
+              ],
+              "targets": [
+                {
+                  "kind": [],
+                  "crate_types": [],
+                  "name": "",
+                  "src_path": ""
+                }
+              ],
+              "features": {},
+              "manifest_path": "/home/user/workspace/crates/in-workspace-1/Cargo.toml",
+              "publish": null
+            },
+            {
+              "name": "in-workspace-2",
+              "version": "0.6.0-dev",
+              "id": "in-workspace-2 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-2)",
+              "dependencies": [
+                {
+                  "name": "anyhow",
+                  "source": "registry+https://github.com/rust-lang/crates.io-index",
+                  "req": "^1.0.71",
+                  "kind": null,
+                  "optional": false,
+                  "uses_default_features": true,
+                  "features": []
+                }
+              ],
+              "targets": [
+                {
+                  "kind": [],
+                  "crate_types": [],
+                  "name": "",
+                  "src_path": ""
+                }
+              ],
+              "features": {},
+              "manifest_path": "/home/user/workspace/crates/in-workspace-2/Cargo.toml",
+              "publish": null
+            },
+            {
+              "name": "in-workspace-3",
+              "version": "0.6.0-dev",
+              "id": "in-workspace-3 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-3)",
+              "dependencies": [
+                {
+                  "name": "anyhow",
+                  "source": "registry+https://github.com/rust-lang/crates.io-index",
+                  "req": "^1.0.71",
+                  "kind": null,
+                  "optional": false,
+                  "uses_default_features": true,
+                  "features": []
+                },
+                {
+                  "name": "in-workspace-1",
+                  "source": null,
+                  "req": "^0.6.0-dev",
+                  "kind": null,
+                  "optional": false,
+                  "uses_default_features": true,
+                  "features": [],
+                  "path": "/home/user/workspace/crates/in-workspace-1"
+                }
+              ],
+              "targets": [
+                {
+                  "kind": [],
+                  "crate_types": [],
+                  "name": "",
+                  "src_path": ""
+                }
+              ],
+              "features": {},
+              "manifest_path": "/home/user/workspace/crates/in-workspace-3/Cargo.toml",
+              "publish": []
+            }
+          ],
+          "workspace_members": [
+            "in-workspace-1 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-1)",
+            "in-workspace-2 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-2)",
+            "in-workspace-3 0.6.0-dev (path+file:///home/user/workspace/crates/in-workspace-3)"
+          ],
+          "target_directory": "/home/user/workspace/target",
+          "version": 1,
+          "workspace_root": "/home/user/workspace"
+        }"###;
+        let metadata: Metadata = serde_json::from_str(metadata).unwrap();
+        let packages = super::extract_workspace_packages(&metadata);
+        assert_eq!(
+            packages,
+            HashMap::from_iter([
+                (
+                    "in-workspace-1",
+                    PackageInfo {
+                        to_publish: true,
+                        path: "/home/user/workspace/crates/in-workspace-1".into(),
+                        version: &Version::parse("0.6.0-dev").unwrap(),
+                        dependencies: vec!["in-workspace-2"],
+                    }
+                ),
+                (
+                    "in-workspace-2",
+                    PackageInfo {
+                        to_publish: true,
+                        path: "/home/user/workspace/crates/in-workspace-2".into(),
+                        version: &Version::parse("0.6.0-dev").unwrap(),
+                        dependencies: vec![],
+                    }
+                ),
+                (
+                    "in-workspace-3",
+                    PackageInfo {
+                        to_publish: false,
+                        path: "/home/user/workspace/crates/in-workspace-3".into(),
+                        version: &Version::parse("0.6.0-dev").unwrap(),
+                        dependencies: vec!["in-workspace-1"],
+                    }
+                )
+            ])
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_ok() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([
+            (
+                "foo",
+                PackageInfo {
+                    to_publish: true,
+                    path: "/foo".into(),
+                    version,
+                    dependencies: vec!["bar"],
+                },
+            ),
+            (
+                "bar",
+                PackageInfo {
+                    to_publish: true,
+                    path: "/bar".into(),
+                    version,
+                    dependencies: vec![],
+                },
+            ),
+            (
+                "baz",
+                PackageInfo {
+                    to_publish: false,
+                    path: "/baz".into(),
+                    version,
+                    dependencies: vec!["bar"],
+                },
+            ),
+        ]);
+        assert_eq!(
+            HashSet::<&str>::from_iter(get_publishable_packages(&packages).unwrap()),
+            HashSet::from_iter(["foo", "bar"])
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_bad_dependency() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([
+            (
+                "foo",
+                PackageInfo {
+                    to_publish: true,
+                    path: "/foo".into(),
+                    version,
+                    dependencies: vec!["bar"],
+                },
+            ),
+            (
+                "bar",
+                PackageInfo {
+                    to_publish: false,
+                    path: "/bar".into(),
+                    version,
+                    dependencies: vec![],
+                },
+            ),
+        ]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because its dependency bar isn't publishable"
+        );
+    }
+}

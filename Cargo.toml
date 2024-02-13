@@ -67,6 +67,7 @@ maelstrom-client = { version = "0.6.0-dev", path = "crates/maelstrom-client" }
 maelstrom-container = { version = "0.6.0-dev", path = "crates/maelstrom-container" }
 maelstrom-linux = { version = "0.6.0-dev", path = "crates/maelstrom-linux" }
 maelstrom-plot = { version = "0.6.0-dev", path = "crates/maelstrom-plot" }
+maelstrom-simex = { version = "0.6.0-dev", path = "crates/maelstrom-simex" }
 maelstrom-test = { version = "0.6.0-dev", path = "crates/maelstrom-test" }
 maelstrom-util = { version = "0.6.0-dev", path = "crates/maelstrom-util" }
 maelstrom-web = { version = "0.6.0-dev", path = "crates/maelstrom-web" }
@@ -81,7 +82,7 @@ oci-spec = "0.6"
 rand = "0.8.5"
 regex = "1.8.3"
 regex-macro = "0.2"
-reqwest = { version = "0.11", features = [ "stream", "json" ] }
+reqwest = { version = "0.11", features = [ "blocking", "json", "stream" ] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1.0.107" }
 serde_repr = "0.1"
