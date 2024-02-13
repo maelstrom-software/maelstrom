@@ -20,17 +20,17 @@ fn filter(version: &str, input: impl BufRead, mut output: impl Write) -> Result<
         let line = line?;
         if line.starts_with(&start_line) {
             state = State::InSectionLeadingBlanks;
-        } else if line.starts_with("## [") || line.starts_with("[") {
+        } else if line.starts_with("## [") || line.starts_with('[') {
             state = State::NotInSection;
         } else if line.trim().is_empty() {
             blanks += 1;
         } else if state != State::NotInSection {
             if state == State::InSection {
                 for _ in 0..blanks {
-                    write!(output, "\n")?;
+                    writeln!(output)?;
                 }
             }
-            write!(output, "{line}\n")?;
+            writeln!(output, "{line}")?;
             blanks = 0;
             state = State::InSection;
         }
