@@ -8,7 +8,7 @@ pub mod substitute;
 
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
-use maelstrom_base::{Layer, Utf8PathBuf};
+use maelstrom_base::Utf8PathBuf;
 use serde::{de, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -39,6 +39,45 @@ where
     } else {
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct PrefixOptions {
+    pub strip_prefix: Option<Utf8PathBuf>,
+    pub prepend_prefix: Option<Utf8PathBuf>,
+    #[serde(default)]
+    pub canonicalize: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct SymlinkSpec {
+    pub link: Utf8PathBuf,
+    pub target: Utf8PathBuf,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
+pub enum Layer {
+    Tar {
+        #[serde(rename = "tar")]
+        path: Utf8PathBuf,
+    },
+    Glob {
+        glob: String,
+        #[serde(flatten)]
+        prefix_options: PrefixOptions,
+    },
+    Paths {
+        paths: Vec<Utf8PathBuf>,
+        #[serde(flatten)]
+        prefix_options: PrefixOptions,
+    },
+    Stubs {
+        stubs: Vec<String>,
+    },
+    Symlinks {
+        symlinks: Vec<SymlinkSpec>,
+    },
 }
 
 /// An enum and struct (`EnumSet<ImageUse>`) used for deserializing "image use" statements in JSON,

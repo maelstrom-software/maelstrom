@@ -1,9 +1,9 @@
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestReader},
-    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Layer, PrefixOptions,
-    Sha256Digest, SymlinkSpec, Utf8Path,
+    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Sha256Digest, Utf8Path,
 };
 use maelstrom_client::{
+    spec::{Layer, PrefixOptions, SymlinkSpec},
     test::{
         client_driver::TestClientDriver,
         fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},

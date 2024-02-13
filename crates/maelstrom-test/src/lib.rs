@@ -192,7 +192,7 @@ macro_rules! string_nonempty {
 #[macro_export]
 macro_rules! tar_layer {
     ($path:expr) => {
-        ::maelstrom_base::Layer::Tar {
+        ::maelstrom_client::spec::Layer::Tar {
             path: ::maelstrom_base::Utf8PathBuf::from($path),
         }
     };
@@ -207,9 +207,9 @@ macro_rules! glob_layer {
         $prepend_prefix:expr,
         $canonicalize:expr
     ) => {
-        ::maelstrom_base::Layer::Glob {
+        ::maelstrom_client::spec::Layer::Glob {
             glob: ::std::convert::Into::into($glob),
-            prefix_options: ::maelstrom_base::PrefixOptions {
+            prefix_options: ::maelstrom_client::spec::PrefixOptions {
                 strip_prefix: $strip_prefix,
                 prepend_prefix: $prepend_prefix,
                 canonicalize: $canonicalize,
@@ -265,9 +265,9 @@ macro_rules! paths_layer {
         $prepend_prefix:expr,
         $canonicalize:expr
     ) => {
-        ::maelstrom_base::Layer::Paths {
+        ::maelstrom_client::spec::Layer::Paths {
             paths: vec![$(utf8_path_buf!($path)),*],
-            prefix_options: ::maelstrom_base::PrefixOptions {
+            prefix_options: ::maelstrom_client::spec::PrefixOptions {
                 strip_prefix: $strip_prefix,
                 prepend_prefix: $prepend_prefix,
                 canonicalize: $canonicalize,

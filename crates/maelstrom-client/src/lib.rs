@@ -1,6 +1,10 @@
 pub mod spec;
 pub mod test;
 
+// This hack makes some macros in maelstrom_base work
+#[cfg(test)]
+extern crate self as maelstrom_client;
+
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use itertools::Itertools as _;
@@ -13,8 +17,7 @@ use maelstrom_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ArtifactType, ClientJobId, JobSpec, JobStringResult, Layer, PrefixOptions, Sha256Digest,
-    SymlinkSpec, Utf8Path, Utf8PathBuf,
+    ArtifactType, ClientJobId, JobSpec, JobStringResult, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_container::ContainerImageDepot;
 use maelstrom_util::{
@@ -25,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest as _, Sha256};
+use spec::{Layer, PrefixOptions, SymlinkSpec};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,

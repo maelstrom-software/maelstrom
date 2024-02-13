@@ -1,9 +1,9 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, Layer, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
 };
-use maelstrom_client::spec::{incompatible, Image, ImageUse, PossiblyImage};
+use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, str};
 
@@ -232,7 +232,8 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 mod test {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, JobMountFsType, SymlinkSpec};
+    use maelstrom_base::{enum_set, JobMountFsType};
+    use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
