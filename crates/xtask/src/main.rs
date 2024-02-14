@@ -1,8 +1,14 @@
-mod extract_release_notes;
+mod changelog;
 mod publish;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    Changelog(changelog::CliArgs),
+    Publish(publish::CliArgs),
+}
 
 /// Perform a number of different tasks for the Maelstrom project related to building, testing,
 /// publishing, etc..
@@ -13,15 +19,9 @@ struct CliArgs {
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
-enum Command {
-    ExtractReleaseNotes(extract_release_notes::CliArgs),
-    Publish(publish::CliArgs),
-}
-
 fn main() -> Result<()> {
     match CliArgs::parse().command {
-        Command::ExtractReleaseNotes(options) => extract_release_notes::main(options),
+        Command::Changelog(options) => changelog::main(options),
         Command::Publish(options) => publish::main(options),
     }
 }

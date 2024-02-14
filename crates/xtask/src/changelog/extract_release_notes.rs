@@ -38,25 +38,21 @@ fn filter(version: &str, input: impl BufRead, mut output: impl Write) -> Result<
     Ok(())
 }
 
-/// Extract release notes from a changelog.
+/// Extract release notes from changelog.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
     /// Release version.
     version: String,
-
-    /// Location of changelog.
-    #[arg(long, short, default_value = "CHANGELOG.md")]
-    input: Utf8PathBuf,
 
     /// Where to put release notes. If not given, standard output is used.
     #[arg(long, short)]
     output: Option<Utf8PathBuf>,
 }
 
-pub fn main(args: CliArgs) -> Result<()> {
+pub fn main(changelog: Utf8PathBuf, args: CliArgs) -> Result<()> {
     filter(
         &args.version,
-        BufReader::new(File::open(args.input).context("opening input file")?),
+        BufReader::new(File::open(changelog).context("opening input file")?),
         BufWriter::new(match args.output {
             Some(filename) => Box::new(File::create(filename)?) as Box<dyn Write>,
             None => Box::new(io::stdout()) as Box<dyn Write>,

@@ -118,7 +118,7 @@ gh auth status
 
 Then, create the GitHub release:
 ```bash
-gh release create "v$VERSION" -F <(cargo xtask extract-release-notes "$VERSION")
+gh release create "v$VERSION" -F <(cargo xtask changelog extract-release-notes "$VERSION")
 ```
 
 ## Update `CHANGELOG.md` for Unreleased Changes
