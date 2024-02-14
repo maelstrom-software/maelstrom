@@ -5601,12 +5601,16 @@ dependencies = [
  "anyhow",
  "camino",
  "cargo_metadata",
+ "chrono",
  "clap",
+ "colored-diff",
  "indoc",
  "maelstrom-simex",
  "maelstrom-util",
+ "regex",
  "reqwest",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
