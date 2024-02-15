@@ -261,8 +261,7 @@ where
                 .new_side_progress(format!("downloading image {image}"))
                 .unwrap_or_else(ProgressBar::hidden);
             let mut client = self.client.lock().unwrap();
-            let container_image_depot = client.container_image_depot_mut();
-            let image = container_image_depot.get_container_image(image, version, prog)?;
+            let image = client.get_container_image(image, version, prog)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),

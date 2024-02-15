@@ -7,6 +7,7 @@ extern crate self as maelstrom_client;
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
+use indicatif::ProgressBar;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{
@@ -19,7 +20,7 @@ use maelstrom_base::{
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobSpec, JobStringResult, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
-use maelstrom_container::ContainerImageDepot;
+use maelstrom_container::{ContainerImage, ContainerImageDepot};
 use maelstrom_util::{
     config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader,
     manifest::ManifestBuilder, net,
@@ -712,8 +713,14 @@ impl Client {
         Ok(res)
     }
 
-    pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
-        &mut self.container_image_depot
+    pub fn get_container_image(
+        &mut self,
+        name: &str,
+        tag: &str,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        self.container_image_depot
+            .get_container_image(name, tag, prog)
     }
 
     pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {

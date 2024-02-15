@@ -170,8 +170,7 @@ fn main() -> Result<ExitCode> {
         let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
         let prog = ProgressBar::hidden();
         let mut client = client.borrow_mut();
-        let container_image_depot = client.container_image_depot_mut();
-        let image = container_image_depot.get_container_image(image, version, prog)?;
+        let image = client.get_container_image(image, version, prog)?;
         Ok(ImageConfig {
             layers: image.layers.clone(),
             environment: image.env().cloned(),

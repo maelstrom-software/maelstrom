@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client-process.workspace = true
 maelstrom-container.workspace = true

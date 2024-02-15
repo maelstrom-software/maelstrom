@@ -3,16 +3,17 @@ pub use maelstrom_client_process::{
 };
 
 use anyhow::Result;
+use indicatif::ProgressBar;
 use maelstrom_base::{stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
-use maelstrom_client_process as proc;
-use maelstrom_container::ContainerImageDepot;
+use maelstrom_client_process::Client as ProcessClient;
+use maelstrom_container::ContainerImage;
 use maelstrom_util::config::BrokerAddr;
 use spec::Layer;
 use std::path::Path;
 use std::sync::mpsc::Receiver;
 
 pub struct Client {
-    inner: proc::Client,
+    inner: ProcessClient,
 }
 
 impl Client {
@@ -23,7 +24,7 @@ impl Client {
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
         Ok(Self {
-            inner: proc::Client::new(driver_mode, broker_addr, project_dir, cache_dir)?,
+            inner: ProcessClient::new(driver_mode, broker_addr, project_dir, cache_dir)?,
         })
     }
 
@@ -35,8 +36,13 @@ impl Client {
         self.inner.add_layer(layer)
     }
 
-    pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
-        self.inner.container_image_depot_mut()
+    pub fn get_container_image(
+        &mut self,
+        name: &str,
+        tag: &str,
+        prog: ProgressBar,
+    ) -> Result<ContainerImage> {
+        self.inner.get_container_image(name, tag, prog)
     }
 
     pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
