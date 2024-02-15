@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
     ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec,
-    NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
+    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, Layer, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, io::Read};
+use std::{collections::BTreeMap, io::Read, num::NonZeroU32};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
     inner: InnerT,
@@ -70,6 +70,7 @@ struct Job {
     user: Option<UserId>,
     group: Option<GroupId>,
     image: Option<String>,
+    timeout: Option<u32>,
 }
 
 impl Job {
@@ -90,6 +91,7 @@ impl Job {
             user: None,
             group: None,
             image: None,
+            timeout: None,
         }
     }
 
@@ -158,7 +160,7 @@ impl Job {
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
-            timeout: Default::default(),
+            timeout: Timeout::from(self.timeout.and_then(NonZeroU32::new)),
         })
     }
 }
@@ -180,6 +182,7 @@ enum JobField {
     User,
     Group,
     Image,
+    Timeout,
 }
 
 struct JobVisitor;
@@ -224,6 +227,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
         let mut user = None;
         let mut group = None;
         let mut image = None;
+        let mut timeout = None;
         while let Some(key) = map.next_key()? {
             match key {
                 JobField::Program => {
@@ -300,6 +304,9 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                 JobField::Group => {
                     group = Some(map.next_value()?);
                 }
+                JobField::Timeout => {
+                    timeout = Some(map.next_value()?);
+                }
                 JobField::Image => {
                     let i = map.next_value::<Image>()?;
                     image = Some(i.name);
@@ -346,6 +353,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
             user,
             group,
             image,
+            timeout,
         })
     }
 }
@@ -1201,6 +1209,48 @@ mod test {
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
             .group(4321),
+        )
+    }
+
+    #[test]
+    fn timeout() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "timeout": 1234
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .timeout(Timeout::from(NonZeroU32::new(1234))),
+        )
+    }
+
+    #[test]
+    fn timeout_0() {
+        assert_eq!(
+            parse_job(
+                r#"{
+                    "program": "/bin/sh",
+                    "layers": [ { "tar": "1" } ],
+                    "timeout": 0
+                }"#,
+            )
+            .unwrap()
+            .into_job_spec(layer_mapper, env, images)
+            .unwrap(),
+            JobSpec::new(
+                string!("/bin/sh"),
+                nonempty![(digest!(1), ArtifactType::Tar)]
+            )
+            .timeout(Timeout::from(None)),
         )
     }
 }

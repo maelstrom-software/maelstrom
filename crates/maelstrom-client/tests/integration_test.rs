@@ -70,6 +70,7 @@ fn basic_job_test(
         working_directory: utf8_path_buf!("."),
         user: 1000.into(),
         group: 1000.into(),
+        timeout: Default::default(),
     };
     let (send, recv) = mpsc::channel();
     client.add_job(
