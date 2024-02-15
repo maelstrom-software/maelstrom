@@ -65,6 +65,7 @@ maplit = "1"
 maelstrom-base = { version = "0.6.0-dev", path = "crates/maelstrom-base" }
 maelstrom-broker = { version = "0.6.0-dev", path = "crates/maelstrom-broker" }
 maelstrom-client = { version = "0.6.0-dev", path = "crates/maelstrom-client" }
+maelstrom-client-process = { version = "0.6.0-dev", path = "crates/maelstrom-client-process" }
 maelstrom-container = { version = "0.6.0-dev", path = "crates/maelstrom-container" }
 maelstrom-linux = { version = "0.6.0-dev", path = "crates/maelstrom-linux" }
 maelstrom-plot = { version = "0.6.0-dev", path = "crates/maelstrom-plot" }
