@@ -491,8 +491,8 @@ pub enum ClientDriverMode {
 impl ClientDriverMode {
     fn new_driver(&self) -> Box<dyn ClientDriver + Send + Sync> {
         match self {
-            Self::MultiThreaded => Box::new(MultiThreadedClientDriver::default()),
-            Self::SingleThreaded => Box::new(SingleThreadedClientDriver::default()),
+            Self::MultiThreaded => Box::<MultiThreadedClientDriver>::default(),
+            Self::SingleThreaded => Box::<SingleThreadedClientDriver>::default(),
         }
     }
 }
