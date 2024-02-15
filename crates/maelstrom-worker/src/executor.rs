@@ -10,7 +10,7 @@ use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
-    NonEmpty, Sha256Digest, UserId, Utf8PathBuf,
+    NonEmpty, Sha256Digest, UserId, Utf8PathBuf, Timeout,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -59,6 +59,7 @@ pub struct JobSpec {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
+    pub timeout: Timeout,
 }
 
 impl JobSpec {
@@ -78,6 +79,7 @@ impl JobSpec {
             working_directory,
             user,
             group,
+            timeout,
         } = spec;
         (
             JobSpec {
@@ -92,6 +94,7 @@ impl JobSpec {
                 working_directory,
                 user,
                 group,
+                timeout,
             },
             digest_layers.map(|(d, _)| d),
         )

@@ -17,6 +17,7 @@ use std::{
     error::Error,
     fmt::{self, Debug, Formatter},
     hash::Hash,
+    num::NonZeroU32,
     result::Result,
     str::{self, FromStr},
 };
@@ -111,6 +112,12 @@ pub struct UserId(u32);
 )]
 pub struct GroupId(u32);
 
+/// A count of seconds.
+#[derive(
+    Copy, Clone, Debug, Default, Deserialize, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
+)]
+pub struct Timeout(Option<NonZeroU32>);
+
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct JobSpec {
@@ -125,6 +132,7 @@ pub struct JobSpec {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
+    pub timeout: Timeout,
 }
 
 impl JobSpec {
@@ -144,6 +152,7 @@ impl JobSpec {
             working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
+            timeout: Timeout::default(),
         }
     }
 
@@ -197,6 +206,11 @@ impl JobSpec {
 
     pub fn group(mut self, group: impl Into<GroupId>) -> Self {
         self.group = group.into();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: impl Into<Timeout>) -> Self {
+        self.timeout = timeout.into();
         self
     }
 }

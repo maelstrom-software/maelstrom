@@ -158,6 +158,7 @@ impl Job {
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
+            timeout: Default::default(),
         })
     }
 }

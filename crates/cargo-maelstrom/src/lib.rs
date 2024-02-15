@@ -316,6 +316,7 @@ where
                 working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
                 group: test_metadata.group,
+                timeout: Default::default(),
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
