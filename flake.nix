@@ -79,10 +79,12 @@
           packages = [
             pkgs.bat
             pkgs.cargo-audit
+            pkgs.cargo-binstall
             pkgs.cargo-edit
             pkgs.cargo-nextest
             pkgs.cargo-watch
 	    pkgs.gh
+	    pkgs.mdbook
             pkgs.ripgrep
             pkgs.rust-analyzer
             pkgs.stgit
