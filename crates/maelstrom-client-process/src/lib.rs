@@ -754,17 +754,17 @@ impl Client {
         Ok(self.get_job_state_counts_async()?.recv()?)
     }
 
-    /// Must only be called if created with `DriverMode::SingleThreaded`
+    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_broker_msg_single_threaded(&self, count: usize) {
         self.driver.process_broker_msg_single_threaded(count)
     }
 
-    /// Must only be called if created with `DriverMode::SingleThreaded`
+    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_client_messages_single_threaded(&self) {
         self.driver.process_client_messages_single_threaded()
     }
 
-    /// Must only be called if created with `DriverMode::SingleThreaded`
+    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_artifact_single_threaded(&self) {
         self.driver.process_artifact_single_threaded()
     }
