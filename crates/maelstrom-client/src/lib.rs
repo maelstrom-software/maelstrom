@@ -39,6 +39,7 @@ use std::{
     thread::{self, JoinHandle},
     time::SystemTime,
 };
+use test::client_driver::SingleThreadedClientDriver;
 
 fn push_one_artifact(broker_addr: BrokerAddr, path: PathBuf, digest: Sha256Digest) -> Result<()> {
     let mut stream = TcpStream::connect(broker_addr.inner())?;
@@ -371,14 +372,26 @@ impl ClientDeps {
 pub trait ClientDriver {
     fn drive(&mut self, deps: ClientDeps);
     fn stop(&mut self) -> Result<()>;
+
+    fn process_broker_msg_single_threaded(&self, _count: usize) {
+        unimplemented!()
+    }
+
+    fn process_client_messages_single_threaded(&self) {
+        unimplemented!()
+    }
+
+    fn process_artifact_single_threaded(&self) {
+        unimplemented!()
+    }
 }
 
 #[derive(Default)]
-pub struct DefaultClientDriver {
+pub struct MultiThreadedClientDriver {
     handle: Option<JoinHandle<Result<()>>>,
 }
 
-impl ClientDriver for DefaultClientDriver {
+impl ClientDriver for MultiThreadedClientDriver {
     fn drive(&mut self, mut deps: ClientDeps) {
         assert!(self.handle.is_none());
         self.handle = Some(thread::spawn(move || {
@@ -467,6 +480,22 @@ pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
 pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
 
+#[derive(Default)]
+pub enum ClientDriverMode {
+    #[default]
+    MultiThreaded,
+    SingleThreaded,
+}
+
+impl ClientDriverMode {
+    fn new_driver(&self) -> Box<dyn ClientDriver + Send + Sync> {
+        match self {
+            Self::MultiThreaded => Box::new(MultiThreadedClientDriver::default()),
+            Self::SingleThreaded => Box::new(SingleThreadedClientDriver::default()),
+        }
+    }
+}
+
 pub struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     driver: Box<dyn ClientDriver + Send + Sync>,
@@ -479,12 +508,13 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new<DriverT: ClientDriver + 'static + Send + Sync>(
-        mut driver: DriverT,
+    pub fn new(
+        driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
+        let mut driver = driver_mode.new_driver();
         let deps = ClientDeps::new(broker_addr)?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
         driver.drive(deps);
@@ -496,7 +526,7 @@ impl Client {
 
         Ok(Client {
             dispatcher_sender,
-            driver: Box::new(driver),
+            driver,
             digest_repo: DigestRespository::new(cache_dir.as_ref()),
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             processed_artifact_paths: HashSet::default(),
@@ -715,5 +745,20 @@ impl Client {
 
     pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
         Ok(self.get_job_state_counts_async()?.recv()?)
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_broker_msg_single_threaded(&self, count: usize) {
+        self.driver.process_broker_msg_single_threaded(count)
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_client_messages_single_threaded(&self) {
+        self.driver.process_client_messages_single_threaded()
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_artifact_single_threaded(&self) {
+        self.driver.process_artifact_single_threaded()
     }
 }

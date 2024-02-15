@@ -11,7 +11,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
-    Client, DefaultClientDriver,
+    Client,
 };
 use maelstrom_client_cli::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
@@ -163,12 +163,7 @@ fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let client = Client::new(
-        DefaultClientDriver::default(),
-        config.broker,
-        ".",
-        cache_dir(),
-    )?;
+    let client = Client::new(Default::default(), config.broker, ".", cache_dir())?;
     let client = RefCell::new(client);
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let image_lookup = |image: &str| {

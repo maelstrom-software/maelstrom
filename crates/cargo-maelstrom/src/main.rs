@@ -13,7 +13,6 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
-use maelstrom_client::DefaultClientDriver;
 use maelstrom_util::process::ExitCode;
 use std::{
     env,
@@ -218,7 +217,7 @@ pub fn main() -> Result<ExitCode> {
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
         config.broker,
-        DefaultClientDriver::default(),
+        Default::default(),
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();

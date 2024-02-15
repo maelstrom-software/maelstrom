@@ -5,11 +5,8 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    test::{
-        client_driver::TestClientDriver,
-        fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    },
-    Client,
+    test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
+    Client, ClientDriverMode,
 };
 use maelstrom_test::utf8_path_buf;
 use maelstrom_util::fs::Fs;
@@ -19,6 +16,7 @@ use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
+use std::thread;
 use tempfile::tempdir;
 
 fn basic_job_test(
@@ -48,9 +46,8 @@ fn basic_job_test(
         ..Default::default()
     };
     let mut broker = FakeBroker::new(state);
-    let client_driver = TestClientDriver::default();
     let mut client = Client::new(
-        client_driver.clone(),
+        ClientDriverMode::SingleThreaded,
         broker.address().clone(),
         &artifact_dir,
         cache_dir,
@@ -59,7 +56,7 @@ fn basic_job_test(
     let mut broker_conn = broker.accept();
 
     let layers = add_artifacts(&mut client, &artifact_dir);
-    client_driver.process_client_messages();
+    client.process_client_messages_single_threaded();
 
     let spec = JobSpec {
         program: utf8_path_buf!("foo"),
@@ -80,18 +77,21 @@ fn basic_job_test(
         Box::new(move |id, result| Ok(send.send((id, result)).unwrap())),
     );
 
-    client_driver.process_client_messages();
+    client.process_client_messages_single_threaded();
     broker_conn.process(1, true /* fetch_layers */);
 
     for _ in 0..layers.len() {
-        client_driver.process_broker_msg(1);
-        client_driver.process_artifact(|| broker.receive_artifact(&artifact_dir));
+        client.process_broker_msg_single_threaded(1);
+        thread::scope(|scope| {
+            scope.spawn(|| client.process_artifact_single_threaded());
+            broker.receive_artifact(&artifact_dir);
+        });
     }
 
     verify_artifacts(&artifact_dir, &layers);
 
     broker_conn.process(1, true /* fetch_layers */);
-    client_driver.process_broker_msg(1);
+    client.process_broker_msg_single_threaded(1);
 
     let (_id, result) = recv.recv().unwrap();
     assert_eq!(test_job_result, result.unwrap());

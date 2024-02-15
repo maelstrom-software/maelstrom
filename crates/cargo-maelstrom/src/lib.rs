@@ -14,7 +14,7 @@ use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Package
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest};
-use maelstrom_client::{spec::ImageConfig, Client, ClientDriver};
+use maelstrom_client::{spec::ImageConfig, Client, ClientDriverMode};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
@@ -488,11 +488,11 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
         broker_addr: BrokerAddr,
-        client_driver: impl ClientDriver + Send + Sync + 'static,
+        driver_mode: ClientDriverMode,
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(
-            client_driver,
+            driver_mode,
             broker_addr,
             workspace_root,
             cache_dir.clone(),

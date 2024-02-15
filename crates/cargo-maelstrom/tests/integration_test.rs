@@ -15,11 +15,8 @@ use maelstrom_base::{
     JobOutputResult, JobStatus, JobSuccess,
 };
 use maelstrom_client::{
-    test::{
-        client_driver::TestClientDriver,
-        fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    },
-    Client,
+    test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
+    Client, ClientDriverMode,
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -250,7 +247,6 @@ fn run_app(
 
     let mut stderr = vec![];
     let mut b = FakeBroker::new(state);
-    let client_driver = TestClientDriver::default();
 
     let deps = MainAppDeps::new(
         cargo,
@@ -262,7 +258,7 @@ fn run_app(
         &workspace_root,
         &cargo_metadata.workspace_packages(),
         b.address().clone(),
-        client_driver.clone(),
+        ClientDriverMode::SingleThreaded,
     )
     .unwrap();
     let prog_driver = TestProgressDriver::default();
@@ -270,6 +266,7 @@ fn run_app(
         main_app_new(&deps, stdout_tty, quiet, term.clone(), prog_driver.clone()).unwrap();
 
     let mut b_conn = b.accept();
+    let get_client = || deps.client.lock().unwrap();
 
     loop {
         let res = app.enqueue_one().unwrap();
@@ -280,30 +277,27 @@ fn run_app(
         };
         let test = fake_tests.get(&package_name, &case);
 
+        let mut client = get_client();
+
         // process job enqueuing
-        client_driver.process_client_messages();
+        client.process_client_messages_single_threaded();
         b_conn.process(1, false /* fetch_layers */);
         if test.desired_state == JobState::Complete {
-            client_driver.process_broker_msg(1);
+            client.process_broker_msg_single_threaded(1);
         }
 
-        let counts = deps
-            .client
-            .lock()
-            .unwrap()
-            .get_job_state_counts_async()
-            .unwrap();
-        client_driver.process_client_messages();
+        let counts = client.get_job_state_counts_async().unwrap();
+        client.process_client_messages_single_threaded();
 
         // process job state request
         b_conn.process(1, false /* fetch_layers */);
-        client_driver.process_broker_msg(1);
+        client.process_broker_msg_single_threaded(1);
 
         prog_driver.update(counts.try_recv().unwrap()).unwrap();
     }
 
     app.drain().unwrap();
-    client_driver.process_client_messages();
+    get_client().process_client_messages_single_threaded();
 
     if finish {
         app.finish().unwrap();

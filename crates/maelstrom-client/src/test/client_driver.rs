@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 #[derive(Default, Clone)]
-pub struct TestClientDriver {
+pub struct SingleThreadedClientDriver {
     deps: Arc<Mutex<Option<ClientDeps>>>,
 }
 
-impl ClientDriver for TestClientDriver {
+impl ClientDriver for SingleThreadedClientDriver {
     fn drive(&mut self, deps: ClientDeps) {
         *self.deps.lock().unwrap() = Some(deps);
     }
@@ -16,10 +16,8 @@ impl ClientDriver for TestClientDriver {
     fn stop(&mut self) -> Result<()> {
         Ok(())
     }
-}
 
-impl TestClientDriver {
-    pub fn process_broker_msg(&self, count: usize) {
+    fn process_broker_msg_single_threaded(&self, count: usize) {
         let mut locked_deps = self.deps.lock().unwrap();
         let deps = locked_deps.as_mut().unwrap();
 
@@ -29,18 +27,17 @@ impl TestClientDriver {
         }
     }
 
-    pub fn process_client_messages(&self) {
+    fn process_client_messages_single_threaded(&self) {
         let mut locked_deps = self.deps.lock().unwrap();
         let deps = locked_deps.as_mut().unwrap();
         while deps.dispatcher.try_process_one().is_ok() {}
     }
 
-    pub fn process_artifact(&self, body: impl FnOnce()) {
+    fn process_artifact_single_threaded(&self) {
         let mut locked_deps = self.deps.lock().unwrap();
         let deps = locked_deps.as_mut().unwrap();
         thread::scope(|scope| {
             deps.artifact_pusher.process_one(scope);
-            body()
         });
     }
 }
