@@ -286,7 +286,7 @@ fn run_app(
             client.process_broker_msg_single_threaded(1);
         }
 
-        let counts = client.get_job_state_counts_async().unwrap();
+        let counts = client.get_job_state_counts().unwrap();
         client.process_client_messages_single_threaded();
 
         // process job state request

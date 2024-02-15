@@ -57,11 +57,7 @@ impl Client {
         self.inner.wait_for_outstanding_jobs()
     }
 
-    pub fn get_job_state_counts_async(&mut self) -> Result<Receiver<JobStateCounts>> {
-        self.inner.get_job_state_counts_async()
-    }
-
-    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
+    pub fn get_job_state_counts(&mut self) -> Result<Receiver<JobStateCounts>> {
         self.inner.get_job_state_counts()
     }
 

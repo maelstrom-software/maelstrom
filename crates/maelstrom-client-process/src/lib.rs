@@ -743,15 +743,11 @@ impl Client {
         Ok(())
     }
 
-    pub fn get_job_state_counts_async(&mut self) -> Result<Receiver<JobStateCounts>> {
+    pub fn get_job_state_counts(&mut self) -> Result<Receiver<JobStateCounts>> {
         let (sender, recv) = mpsc::sync_channel(1);
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))?;
         Ok(recv)
-    }
-
-    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
-        Ok(self.get_job_state_counts_async()?.recv()?)
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
