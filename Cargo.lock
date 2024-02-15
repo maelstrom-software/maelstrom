@@ -2643,8 +2643,10 @@ dependencies = [
 name = "maelstrom-client"
 version = "0.6.0-dev"
 dependencies = [
+ "anyhow",
  "maelstrom-base",
  "maelstrom-client-process",
+ "maelstrom-container",
  "maelstrom-test",
  "maelstrom-util",
  "maplit",

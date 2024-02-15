@@ -1,1 +1,76 @@
-pub use maelstrom_client_process::*;
+pub use maelstrom_client_process::{
+    spec, test, ClientDriverMode, JobResponseHandler, MANIFEST_DIR,
+};
+
+use anyhow::Result;
+use maelstrom_base::{stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
+use maelstrom_client_process as proc;
+use maelstrom_container::ContainerImageDepot;
+use maelstrom_util::config::BrokerAddr;
+use spec::Layer;
+use std::path::Path;
+use std::sync::mpsc::Receiver;
+
+pub struct Client {
+    inner: proc::Client,
+}
+
+impl Client {
+    pub fn new(
+        driver_mode: ClientDriverMode,
+        broker_addr: BrokerAddr,
+        project_dir: impl AsRef<Path>,
+        cache_dir: impl AsRef<Path>,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: proc::Client::new(driver_mode, broker_addr, project_dir, cache_dir)?,
+        })
+    }
+
+    pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+        self.inner.add_artifact(path)
+    }
+
+    pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        self.inner.add_layer(layer)
+    }
+
+    pub fn container_image_depot_mut(&mut self) -> &mut ContainerImageDepot {
+        self.inner.container_image_depot_mut()
+    }
+
+    pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
+        self.inner.add_job(spec, handler)
+    }
+
+    pub fn stop_accepting(&mut self) -> Result<()> {
+        self.inner.stop_accepting()
+    }
+
+    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+        self.inner.wait_for_outstanding_jobs()
+    }
+
+    pub fn get_job_state_counts_async(&mut self) -> Result<Receiver<JobStateCounts>> {
+        self.inner.get_job_state_counts_async()
+    }
+
+    pub fn get_job_state_counts(&mut self) -> Result<JobStateCounts> {
+        self.inner.get_job_state_counts()
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_broker_msg_single_threaded(&self, count: usize) {
+        self.inner.process_broker_msg_single_threaded(count)
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_client_messages_single_threaded(&self) {
+        self.inner.process_client_messages_single_threaded()
+    }
+
+    /// Must only be called if created with `DriverMode::SingleThreaded`
+    pub fn process_artifact_single_threaded(&self) {
+        self.inner.process_artifact_single_threaded()
+    }
+}
