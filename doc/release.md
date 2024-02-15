@@ -36,23 +36,16 @@ git commit -am "Update CHANGELOG.md for version $VERSION."
 
 ### Change Headings and Links
 
-The second thing to do is to update the headers in `CHANGELOG.md`. This is
-mechanical. In the future, we will do this using a tool.
-
-These are the steps to take:
-  - At the top of the file, change the `[Unreleased]` header to contain the
-    version number and the date. Something like this:
+The second thing to do is to update the headers and links in `CHANGELOG.md`.
+This is done with `cargo xtask changelog open`:
+```bash
+cargo xtask changelog close "$VERSION"
 ```
-## [10.3.1] - 2028-06-26
-```
-  - Go to the bottom of the file and change the `[unreleased]` line. Change
-    "`unreleased`" to the new version number and change "`HEAD`" to the new
-    release's tag.
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml`
 
 This is a bit tricky because you have to update the version itself as well as
-all internal dependencies, so we use the `cargo-set-version` tool to make: sure
+all internal dependencies, so we use the `cargo-set-version` tool to make sure
 we get it right:
 ```bash
 cargo set-version "$VERSION"
@@ -123,24 +116,9 @@ gh release create "v$VERSION" -F <(cargo xtask changelog extract-release-notes "
 
 ## Update `CHANGELOG.md` for Unreleased Changes
 
-Add the `[Unreleased]` section into `CHANGELOG.md`. This should look like:
-```
-## [Unreleased]
-### General
-#### Changed
-#### Added
-#### Removed
-#### Fixed
-### `cargo-maelstrom`
-#### Changed
-#### Added
-#### Removed
-#### Fixed
-```
-
-At the bottom of the file, add a link like this:
-```
-[unreleased]: https://github.com/maelstrom-software/maelstrom/compare/v<VERSION>...HEAD
+Use `cargo xtask changelog open` to Add the `[Unreleased]` section to `CHANGELOG.md`:
+```bash
+cargo xtask changelog open
 ```
 
 ## Update `version` in `[workspace.package]` in `Cargo.toml` to Next Dev Version
@@ -156,7 +134,7 @@ It's important to commit these new changes right away, so that nothing other tha
 actual version has the given version string.
 
 ```bash
-git commit -am "Update CHANGELOG.md for version $NEXT_VERSION."
+git commit -am "Start version $NEXT_VERSION."
 ```
 
 ## Push Changesets and Tags
