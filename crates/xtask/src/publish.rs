@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{bail, Result};
 use cargo_metadata::{camino::Utf8Path, semver::Version, Metadata, MetadataCommand};
 use clap::{ArgAction::Count, Parser};
 use reqwest::blocking::Client;
@@ -17,27 +17,34 @@ type Packages<'a> = HashMap<&'a str, PackageInfo<'a>>;
 /// Return a map from all of the packages in the workspace to some relevant information about them.
 /// Only intra-workspace dependencies are included.
 fn extract_workspace_packages(metadata: &Metadata) -> Packages {
-    let mut packages = metadata
-        .workspace_packages()
-        .iter()
-        .map(|pkg| {
-            (
-                pkg.name.as_str(),
-                PackageInfo {
-                    to_publish: !matches!(&pkg.publish, Some(v) if v.is_empty()),
-                    path: pkg.manifest_path.parent().unwrap(),
-                    version: &pkg.version,
-                    dependencies: pkg.dependencies.iter().map(|d| d.name.as_str()).collect(),
-                },
-            )
-        })
-        .collect::<Packages>();
-    let workspace_packages = Vec::from_iter(packages.keys().copied());
-    for info in packages.values_mut() {
-        info.dependencies
-            .retain(|pkg| workspace_packages.contains(pkg));
-    }
-    packages
+    let packages = Packages::from_iter(metadata.workspace_packages().iter().map(|pkg| {
+        (
+            pkg.name.as_str(),
+            PackageInfo {
+                to_publish: !pkg.publish.as_ref().is_some_and(Vec::is_empty),
+                path: pkg.manifest_path.parent().unwrap(),
+                version: &pkg.version,
+                dependencies: pkg.dependencies.iter().map(|d| d.name.as_str()).collect(),
+            },
+        )
+    }));
+    Packages::from_iter(
+        packages
+            .iter()
+            .map(|(&pkg, info @ PackageInfo { dependencies, .. })| {
+                (
+                    pkg,
+                    PackageInfo {
+                        dependencies: dependencies
+                            .iter()
+                            .copied()
+                            .filter(|dep| packages.contains_key(dep))
+                            .collect(),
+                        ..*info
+                    },
+                )
+            }),
+    )
 }
 
 /// Return a vector of packages that aren't marked as `publish = false`. Return an error if any
@@ -46,13 +53,14 @@ fn get_publishable_packages<'a>(packages: &Packages<'a>) -> Result<Vec<&'a str>>
     packages
         .iter()
         .filter(|(_, info)| info.to_publish)
-        .map(|(package, _)| {
-            for dependency in &packages.get(package).unwrap().dependencies {
+        .map(|(package, info)| {
+            for dependency in &info.dependencies {
                 // Some dependencies may be to packages outside of the workspace.
                 if !packages.get(dependency).unwrap().to_publish {
-                        return Err(anyhow!(
-                            "cannot publish {package} because its dependency {dependency} isn't publishable",
-                        ));
+                    bail!(
+                        "cannot publish {package} because its dependency \
+                            {dependency} isn't publishable",
+                    );
                 }
             }
             Ok(*package)
@@ -180,14 +188,7 @@ pub fn main(args: CliArgs) -> Result<()> {
     }) {
         TopologicalSortResult::Ordering(ordering) => ordering,
         TopologicalSortResult::Cycle(cycle) => {
-            let cycle = cycle.into_iter().fold(String::new(), |mut pre, post| {
-                if !pre.is_empty() {
-                    pre.push_str(" -> ");
-                }
-                pre.push_str(post);
-                pre
-            });
-            return Err(anyhow!("found dependency cycle: {cycle}"));
+            bail!("found dependency cycle: {}", cycle.join(" -> "));
         }
     };
 
@@ -204,10 +205,7 @@ pub fn main(args: CliArgs) -> Result<()> {
     for package in ordering {
         let info = packages.get(package).unwrap();
         if !info.version.pre.is_empty() {
-            return Err(anyhow!(
-                "cannot publish pre-release version {}",
-                info.version
-            ));
+            bail!("cannot publish pre-release version {}", info.version);
         }
         if package_published(package, info.version)? {
             (args.quiet < 2).then(|| println!("Package {package} already published."));
@@ -224,7 +222,7 @@ pub fn main(args: CliArgs) -> Result<()> {
             .status()?
             .success()
         {
-            return Err(anyhow!("cargo publish exited with non-zero status"));
+            bail!("cargo publish exited with non-zero status");
         }
     }
 
@@ -277,8 +275,11 @@ mod tests {
                 TopologicalSortResult::Cycle(cycle) => {
                     // First, check that this cycle is syntactically correct.
                     assert!(cycle.len() > 1);
-                    assert!(cycle[0] == cycle[cycle.len() - 1]);
-                    assert!(HashSet::<&usize>::from_iter(cycle.iter()).len() == cycle.len() - 1);
+                    assert_eq!(cycle.first(), cycle.last());
+                    assert_eq!(
+                        HashSet::<&usize>::from_iter(cycle.iter()).len(),
+                        cycle.len() - 1
+                    );
 
                     // Second, check that every edge in the cycle is actually in our order.
                     for window in cycle.windows(2) {
