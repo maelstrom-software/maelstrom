@@ -278,6 +278,7 @@ pub enum JobOutcome {
         status: JobStatus,
         effects: JobEffects,
     },
+    TimedOut(JobEffects),
 }
 
 /// A job failed to execute for some reason. We separate the universe of errors into "execution"

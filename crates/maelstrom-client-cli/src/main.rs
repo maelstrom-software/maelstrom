@@ -74,37 +74,39 @@ pub struct ConfigOptions {
     pub broker: Option<String>,
 }
 
+fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -> Result<()> {
+    match stdout {
+        JobOutputResult::None => {}
+        JobOutputResult::Inline(bytes) => {
+            io::stdout().lock().write_all(&bytes)?;
+        }
+        JobOutputResult::Truncated { first, truncated } => {
+            io::stdout().lock().write_all(&first)?;
+            io::stdout().lock().flush()?;
+            eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
+        }
+    }
+    match stderr {
+        JobOutputResult::None => {}
+        JobOutputResult::Inline(bytes) => {
+            io::stderr().lock().write_all(&bytes)?;
+        }
+        JobOutputResult::Truncated { first, truncated } => {
+            io::stderr().lock().write_all(&first)?;
+            eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+        }
+    }
+    Ok(())
+}
+
 fn visitor(
     cjid: ClientJobId,
     result: JobOutcomeResult,
     accum: Arc<ExitCodeAccumulator>,
 ) -> Result<()> {
     match result {
-        Ok(JobOutcome::Completed {
-            status,
-            effects: JobEffects { stdout, stderr },
-        }) => {
-            match stdout {
-                JobOutputResult::None => {}
-                JobOutputResult::Inline(bytes) => {
-                    io::stdout().lock().write_all(&bytes)?;
-                }
-                JobOutputResult::Truncated { first, truncated } => {
-                    io::stdout().lock().write_all(&first)?;
-                    io::stdout().lock().flush()?;
-                    eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
-                }
-            }
-            match stderr {
-                JobOutputResult::None => {}
-                JobOutputResult::Inline(bytes) => {
-                    io::stderr().lock().write_all(&bytes)?;
-                }
-                JobOutputResult::Truncated { first, truncated } => {
-                    io::stderr().lock().write_all(&first)?;
-                    eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
-                }
-            }
+        Ok(JobOutcome::Completed { status, effects }) => {
+            print_effects(cjid, effects)?;
             match status {
                 JobStatus::Exited(0) => {}
                 JobStatus::Exited(code) => {
@@ -118,6 +120,12 @@ fn visitor(
                     accum.add(ExitCode::FAILURE);
                 }
             };
+        }
+        Ok(JobOutcome::TimedOut(effects)) => {
+            print_effects(cjid, effects)?;
+            io::stdout().lock().flush()?;
+            eprintln!("job {cjid}: timed out");
+            accum.add(ExitCode::FAILURE);
         }
         Err(JobError::Execution(err)) => {
             eprintln!("job {cjid}: execution error: {err}");

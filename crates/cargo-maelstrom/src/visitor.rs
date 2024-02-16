@@ -194,6 +194,12 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     }
                 }
             }
+            Ok(JobOutcome::TimedOut(_)) => {
+                result_str = "TIMEOUT".red();
+                result_details = Some("timed out".into());
+                self.tracker
+                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+            }
             Err(JobError::Execution(err)) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
