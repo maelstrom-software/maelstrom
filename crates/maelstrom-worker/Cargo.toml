@@ -37,7 +37,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 tar.workspace = true
-tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync"] }
+tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tuple.workspace = true
 
 [dev-dependencies]

@@ -24,13 +24,14 @@ use maelstrom_util::{
 };
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
-use std::{ops::ControlFlow, path::PathBuf, process, thread};
+use std::{ops::ControlFlow, path::PathBuf, process, thread, time::Duration};
 use tokio::{
     io::BufReader,
     net::TcpStream,
     signal::unix::{self, SignalKind},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    task::JoinSet,
+    task::{self, JoinHandle, JoinSet},
+    time,
 };
 
 type DispatcherReceiver = UnboundedReceiver<Message>;
@@ -109,6 +110,20 @@ impl DispatcherDeps for DispatcherAdapter {
 
     fn kill_job(&mut self, pid: Pid) {
         linux::kill(pid, Signal::KILL).ok();
+    }
+
+    type TimerHandle = JoinHandle<()>;
+
+    fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
+        let sender = self.dispatcher_sender.clone();
+        task::spawn(async move {
+            time::sleep(duration).await;
+            sender.send(Message::JobTimer(jid)).ok();
+        })
+    }
+
+    fn cancel_timer(&mut self, handle: Self::TimerHandle) {
+        handle.abort()
     }
 
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf) {

@@ -18,6 +18,7 @@ use std::{
     mem,
     path::PathBuf,
     result::Result as StdResult,
+    time::Duration,
 };
 
 /*              _     _ _
@@ -29,7 +30,7 @@ use std::{
  *  FIGLET: public
  */
 
-/// The external dependencies for [Dispatcher]. All of these methods must be asynchronous: they
+/// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
     /// Start a new job. If this returns [`JobResult::Ok`], then the dispatcher is expecting three
@@ -46,6 +47,19 @@ pub trait DispatcherDeps {
 
     /// Kill a running job using the [`Pid`] obtained from [`JobResult::Ok`].
     fn kill_job(&mut self, pid: Pid);
+
+    /// A handle used to cancel a timer.
+    type TimerHandle;
+
+    /// Start a timer that will send a [`Message::JobTimer`] message when it's done, unless it is
+    /// canceled beforehand.
+    fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle;
+
+    /// Cancel a timer previously started by [`start_timer`]. There's no guarantee on timing, so
+    /// it's possible that a [`Message::JobTimer`] message may still be delivered for this job even
+    /// after the timer is canceled.
+    /// canceled beforehand.
+    fn cancel_timer(&mut self, handle: Self::TimerHandle);
 
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
@@ -98,6 +112,7 @@ pub enum Message {
     PidStatus(Pid, JobStatus),
     JobStdout(JobId, StdResult<JobOutputResult, String>),
     JobStderr(JobId, StdResult<JobOutputResult, String>),
+    JobTimer(JobId),
     ArtifactFetcher(Sha256Digest, Result<u64>),
 }
 
@@ -127,6 +142,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             Message::PidStatus(pid, status) => self.receive_pid_status(pid, status),
             Message::JobStdout(jid, result) => self.receive_job_stdout(jid, result),
             Message::JobStderr(jid, result) => self.receive_job_stderr(jid, result),
+            Message::JobTimer(jid) => self.receive_job_timer(jid),
             Message::ArtifactFetcher(digest, Err(err)) => {
                 self.receive_artifact_failure(digest, err)
             }
@@ -362,6 +378,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         self.update_entry_and_potentially_finish_job(jid, move |entry| entry.stderr = Some(result));
     }
 
+    fn receive_job_timer(&mut self, jid: JobId) {
+        todo!("{jid:?}")
+    }
+
     fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
         for jid in self.cache.got_artifact_failure(&digest) {
             if let Some(entry) = self.awaiting_layers.remove(&jid) {
@@ -469,6 +489,16 @@ mod tests {
 
         fn kill_job(&mut self, pid: Pid) {
             self.borrow_mut().messages.push(Kill(pid));
+        }
+
+        type TimerHandle = ();
+
+        fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
+            todo!("{jid:?} {duration:?}")
+        }
+
+        fn cancel_timer(&mut self, handle: Self::TimerHandle) {
+            todo!("{handle:?}")
         }
 
         fn start_artifact_fetch(
