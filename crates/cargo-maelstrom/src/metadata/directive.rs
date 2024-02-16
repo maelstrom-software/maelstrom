@@ -1,11 +1,11 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, str};
+use std::{collections::BTreeMap, num::NonZeroU32, str};
 
 #[derive(PartialEq, Eq, Debug, Default)]
 pub struct TestDirective {
@@ -17,6 +17,7 @@ pub struct TestDirective {
     pub enable_writable_file_system: Option<bool>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
+    pub timeout: Option<Timeout>,
     pub layers: Option<PossiblyImage<Vec<Layer>>>,
     pub added_layers: Vec<Layer>,
     pub mounts: Option<Vec<JobMount>>,
@@ -37,6 +38,7 @@ enum DirectiveField {
     EnableWritableFileSystem,
     User,
     Group,
+    Timeout,
     Mounts,
     AddedMounts,
     Devices,
@@ -68,6 +70,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
         let mut enable_writable_file_system = None;
         let mut user = None;
         let mut group = None;
+        let mut timeout = None;
         let mut mounts = None;
         let mut added_mounts = None;
         let mut devices = None;
@@ -101,6 +104,9 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                 }
                 DirectiveField::Group => {
                     group = Some(map.next_value()?);
+                }
+                DirectiveField::Timeout => {
+                    timeout = Some(Timeout::from(NonZeroU32::new(map.next_value()?)));
                 }
                 DirectiveField::Mounts => {
                     incompatible(
@@ -205,6 +211,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
             enable_writable_file_system,
             user,
             group,
+            timeout,
             layers,
             added_layers: added_layers.unwrap_or_default(),
             mounts,
@@ -290,6 +297,7 @@ mod test {
                 enable_writable_file_system = true
                 user = 101
                 group = 202
+                timeout = 1
                 "#
             )
             .unwrap(),
@@ -304,6 +312,29 @@ mod test {
                 enable_writable_file_system: Some(true),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
+                timeout: Some(Timeout::from(NonZeroU32::new(1))),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn zero_timeout() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                filter = "package.equals(package1) && test.equals(test1)"
+                timeout = 0
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                filter: Some(
+                    "package.equals(package1) && test.equals(test1)"
+                        .parse()
+                        .unwrap()
+                ),
+                timeout: Some(Timeout::from(None)),
                 ..Default::default()
             }
         );

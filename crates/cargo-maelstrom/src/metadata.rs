@@ -3,7 +3,7 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
-use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, UserId, Utf8PathBuf};
+use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, Layer, PossiblyImage};
 use maelstrom_util::fs::Fs;
 use serde::Deserialize;
@@ -23,6 +23,7 @@ pub struct TestMetadata {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
+    pub timeout: Timeout,
     pub layers: Vec<Layer>,
     environment: BTreeMap<String, String>,
     pub mounts: Vec<JobMount>,
@@ -38,6 +39,7 @@ impl Default for TestMetadata {
             working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
+            timeout: Default::default(),
             layers: Default::default(),
             environment: Default::default(),
             mounts: Default::default(),
@@ -68,43 +70,39 @@ impl TestMetadata {
 
     fn try_fold(
         mut self,
-        directive: &TestDirective,
+        &TestDirective {
+            filter: _,
+            ref image,
+            include_shared_libraries,
+            enable_loopback,
+            enable_writable_file_system,
+            user,
+            group,
+            timeout,
+            ref layers,
+            ref added_layers,
+            ref mounts,
+            ref added_mounts,
+            devices,
+            added_devices,
+            ref environment,
+            ref added_environment,
+            ref working_directory,
+        }: &TestDirective,
         env_lookup: impl Fn(&str) -> Result<Option<String>>,
         image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<Self> {
-        let image = ImageOption::new(&directive.image, image_lookup)?;
+        let image = ImageOption::new(image, image_lookup)?;
 
-        if directive.include_shared_libraries.is_some() {
-            self.include_shared_libraries = directive.include_shared_libraries;
-        }
+        self.include_shared_libraries = include_shared_libraries.or(self.include_shared_libraries);
+        self.enable_loopback = enable_loopback.unwrap_or(self.enable_loopback);
+        self.enable_writable_file_system =
+            enable_writable_file_system.unwrap_or(self.enable_writable_file_system);
+        self.user = user.unwrap_or(self.user);
+        self.group = group.unwrap_or(self.group);
+        self.timeout = timeout.unwrap_or(self.timeout);
 
-        if let Some(enable_loopback) = directive.enable_loopback {
-            self.enable_loopback = enable_loopback;
-        }
-
-        if let Some(enable_writable_file_system) = directive.enable_writable_file_system {
-            self.enable_writable_file_system = enable_writable_file_system;
-        }
-
-        match &directive.working_directory {
-            Some(PossiblyImage::Explicit(working_directory)) => {
-                self.working_directory = working_directory.clone();
-            }
-            Some(PossiblyImage::Image) => {
-                self.working_directory = image.working_directory()?;
-            }
-            None => {}
-        }
-
-        if let Some(user) = directive.user {
-            self.user = user;
-        }
-
-        if let Some(group) = directive.group {
-            self.group = group;
-        }
-
-        match &directive.layers {
+        match layers {
             Some(PossiblyImage::Explicit(layers)) => {
                 self.layers = layers.to_vec();
             }
@@ -113,7 +111,14 @@ impl TestMetadata {
             }
             None => {}
         }
-        self.layers.extend(directive.added_layers.iter().cloned());
+        self.layers.extend(added_layers.iter().cloned());
+
+        self.mounts = mounts
+            .as_ref()
+            .map_or(self.mounts, |mounts| mounts.to_vec());
+        self.mounts.extend(added_mounts.iter().cloned());
+
+        self.devices = devices.unwrap_or(self.devices).union(added_devices);
 
         fn substitute_environment(
             env_lookup: impl Fn(&str) -> Result<Option<String>>,
@@ -129,7 +134,7 @@ impl TestMetadata {
                 .collect()
         }
 
-        match &directive.environment {
+        match environment {
             Some(PossiblyImage::Explicit(environment)) => {
                 self.environment =
                     substitute_environment(&env_lookup, &self.environment, environment)?
@@ -144,18 +149,18 @@ impl TestMetadata {
         self.environment.extend(substitute_environment(
             &env_lookup,
             &self.environment,
-            &directive.added_environment,
+            added_environment,
         )?);
 
-        if let Some(mounts) = &directive.mounts {
-            self.mounts = mounts.to_vec();
+        match working_directory {
+            Some(PossiblyImage::Explicit(working_directory)) => {
+                self.working_directory = working_directory.clone();
+            }
+            Some(PossiblyImage::Image) => {
+                self.working_directory = image.working_directory()?;
+            }
+            None => {}
         }
-        self.mounts.extend(directive.added_mounts.iter().cloned());
-
-        if let Some(devices) = directive.devices {
-            self.devices = devices;
-        }
-        self.devices = self.devices.union(directive.added_devices);
 
         Ok(self)
     }
@@ -214,6 +219,7 @@ mod test {
     use super::*;
     use maelstrom_base::{enum_set, JobMountFsType};
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
+    use std::num::NonZeroU32;
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -483,6 +489,40 @@ mod test {
                 .unwrap()
                 .group,
             GroupId::from(0)
+        );
+    }
+
+    #[test]
+    fn timeout() {
+        let all = AllMetadata::from_str(
+            r#"
+            [[directives]]
+            filter = "package.equals(package1)"
+            timeout = 100
+
+            [[directives]]
+            filter = "package.equals(package1) && name.equals(test1)"
+            timeout = 0
+            "#,
+        )
+        .unwrap();
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
+                .unwrap()
+                .timeout,
+            Timeout::from(None)
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
+                .unwrap()
+                .timeout,
+            Timeout::from(Some(NonZeroU32::new(100).unwrap()))
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
+                .unwrap()
+                .timeout,
+            Timeout::from(None)
         );
     }
 
