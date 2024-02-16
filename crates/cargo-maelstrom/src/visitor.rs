@@ -3,7 +3,7 @@ use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
 use maelstrom_base::{
-    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+    ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
 };
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Mutex};
@@ -151,12 +151,15 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         }
     }
 
-    pub fn job_finished(&self, cjid: ClientJobId, result: JobStringResult) -> Result<()> {
+    pub fn job_finished(&self, cjid: ClientJobId, result: JobOutcomeResult) -> Result<()> {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
         let mut test_output_lines: Vec<String> = vec![];
         match result {
-            Ok(JobSuccess { status, stderr, .. }) => {
+            Ok(JobOutcome::Completed {
+                status,
+                effects: JobEffects { stderr, .. },
+            }) => {
                 let mut job_failed = true;
                 match status {
                     JobStatus::Exited(code) => {

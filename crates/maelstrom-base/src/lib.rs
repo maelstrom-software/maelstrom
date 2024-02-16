@@ -262,15 +262,22 @@ impl Debug for JobOutputResult {
     }
 }
 
-/// The output of a job that was successfully executed. This doesn't mean that the client will be
-/// happy with the job's output. Maybe the job was killed by a signal, or it exited with an error
-/// status code. From our point of view, it doesn't matter. We ran the job until it was terminated,
-/// and gathered its output.
+/// The output of a job that ran for some amount of time. This is generated regardless of how the
+/// job terminated. From our point of view, it doesn't matter. We ran the job until it was
+/// terminated, and gathered its output.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct JobSuccess {
-    pub status: JobStatus,
+pub struct JobEffects {
     pub stdout: JobOutputResult,
     pub stderr: JobOutputResult,
+}
+
+/// The outcome of a job. This doesn't include error outcomes, which are handled with JobError.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum JobOutcome {
+    Completed {
+        status: JobStatus,
+        effects: JobEffects,
+    },
 }
 
 /// A job failed to execute for some reason. We separate the universe of errors into "execution"
@@ -303,7 +310,7 @@ pub type JobResult<T, E> = Result<T, JobError<E>>;
 
 /// All relevant information about the outcome of a job. This is what's sent around between the
 /// Worker, Broker, and Client.
-pub type JobStringResult = JobResult<JobSuccess, String>;
+pub type JobOutcomeResult = JobResult<JobOutcome, String>;
 
 /// ID of a worker connection. These share the same ID space as [`ClientId`].
 #[derive(

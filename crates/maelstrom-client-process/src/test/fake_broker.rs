@@ -4,7 +4,7 @@ use maelstrom_base::{
         self, ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ClientJobId, JobSpec, JobStringResult,
+    ClientJobId, JobOutcomeResult, JobSpec,
 };
 use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader};
 use serde::{de::DeserializeOwned, Serialize};
@@ -186,7 +186,7 @@ impl FakeBrokerConnection {
 #[derive(Clone)]
 pub enum FakeBrokerJobAction {
     Ignore,
-    Respond(JobStringResult),
+    Respond(JobOutcomeResult),
 }
 
 #[derive(Default, Clone)]

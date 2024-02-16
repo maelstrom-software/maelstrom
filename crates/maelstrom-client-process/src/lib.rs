@@ -18,7 +18,7 @@ use maelstrom_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ArtifactType, ClientJobId, JobSpec, JobStringResult, Sha256Digest, Utf8Path, Utf8PathBuf,
+    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot};
 use maelstrom_util::{
@@ -475,7 +475,7 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
 pub type JobResponseHandler =
-    Box<dyn FnOnce(ClientJobId, JobStringResult) -> Result<()> + Send + Sync>;
+    Box<dyn FnOnce(ClientJobId, JobOutcomeResult) -> Result<()> + Send + Sync>;
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";

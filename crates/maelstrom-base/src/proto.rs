@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ArtifactType, ClientJobId, JobId, JobSpec, JobStringResult, Sha256Digest,
+    ArtifactType, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -29,13 +29,13 @@ pub enum BrokerToWorker {
 /// [`BrokerToWorker::EnqueueJob`] messages. After sending the initial [`Hello`], a worker will
 /// send a stream of these messages.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct WorkerToBroker(pub JobId, pub JobStringResult);
+pub struct WorkerToBroker(pub JobId, pub JobOutcomeResult);
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied
 /// a [`Hello`] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum BrokerToClient {
-    JobResponse(ClientJobId, JobStringResult),
+    JobResponse(ClientJobId, JobOutcomeResult),
     TransferArtifact(Sha256Digest),
     StatisticsResponse(BrokerStatistics),
     JobStateCountsResponse(JobStateCounts),

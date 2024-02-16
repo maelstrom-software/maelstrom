@@ -1,7 +1,7 @@
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestReader, Mode},
-    ArtifactType, JobOutputResult, JobSpec, JobStatus, JobSuccess, Sha256Digest, Utf8Path,
-    Utf8PathBuf,
+    ArtifactType, JobEffects, JobOutcome, JobOutputResult, JobSpec, JobStatus, Sha256Digest,
+    Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
@@ -30,10 +30,12 @@ fn basic_job_test(
     let artifact_dir = tmp_dir.path().join("artifacts");
     fs.create_dir(&artifact_dir).unwrap();
 
-    let test_job_result = JobSuccess {
+    let test_job_outcome = JobOutcome::Completed {
         status: JobStatus::Exited(0),
-        stdout: JobOutputResult::None,
-        stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
+        effects: JobEffects {
+            stdout: JobOutputResult::None,
+            stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
+        },
     };
 
     let state = FakeBrokerState {
@@ -41,7 +43,7 @@ fn basic_job_test(
             JobSpecMatcher {
                 binary: "foo".into(),
                 first_arg: "bar".into(),
-            } => FakeBrokerJobAction::Respond(Ok(test_job_result.clone())),
+            } => FakeBrokerJobAction::Respond(Ok(test_job_outcome.clone())),
         },
         ..Default::default()
     };
@@ -95,7 +97,7 @@ fn basic_job_test(
     client.process_broker_msg_single_threaded(1);
 
     let (_id, result) = recv.recv().unwrap();
-    assert_eq!(test_job_result, result.unwrap());
+    assert_eq!(test_job_outcome, result.unwrap());
 }
 
 #[test]

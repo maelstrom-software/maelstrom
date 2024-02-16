@@ -69,33 +69,41 @@ macro_rules! spec {
 }
 
 #[macro_export]
-macro_rules! result {
+macro_rules! outcome {
     [1] => {
-        Ok(maelstrom_base::JobSuccess {
+        Ok(maelstrom_base::JobOutcome::Completed {
             status: maelstrom_base::JobStatus::Exited(0),
-            stdout: maelstrom_base::JobOutputResult::None,
-            stderr: maelstrom_base::JobOutputResult::None,
+            effects: maelstrom_base::JobEffects {
+                stdout: maelstrom_base::JobOutputResult::None,
+                stderr: maelstrom_base::JobOutputResult::None,
+            }
         })
     };
     [2] => {
-        Ok(maelstrom_base::JobSuccess {
+        Ok(maelstrom_base::JobOutcome::Completed {
             status: maelstrom_base::JobStatus::Exited(1),
-            stdout: maelstrom_base::JobOutputResult::None,
-            stderr: maelstrom_base::JobOutputResult::None,
+            effects: maelstrom_base::JobEffects {
+                stdout: maelstrom_base::JobOutputResult::None,
+                stderr: maelstrom_base::JobOutputResult::None,
+            }
         })
     };
     [3] => {
-        Ok(maelstrom_base::JobSuccess {
+        Ok(maelstrom_base::JobOutcome::Completed {
             status: maelstrom_base::JobStatus::Signaled(15),
-            stdout: maelstrom_base::JobOutputResult::None,
-            stderr: maelstrom_base::JobOutputResult::None,
+            effects: maelstrom_base::JobEffects {
+                stdout: maelstrom_base::JobOutputResult::None,
+                stderr: maelstrom_base::JobOutputResult::None,
+            }
         })
     };
     [$n:expr] => {
-        Ok(maelstrom_base::JobSuccess {
+        Ok(maelstrom_base::JobOutcome::Completed {
             status: maelstrom_base::JobStatus::Exited($n),
-            stdout: maelstrom_base::JobOutputResult::None,
-            stderr: maelstrom_base::JobOutputResult::None,
+            effects: maelstrom_base::JobEffects {
+                stdout: maelstrom_base::JobOutputResult::None,
+                stderr: maelstrom_base::JobOutputResult::None,
+            }
         })
     };
 }

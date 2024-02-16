@@ -12,7 +12,7 @@ use cargo_maelstrom::{
 use indicatif::InMemoryTerm;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
-    JobOutputResult, JobStatus, JobSuccess,
+    JobEffects, JobOutcome, JobOutputResult, JobStatus,
 };
 use maelstrom_client::{
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
@@ -318,10 +318,12 @@ fn run_or_list_all_tests_sync(
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
-            FakeBrokerJobAction::Respond(Ok(JobSuccess {
+            FakeBrokerJobAction::Respond(Ok(JobOutcome::Completed {
                 status: JobStatus::Exited(0),
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
+                },
             })),
         );
     }
@@ -855,10 +857,12 @@ fn run_failed_tests(fake_tests: FakeTests) -> String {
     for (_, test_path) in fake_tests.all_test_paths() {
         state.job_responses.insert(
             test_path,
-            FakeBrokerJobAction::Respond(Ok(JobSuccess {
+            FakeBrokerJobAction::Respond(Ok(JobOutcome::Completed {
                 status: JobStatus::Exited(1),
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::Inline(Box::new(*b"error output")),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::Inline(Box::new(*b"error output")),
+                },
             })),
         );
     }
@@ -928,10 +932,12 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         if test.desired_state == JobState::Complete {
             state.job_responses.insert(
                 test_path,
-                FakeBrokerJobAction::Respond(Ok(JobSuccess {
+                FakeBrokerJobAction::Respond(Ok(JobOutcome::Completed {
                     status: JobStatus::Exited(0),
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
+                    effects: JobEffects {
+                        stdout: JobOutputResult::None,
+                        stderr: JobOutputResult::None,
+                    },
                 })),
             );
         } else {

@@ -7,7 +7,7 @@ use figment::{
 };
 use indicatif::ProgressBar;
 use maelstrom_base::{
-    ClientJobId, JobError, JobOutputResult, JobStatus, JobStringResult, JobSuccess,
+    ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
@@ -76,14 +76,13 @@ pub struct ConfigOptions {
 
 fn visitor(
     cjid: ClientJobId,
-    result: JobStringResult,
+    result: JobOutcomeResult,
     accum: Arc<ExitCodeAccumulator>,
 ) -> Result<()> {
     match result {
-        Ok(JobSuccess {
+        Ok(JobOutcome::Completed {
             status,
-            stdout,
-            stderr,
+            effects: JobEffects { stdout, stderr },
         }) => {
             match stdout {
                 JobOutputResult::None => {}

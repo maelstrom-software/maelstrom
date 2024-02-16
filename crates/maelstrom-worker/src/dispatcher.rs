@@ -8,8 +8,8 @@ use crate::{
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    ArtifactType, JobError, JobId, JobOutputResult, JobResult, JobSpec, JobStatus, JobSuccess,
-    NonEmpty, Sha256Digest,
+    ArtifactType, JobEffects, JobError, JobId, JobOutcome, JobOutputResult, JobResult, JobSpec,
+    JobStatus, NonEmpty, Sha256Digest,
 };
 use maelstrom_linux::Pid;
 use maelstrom_util::ext::OptionExt as _;
@@ -311,11 +311,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let stdout = entry.stdout.unwrap();
             let stderr = entry.stderr.unwrap();
             let result = match (status, stdout, stderr) {
-                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => Ok(JobSuccess {
-                    status,
-                    stdout,
-                    stderr,
-                }),
+                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
+                    Ok(JobOutcome::Completed {
+                        status,
+                        effects: JobEffects { stdout, stderr },
+                    })
+                }
                 (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => Err(JobError::System(e)),
             };
             self.deps
@@ -749,7 +750,7 @@ mod tests {
         PidStatus(pid!(1), JobStatus::Exited(0)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
             SendMessageToBroker(WorkerToBroker(jid!(2), Err(JobError::Execution(string!("ee"))))),
@@ -842,7 +843,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(4), spec!(4, Tar), path_buf_vec!["/4"]),
         };
@@ -893,7 +894,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), result!(1))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
@@ -955,13 +956,15 @@ mod tests {
             truncated: 100,
         })) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
@@ -990,13 +993,15 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
@@ -1025,13 +1030,15 @@ mod tests {
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
@@ -1060,13 +1067,15 @@ mod tests {
         })) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
@@ -1095,13 +1104,15 @@ mod tests {
             first: boxed_u8!(b"stderr"),
             truncated: 100,
         })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
@@ -1130,13 +1141,15 @@ mod tests {
             truncated: 100,
         })) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobSuccess {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Signaled(9),
-                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
-                stderr: JobOutputResult::Truncated {
-                    first: boxed_u8!(b"stderr"),
-                    truncated: 100,
-                },
+                effects: JobEffects {
+                    stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                    stderr: JobOutputResult::Truncated {
+                        first: boxed_u8!(b"stderr"),
+                        truncated: 100,
+                    },
+                }
             }))),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
