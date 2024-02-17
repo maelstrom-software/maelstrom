@@ -7,21 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### General
-#### Changed
 #### Added
-#### Removed
-#### Fixed
+- Added support for job timeouts. When a job times out, the stdout and stderr
+  are still returned to the client.
+
 ### `cargo-maelstrom`
-#### Changed
 #### Added
-- New `glob` layer type added which accepts a glob pattern. Matching files are added to that layer.
-- New `stubs` layer type added. This makes it easy to create empty directories and files in a layer.
-- New `symlinks` layer type added. This makes it easy to create symlinks in a layer.
-#### Removed
-#### Fixed
+- `glob` layer type added which accepts a glob pattern. Matching files are added to that layer.
+- `stubs` layer type added. This makes it easy to create empty directories and files in a layer.
+- `symlinks` layer type added. This makes it easy to create symlinks in a layer.
+- `timeout` directive field which specifies the timeout in seconds. A value
+  of 0 indicates no timeout.
+  \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
+- `--timeout` command-line option to override the timeout for the test
+  specified. A value of 0 indicates no timeout.
+
 ### `maelstrom-client-cli`
-#### Changed
+#### Added
 - The new layer types from `cargo-maelstrom` have also been added.
+- `timeout` job field which specifies the timeout in seconds. A value of
+  0 indicates no timeout.
 
 ## [0.5.0] - 2024-02-08
 
