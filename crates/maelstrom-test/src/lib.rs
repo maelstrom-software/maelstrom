@@ -327,3 +327,10 @@ macro_rules! paths_layer {
         )
     };
 }
+
+#[macro_export]
+macro_rules! timeout {
+    ($n:literal) => {
+        maelstrom_base::Timeout::new($n)
+    };
+}

@@ -45,7 +45,8 @@ pub trait DispatcherDeps {
         layers: NonEmpty<PathBuf>,
     ) -> (JobResult<Pid, String>, NonEmpty<Sha256Digest>);
 
-    /// Kill a running job using the [`Pid`] obtained from [`JobResult::Ok`].
+    /// Kill a running job using the [`Pid`] obtained from [`JobResult::Ok`]. This must be
+    /// resilient in the case where the process has already completed.
     fn kill_job(&mut self, pid: Pid);
 
     /// A handle used to cancel a timer.
@@ -58,7 +59,6 @@ pub trait DispatcherDeps {
     /// Cancel a timer previously started by [`start_timer`]. There's no guarantee on timing, so
     /// it's possible that a [`Message::JobTimer`] message may still be delivered for this job even
     /// after the timer is canceled.
-    /// canceled beforehand.
     fn cancel_timer(&mut self, handle: Self::TimerHandle);
 
     /// Send a message to the broker.
@@ -180,23 +180,27 @@ impl AwaitingLayersEntry {
     }
 }
 
-enum ExecutingJobState {
-    Ok { pid: Pid },
+enum ExecutingJobState<DepsT: DispatcherDeps> {
+    Ok {
+        pid: Pid,
+        timer: Option<DepsT::TimerHandle>,
+    },
     Canceled,
+    TimedOut,
 }
 
-struct ExecutingJob {
-    state: ExecutingJobState,
+struct ExecutingJob<DepsT: DispatcherDeps> {
+    state: ExecutingJobState<DepsT>,
     status: Option<JobStatus>,
     stdout: Option<StdResult<JobOutputResult, String>>,
     stderr: Option<StdResult<JobOutputResult, String>>,
     layers: NonEmpty<Sha256Digest>,
 }
 
-impl ExecutingJob {
-    fn new(pid: Pid, layers: NonEmpty<Sha256Digest>) -> Self {
+impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
+    fn new(pid: Pid, layers: NonEmpty<Sha256Digest>, timer: Option<DepsT::TimerHandle>) -> Self {
         ExecutingJob {
-            state: ExecutingJobState::Ok { pid },
+            state: ExecutingJobState::Ok { pid, timer },
             status: None,
             stdout: None,
             stderr: None,
@@ -220,7 +224,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
     queued: VecDeque<(JobId, JobSpec, NonEmpty<PathBuf>)>,
-    executing: HashMap<JobId, ExecutingJob>,
+    executing: HashMap<JobId, ExecutingJob<DepsT>>,
     executing_pids: HashMap<Pid, JobId>,
 }
 
@@ -228,9 +232,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
             let (jid, spec, layer_paths) = self.queued.pop_front().unwrap();
+            let timeout = spec.timeout;
             match self.deps.start_job(jid, spec, layer_paths) {
                 (Ok(pid), layers) => {
-                    let executing_job = ExecutingJob::new(pid, layers);
+                    let executing_job = ExecutingJob::new(
+                        pid,
+                        layers,
+                        timeout.map(|timeout| self.deps.start_timer(jid, Duration::from(timeout))),
+                    );
                     self.executing.insert(jid, executing_job).assert_is_none();
                     self.executing_pids.insert(pid, jid).assert_is_none();
                 }
@@ -284,13 +293,17 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // We may have already gotten some layers. Make sure we release those.
             layers = NonEmpty::collect(entry.layers.into_keys());
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
-            // The job was executing. We kill the job, but we wait around until it's actually
-            // teriminated. We don't want to release the layers until then. If we didn't it would
-            // be possible for us to try to remove a directory that was still in use, which would
-            // fail.
-            if let ExecutingJobState::Ok { pid } = mem::replace(state, ExecutingJobState::Canceled)
+            // The job was executing. We kill the job and cancel a timer if there is one, but we
+            // wait around until it's actually teriminated. We don't want to release the layers
+            // until then. If we didn't it would be possible for us to try to remove a directory
+            // that was still in use, which would fail.
+            if let ExecutingJobState::Ok { pid, timer } =
+                mem::replace(state, ExecutingJobState::Canceled)
             {
                 self.deps.kill_job(pid);
+                if let Some(handle) = timer {
+                    self.deps.cancel_timer(handle)
+                }
             }
         } else {
             // It may be the queue.
@@ -317,7 +330,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn update_entry_and_potentially_finish_job(
         &mut self,
         jid: JobId,
-        f: impl FnOnce(&mut ExecutingJob),
+        f: impl FnOnce(&mut ExecutingJob<DepsT>),
     ) {
         let Entry::Occupied(mut oe) = self.executing.entry(jid) else {
             panic!("missing entry for {jid:?}");
@@ -334,26 +347,29 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     layers,
                 },
             ) = oe.remove_entry();
-            let status = status.unwrap();
-            let stdout = stdout.unwrap();
-            let stderr = stderr.unwrap();
+            let effects_result = match (stdout.unwrap(), stderr.unwrap()) {
+                (StdResult::Ok(stdout), StdResult::Ok(stderr)) => Ok(JobEffects { stdout, stderr }),
+                (StdResult::Err(e), _) | (_, StdResult::Err(e)) => Err(JobError::System(e)),
+            };
+
             match state {
-                ExecutingJobState::Ok { .. } => {
-                    let result = match (status, stdout, stderr) {
-                        (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
-                            Ok(JobOutcome::Completed {
-                                status,
-                                effects: JobEffects { stdout, stderr },
-                            })
-                        }
-                        (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => {
-                            Err(JobError::System(e))
-                        }
-                    };
-                    self.deps
-                        .send_message_to_broker(WorkerToBroker(jid, result));
+                ExecutingJobState::Ok { pid: _, timer } => {
+                    if let Some(handle) = timer {
+                        self.deps.cancel_timer(handle)
+                    }
+                    let status = status.unwrap();
+                    self.deps.send_message_to_broker(WorkerToBroker(
+                        jid,
+                        effects_result.map(|effects| JobOutcome::Completed { status, effects }),
+                    ));
                 }
                 ExecutingJobState::Canceled => {}
+                ExecutingJobState::TimedOut => {
+                    self.deps.send_message_to_broker(WorkerToBroker(
+                        jid,
+                        effects_result.map(JobOutcome::TimedOut),
+                    ));
+                }
             }
             for digest in layers {
                 self.cache.decrement_ref_count(&digest);
@@ -379,7 +395,29 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_job_timer(&mut self, jid: JobId) {
-        todo!("{jid:?}")
+        if let Some(&mut ExecutingJob {
+            ref mut state,
+            ref status,
+            ..
+        }) = self.executing.get_mut(&jid)
+        {
+            // The job was executing. We kill the job, but we wait around until it's actually
+            // teriminated. We don't want to release the layers until the job has terminated. If we
+            // didn't it would be possible for us to try to remove a directory that was still in
+            // use, which would fail.
+            match state {
+                ExecutingJobState::Ok { pid, timer: _ } => {
+                    if status.is_none() {
+                        self.deps.kill_job(*pid);
+                    }
+                    *state = ExecutingJobState::TimedOut;
+                }
+                ExecutingJobState::TimedOut => {
+                    panic!("two timer expirations for job {jid:?}");
+                }
+                ExecutingJobState::Canceled => {}
+            }
+        }
     }
 
     fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
@@ -388,8 +426,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 // If this was the first layer error for this request, then we'll find something in the
                 // hash table, and we'll need to clean up.
                 //
-                // Otherwise, it means that there were previous errors for this entry, and there's
-                // nothing to do here.
+                // Otherwise, it means that there were previous errors for this entry, or it was
+                // canceled, and there's nothing to do here.
                 self.deps.send_message_to_broker(WorkerToBroker(
                     jid,
                     Err(JobError::System(format!(
@@ -408,8 +446,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         for jid in jobs {
             match self.awaiting_layers.entry(jid) {
                 Entry::Vacant(_) => {
-                    // If there were previous errors for this job, then we'll find
-                    // nothing in the hash table, and we'll need to release this layer.
+                    // If there were previous errors for this job, or the job was canceled, then
+                    // we'll find nothing in the hash table, and we'll need to release this layer.
                     self.cache.decrement_ref_count(&digest);
                 }
                 Entry::Occupied(mut entry) => {
@@ -444,7 +482,7 @@ mod tests {
     use anyhow::anyhow;
     use itertools::Itertools;
     use maelstrom_test::*;
-    use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
 
     #[derive(Clone, Debug, PartialEq)]
@@ -457,6 +495,8 @@ mod tests {
         CacheGotArtifactFailure(Sha256Digest),
         CacheDecrementRefCount(Sha256Digest),
         Kill(Pid),
+        StartTimer(JobId, Duration),
+        CancelTimer(JobId),
     }
 
     use TestMessage::*;
@@ -491,14 +531,15 @@ mod tests {
             self.borrow_mut().messages.push(Kill(pid));
         }
 
-        type TimerHandle = ();
+        type TimerHandle = JobId;
 
         fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
-            todo!("{jid:?} {duration:?}")
+            self.borrow_mut().messages.push(StartTimer(jid, duration));
+            jid
         }
 
         fn cancel_timer(&mut self, handle: Self::TimerHandle) {
-            todo!("{handle:?}")
+            self.borrow_mut().messages.push(CancelTimer(handle));
         }
 
         fn start_artifact_fetch(
@@ -915,6 +956,35 @@ mod tests {
     }
 
     script_test! {
+        cancel_timed_out,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        JobTimer(jid!(1)) => {
+            Kill(pid!(1))
+        };
+        Broker(CancelJob(jid!(1))) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
+        };
+    }
+
+    script_test! {
         receive_pid_status_unknown,
         Fixture::new(1, [], [], [], []),
         PidStatus(pid!(1), JobStatus::Exited(0)) => {};
@@ -1290,6 +1360,209 @@ mod tests {
             ),
             CacheDecrementRefCount(digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
+        };
+    }
+
+    script_test! {
+        timer_scheduled_then_canceled_on_success,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/a"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)), path_buf_vec!["/a"]),
+            StartTimer(jid!(1), Duration::from_secs(33)),
+        };
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
+                status: JobStatus::Exited(0),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                }
+            }))),
+            CacheDecrementRefCount(digest!(1)),
+            CancelTimer(jid!(1)),
+        };
+    }
+
+    script_test! {
+        timer_scheduled_then_canceled_on_cancellation,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/a"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)), path_buf_vec!["/a"]),
+            StartTimer(jid!(1), Duration::from_secs(33)),
+        };
+        Broker(CancelJob(jid!(1))) => {
+            Kill(pid!(1)),
+            CancelTimer(jid!(1)),
+        };
+    }
+
+    script_test! {
+        time_out_running_1,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        JobTimer(jid!(1)) => {
+            Kill(pid!(1)),
+        };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+            })))),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
+        };
+    }
+
+    script_test! {
+        time_out_running_2,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobTimer(jid!(1)) => {
+            Kill(pid!(1)),
+        };
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+            })))),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
+        };
+    }
+
+    script_test! {
+        time_out_running_3,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
+        JobTimer(jid!(1)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stderr")))) => {
+            CacheDecrementRefCount(digest!(1)),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
+                stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
+                stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),
+            })))),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
+        };
+    }
+
+    script_test! {
+        time_out_completed,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
+            CacheDecrementRefCount(digest!(1)),
+            CancelTimer(jid!(1)),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
+                status: JobStatus::Exited(0),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                }
+            }))),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
+        };
+        JobTimer(jid!(1)) => {};
+    }
+
+    script_test! {
+        time_out_canceled,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+            Ok(pid!(2)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+            (digest!(2), GetArtifact::Success(path_buf!("/2"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
+            StartTimer(jid!(1), Duration::from_secs(1))
+        };
+        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
+            CacheGetArtifact(digest!(2), jid!(2)),
+        };
+        Broker(CancelJob(jid!(1))) => {
+            Kill(pid!(1)),
+            CancelTimer(jid!(1)),
+        };
+        JobTimer(jid!(1)) => {};
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
         };
     }
 
