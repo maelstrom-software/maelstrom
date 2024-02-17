@@ -7,7 +7,7 @@ use maelstrom_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, Layer, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, io::Read, num::NonZeroU32};
+use std::{collections::BTreeMap, io::Read};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
     inner: InnerT,
@@ -160,7 +160,7 @@ impl Job {
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
-            timeout: Timeout::from(self.timeout.and_then(NonZeroU32::new)),
+            timeout: self.timeout.and_then(Timeout::new),
         })
     }
 }
@@ -1229,7 +1229,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .timeout(Timeout::from(NonZeroU32::new(1234))),
+            .timeout(Timeout::new(1234)),
         )
     }
 
@@ -1250,7 +1250,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .timeout(Timeout::from(None)),
+            .timeout(Timeout::new(0)),
         )
     }
 }

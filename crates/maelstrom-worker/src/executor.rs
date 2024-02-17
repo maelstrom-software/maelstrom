@@ -59,7 +59,7 @@ pub struct JobSpec {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
-    pub timeout: Timeout,
+    pub timeout: Option<Timeout>,
 }
 
 impl JobSpec {

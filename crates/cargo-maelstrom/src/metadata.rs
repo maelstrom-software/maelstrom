@@ -23,7 +23,7 @@ pub struct TestMetadata {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
-    pub timeout: Timeout,
+    pub timeout: Option<Timeout>,
     pub layers: Vec<Layer>,
     environment: BTreeMap<String, String>,
     pub mounts: Vec<JobMount>,
@@ -39,7 +39,7 @@ impl Default for TestMetadata {
             working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
-            timeout: Default::default(),
+            timeout: None,
             layers: Default::default(),
             environment: Default::default(),
             mounts: Default::default(),
@@ -219,7 +219,6 @@ mod test {
     use super::*;
     use maelstrom_base::{enum_set, JobMountFsType};
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
-    use std::num::NonZeroU32;
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -510,19 +509,19 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test1"), empty_env, no_containers)
                 .unwrap()
                 .timeout,
-            Timeout::from(None)
+            None,
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), empty_env, no_containers)
                 .unwrap()
                 .timeout,
-            Timeout::from(Some(NonZeroU32::new(100).unwrap()))
+            Timeout::new(100),
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), empty_env, no_containers)
                 .unwrap()
                 .timeout,
-            Timeout::from(None)
+            None,
         );
     }
 

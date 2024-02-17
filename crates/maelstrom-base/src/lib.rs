@@ -20,6 +20,7 @@ use std::{
     num::NonZeroU32,
     result::Result,
     str::{self, FromStr},
+    time::Duration,
 };
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
@@ -113,10 +114,20 @@ pub struct UserId(u32);
 pub struct GroupId(u32);
 
 /// A count of seconds.
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
-)]
-pub struct Timeout(Option<NonZeroU32>);
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct Timeout(NonZeroU32);
+
+impl Timeout {
+    pub fn new(timeout: u32) -> Option<Self> {
+        NonZeroU32::new(timeout).map(Timeout)
+    }
+}
+
+impl From<Timeout> for Duration {
+    fn from(timeout: Timeout) -> Duration {
+        Duration::from_secs(timeout.0.get().into())
+    }
+}
 
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -132,7 +143,7 @@ pub struct JobSpec {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
-    pub timeout: Timeout,
+    pub timeout: Option<Timeout>,
 }
 
 impl JobSpec {
@@ -152,7 +163,7 @@ impl JobSpec {
             working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
             group: GroupId::from(0),
-            timeout: Timeout::default(),
+            timeout: None,
         }
     }
 
@@ -209,7 +220,7 @@ impl JobSpec {
         self
     }
 
-    pub fn timeout(mut self, timeout: impl Into<Timeout>) -> Self {
+    pub fn timeout(mut self, timeout: impl Into<Option<Timeout>>) -> Self {
         self.timeout = timeout.into();
         self
     }

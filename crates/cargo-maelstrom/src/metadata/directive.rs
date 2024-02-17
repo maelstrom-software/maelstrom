@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, num::NonZeroU32, str};
+use std::{collections::BTreeMap, str};
 
 #[derive(PartialEq, Eq, Debug, Default)]
 pub struct TestDirective {
@@ -17,7 +17,7 @@ pub struct TestDirective {
     pub enable_writable_file_system: Option<bool>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
-    pub timeout: Option<Timeout>,
+    pub timeout: Option<Option<Timeout>>,
     pub layers: Option<PossiblyImage<Vec<Layer>>>,
     pub added_layers: Vec<Layer>,
     pub mounts: Option<Vec<JobMount>>,
@@ -106,7 +106,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                     group = Some(map.next_value()?);
                 }
                 DirectiveField::Timeout => {
-                    timeout = Some(Timeout::from(NonZeroU32::new(map.next_value()?)));
+                    timeout = Some(Timeout::new(map.next_value()?));
                 }
                 DirectiveField::Mounts => {
                     incompatible(
@@ -312,7 +312,7 @@ mod test {
                 enable_writable_file_system: Some(true),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
-                timeout: Some(Timeout::from(NonZeroU32::new(1))),
+                timeout: Some(Timeout::new(1)),
                 ..Default::default()
             }
         );
@@ -334,7 +334,7 @@ mod test {
                         .parse()
                         .unwrap()
                 ),
-                timeout: Some(Timeout::from(None)),
+                timeout: Some(None),
                 ..Default::default()
             }
         );
