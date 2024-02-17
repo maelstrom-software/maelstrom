@@ -1,4 +1,5 @@
 [[directives]]
+timeout = 1
 include_shared_libraries = true
 
 [[directives]]

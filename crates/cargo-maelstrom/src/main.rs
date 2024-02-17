@@ -13,6 +13,7 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     Figment,
 };
+use maelstrom_base::Timeout;
 use maelstrom_util::process::ExitCode;
 use std::{
     env,
@@ -28,11 +29,11 @@ struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line. If not set, the file
     /// .config/cargo-maelstrom.toml in the workspace root will be used, if it exists.
-    #[arg(short = 'c', long)]
+    #[arg(short, long)]
     config_file: Option<PathBuf>,
 
     /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
-    #[arg(short = 'b', long)]
+    #[arg(short, long)]
     broker: Option<String>,
 
     #[command(subcommand)]
@@ -55,12 +56,12 @@ struct CliRun {
     print_config: bool,
 
     /// Don't output information about the tests being run
-    #[arg(short = 'q', long)]
+    #[arg(short, long)]
     quiet: bool,
 
     /// Only run tests which match the given filter. Can be specified multiple times
     #[arg(
-        short = 'i',
+        short,
         long,
         value_name = "FILTER_EXPRESSION",
         default_value = "all"
@@ -70,6 +71,10 @@ struct CliRun {
     /// Only run tests which don't match the given filter. Can be specified multiple times
     #[arg(short = 'x', long, value_name = "FILTER_EXPRESSION")]
     exclude: Vec<String>,
+
+    /// Override timeout value for all tests specified (O indicates no timeout)
+    #[arg(short, long)]
+    timeout: Option<u32>,
 }
 
 #[derive(Args, Debug)]
@@ -83,7 +88,7 @@ struct CliList {
 
     /// Only list artifacts which match the given filter. Can be specified multiple times
     #[arg(
-        short = 'i',
+        short,
         long,
         value_name = "FILTER_EXPRESSION",
         default_value = "all"
@@ -155,7 +160,7 @@ pub fn main() -> Result<ExitCode> {
             .into(),
     };
 
-    let (config, include, exclude, list_action) = match cli_options.command {
+    let (config, include, exclude, list_action, timeout_override) = match cli_options.command {
         CliCommand::List(CliList {
             what,
             include,
@@ -182,6 +187,7 @@ pub fn main() -> Result<ExitCode> {
                     Some(CliListType::Binaries) => ListAction::ListBinaries,
                     Some(CliListType::Packages) => ListAction::ListPackages,
                 }),
+                None,
             )
         }
         CliCommand::Run(CliRun {
@@ -189,6 +195,7 @@ pub fn main() -> Result<ExitCode> {
             exclude,
             print_config,
             quiet,
+            timeout,
         }) => {
             let config = config(
                 config_file,
@@ -203,7 +210,7 @@ pub fn main() -> Result<ExitCode> {
                 println!("{config:#?}");
                 return Ok(ExitCode::SUCCESS);
             }
-            (config, include, exclude, None)
+            (config, include, exclude, None, timeout.map(Timeout::new))
         }
     };
 
@@ -228,6 +235,7 @@ pub fn main() -> Result<ExitCode> {
             config.run.quiet,
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
+            timeout_override,
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;

@@ -262,8 +262,15 @@ fn run_app(
     )
     .unwrap();
     let prog_driver = TestProgressDriver::default();
-    let mut app =
-        main_app_new(&deps, stdout_tty, quiet, term.clone(), prog_driver.clone()).unwrap();
+    let mut app = main_app_new(
+        &deps,
+        stdout_tty,
+        quiet,
+        term.clone(),
+        prog_driver.clone(),
+        None,
+    )
+    .unwrap();
 
     let mut b_conn = b.accept();
     let get_client = || deps.client.lock().unwrap();

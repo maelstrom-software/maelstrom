@@ -13,7 +13,7 @@ use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
-use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest};
+use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientDriverMode};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
@@ -134,6 +134,7 @@ struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
     ignored_cases: HashSet<String>,
     package_name: String,
     cases: StringIter,
+    timeout_override: Option<Option<Timeout>>,
 }
 
 #[derive(Default)]
@@ -188,6 +189,7 @@ where
         ind: ProgressIndicatorT,
         artifact: CargoArtifact,
         package_name: String,
+        timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
         let binary = PathBuf::from(artifact.executable.clone().unwrap());
 
@@ -210,6 +212,7 @@ where
             ignored_cases: listing.ignored_cases,
             package_name,
             cases: listing.cases.into_iter(),
+            timeout_override,
         })
     }
 
@@ -316,7 +319,7 @@ where
                 working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
                 group: test_metadata.group,
-                timeout: test_metadata.timeout,
+                timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
         );
@@ -352,6 +355,7 @@ struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
     package_match: bool,
     artifacts: TestArtifactStream,
     artifact_queuing: Option<ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>>,
+    timeout_override: Option<Option<Timeout>>,
 }
 
 impl<'a, StdErrT, ProgressIndicatorT: ProgressIndicator> JobQueuing<'a, StdErrT, ProgressIndicatorT>
@@ -364,6 +368,7 @@ where
         client: &'a Mutex<Client>,
         width: usize,
         ind: ProgressIndicatorT,
+        timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
         let package_names: Vec<_> = queuing_deps
             .packages
@@ -395,6 +400,7 @@ where
                 .unwrap_or_default(),
             artifact_queuing: None,
             cargo_build,
+            timeout_override,
         })
     }
 
@@ -420,6 +426,7 @@ where
             self.ind.clone(),
             artifact,
             package_name.into(),
+            self.timeout_override,
         )?);
 
         Ok(true)
@@ -681,6 +688,7 @@ fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
     prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
+    timeout_override: Option<Option<Timeout>>,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -701,7 +709,13 @@ where
         _ => {}
     }
 
-    let queuing = JobQueuing::new(&deps.queuing_deps, &deps.client, width, prog.clone())?;
+    let queuing = JobQueuing::new(
+        &deps.queuing_deps,
+        &deps.client,
+        width,
+        prog.clone(),
+        timeout_override,
+    )?;
     Ok(Box::new(MainAppImpl::new(
         deps,
         queuing,
@@ -724,6 +738,7 @@ pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     quiet: Quiet,
     term: TermT,
     driver: impl ProgressDriver<'scope> + 'scope,
+    timeout_override: Option<Option<Timeout>>,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -732,21 +747,52 @@ where
 {
     if deps.queuing_deps.list_action.is_some() {
         return if stdout_tty {
-            Ok(new_helper(deps, TestListingProgress::new, term, driver)?)
+            Ok(new_helper(
+                deps,
+                TestListingProgress::new,
+                term,
+                driver,
+                timeout_override,
+            )?)
         } else {
             Ok(new_helper(
                 deps,
                 TestListingProgressNoSpinner::new,
                 term,
                 driver,
+                timeout_override,
             )?)
         };
     }
 
     match (stdout_tty, quiet.into_inner()) {
-        (true, true) => Ok(new_helper(deps, QuietProgressBar::new, term, driver)?),
-        (true, false) => Ok(new_helper(deps, MultipleProgressBars::new, term, driver)?),
-        (false, true) => Ok(new_helper(deps, QuietNoBar::new, term, driver)?),
-        (false, false) => Ok(new_helper(deps, NoBar::new, term, driver)?),
+        (true, true) => Ok(new_helper(
+            deps,
+            QuietProgressBar::new,
+            term,
+            driver,
+            timeout_override,
+        )?),
+        (true, false) => Ok(new_helper(
+            deps,
+            MultipleProgressBars::new,
+            term,
+            driver,
+            timeout_override,
+        )?),
+        (false, true) => Ok(new_helper(
+            deps,
+            QuietNoBar::new,
+            term,
+            driver,
+            timeout_override,
+        )?),
+        (false, false) => Ok(new_helper(
+            deps,
+            NoBar::new,
+            term,
+            driver,
+            timeout_override,
+        )?),
     }
 }
