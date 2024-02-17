@@ -60,12 +60,7 @@ struct CliRun {
     quiet: bool,
 
     /// Only run tests which match the given filter. Can be specified multiple times
-    #[arg(
-        short,
-        long,
-        value_name = "FILTER_EXPRESSION",
-        default_value = "all"
-    )]
+    #[arg(short, long, value_name = "FILTER_EXPRESSION", default_value = "all")]
     include: Vec<String>,
 
     /// Only run tests which don't match the given filter. Can be specified multiple times
@@ -87,12 +82,7 @@ struct CliList {
     print_config: bool,
 
     /// Only list artifacts which match the given filter. Can be specified multiple times
-    #[arg(
-        short,
-        long,
-        value_name = "FILTER_EXPRESSION",
-        default_value = "all"
-    )]
+    #[arg(short, long, value_name = "FILTER_EXPRESSION", default_value = "all")]
     include: Vec<String>,
 
     /// Only list artifacts which don't match the given filter. Can be specified multiple times
