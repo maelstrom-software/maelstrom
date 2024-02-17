@@ -113,7 +113,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             queued: VecDeque::default(),
             executing: HashMap::default(),
             executing_pids: HashMap::default(),
-            canceled: HashMap::default(),
         }
     }
 
@@ -165,8 +164,13 @@ impl AwaitingLayersEntry {
     }
 }
 
+enum ExecutingJobState {
+    Ok { pid: Pid },
+    Canceled,
+}
+
 struct ExecutingJob {
-    pid: Pid,
+    state: ExecutingJobState,
     status: Option<JobStatus>,
     stdout: Option<StdResult<JobOutputResult, String>>,
     stderr: Option<StdResult<JobOutputResult, String>>,
@@ -176,7 +180,7 @@ struct ExecutingJob {
 impl ExecutingJob {
     fn new(pid: Pid, layers: NonEmpty<Sha256Digest>) -> Self {
         ExecutingJob {
-            pid,
+            state: ExecutingJobState::Ok { pid },
             status: None,
             stdout: None,
             stderr: None,
@@ -202,7 +206,6 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     queued: VecDeque<(JobId, JobSpec, NonEmpty<PathBuf>)>,
     executing: HashMap<JobId, ExecutingJob>,
     executing_pids: HashMap<Pid, JobId>,
-    canceled: HashMap<Pid, NonEmpty<Sha256Digest>>,
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -264,15 +267,15 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
             layers = NonEmpty::collect(entry.layers.into_keys());
-        } else if let Some(ExecutingJob { pid, layers, .. }) = self.executing.remove(&jid) {
-            // The job was executing. We kill the job. We also start a new job if possible.
-            // However, we wait to release the layers until the job has terminated. If we didn't it
-            // would be possible for us to try to remove a directory that was still in use, which
-            // would fail.
-            self.executing_pids.remove(&pid).assert_is_some();
-            self.deps.kill_job(pid);
-            self.canceled.insert(pid, layers).assert_is_none();
-            self.possibly_start_job();
+        } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
+            // The job was executing. We kill the job, but we wait around until it's actually
+            // teriminated. We don't want to release the layers until then. If we didn't it would
+            // be possible for us to try to remove a directory that was still in use, which would
+            // fail.
+            if let ExecutingJobState::Ok { pid } = mem::replace(state, ExecutingJobState::Canceled)
+            {
+                self.deps.kill_job(pid);
+            }
         } else {
             // It may be the queue.
             self.queued = mem::take(&mut self.queued)
@@ -301,27 +304,42 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         f: impl FnOnce(&mut ExecutingJob),
     ) {
         let Entry::Occupied(mut oe) = self.executing.entry(jid) else {
-            return;
+            panic!("missing entry for {jid:?}");
         };
         f(oe.get_mut());
         if oe.get().is_complete() {
-            let (jid, entry) = oe.remove_entry();
-            self.executing_pids.remove(&entry.pid).assert_is_some();
-            let status = entry.status.unwrap();
-            let stdout = entry.stdout.unwrap();
-            let stderr = entry.stderr.unwrap();
-            let result = match (status, stdout, stderr) {
-                (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
-                    Ok(JobOutcome::Completed {
-                        status,
-                        effects: JobEffects { stdout, stderr },
-                    })
+            let (
+                jid,
+                ExecutingJob {
+                    state,
+                    status,
+                    stdout,
+                    stderr,
+                    layers,
+                },
+            ) = oe.remove_entry();
+            let status = status.unwrap();
+            let stdout = stdout.unwrap();
+            let stderr = stderr.unwrap();
+            match state {
+                ExecutingJobState::Ok { .. } => {
+                    let result = match (status, stdout, stderr) {
+                        (status, StdResult::Ok(stdout), StdResult::Ok(stderr)) => {
+                            Ok(JobOutcome::Completed {
+                                status,
+                                effects: JobEffects { stdout, stderr },
+                            })
+                        }
+                        (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => {
+                            Err(JobError::System(e))
+                        }
+                    };
+                    self.deps
+                        .send_message_to_broker(WorkerToBroker(jid, result));
                 }
-                (_, StdResult::Err(e), _) | (_, _, StdResult::Err(e)) => Err(JobError::System(e)),
-            };
-            self.deps
-                .send_message_to_broker(WorkerToBroker(jid, result));
-            for digest in entry.layers {
+                ExecutingJobState::Canceled => {}
+            }
+            for digest in layers {
                 self.cache.decrement_ref_count(&digest);
             }
             self.possibly_start_job();
@@ -329,20 +347,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_pid_status(&mut self, pid: Pid, status: JobStatus) {
-        let target_jid = self.executing_pids.get(&pid);
-        match target_jid {
-            Some(jid) => {
-                self.update_entry_and_potentially_finish_job(*jid, move |entry| {
-                    entry.status = Some(status)
-                });
-            }
-            None => {
-                if let Some(layers) = self.canceled.remove(&pid) {
-                    for digest in layers {
-                        self.cache.decrement_ref_count(&digest);
-                    }
-                }
-            }
+        if let Some(jid) = self.executing_pids.remove(&pid) {
+            self.update_entry_and_potentially_finish_job(jid, move |entry| {
+                entry.status = Some(status)
+            });
         }
     }
 
@@ -717,8 +725,13 @@ mod tests {
         };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
-            StartJob(jid!(5), spec!(5, Tar), path_buf_vec!["/e"]),
         };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            StartJob(jid!(5), spec!(5, Tar), path_buf_vec!["/e"]),
+        }
     }
 
     script_test! {
@@ -797,11 +810,13 @@ mod tests {
         };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
-            StartJob(jid!(2), spec!(2, [(43, Tar)]), path_buf_vec!["/c"]),
         };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
+            StartJob(jid!(2), spec!(2, [(43, Tar)]), path_buf_vec!["/c"]),
         };
     }
 
@@ -916,22 +931,30 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
         };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
         };
     }
 
-    script_test! {
-        receive_job_stdout_unknown,
-        Fixture::new(1, [], [], [], []),
-        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+    #[test]
+    #[should_panic(expected = "missing entry for JobId")]
+    fn receive_job_stdout_unknown() {
+        let mut fixture = Fixture::new(1, [], [], [], []);
+        fixture
+            .dispatcher
+            .receive_message(JobStdout(jid!(1), Ok(JobOutputResult::None)));
     }
 
-    script_test! {
-        receive_job_stderr_unknown,
-        Fixture::new(1, [], [], [], []),
-        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+    #[test]
+    #[should_panic(expected = "missing entry for JobId")]
+    fn receive_job_stderr_unknown() {
+        let mut fixture = Fixture::new(1, [], [], [], []);
+        fixture
+            .dispatcher
+            .receive_message(JobStderr(jid!(1), Ok(JobOutputResult::None)));
     }
 
     script_test! {
