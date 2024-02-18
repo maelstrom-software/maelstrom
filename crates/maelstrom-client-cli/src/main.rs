@@ -99,31 +99,27 @@ fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -
     Ok(())
 }
 
-fn visitor(
-    cjid: ClientJobId,
-    result: JobOutcomeResult,
-    accum: Arc<ExitCodeAccumulator>,
-) -> Result<()> {
+fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccumulator>) {
     match result {
         Ok(JobOutcome::Completed { status, effects }) => {
-            print_effects(cjid, effects)?;
+            print_effects(cjid, effects).ok();
             match status {
                 JobStatus::Exited(0) => {}
                 JobStatus::Exited(code) => {
-                    io::stdout().lock().flush()?;
+                    io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: exited with code {code}");
                     accum.add(ExitCode::from(code));
                 }
                 JobStatus::Signaled(signum) => {
-                    io::stdout().lock().flush()?;
+                    io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: killed by signal {signum}");
                     accum.add(ExitCode::FAILURE);
                 }
             };
         }
         Ok(JobOutcome::TimedOut(effects)) => {
-            print_effects(cjid, effects)?;
-            io::stdout().lock().flush()?;
+            print_effects(cjid, effects).ok();
+            io::stdout().lock().flush().ok();
             eprintln!("job {cjid}: timed out");
             accum.add(ExitCode::FAILURE);
         }
@@ -136,7 +132,6 @@ fn visitor(
             accum.add(ExitCode::FAILURE);
         }
     }
-    Ok(())
 }
 
 fn cache_dir() -> PathBuf {
@@ -195,7 +190,7 @@ fn main() -> Result<ExitCode> {
         client.borrow_mut().add_job(
             job_spec?,
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
-        );
+        )?;
     }
     client.into_inner().wait_for_outstanding_jobs()?;
     Ok(accum.get())

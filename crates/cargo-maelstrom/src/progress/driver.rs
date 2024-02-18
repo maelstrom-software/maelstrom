@@ -63,7 +63,7 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                 });
                 while !canceled.load(Ordering::Acquire) {
                     let counts = client.lock().unwrap().get_job_state_counts()?;
-                    if !ind.update_job_states(counts.recv()?)? {
+                    if !ind.update_job_states(counts.recv()??)? {
                         break;
                     }
 

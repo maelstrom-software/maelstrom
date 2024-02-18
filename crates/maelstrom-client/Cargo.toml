@@ -18,6 +18,7 @@ maelstrom-base.workspace = true
 maelstrom-client-process.workspace = true
 maelstrom-container.workspace = true
 maelstrom-util.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true

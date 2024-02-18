@@ -1,3 +1,4 @@
+pub mod comm;
 pub mod spec;
 pub mod test;
 
@@ -5,7 +6,7 @@ pub mod test;
 #[cfg(test)]
 extern crate self as maelstrom_client;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, Utc};
 use indicatif::ProgressBar;
 use itertools::Itertools as _;
@@ -155,7 +156,7 @@ impl Dispatcher {
     fn handle_message(&mut self, msg: DispatcherMessage) -> Result<bool> {
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                self.handlers.remove(&cjid).unwrap()(cjid, result)?;
+                self.handlers.remove(&cjid).unwrap()(cjid, result);
                 if self.stop_when_all_completed && self.handlers.is_empty() {
                     return Ok(false);
                 }
@@ -355,7 +356,8 @@ pub struct ClientDeps {
 
 impl ClientDeps {
     fn new(broker_addr: BrokerAddr) -> Result<Self> {
-        let mut stream = TcpStream::connect(broker_addr.inner())?;
+        let mut stream = TcpStream::connect(broker_addr.inner())
+            .with_context(|| format!("failed to connect to {broker_addr}"))?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
 
         let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
@@ -474,14 +476,13 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
-pub type JobResponseHandler =
-    Box<dyn FnOnce(ClientJobId, JobOutcomeResult) -> Result<()> + Send + Sync>;
+pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
 pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
 
-#[derive(Default)]
+#[derive(Default, Debug, Serialize, Deserialize)]
 pub enum ClientDriverMode {
     #[default]
     MultiThreaded,

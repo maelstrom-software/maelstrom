@@ -322,7 +322,7 @@ where
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
             },
             Box::new(move |cjid, result| visitor.job_finished(cjid, result)),
-        );
+        )?;
 
         Ok(EnqueueResult::Enqueued {
             package_name: self.package_name.clone(),

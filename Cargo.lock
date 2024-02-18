@@ -2652,6 +2652,7 @@ dependencies = [
  "maelstrom-util",
  "maplit",
  "nonempty",
+ "serde",
  "sha2",
  "tempfile",
 ]

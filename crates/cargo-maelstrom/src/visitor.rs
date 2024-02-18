@@ -151,7 +151,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         }
     }
 
-    pub fn job_finished(&self, cjid: ClientJobId, result: JobOutcomeResult) -> Result<()> {
+    pub fn job_finished(&self, cjid: ClientJobId, result: JobOutcomeResult) {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
         let mut test_output_lines: Vec<String> = vec![];
@@ -222,7 +222,6 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
             self.ind.eprintln(line);
         }
         self.ind.job_finished();
-        Ok(())
     }
 
     pub fn job_ignored(&self) {

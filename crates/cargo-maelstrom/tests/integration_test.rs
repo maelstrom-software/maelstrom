@@ -300,7 +300,7 @@ fn run_app(
         b_conn.process(1, false /* fetch_layers */);
         client.process_broker_msg_single_threaded(1);
 
-        prog_driver.update(counts.try_recv().unwrap()).unwrap();
+        prog_driver.update(counts.recv().unwrap().unwrap()).unwrap();
     }
 
     app.drain().unwrap();

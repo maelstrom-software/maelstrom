@@ -75,10 +75,12 @@ fn basic_job_test(
         timeout: Default::default(),
     };
     let (send, recv) = mpsc::channel();
-    client.add_job(
-        spec,
-        Box::new(move |id, result| Ok(send.send((id, result)).unwrap())),
-    );
+    client
+        .add_job(
+            spec,
+            Box::new(move |id, result| send.send((id, result)).unwrap()),
+        )
+        .unwrap();
 
     client.process_client_messages_single_threaded();
     broker_conn.process(1, true /* fetch_layers */);

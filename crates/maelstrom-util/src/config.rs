@@ -3,14 +3,13 @@ use clap::ValueEnum;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
 use std::{
-    fmt::{self, Debug, Formatter},
-    io,
+    fmt, io,
     net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
 };
 
-#[derive(Clone, Copy, Deserialize)]
-#[serde(try_from = "String")]
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct BrokerAddr(SocketAddr);
 
 impl BrokerAddr {
@@ -38,8 +37,20 @@ impl TryFrom<String> for BrokerAddr {
     }
 }
 
-impl Debug for BrokerAddr {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+impl From<BrokerAddr> for String {
+    fn from(b: BrokerAddr) -> Self {
+        b.to_string()
+    }
+}
+
+impl fmt::Display for BrokerAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Debug for BrokerAddr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
@@ -58,8 +69,8 @@ impl CacheRoot {
     }
 }
 
-impl Debug for CacheRoot {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl fmt::Debug for CacheRoot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
@@ -74,8 +85,8 @@ impl CacheBytesUsedTarget {
     }
 }
 
-impl Debug for CacheBytesUsedTarget {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
+impl fmt::Debug for CacheBytesUsedTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         ByteSize::b(self.0).fmt(f)
     }
 }
