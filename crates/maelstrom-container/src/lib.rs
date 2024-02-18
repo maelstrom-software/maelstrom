@@ -3,7 +3,7 @@ use async_compression::tokio::bufread::GzipDecoder;
 use futures::stream::TryStreamExt as _;
 use indicatif::ProgressBar;
 use maelstrom_util::fs::Fs;
-use oci_spec::image::{Descriptor, ImageConfiguration, ImageIndex, ImageManifest, Platform};
+use oci_spec::image::{Arch, Descriptor, ImageIndex, ImageManifest, Os, Platform, RootFs};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::{
@@ -14,6 +14,64 @@ use std::{
 };
 use tokio::{io::AsyncWrite, task};
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone)]
+pub struct Config {
+    pub user: Option<String>,
+    pub exposed_ports: Option<Vec<String>>,
+    pub env: Option<Vec<String>>,
+    pub entrypoint: Option<Vec<String>>,
+    pub cmd: Option<Vec<String>>,
+    pub volumes: Option<Vec<String>>,
+    pub working_dir: Option<String>,
+    pub labels: Option<HashMap<String, String>>,
+    pub stop_signal: Option<String>,
+}
+
+impl From<oci_spec::image::Config> for Config {
+    fn from(other: oci_spec::image::Config) -> Self {
+        Self {
+            user: other.user().clone(),
+            exposed_ports: other.exposed_ports().clone(),
+            env: other.env().clone(),
+            entrypoint: other.entrypoint().clone(),
+            cmd: other.cmd().clone(),
+            volumes: other.volumes().clone(),
+            working_dir: other.working_dir().clone(),
+            labels: other.labels().clone(),
+            stop_signal: other.stop_signal().clone(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone)]
+pub struct ImageConfiguration {
+    pub created: Option<String>,
+    pub author: Option<String>,
+    pub architecture: Arch,
+    pub os: Os,
+    pub os_version: Option<String>,
+    pub os_features: Option<Vec<String>>,
+    pub variant: Option<String>,
+    pub config: Option<Config>,
+    pub rootfs: RootFs,
+}
+
+impl From<oci_spec::image::ImageConfiguration> for ImageConfiguration {
+    fn from(other: oci_spec::image::ImageConfiguration) -> Self {
+        Self {
+            created: other.created().clone(),
+            author: other.author().clone(),
+            architecture: other.architecture().clone(),
+            os: other.os().clone(),
+            os_version: other.os_version().clone(),
+            os_features: other.os_features().clone(),
+            variant: other.variant().clone(),
+            config: other.config().clone().map(Into::into),
+            rootfs: other.rootfs().clone(),
+        }
+    }
+}
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(transparent)]
@@ -104,7 +162,7 @@ async fn get_image_config(
     pkg: &str,
     config_digest: &str,
 ) -> Result<ImageConfiguration> {
-    Ok(client
+    let config: oci_spec::image::ImageConfiguration = client
         .get(&format!(
             "https://registry-1.docker.io/v2/library/{pkg}/blobs/{config_digest}"
         ))
@@ -116,7 +174,8 @@ async fn get_image_config(
         .send()
         .await?
         .json()
-        .await?)
+        .await?;
+    Ok(config.into())
 }
 
 async fn download_layer(
@@ -148,10 +207,12 @@ async fn download_layer(
     Ok(())
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 pub enum ContainerImageVersion {
     V0 = 0,
+    #[default]
+    V1 = 1,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -170,18 +231,19 @@ impl ContainerImage {
     }
 
     fn from_dir(fs: &Fs, path: impl AsRef<Path>) -> Option<Self> {
-        ContainerImage::from_path(fs, path.as_ref().join("config.json")).ok()
+        let i = ContainerImage::from_path(fs, path.as_ref().join("config.json")).ok()?;
+        (i.version == ContainerImageVersion::default()).then_some(i)
     }
 
     pub fn env(&self) -> Option<&Vec<String>> {
-        self.config.config().as_ref().and_then(|c| c.env().as_ref())
+        self.config.config.as_ref().and_then(|c| c.env.as_ref())
     }
 
     pub fn working_dir(&self) -> Option<&String> {
         self.config
-            .config()
+            .config
             .as_ref()
-            .and_then(|c| c.working_dir().as_ref())
+            .and_then(|c| c.working_dir.as_ref())
     }
 }
 
@@ -253,7 +315,7 @@ pub async fn download_image(
     }
 
     Ok(ContainerImage {
-        version: ContainerImageVersion::V0,
+        version: ContainerImageVersion::default(),
         name: name.into(),
         digest: manifest_digest,
         config,
@@ -513,7 +575,7 @@ impl ContainerImageDepotOps for FakeContainerImageDepotOps {
         _prog: ProgressBar,
     ) -> Result<ContainerImage> {
         Ok(ContainerImage {
-            version: ContainerImageVersion::V0,
+            version: ContainerImageVersion::default(),
             name: name.into(),
             digest: digest.into(),
             config: ImageConfiguration::default(),
