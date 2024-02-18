@@ -40,12 +40,24 @@ impl std::error::Error for CommunicationError {}
 pub type Result<T> = std::result::Result<T, CommunicationError>;
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum ProgressInfo {
+    Length(u64),
+    Inc(u64),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ProgressResponse<T> {
+    InProgress(ProgressInfo),
+    Done(T),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Start(Result<()>),
     AddArtifact(Result<Sha256Digest>),
     AddLayer(Result<(Sha256Digest, ArtifactType)>),
     AddJob(Result<(ClientJobId, JobOutcomeResult)>),
-    GetContainerImage(Result<ContainerImage>),
+    GetContainerImage(Result<ProgressResponse<ContainerImage>>),
     StopAccepting(Result<()>),
     WaitForOutstandingJobs(Result<()>),
     GetJobStateCounts(Result<JobStateCounts>),
@@ -98,5 +110,6 @@ impl MessageId {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message<BodyT> {
     pub id: MessageId,
+    pub finished: bool,
     pub body: BodyT,
 }

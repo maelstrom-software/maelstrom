@@ -8,7 +8,6 @@ extern crate self as maelstrom_client;
 
 use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, Utc};
-use indicatif::ProgressBar;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{
@@ -21,7 +20,7 @@ use maelstrom_base::{
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
-use maelstrom_container::{ContainerImage, ContainerImageDepot};
+use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
     config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader,
     manifest::ManifestBuilder, net,
@@ -718,7 +717,7 @@ impl Client {
         &mut self,
         name: &str,
         tag: &str,
-        prog: ProgressBar,
+        prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         self.container_image_depot
             .get_container_image(name, tag, prog)

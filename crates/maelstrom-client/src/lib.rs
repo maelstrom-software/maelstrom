@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Result};
 use indicatif::ProgressBar;
 use maelstrom_base::{proto, stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_process::{comm, Client as ProcessClient};
-use maelstrom_container::ContainerImage;
+use maelstrom_container::{ContainerImage, ProgressTracker};
 use maelstrom_util::config::BrokerAddr;
 use spec::Layer;
 use std::collections::HashMap;
@@ -18,7 +18,7 @@ use std::sync::{
 };
 use std::thread;
 
-type ResponseCallback = Box<dyn FnOnce(comm::Response) + Send + Sync>;
+type ResponseCallback = Box<dyn FnMut(comm::Response) + Send + Sync>;
 
 fn print_error(label: &str, res: Result<()>) -> bool {
     if let Err(e) = res {
@@ -41,9 +41,63 @@ impl ProcessClientSender {
     }
 
     fn send(&self, id: comm::MessageId, msg: comm::Response) -> Result<()> {
+        self.send_inner(id, true /* finished */, msg)
+    }
+
+    fn send_in_progress(&self, id: comm::MessageId, msg: comm::Response) -> Result<()> {
+        self.send_inner(id, false /* finished */, msg)
+    }
+
+    fn send_inner(&self, id: comm::MessageId, finished: bool, msg: comm::Response) -> Result<()> {
         let sock = self.sock.lock().unwrap();
-        proto::serialize_into(&*sock, &comm::Message { id, body: msg })?;
+        proto::serialize_into(
+            &*sock,
+            &comm::Message {
+                id,
+                finished,
+                body: msg,
+            },
+        )?;
         Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct ProgressSender<ResponseFactoryT> {
+    sender: Arc<ProcessClientSender>,
+    id: comm::MessageId,
+    response_factory: ResponseFactoryT,
+}
+
+impl<ResponseFactoryT> ProgressSender<ResponseFactoryT> {
+    fn new(
+        sender: Arc<ProcessClientSender>,
+        id: comm::MessageId,
+        response_factory: ResponseFactoryT,
+    ) -> Self {
+        Self {
+            sender,
+            id,
+            response_factory,
+        }
+    }
+}
+
+impl<ResponseFactoryT> ProgressTracker for ProgressSender<ResponseFactoryT>
+where
+    ResponseFactoryT: Fn(comm::ProgressInfo) -> comm::Response + Send + Unpin + Clone + 'static,
+{
+    fn set_length(&self, length: u64) {
+        let _ = self.sender.send_in_progress(
+            self.id,
+            (self.response_factory)(comm::ProgressInfo::Length(length)),
+        );
+    }
+
+    fn inc(&self, v: u64) {
+        let _ = self
+            .sender
+            .send_in_progress(self.id, (self.response_factory)(comm::ProgressInfo::Inc(v)));
     }
 }
 
@@ -98,12 +152,16 @@ impl ProcessClientHandler {
                 );
             }
             comm::Request::GetContainerImage { name, tag } => {
+                let prog = ProgressSender::new(self.sender.clone(), id, |v| {
+                    comm::Response::GetContainerImage(Ok(comm::ProgressResponse::InProgress(v)))
+                });
                 self.sender.send(
                     id,
                     comm::Response::GetContainerImage(
                         self.client
-                            .get_container_image(&name, &tag, ProgressBar::hidden())
-                            .map_err(|e| e.into()),
+                            .get_container_image(&name, &tag, prog)
+                            .map_err(|e| e.into())
+                            .map(comm::ProgressResponse::Done),
                     ),
                 )?;
             }
@@ -174,6 +232,7 @@ fn run_process_client(mut sock: UnixStream) -> Result<()> {
     let req: comm::Message<comm::Request> = proto::deserialize_from(&mut sock)?;
     let comm::Message {
         id: start_message_id,
+        finished: false,
         body:
             comm::Request::Start {
                 driver_mode,
@@ -235,13 +294,21 @@ impl Dispatcher {
     fn get_message(&mut self, message: comm::Message<comm::Response>) -> Result<()> {
         let callback = self
             .outstanding
-            .remove(&message.id)
+            .get_mut(&message.id)
             .expect("unexpected message");
         callback(message.body);
+        if message.finished {
+            self.outstanding.remove(&message.id);
+        }
+
         Ok(())
     }
 
-    fn send_message(&mut self, request: comm::Request, callback: ResponseCallback) -> Result<()> {
+    fn send_message(
+        &mut self,
+        request: comm::Request,
+        mut callback: ResponseCallback,
+    ) -> Result<()> {
         if let Some(err) = &self.drained_error {
             callback(comm::Response::Error(err.clone()));
             return Ok(());
@@ -252,6 +319,7 @@ impl Dispatcher {
             &mut self.sock,
             &comm::Message {
                 id: self.next_message_id,
+                finished: false,
                 body: request,
             },
         )?;
@@ -261,7 +329,7 @@ impl Dispatcher {
 
     fn drain(&mut self, error: impl Into<comm::CommunicationError>) {
         let err = error.into();
-        for (_, callback) in self.outstanding.drain() {
+        for (_, mut callback) in self.outstanding.drain() {
             callback(comm::Response::Error(err.clone()))
         }
         self.drained_error = Some(err);
@@ -338,6 +406,22 @@ macro_rules! send_sync {
     }};
 }
 
+fn run_progress_bar<Ret>(
+    prog: ProgressBar,
+    recv: Receiver<Result<comm::ProgressResponse<Ret>>>,
+) -> Result<Ret> {
+    for msg in recv.iter() {
+        match msg? {
+            comm::ProgressResponse::InProgress(comm::ProgressInfo::Length(len)) => {
+                prog.set_length(len)
+            }
+            comm::ProgressResponse::InProgress(comm::ProgressInfo::Inc(v)) => prog.inc(v),
+            comm::ProgressResponse::Done(ret) => return Ok(ret),
+        }
+    }
+    Err(anyhow!("call incomplete"))
+}
+
 impl Drop for Client {
     fn drop(&mut self) {
         drop(self.requester.take());
@@ -398,17 +482,19 @@ impl Client {
         &mut self,
         name: &str,
         tag: &str,
-        _prog: ProgressBar,
+        prog: ProgressBar,
     ) -> Result<ContainerImage> {
-        send_sync!(self, GetContainerImage, name: name.into(), tag: tag.into())
+        let resp = send_async!(self, GetContainerImage, name: name.into(), tag: tag.into())?;
+        run_progress_bar(prog, resp)
     }
 
     pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) -> Result<()> {
+        let mut once_handler = Some(handler);
         self.requester.as_ref().unwrap().send((
             comm::Request::AddJob { spec },
             Box::new(move |message: comm::Response| {
                 if let comm::Response::AddJob(Ok((cjid, result))) = message {
-                    handler(cjid, result)
+                    (once_handler.take().unwrap())(cjid, result)
                 }
             }),
         ))?;

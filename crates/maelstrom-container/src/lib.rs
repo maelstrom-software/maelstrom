@@ -1,15 +1,16 @@
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
+use core::task::Poll;
 use futures::stream::TryStreamExt as _;
-use indicatif::ProgressBar;
 use maelstrom_util::fs::Fs;
 use oci_spec::image::{Arch, Descriptor, ImageIndex, ImageManifest, Os, Platform, RootFs};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::pin::Pin;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    io::{Read as _, Seek as _, SeekFrom, Write as _},
+    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
     path::{Path, PathBuf},
 };
 use tokio::{io::AsyncWrite, task};
@@ -178,12 +179,64 @@ async fn get_image_config(
     Ok(config.into())
 }
 
+pub trait ProgressTracker: Clone + Unpin + Send + 'static {
+    fn set_length(&self, length: u64);
+    fn inc(&self, v: u64);
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct NullProgressTracker;
+
+impl ProgressTracker for NullProgressTracker {
+    fn set_length(&self, _length: u64) {}
+    fn inc(&self, _v: u64) {}
+}
+
+impl ProgressTracker for indicatif::ProgressBar {
+    fn set_length(&self, length: u64) {
+        indicatif::ProgressBar::set_length(self, length)
+    }
+
+    fn inc(&self, v: u64) {
+        indicatif::ProgressBar::inc(self, v)
+    }
+}
+
+struct ProgressTrackerStream<ProgressT, ReadT> {
+    prog: ProgressT,
+    inner: ReadT,
+}
+
+impl<ProgressT, ReadT> ProgressTrackerStream<ProgressT, ReadT> {
+    fn new(prog: ProgressT, inner: ReadT) -> Self {
+        Self { prog, inner }
+    }
+}
+
+impl<ProgressT: ProgressTracker, ReadT: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead
+    for ProgressTrackerStream<ProgressT, ReadT>
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let prev_len = buf.filled().len() as u64;
+        if let Poll::Ready(e) = Pin::new(&mut self.inner).poll_read(cx, buf) {
+            self.prog.inc(buf.filled().len() as u64 - prev_len);
+            Poll::Ready(e)
+        } else {
+            Poll::Pending
+        }
+    }
+}
+
 async fn download_layer(
     client: &reqwest::Client,
     token: &AuthToken,
     pkg: &str,
     digest: &str,
-    prog: ProgressBar,
+    prog: impl ProgressTracker,
     mut out: impl AsyncWrite + Unpin,
 ) -> Result<()> {
     let tar_stream = client
@@ -194,15 +247,14 @@ async fn download_layer(
         .send()
         .await?
         .error_for_status()?;
-    let mut d = GzipDecoder::new(tokio::io::BufReader::new(
-        prog.wrap_async_read(
-            tar_stream
-                .bytes_stream()
-                .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-                .into_async_read()
-                .compat(),
-        ),
-    ));
+    let mut d = GzipDecoder::new(tokio::io::BufReader::new(ProgressTrackerStream::new(
+        prog,
+        tar_stream
+            .bytes_stream()
+            .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+            .into_async_read()
+            .compat(),
+    )));
     tokio::io::copy(&mut d, &mut out).await?;
     Ok(())
 }
@@ -253,7 +305,7 @@ fn download_layer_on_task(
     pkg: String,
     token: AuthToken,
     path: PathBuf,
-    prog: ProgressBar,
+    prog: impl ProgressTracker,
 ) -> task::JoinHandle<Result<()>> {
     task::spawn(async move {
         let mut file = tokio::fs::File::create(&path).await?;
@@ -275,7 +327,7 @@ pub async fn download_image(
     name: &str,
     tag_or_digest: &str,
     layer_dir: impl AsRef<Path>,
-    prog: ProgressBar,
+    prog: impl ProgressTracker,
 ) -> Result<ContainerImage> {
     let token = get_token(client, name).await?;
 
@@ -359,7 +411,7 @@ pub trait ContainerImageDepotOps {
         name: &str,
         digest: &str,
         layer_dir: &Path,
-        prog: ProgressBar,
+        prog: impl ProgressTracker,
     ) -> Result<ContainerImage>;
 }
 
@@ -385,7 +437,7 @@ impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
         name: &str,
         digest: &str,
         layer_dir: &Path,
-        prog: ProgressBar,
+        prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         download_image_sync(&self.client, name, digest, layer_dir, prog)
     }
@@ -459,7 +511,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         &self,
         name: &str,
         digest: &str,
-        prog: ProgressBar,
+        prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         let output_dir = self.cache_dir.join(digest);
         if output_dir.exists() {
@@ -513,7 +565,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         &mut self,
         name: &str,
         tag: &str,
-        prog: ProgressBar,
+        prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         let cache_key = (name.into(), tag.into());
         if let Some(img) = self.cache.get(&cache_key) {
@@ -551,7 +603,7 @@ impl ContainerImageDepotOps for PanicContainerImageDepotOps {
         _name: &str,
         _digest: &str,
         _layer_dir: &Path,
-        _prog: ProgressBar,
+        _prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         panic!()
     }
@@ -572,7 +624,7 @@ impl ContainerImageDepotOps for FakeContainerImageDepotOps {
         name: &str,
         digest: &str,
         _layer_dir: &Path,
-        _prog: ProgressBar,
+        _prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         Ok(ContainerImage {
             version: ContainerImageVersion::default(),
@@ -619,7 +671,7 @@ fn container_image_depot_download_dir_structure() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
 
     assert_eq!(
@@ -652,7 +704,7 @@ fn container_image_depot_download_then_reload() {
     )
     .unwrap();
     let img1 = depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     drop(depot);
 
@@ -663,7 +715,7 @@ fn container_image_depot_download_then_reload() {
     )
     .unwrap();
     let img2 = depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
 
     assert_eq!(img1, img2);
@@ -684,7 +736,7 @@ fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     drop(depot);
     fs.remove_file(image_dir.path().join("sha256:abcdef").join("config.json"))
@@ -699,7 +751,7 @@ fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
 
     assert_eq!(
@@ -728,10 +780,10 @@ fn container_image_depot_update_image() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     depot
-        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .get_container_image("bar", "latest", NullProgressTracker)
         .unwrap();
     drop(depot);
     fs.remove_file(project_dir.path().join(TAG_FILE_NAME))
@@ -749,10 +801,10 @@ fn container_image_depot_update_image() {
     .unwrap();
     #[allow(clippy::disallowed_names)]
     let foo = depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     depot
-        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .get_container_image("bar", "latest", NullProgressTracker)
         .unwrap();
 
     // ensure we get new foo
@@ -790,10 +842,10 @@ fn container_image_depot_update_image_but_nothing_to_do() {
     let mut depot =
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops.clone()).unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     depot
-        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .get_container_image("bar", "latest", NullProgressTracker)
         .unwrap();
     drop(depot);
     fs.remove_file(project_dir.path().join(TAG_FILE_NAME))
@@ -802,10 +854,10 @@ fn container_image_depot_update_image_but_nothing_to_do() {
     let mut depot =
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
     depot
-        .get_container_image("foo", "latest", ProgressBar::hidden())
+        .get_container_image("foo", "latest", NullProgressTracker)
         .unwrap();
     depot
-        .get_container_image("bar", "latest", ProgressBar::hidden())
+        .get_container_image("bar", "latest", NullProgressTracker)
         .unwrap();
 
     assert_eq!(
@@ -838,7 +890,7 @@ pub async fn download_image_sync(
     name: &str,
     tag_or_digest: &str,
     layer_dir: impl AsRef<Path>,
-    prog: ProgressBar,
+    prog: impl ProgressTracker,
 ) -> Result<ContainerImage> {
     download_image(client, name, tag_or_digest, layer_dir, prog).await
 }
