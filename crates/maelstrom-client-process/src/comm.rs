@@ -51,6 +51,7 @@ pub enum ProgressResponse<T> {
     Done(T),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Start(Result<()>),

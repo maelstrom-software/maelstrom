@@ -136,6 +136,7 @@ macro_rules! send_async {
     ($self:expr, $msg:ident, $($arg_n:ident: $arg_v:expr),*) => {{
         let (send, recv) = channel();
         $self.requester.as_ref().unwrap().send((
+            #[allow(clippy::redundant_field_names)]
             comm::Request::$msg { $($arg_n: $arg_v),* },
             Box::new(move |message: comm::Response| {
                 match message {

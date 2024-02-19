@@ -91,6 +91,7 @@ impl ProcessClientHandler {
         }
     }
 
+    #[allow(clippy::unit_arg)]
     fn handle_msg<'a, 'b>(
         &mut self,
         msg: comm::Message<comm::Request>,
