@@ -9,7 +9,7 @@ pub mod visitor;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use cargo::{get_cases_from_binary, CargoBuild, TestArtifactStream};
+use cargo::{get_cases_from_binary, run_cargo_test, TestArtifactStream, WaitHandle};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
@@ -351,9 +351,9 @@ struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
     client: &'a Mutex<Client>,
     width: usize,
     ind: ProgressIndicatorT,
-    cargo_build: Option<CargoBuild>,
+    wait_handle: Option<WaitHandle>,
     package_match: bool,
-    artifacts: TestArtifactStream,
+    artifacts: Option<TestArtifactStream>,
     artifact_queuing: Option<ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>>,
     timeout_override: Option<Option<Timeout>>,
 }
@@ -378,15 +378,17 @@ where
 
         let building_tests = !package_names.is_empty()
             && matches!(queuing_deps.list_action, None | Some(ListAction::ListTests));
-        let mut cargo_build = building_tests
+
+        let (wait_handle, artifacts) = building_tests
             .then(|| {
-                CargoBuild::new(
+                run_cargo_test(
                     &queuing_deps.cargo,
                     queuing_deps.stderr_color,
                     package_names,
                 )
             })
-            .transpose()?;
+            .transpose()?
+            .unzip();
 
         Ok(Self {
             queuing_deps,
@@ -394,12 +396,9 @@ where
             width,
             ind,
             package_match: false,
-            artifacts: cargo_build
-                .as_mut()
-                .map(|c| c.artifact_stream())
-                .unwrap_or_default(),
+            artifacts,
             artifact_queuing: None,
-            cargo_build,
+            wait_handle,
             timeout_override,
         })
     }
@@ -407,7 +406,10 @@ where
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
         self.ind.update_enqueue_status("building artifacts...");
 
-        let Some(artifact) = self.artifacts.next() else {
+        let Some(ref mut artifacts) = self.artifacts else {
+            return Ok(false);
+        };
+        let Some(artifact) = artifacts.next() else {
             return Ok(false);
         };
         let artifact = artifact?;
@@ -435,10 +437,9 @@ where
     /// Meant to be called when the user has enqueued all the jobs they want. Checks for deferred
     /// errors from cargo or otherwise
     fn finish(&mut self) -> Result<()> {
-        if let Some(cb) = self.cargo_build.take() {
-            cb.check_status(&mut *self.queuing_deps.stderr.lock().unwrap())?;
+        if let Some(wh) = self.wait_handle.take() {
+            wh.wait(&mut *self.queuing_deps.stderr.lock().unwrap())?;
         }
-
         Ok(())
     }
 

@@ -11,62 +11,31 @@ use std::{
     str,
 };
 
-pub struct CargoBuild {
+pub struct WaitHandle {
     child: Child,
 }
 
-impl CargoBuild {
-    pub fn new(program: &str, color: bool, packages: Vec<String>) -> Result<Self> {
-        let mut cmd = Command::new(program);
-        cmd.arg("test")
-            .arg("--no-run")
-            .arg("--message-format=json-render-diagnostics")
-            .arg(&format!(
-                "--color={}",
-                if color { "always" } else { "never" }
-            ))
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        for package in packages {
-            cmd.arg("--package").arg(package);
-        }
-
-        let child = cmd.spawn()?;
-
-        Ok(Self { child })
-    }
-
-    pub fn artifact_stream(&mut self) -> TestArtifactStream {
-        TestArtifactStream {
-            stream: Some(CargoMessage::parse_stream(BufReader::new(
-                self.child.stdout.take().unwrap(),
-            ))),
-        }
-    }
-
-    pub fn check_status(mut self, mut stderr: impl io::Write) -> Result<()> {
-        let exit_status = self.child.wait()?;
-        if !exit_status.success() {
+impl WaitHandle {
+    pub fn wait(mut self, mut stderr: impl io::Write) -> Result<()> {
+        if self.child.wait()?.success() {
+            Ok(())
+        } else {
             std::io::copy(self.child.stderr.as_mut().unwrap(), &mut stderr)?;
-            return Err(Error::msg("build failure".to_string()));
+            Err(Error::msg("build failure".to_string()))
         }
-
-        Ok(())
     }
 }
 
-#[derive(Default)]
 pub struct TestArtifactStream {
-    stream: Option<CargoMessageIter<BufReader<ChildStdout>>>,
+    stream: CargoMessageIter<BufReader<ChildStdout>>,
 }
 
 impl Iterator for TestArtifactStream {
     type Item = Result<CargoArtifact>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(stream) = &mut self.stream {
-            match stream.next()? {
+        loop {
+            match self.stream.next()? {
                 Err(e) => return Some(Err(e.into())),
                 Ok(CargoMessage::CompilerArtifact(artifact)) => {
                     if artifact.executable.is_some() && artifact.profile.test {
@@ -76,8 +45,38 @@ impl Iterator for TestArtifactStream {
                 _ => continue,
             }
         }
-        None
     }
+}
+
+pub fn run_cargo_test(
+    cargo: &str,
+    color: bool,
+    packages: Vec<String>,
+) -> Result<(WaitHandle, TestArtifactStream)> {
+    let mut cmd = Command::new(cargo);
+    cmd.arg("test")
+        .arg("--no-run")
+        .arg("--message-format=json-render-diagnostics")
+        .arg(&format!(
+            "--color={}",
+            if color { "always" } else { "never" }
+        ))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    for package in packages {
+        cmd.arg("--package").arg(package);
+    }
+
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().unwrap();
+
+    Ok((
+        WaitHandle { child },
+        TestArtifactStream {
+            stream: CargoMessage::parse_stream(BufReader::new(stdout)),
+        },
+    ))
 }
 
 pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
