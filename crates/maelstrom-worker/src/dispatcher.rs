@@ -1,6 +1,8 @@
 //! Central processing module for the worker. Receive messages from the broker, executors, and
 //! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
+mod tracker;
+
 use crate::{
     cache::{Cache, CacheFs, GetArtifact},
     config::Slots,
@@ -14,12 +16,13 @@ use maelstrom_base::{
 use maelstrom_linux::Pid;
 use maelstrom_util::ext::OptionExt as _;
 use std::{
-    collections::{hash_map::Entry, HashMap, VecDeque},
+    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     mem,
     path::PathBuf,
     result::Result as StdResult,
     time::Duration,
 };
+use tracker::{FetcherResult, LayerTracker};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -164,20 +167,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
 struct AwaitingLayersEntry {
     spec: JobSpec,
-    layers: HashMap<Sha256Digest, PathBuf>,
-}
-
-impl AwaitingLayersEntry {
-    fn new(spec: JobSpec) -> Self {
-        AwaitingLayersEntry {
-            spec,
-            layers: HashMap::default(),
-        }
-    }
-
-    fn has_all_layers(&self) -> bool {
-        self.layers.len() == self.spec.layers.len()
-    }
+    tracker: LayerTracker,
 }
 
 enum ExecutingJobState<DepsT: DispatcherDeps> {
@@ -194,17 +184,17 @@ struct ExecutingJob<DepsT: DispatcherDeps> {
     status: Option<JobStatus>,
     stdout: Option<StdResult<JobOutputResult, String>>,
     stderr: Option<StdResult<JobOutputResult, String>>,
-    layers: NonEmpty<Sha256Digest>,
+    digests: HashSet<Sha256Digest>,
 }
 
 impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
-    fn new(pid: Pid, layers: NonEmpty<Sha256Digest>, timer: Option<DepsT::TimerHandle>) -> Self {
+    fn new(pid: Pid, digests: HashSet<Sha256Digest>, timer: Option<DepsT::TimerHandle>) -> Self {
         ExecutingJob {
             state: ExecutingJobState::Ok { pid, timer },
             status: None,
             stdout: None,
             stderr: None,
-            layers,
+            digests,
         }
     }
 
@@ -223,7 +213,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
-    queued: VecDeque<(JobId, JobSpec, NonEmpty<PathBuf>)>,
+    queued: VecDeque<(JobId, JobSpec, LayerTracker)>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
     executing_pids: HashMap<Pid, JobId>,
 }
@@ -231,20 +221,21 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
-            let (jid, spec, layer_paths) = self.queued.pop_front().unwrap();
+            let (jid, spec, tracker) = self.queued.pop_front().unwrap();
             let timeout = spec.timeout;
-            match self.deps.start_job(jid, spec, layer_paths) {
-                (Ok(pid), layers) => {
+            let (paths, digests) = tracker.into_paths_and_digests();
+            match self.deps.start_job(jid, spec, paths) {
+                (Ok(pid), _) => {
                     let executing_job = ExecutingJob::new(
                         pid,
-                        layers,
+                        digests,
                         timeout.map(|timeout| self.deps.start_timer(jid, Duration::from(timeout))),
                     );
                     self.executing.insert(jid, executing_job).assert_is_none();
                     self.executing_pids.insert(pid, jid).assert_is_none();
                 }
-                (Err(e), layers) => {
-                    for digest in layers {
+                (Err(e), _) => {
+                    for digest in digests {
                         self.cache.decrement_ref_count(&digest);
                     }
                     self.deps
@@ -254,44 +245,36 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
-    fn enqueue_job_with_all_layers(&mut self, jid: JobId, mut entry: AwaitingLayersEntry) {
-        let layers = NonEmpty::<PathBuf>::collect(
-            entry
-                .spec
-                .layers
-                .iter()
-                .map(|(digest, _)| entry.layers.remove(digest).unwrap()),
-        )
-        .unwrap();
-        self.queued.push_back((jid, entry.spec, layers));
+    fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
+        self.queued.push_back((jid, spec, tracker));
         self.possibly_start_job();
     }
 
     fn receive_enqueue_job(&mut self, jid: JobId, spec: JobSpec) {
-        let mut entry = AwaitingLayersEntry::new(spec);
-        for (digest, type_) in &entry.spec.layers {
+        let tracker = LayerTracker::new(&spec.layers, |digest, type_| -> FetcherResult {
             match self.cache.get_artifact(digest.clone(), jid) {
-                GetArtifact::Success(path) => {
-                    entry.layers.insert(digest.clone(), path).assert_is_none()
-                }
-                GetArtifact::Wait => {}
+                GetArtifact::Success(path) => FetcherResult::Got(path),
+                GetArtifact::Wait => FetcherResult::Pending,
                 GetArtifact::Get(path) => {
-                    self.deps.start_artifact_fetch(digest.clone(), *type_, path)
+                    self.deps.start_artifact_fetch(digest.clone(), type_, path);
+                    FetcherResult::Pending
                 }
             }
-        }
-        if entry.has_all_layers() {
-            self.enqueue_job_with_all_layers(jid, entry);
+        });
+        if tracker.is_complete() {
+            self.enqueue_job_with_all_layers(jid, spec, tracker);
         } else {
-            self.awaiting_layers.insert(jid, entry).assert_is_none();
+            self.awaiting_layers
+                .insert(jid, AwaitingLayersEntry { spec, tracker })
+                .assert_is_none();
         }
     }
 
     fn receive_cancel_job(&mut self, jid: JobId) {
-        let mut layers = None;
+        let mut digests: Option<HashSet<Sha256Digest>> = None;
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
-            layers = NonEmpty::collect(entry.layers.into_keys());
+            digests = Some(entry.tracker.into_digests());
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
             // The job was executing. We kill the job and cancel a timer if there is one, but we
             // wait around until it's actually teriminated. We don't want to release the layers
@@ -313,15 +296,15 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     if x.0 != jid {
                         Some(x)
                     } else {
-                        assert!(layers.is_none());
-                        layers = Some(x.1.layers.map(|(d, _)| d));
+                        assert!(digests.is_none());
+                        digests = Some(x.1.layers.into_iter().map(|(digest, _)| digest).collect());
                         None
                     }
                 })
                 .collect();
         }
-        if let Some(layers) = layers {
-            for digest in layers {
+        if let Some(digests) = digests {
+            for digest in digests {
                 self.cache.decrement_ref_count(&digest);
             }
         }
@@ -344,7 +327,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     status,
                     stdout,
                     stderr,
-                    layers,
+                    digests,
                 },
             ) = oe.remove_entry();
             let effects_result = match (stdout.unwrap(), stderr.unwrap()) {
@@ -371,7 +354,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     ));
                 }
             }
-            for digest in layers {
+            for digest in digests {
                 self.cache.decrement_ref_count(&digest);
             }
             self.possibly_start_job();
@@ -434,7 +417,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                         "Failed to download and extract layer artifact {digest}: {err}"
                     ))),
                 ));
-                for digest in entry.layers.into_keys() {
+                for digest in entry.tracker.into_digests() {
                     self.cache.decrement_ref_count(&digest);
                 }
             }
@@ -453,14 +436,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 Entry::Occupied(mut entry) => {
                     // So far all is good. We then need to check if we've gotten all layers. If we
                     // have, then we can go ahead and schedule the job.
-                    entry
-                        .get_mut()
-                        .layers
-                        .insert(digest.clone(), path.clone())
-                        .assert_is_none();
-                    if entry.get().has_all_layers() {
-                        let entry = entry.remove();
-                        self.enqueue_job_with_all_layers(jid, entry);
+                    entry.get_mut().tracker.got(&digest, path.clone());
+                    if entry.get().tracker.is_complete() {
+                        let AwaitingLayersEntry { spec, tracker } = entry.remove();
+                        self.enqueue_job_with_all_layers(jid, spec, tracker);
                     }
                 }
             }
@@ -562,6 +541,7 @@ mod tests {
 
     impl DispatcherCache for Rc<RefCell<TestState>> {
         fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
+            eprintln!("{digest} {jid:?}");
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifact(digest.clone(), jid));
@@ -641,12 +621,15 @@ mod tests {
                     return;
                 }
             }
+            //            panic!(
+            //                "Expected messages didn't match actual messages in any order.\n{}",
+            //                colored_diff::PrettyDifference {
+            //                    expected: &format!("{:#?}", expected),
+            //                    actual: &format!("{:#?}", messages)
+            //                }
+            //            );
             panic!(
-                "Expected messages didn't match actual messages in any order.\n{}",
-                colored_diff::PrettyDifference {
-                    expected: &format!("{:#?}", expected),
-                    actual: &format!("{:#?}", messages)
-                }
+                "Expected messages didn't match actual messages in any order.\nExpected: {expected:#?}\nActual: {messages:#?}\n",
             );
         }
     }
@@ -1623,5 +1606,30 @@ mod tests {
         fixture
             .dispatcher
             .receive_message(Broker(EnqueueJob(jid!(1), spec!(2, Tar))));
+    }
+
+    script_test! {
+        duplicate_layer_digests,
+        Fixture::new(1, [
+            Ok(pid!(1)),
+        ], [
+            (digest!(1), GetArtifact::Success(path_buf!("/1"))),
+        ], [], []),
+        Broker(EnqueueJob(jid!(1), spec!(1, [(1, Tar), (1, Tar)]))) => {
+            CacheGetArtifact(digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, [(1, Tar), (1, Tar)]), path_buf_vec!["/1", "/1"]),
+        };
+        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
+        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
+        PidStatus(pid!(1), JobStatus::Exited(0)) => {
+            CacheDecrementRefCount(digest!(1)),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
+                status: JobStatus::Exited(0),
+                effects: JobEffects {
+                    stdout: JobOutputResult::None,
+                    stderr: JobOutputResult::None,
+                },
+            }))),
+        };
     }
 }

@@ -116,6 +116,13 @@ macro_rules! digest {
 }
 
 #[macro_export]
+macro_rules! digest_hash_set {
+    [$($e:expr),*] => {
+        ::std::collections::HashSet::from_iter([$($crate::digest!($e)),*])
+    };
+}
+
+#[macro_export]
 macro_rules! path_buf {
     ($e:expr) => {
         std::path::Path::new($e).to_path_buf()
@@ -126,6 +133,13 @@ macro_rules! path_buf {
 macro_rules! path_buf_vec {
     [$($e:expr),*] => {
         vec![$($crate::path_buf!($e)),*]
+    };
+}
+
+#[macro_export]
+macro_rules! path_buf_nonempty {
+    [$($e:expr),*] => {
+        nonempty![$($crate::path_buf!($e)),*]
     };
 }
 

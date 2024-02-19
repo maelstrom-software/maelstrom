@@ -109,3 +109,7 @@ wasm-bindgen-cli-support = "0.2"
 wasm-bindgen-futures = "0.4"
 wasm-logger = "0.2"
 walkdir = "2.4"
+[profile.wasm_dev]
+inherits = "dev"
+[profile.wasm_release]
+inherits = "release"
