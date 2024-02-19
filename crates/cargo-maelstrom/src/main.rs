@@ -1,3 +1,4 @@
+use anstyle::{AnsiColor, Effects};
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
     config::{Config, ConfigOptions, RunConfigOptions},
@@ -6,7 +7,10 @@ use cargo_maelstrom::{
     ListAction, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
-use clap::{Args, Parser, Subcommand};
+use clap::{
+    builder::{styling, Styles},
+    Args, Parser, Subcommand,
+};
 use console::Term;
 use figment::{
     error::Kind,
@@ -23,8 +27,20 @@ use std::{
     process::Command,
 };
 
+fn clap_styles() -> Styles {
+    styling::Styles::styled()
+        .header(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .usage(AnsiColor::Green.on_default().effects(Effects::BOLD))
+        .literal(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+        .placeholder(AnsiColor::Cyan.on_default())
+        .error(AnsiColor::Red.on_default().effects(Effects::BOLD))
+        .valid(AnsiColor::Cyan.on_default().effects(Effects::BOLD))
+        .invalid(AnsiColor::Yellow.on_default().effects(Effects::BOLD))
+}
+
 /// cargo-maelstrom. This binary build and sends Rust tests to the broker
 #[derive(Parser, Debug)]
+#[command(styles=clap_styles())]
 #[command(version)]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
