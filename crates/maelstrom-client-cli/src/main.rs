@@ -38,6 +38,7 @@ All values except for 'broker' have reasonable defaults.
 "#
 )]
 #[command(version)]
+#[command(styles=maelstrom_util::clap::styles())]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.

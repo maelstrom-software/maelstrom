@@ -12,7 +12,6 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-anstyle.workspace = true
 anyhow.workspace = true
 byteorder.workspace = true
 cargo_metadata.workspace = true

@@ -4,6 +4,7 @@ use maelstrom_container::download_image;
 use std::path::PathBuf;
 
 #[derive(Parser)]
+#[command(styles=maelstrom_util::clap::styles())]
 struct CliOptions {
     package_name: String,
     version: String,

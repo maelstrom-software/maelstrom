@@ -14,6 +14,7 @@ enum Command {
 /// publishing, etc..
 #[derive(Debug, Parser)]
 #[clap(bin_name = "cargo-xtask", version)]
+#[command(styles=maelstrom_util::clap::styles())]
 struct CliArgs {
     #[clap(subcommand)]
     command: Command,
