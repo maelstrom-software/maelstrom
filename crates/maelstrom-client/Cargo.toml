@@ -19,10 +19,16 @@ maelstrom-client-process.workspace = true
 maelstrom-container.workspace = true
 maelstrom-util.workspace = true
 serde.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true
 maplit.workspace = true
 nonempty.workspace = true
 sha2.workspace = true
+tempfile.workspace = true
+
+[build-dependencies]
+compiler_cli_args.workspace = true
+maelstrom-client-process.workspace = true
 tempfile.workspace = true

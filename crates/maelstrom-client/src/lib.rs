@@ -5,13 +5,16 @@ pub use maelstrom_client_process::{
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
 use maelstrom_base::{proto, stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
-use maelstrom_client_process::{comm, rpc::run_process_client};
+use maelstrom_client_process::comm;
 use maelstrom_container::ContainerImage;
-use maelstrom_util::config::BrokerAddr;
+use maelstrom_util::{config::BrokerAddr, fs::Fs};
 use spec::Layer;
 use std::collections::HashMap;
+use std::io::{self, Read as _, Write as _};
+use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::process;
 use std::sync::{
     mpsc::{channel, Receiver, Sender},
     Mutex,
@@ -178,6 +181,26 @@ fn run_progress_bar<Ret>(
     Err(anyhow!("call incomplete"))
 }
 
+fn spawn_process() -> Result<process::Child> {
+    let tempdir = tempfile::tempdir().unwrap();
+    let proc_path = tempdir.path().join("proc");
+    let fs = Fs::new();
+
+    let mut proc = fs.create_file(&proc_path)?;
+    proc.write_all(include_bytes!(env!("CLIENT_EXE")))?;
+    proc.set_permissions(std::fs::Permissions::from_mode(0o555))?;
+    drop(proc);
+
+    let mut child = process::Command::new(&proc_path)
+        .stdout(process::Stdio::piped())
+        .stderr(process::Stdio::piped())
+        .spawn()?;
+
+    let mut buf = [0; 1];
+    child.stdout.take().unwrap().read_exact(&mut buf)?;
+    Ok(child)
+}
+
 impl Drop for Client {
     fn drop(&mut self) {
         drop(self.requester.take());
@@ -185,17 +208,18 @@ impl Drop for Client {
             "dispatcher",
             self.dispatcher_handle.take().unwrap().join().unwrap(),
         );
-        let proccess_error = self.process_handle.take().unwrap().join().unwrap();
+        let mut process_stderr = self.process_handle.stderr.take().unwrap();
+        self.process_handle.wait().unwrap();
 
         if dispatcher_errored {
-            print_error("process", proccess_error);
+            io::copy(&mut process_stderr, &mut io::stderr()).unwrap();
         }
     }
 }
 
 pub struct Client {
     requester: Option<RequestSender>,
-    process_handle: Option<thread::JoinHandle<Result<()>>>,
+    process_handle: process::Child,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
@@ -206,15 +230,15 @@ impl Client {
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
-        let (sock1, sock2) = UnixStream::pair()?;
-
         let (send, recv) = channel();
-        let process_handle = Some(thread::spawn(move || run_process_client(sock2)));
-        let dispatcher_handle = Some(thread::spawn(move || run_dispatcher(sock1, recv)));
+        let process_handle = spawn_process()?;
+
+        let sock = maelstrom_client_process::rpc::connect(process_handle.id())?;
+        let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
         let s = Self {
             requester: Some(send),
             process_handle,
-            dispatcher_handle,
+            dispatcher_handle: Some(dispatcher_handle),
         };
 
         send_sync!(s, Start,

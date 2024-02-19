@@ -766,3 +766,9 @@ impl Client {
         self.driver.process_artifact_single_threaded()
     }
 }
+
+pub fn main() -> Result<()> {
+    let listener = rpc::listen(std::process::id())?;
+    println!("started");
+    rpc::run_process_client(listener.accept()?.0)
+}

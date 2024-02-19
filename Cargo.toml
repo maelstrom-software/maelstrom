@@ -34,6 +34,7 @@ clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
 colored = "2.0.4"
 colored-diff = "0.2.3"
 combine = "4"
+compiler_cli_args = "0.1.0"
 concat-idents = "1.1.5"
 console = "0.15"
 console_error_panic_hook = "0.1.7"

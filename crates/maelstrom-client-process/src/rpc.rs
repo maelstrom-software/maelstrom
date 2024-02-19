@@ -2,9 +2,27 @@ use crate::{comm, Client as ProcessClient};
 use anyhow::{bail, Result};
 use maelstrom_base::proto;
 use maelstrom_container::ProgressTracker;
-use std::os::unix::net::UnixStream;
+
+use std::os::linux::net::SocketAddrExt as _;
+use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
+
+fn address_from_pid(id: u32) -> Result<SocketAddr> {
+    let mut name = b"maelstrom-client".to_vec();
+    name.extend(id.to_be_bytes());
+    Ok(SocketAddr::from_abstract_name(name)?)
+}
+
+pub fn listen(id: u32) -> Result<UnixListener> {
+    Ok(UnixListener::bind_addr(&address_from_pid(id)?)?)
+}
+
+pub fn connect(id: u32) -> Result<UnixStream> {
+    let mut name = b"maelstrom-client".to_vec();
+    name.extend(id.to_be_bytes());
+    Ok(UnixStream::connect_addr(&address_from_pid(id)?)?)
+}
 
 struct ProcessClientSender {
     sock: Mutex<UnixStream>,
