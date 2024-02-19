@@ -8,11 +8,10 @@ use std::process::Command;
 fn key_value(args: &[&'static str]) -> HashMap<&'static str, &'static str> {
     args.iter()
         .copied()
-        .filter_map(|a| {
-            a.contains('=').then(|| {
-                let mut split = a.split('=');
-                (split.next().unwrap(), split.next().unwrap())
-            })
+        .filter(|a| a.contains('='))
+        .map(|a| {
+            let mut split = a.split('=');
+            (split.next().unwrap(), split.next().unwrap())
         })
         .collect()
 }

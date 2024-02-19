@@ -13,30 +13,20 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-assert_matches.workspace = true
 bracoxide.workspace = true
 chrono.workspace = true
-clap.workspace = true
-directories.workspace = true
-enumset.workspace = true
-figment.workspace = true
-gethostname.workspace = true
 globset.workspace = true
-indicatif.workspace = true
 itertools.workspace = true
 maelstrom-base.workspace = true
-maelstrom-util.workspace = true
+maelstrom-client-base.workspace = true
 maelstrom-container.workspace = true
-regex.workspace = true
+maelstrom-util.workspace = true
 serde.workspace = true
-serde_json.workspace = true
 serde_repr.workspace = true
 serde_with.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["process", "rt-multi-thread"] }
 toml.workspace = true
-tuple.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true

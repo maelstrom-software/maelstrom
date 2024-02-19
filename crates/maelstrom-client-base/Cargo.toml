@@ -1,7 +1,7 @@
 [package]
-name = "maelstrom-client"
+name = "maelstrom-client-base"
 categories = ["development-tools::testing", "virtualization"]
-description = "Client library for Maelstrom."
+description = "Client library code shared between API and process for Maelstrom."
 keywords = ["cluster", "containers"]
 documentation.workspace = true
 edition.workspace = true
@@ -13,23 +13,13 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-assert_matches.workspace = true
-indicatif.workspace = true
+enumset.workspace = true
 maelstrom-base.workspace = true
-maelstrom-client-base.workspace = true
 maelstrom-container.workspace = true
 maelstrom-util.workspace = true
 serde.workspace = true
-tempfile.workspace = true
+serde_with.workspace = true
+tuple.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true
-maplit.workspace = true
-nonempty.workspace = true
-sha2.workspace = true
-tempfile.workspace = true
-
-[build-dependencies]
-compiler_cli_args.workspace = true
-maelstrom-client-process.workspace = true
-tempfile.workspace = true

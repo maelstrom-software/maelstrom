@@ -2653,9 +2653,11 @@ name = "maelstrom-client"
 version = "0.6.0-dev"
 dependencies = [
  "anyhow",
+ "assert_matches",
  "compiler_cli_args",
  "indicatif",
  "maelstrom-base",
+ "maelstrom-client-base",
  "maelstrom-client-process",
  "maelstrom-container",
  "maelstrom-test",
@@ -2665,6 +2667,21 @@ dependencies = [
  "serde",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "maelstrom-client-base"
+version = "0.6.0-dev"
+dependencies = [
+ "anyhow",
+ "enumset",
+ "maelstrom-base",
+ "maelstrom-container",
+ "maelstrom-test",
+ "maelstrom-util",
+ "serde",
+ "serde_with",
+ "tuple",
 ]
 
 [[package]]
@@ -2692,31 +2709,21 @@ name = "maelstrom-client-process"
 version = "0.6.0-dev"
 dependencies = [
  "anyhow",
- "assert_matches",
  "bracoxide",
  "chrono",
- "clap",
- "directories",
- "enumset",
- "figment",
- "gethostname 0.4.3",
  "globset",
- "indicatif",
  "itertools",
  "maelstrom-base",
+ "maelstrom-client-base",
  "maelstrom-container",
  "maelstrom-test",
  "maelstrom-util",
- "regex",
  "serde",
- "serde_json",
  "serde_repr",
  "serde_with",
  "sha2",
  "tempfile",
- "tokio",
  "toml",
- "tuple",
 ]
 
 [[package]]

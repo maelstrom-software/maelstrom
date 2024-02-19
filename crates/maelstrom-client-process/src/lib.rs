@@ -1,11 +1,5 @@
-pub mod comm;
-pub mod rpc;
-pub mod spec;
-pub mod test;
-
-// This hack makes some macros in maelstrom_base work
-#[cfg(test)]
-extern crate self as maelstrom_client;
+mod rpc;
+mod test;
 
 use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, Utc};
@@ -19,7 +13,11 @@ use maelstrom_base::{
         ArtifactPusherToBroker, BrokerToArtifactPusher, BrokerToClient, ClientToBroker, Hello,
     },
     stats::JobStateCounts,
-    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
+    ArtifactType, ClientJobId, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
+};
+use maelstrom_client_base::{
+    spec::{Layer, PrefixOptions, SymlinkSpec},
+    ClientDriverMode, JobResponseHandler, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
@@ -30,7 +28,6 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest as _, Sha256};
-use spec::{Layer, PrefixOptions, SymlinkSpec};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
@@ -42,6 +39,13 @@ use std::{
     time::SystemTime,
 };
 use test::client_driver::SingleThreadedClientDriver;
+
+fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
+    match mode {
+        ClientDriverMode::MultiThreaded => Box::<MultiThreadedClientDriver>::default(),
+        ClientDriverMode::SingleThreaded => Box::<SingleThreadedClientDriver>::default(),
+    }
+}
 
 fn push_one_artifact(broker_addr: BrokerAddr, path: PathBuf, digest: Sha256Digest) -> Result<()> {
     let mut stream = TcpStream::connect(broker_addr.inner())?;
@@ -82,7 +86,7 @@ struct ArtifactPushRequest {
     digest: Sha256Digest,
 }
 
-pub struct ArtifactPusher {
+struct ArtifactPusher {
     broker_addr: BrokerAddr,
     receiver: Receiver<ArtifactPushRequest>,
 }
@@ -97,7 +101,7 @@ impl ArtifactPusher {
 
     /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
     /// until the function return false
-    pub fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
+    fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
     where
         'a: 'b,
     {
@@ -112,7 +116,7 @@ impl ArtifactPusher {
     }
 }
 
-pub struct Dispatcher {
+struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
     stream: TcpStream,
     artifact_pusher: SyncSender<ArtifactPushRequest>,
@@ -143,12 +147,12 @@ impl Dispatcher {
 
     /// Processes one request. In order to drive the dispatcher, this should be called in a loop
     /// until the function return false
-    pub fn process_one(&mut self) -> Result<bool> {
+    fn process_one(&mut self) -> Result<bool> {
         let msg = self.receiver.recv()?;
         self.handle_message(msg)
     }
 
-    pub fn try_process_one(&mut self) -> Result<bool> {
+    fn try_process_one(&mut self) -> Result<bool> {
         let msg = self.receiver.try_recv()?;
         self.handle_message(msg)
     }
@@ -210,7 +214,7 @@ impl Dispatcher {
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
-pub enum DigestRepositoryVersion {
+enum DigestRepositoryVersion {
     #[default]
     V0 = 0,
 }
@@ -225,8 +229,8 @@ struct DigestRepositoryEntry {
 
 #[derive(Serialize, Deserialize, Default)]
 struct DigestRepositoryContents {
-    pub version: DigestRepositoryVersion,
-    pub digests: HashMap<PathBuf, DigestRepositoryEntry>,
+    version: DigestRepositoryVersion,
+    digests: HashMap<PathBuf, DigestRepositoryEntry>,
 }
 
 impl DigestRepositoryContents {
@@ -327,7 +331,7 @@ fn digest_repository_simple_add_get_after_modify() {
     assert_eq!(repo.get(&foo_path).unwrap(), None);
 }
 
-pub struct SocketReader {
+struct SocketReader {
     stream: TcpStream,
     channel: SyncSender<DispatcherMessage>,
 }
@@ -337,7 +341,7 @@ impl SocketReader {
         Self { stream, channel }
     }
 
-    pub fn process_one(&mut self) -> bool {
+    fn process_one(&mut self) -> bool {
         let Ok(msg) = net::read_message_from_socket(&mut self.stream) else {
             return false;
         };
@@ -347,10 +351,10 @@ impl SocketReader {
     }
 }
 
-pub struct ClientDeps {
-    pub dispatcher: Dispatcher,
-    pub artifact_pusher: ArtifactPusher,
-    pub socket_reader: SocketReader,
+struct ClientDeps {
+    dispatcher: Dispatcher,
+    artifact_pusher: ArtifactPusher,
+    socket_reader: SocketReader,
     dispatcher_sender: SyncSender<DispatcherMessage>,
 }
 
@@ -372,7 +376,7 @@ impl ClientDeps {
     }
 }
 
-pub trait ClientDriver {
+trait ClientDriver {
     fn drive(&mut self, deps: ClientDeps);
     fn stop(&mut self) -> Result<()>;
 
@@ -390,7 +394,7 @@ pub trait ClientDriver {
 }
 
 #[derive(Default)]
-pub struct MultiThreadedClientDriver {
+struct MultiThreadedClientDriver {
     handle: Option<JoinHandle<Result<()>>>,
 }
 
@@ -476,29 +480,7 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
-pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
-
-pub const MANIFEST_DIR: &str = "maelstrom-manifests";
-pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
-pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
-
-#[derive(Default, Debug, Serialize, Deserialize)]
-pub enum ClientDriverMode {
-    #[default]
-    MultiThreaded,
-    SingleThreaded,
-}
-
-impl ClientDriverMode {
-    fn new_driver(&self) -> Box<dyn ClientDriver + Send + Sync> {
-        match self {
-            Self::MultiThreaded => Box::<MultiThreadedClientDriver>::default(),
-            Self::SingleThreaded => Box::<SingleThreadedClientDriver>::default(),
-        }
-    }
-}
-
-pub struct Client {
+struct Client {
     dispatcher_sender: SyncSender<DispatcherMessage>,
     driver: Box<dyn ClientDriver + Send + Sync>,
     digest_repo: DigestRespository,
@@ -510,13 +492,13 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(
+    fn new(
         driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut driver = driver_mode.new_driver();
+        let mut driver = new_driver(driver_mode);
         let deps = ClientDeps::new(broker_addr)?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
         driver.drive(deps);
@@ -538,7 +520,7 @@ impl Client {
         })
     }
 
-    pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+    fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
         let fs = Fs::new();
         let path = fs.canonicalize(path)?;
 
@@ -671,7 +653,7 @@ impl Client {
         Ok(manifest_path)
     }
 
-    pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+    fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         if let Some(l) = self.cached_layers.get(&layer) {
             return Ok(l.clone());
         }
@@ -714,7 +696,7 @@ impl Client {
         Ok(res)
     }
 
-    pub fn get_container_image(
+    fn get_container_image(
         &mut self,
         name: &str,
         tag: &str,
@@ -724,7 +706,7 @@ impl Client {
             .get_container_image(name, tag, prog)
     }
 
-    pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
+    fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
@@ -733,18 +715,18 @@ impl Client {
             .send(DispatcherMessage::AddJob(spec, handler));
     }
 
-    pub fn stop_accepting(&mut self) -> Result<()> {
+    fn stop_accepting(&mut self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop)?;
         Ok(())
     }
 
-    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+    fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
         self.stop_accepting().ok();
         self.driver.stop()?;
         Ok(())
     }
 
-    pub fn get_job_state_counts(&mut self) -> Result<Receiver<JobStateCounts>> {
+    fn get_job_state_counts(&mut self) -> Result<Receiver<JobStateCounts>> {
         let (sender, recv) = mpsc::sync_channel(1);
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))?;
@@ -752,23 +734,23 @@ impl Client {
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_broker_msg_single_threaded(&self, count: usize) {
+    fn process_broker_msg_single_threaded(&self, count: usize) {
         self.driver.process_broker_msg_single_threaded(count)
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_client_messages_single_threaded(&self) {
+    fn process_client_messages_single_threaded(&self) {
         self.driver.process_client_messages_single_threaded()
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_artifact_single_threaded(&self) {
+    fn process_artifact_single_threaded(&self) {
         self.driver.process_artifact_single_threaded()
     }
 }
 
 pub fn main() -> Result<()> {
-    let listener = rpc::listen(std::process::id())?;
+    let listener = maelstrom_client_base::listen(std::process::id())?;
     println!("started");
     rpc::run_process_client(listener.accept()?.0)
 }

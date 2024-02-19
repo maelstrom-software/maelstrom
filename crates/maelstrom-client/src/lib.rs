@@ -1,11 +1,11 @@
-pub use maelstrom_client_process::{
-    spec, test, ClientDriverMode, JobResponseHandler, MANIFEST_DIR,
-};
+pub mod test;
+
+pub use maelstrom_client_base::{spec, ClientDriverMode, JobResponseHandler, MANIFEST_DIR};
 
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
 use maelstrom_base::{proto, stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
-use maelstrom_client_process::comm;
+use maelstrom_client_base::comm;
 use maelstrom_container::ContainerImage;
 use maelstrom_util::{config::BrokerAddr, fs::Fs};
 use spec::Layer;
@@ -233,7 +233,7 @@ impl Client {
         let (send, recv) = channel();
         let process_handle = spawn_process()?;
 
-        let sock = maelstrom_client_process::rpc::connect(process_handle.id())?;
+        let sock = maelstrom_client_base::connect(process_handle.id())?;
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
         let s = Self {
             requester: Some(send),
