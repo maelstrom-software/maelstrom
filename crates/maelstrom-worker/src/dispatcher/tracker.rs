@@ -37,25 +37,22 @@ impl LayerTracker {
         };
         let mut fetched = HashMap::<Sha256Digest, usize>::new();
         for (idx, (digest, type_)) in layers.iter().enumerate() {
-            match fetched.get(digest) {
-                Some(from_idx) => {
-                    tracker.duplicates.push(DuplicateEntry {
-                        from: *from_idx,
-                        to: idx,
-                    });
-                }
-                None => {
-                    match fetcher(digest, *type_) {
-                        FetcherResult::Got(path) => {
-                            tracker.paths[idx] = path;
-                            tracker.gotten.insert(digest.clone()).assert_is_true();
-                        }
-                        FetcherResult::Pending => {
-                            tracker.pending.insert(digest.clone(), idx);
-                        }
+            if let Some(from_idx) = fetched.get(digest) {
+                tracker.duplicates.push(DuplicateEntry {
+                    from: *from_idx,
+                    to: idx,
+                });
+            } else {
+                match fetcher(digest, *type_) {
+                    FetcherResult::Got(path) => {
+                        tracker.paths[idx] = path;
+                        tracker.gotten.insert(digest.clone()).assert_is_true();
                     }
-                    fetched.insert(digest.clone(), idx).assert_is_none();
+                    FetcherResult::Pending => {
+                        tracker.pending.insert(digest.clone(), idx);
+                    }
                 }
+                fetched.insert(digest.clone(), idx).assert_is_none();
             }
         }
         tracker

@@ -170,6 +170,13 @@ struct AwaitingLayersEntry {
     tracker: LayerTracker,
 }
 
+struct QueuedEntry {
+    jid: JobId,
+    spec: JobSpec,
+    paths: NonEmpty<PathBuf>,
+    digests: HashSet<Sha256Digest>,
+}
+
 enum ExecutingJobState<DepsT: DispatcherDeps> {
     Ok {
         pid: Pid,
@@ -213,7 +220,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
-    queued: VecDeque<(JobId, JobSpec, LayerTracker)>,
+    queued: VecDeque<QueuedEntry>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
     executing_pids: HashMap<Pid, JobId>,
 }
@@ -221,9 +228,13 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
-            let (jid, spec, tracker) = self.queued.pop_front().unwrap();
+            let QueuedEntry {
+                jid,
+                spec,
+                paths,
+                digests,
+            } = self.queued.pop_front().unwrap();
             let timeout = spec.timeout;
-            let (paths, digests) = tracker.into_paths_and_digests();
             match self.deps.start_job(jid, spec, paths) {
                 Ok(pid) => {
                     let executing_job = ExecutingJob::new(
@@ -246,7 +257,13 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
-        self.queued.push_back((jid, spec, tracker));
+        let (paths, digests) = tracker.into_paths_and_digests();
+        self.queued.push_back(QueuedEntry {
+            jid,
+            spec,
+            paths,
+            digests,
+        });
         self.possibly_start_job();
     }
 
@@ -271,10 +288,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_cancel_job(&mut self, jid: JobId) {
-        let mut digests: Option<HashSet<Sha256Digest>> = None;
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
-            digests = Some(entry.tracker.into_digests());
+            for digest in entry.tracker.into_digests() {
+                self.cache.decrement_ref_count(&digest);
+            }
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
             // The job was executing. We kill the job and cancel a timer if there is one, but we
             // wait around until it's actually teriminated. We don't want to release the layers
@@ -290,23 +308,16 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
         } else {
             // It may be the queue.
-            self.queued = mem::take(&mut self.queued)
-                .into_iter()
-                .filter_map(|x| {
-                    if x.0 != jid {
-                        Some(x)
-                    } else {
-                        assert!(digests.is_none());
-                        digests = Some(x.1.layers.into_iter().map(|(digest, _)| digest).collect());
-                        None
+            self.queued.retain_mut(|entry| {
+                if entry.jid != jid {
+                    true
+                } else {
+                    for digest in &entry.digests {
+                        self.cache.decrement_ref_count(digest);
                     }
-                })
-                .collect();
-        }
-        if let Some(digests) = digests {
-            for digest in digests {
-                self.cache.decrement_ref_count(&digest);
-            }
+                    false
+                }
+            });
         }
     }
 
@@ -537,7 +548,6 @@ mod tests {
 
     impl DispatcherCache for Rc<RefCell<TestState>> {
         fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
-            eprintln!("{digest} {jid:?}");
             self.borrow_mut()
                 .messages
                 .push(CacheGetArtifact(digest.clone(), jid));
@@ -617,15 +627,15 @@ mod tests {
                     return;
                 }
             }
-            //            panic!(
-            //                "Expected messages didn't match actual messages in any order.\n{}",
-            //                colored_diff::PrettyDifference {
-            //                    expected: &format!("{:#?}", expected),
-            //                    actual: &format!("{:#?}", messages)
-            //                }
-            //            );
             panic!(
-                "Expected messages didn't match actual messages in any order.\nExpected: {expected:#?}\nActual: {messages:#?}\n",
+                "Expected messages didn't match actual messages in any order.\n\
+                Expected: {expected:#?}\n\
+                Actual: {messages:#?}\n\
+                Diff: {}",
+                colored_diff::PrettyDifference {
+                    expected: &format!("{expected:#?}"),
+                    actual: &format!("{messages:#?}")
+                }
             );
         }
     }
@@ -709,10 +719,10 @@ mod tests {
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
-        Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
+        Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]))) => {
             CacheGetArtifact(digest!(41), jid!(1)),
             CacheGetArtifact(digest!(42), jid!(1)),
-            StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf_vec!["/a", "/b"]),
+            StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]), path_buf_vec!["/a", "/b", "/a"]),
             SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(string!("se"))))),
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
@@ -882,7 +892,6 @@ mod tests {
             (digest!(4), GetArtifact::Success(path_buf!("/4"))),
             (digest!(41), GetArtifact::Success(path_buf!("/a"))),
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
-            (digest!(43), GetArtifact::Success(path_buf!("/c"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
             CacheGetArtifact(digest!(1), jid!(1)),
@@ -892,10 +901,9 @@ mod tests {
             CacheGetArtifact(digest!(2), jid!(2)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3, [(41, Tar), (42, Tar), (43, Tar)]))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, [(41, Tar), (42, Tar), (41, Tar)]))) => {
             CacheGetArtifact(digest!(41), jid!(3)),
             CacheGetArtifact(digest!(42), jid!(3)),
-            CacheGetArtifact(digest!(43), jid!(3)),
         };
         Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
             CacheGetArtifact(digest!(4), jid!(4)),
@@ -903,7 +911,6 @@ mod tests {
         Broker(CancelJob(jid!(3))) => {
             CacheDecrementRefCount(digest!(41)),
             CacheDecrementRefCount(digest!(42)),
-            CacheDecrementRefCount(digest!(43)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
