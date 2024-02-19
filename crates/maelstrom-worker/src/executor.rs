@@ -10,7 +10,7 @@ use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
-    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    NonEmpty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -63,15 +63,12 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn from_spec_and_layers(
-        spec: maelstrom_base::JobSpec,
-        layers: NonEmpty<PathBuf>,
-    ) -> (Self, NonEmpty<Sha256Digest>) {
+    pub fn from_spec_and_layers(spec: maelstrom_base::JobSpec, layers: NonEmpty<PathBuf>) -> Self {
         let maelstrom_base::JobSpec {
             program,
             arguments,
             environment,
-            layers: digest_layers,
+            layers: _,
             devices,
             mounts,
             enable_loopback,
@@ -81,23 +78,20 @@ impl JobSpec {
             group,
             timeout,
         } = spec;
-        (
-            JobSpec {
-                program,
-                arguments,
-                environment,
-                layers,
-                devices,
-                mounts,
-                enable_loopback,
-                enable_writable_file_system,
-                working_directory,
-                user,
-                group,
-                timeout,
-            },
-            digest_layers.map(|(d, _)| d),
-        )
+        JobSpec {
+            program,
+            arguments,
+            environment,
+            layers,
+            devices,
+            mounts,
+            enable_loopback,
+            enable_writable_file_system,
+            working_directory,
+            user,
+            group,
+            timeout,
+        }
     }
 }
 
@@ -843,8 +837,7 @@ mod tests {
         }
 
         fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
-            let (spec, _) =
-                JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
+            let spec = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
             Self::new(spec)
         }
 
@@ -1192,7 +1185,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_in_correct_order() {
-        let (spec, _) = JobSpec::from_spec_and_layers(
+        let spec = JobSpec::from_spec_and_layers(
             maelstrom_base::JobSpec::new(
                 "/bin/cat",
                 nonempty![
@@ -1219,7 +1212,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_read_only() {
-        let (spec, _) = JobSpec::from_spec_and_layers(
+        let spec = JobSpec::from_spec_and_layers(
             test_spec("/bin/touch").arguments(["/foo"]),
             nonempty![
                 extract_dependencies(),
@@ -1239,7 +1232,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn multiple_layers_with_writable_file_system_is_writable() {
-        let (spec, _) = JobSpec::from_spec_and_layers(
+        let spec = JobSpec::from_spec_and_layers(
             bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true),
             nonempty![
                 extract_dependencies(),
@@ -1254,7 +1247,7 @@ mod tests {
             .await;
 
         // Run another job to ensure that the file doesn't persist.
-        let (spec, _) = JobSpec::from_spec_and_layers(
+        let spec = JobSpec::from_spec_and_layers(
             bash_spec("test -e /foo").enable_writable_file_system(true),
             nonempty![
                 extract_dependencies(),
@@ -1542,7 +1535,7 @@ mod tests {
     }
 
     fn assert_execution_error(spec: maelstrom_base::JobSpec) {
-        let (spec, _) = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
+        let spec = JobSpec::from_spec_and_layers(spec, NonEmpty::new(extract_dependencies()));
         assert_matches!(
             Executor::new(
                 tempfile::tempdir().unwrap().into_path(),

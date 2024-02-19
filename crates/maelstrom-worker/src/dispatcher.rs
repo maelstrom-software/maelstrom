@@ -46,7 +46,7 @@ pub trait DispatcherDeps {
         jid: JobId,
         spec: JobSpec,
         layers: NonEmpty<PathBuf>,
-    ) -> (JobResult<Pid, String>, NonEmpty<Sha256Digest>);
+    ) -> JobResult<Pid, String>;
 
     /// Kill a running job using the [`Pid`] obtained from [`JobResult::Ok`]. This must be
     /// resilient in the case where the process has already completed.
@@ -225,7 +225,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             let timeout = spec.timeout;
             let (paths, digests) = tracker.into_paths_and_digests();
             match self.deps.start_job(jid, spec, paths) {
-                (Ok(pid), _) => {
+                Ok(pid) => {
                     let executing_job = ExecutingJob::new(
                         pid,
                         digests,
@@ -234,7 +234,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     self.executing.insert(jid, executing_job).assert_is_none();
                     self.executing_pids.insert(pid, jid).assert_is_none();
                 }
-                (Err(e), _) => {
+                Err(e) => {
                     for digest in digests {
                         self.cache.decrement_ref_count(&digest);
                     }
@@ -494,16 +494,12 @@ mod tests {
             jid: JobId,
             spec: JobSpec,
             layers: NonEmpty<PathBuf>,
-        ) -> (JobResult<Pid, String>, NonEmpty<Sha256Digest>) {
+        ) -> JobResult<Pid, String> {
             let mut mut_ref = self.borrow_mut();
-            let digest_layers = spec.layers.clone();
             mut_ref
                 .messages
                 .push(StartJob(jid, spec, Vec::from_iter(layers)));
-            (
-                mut_ref.start_job_returns.remove(0),
-                digest_layers.map(|(d, _)| d),
-            )
+            mut_ref.start_job_returns.remove(0)
         }
 
         fn kill_job(&mut self, pid: Pid) {

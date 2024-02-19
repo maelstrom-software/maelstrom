@@ -77,7 +77,7 @@ impl DispatcherDeps for DispatcherAdapter {
         jid: JobId,
         spec: JobSpec,
         layers: NonEmpty<PathBuf>,
-    ) -> (JobResult<Pid, String>, NonEmpty<Sha256Digest>) {
+    ) -> JobResult<Pid, String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self
@@ -85,9 +85,8 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let (spec, layers) = executor::JobSpec::from_spec_and_layers(spec, layers);
-        let result = self
-            .executor
+        let spec = executor::JobSpec::from_spec_and_layers(spec, layers);
+        self.executor
             .start(
                 &spec,
                 self.inline_limit,
@@ -104,8 +103,7 @@ impl DispatcherDeps for DispatcherAdapter {
                         .ok();
                 },
             )
-            .map_err(|e| e.map(|inner| inner.to_string()));
-        (result, layers)
+            .map_err(|e| e.map(|inner| inner.to_string()))
     }
 
     fn kill_job(&mut self, pid: Pid) {
