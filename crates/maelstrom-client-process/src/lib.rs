@@ -1,4 +1,5 @@
 pub mod comm;
+pub mod rpc;
 pub mod spec;
 pub mod test;
 
