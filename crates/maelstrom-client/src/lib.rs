@@ -191,10 +191,21 @@ fn spawn_process() -> Result<process::Child> {
     proc.set_permissions(std::fs::Permissions::from_mode(0o555))?;
     drop(proc);
 
-    let mut child = process::Command::new(&proc_path)
-        .stdout(process::Stdio::piped())
-        .stderr(process::Stdio::piped())
-        .spawn()?;
+    let spawn = || {
+        process::Command::new(&proc_path)
+            .stdout(process::Stdio::piped())
+            .stderr(process::Stdio::piped())
+            .spawn()
+    };
+
+    // Even though we closed the file, we can get ETXTBSY if exec immediately for some reason.
+    let mut child = loop {
+        match spawn() {
+            Ok(child) => break child,
+            Err(e) if format!("{:?}", e.kind()) == "ExecutableFileBusy" => continue,
+            Err(e) => return Err(e.into()),
+        }
+    };
 
     let mut buf = [0; 1];
     child.stdout.take().unwrap().read_exact(&mut buf)?;
