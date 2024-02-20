@@ -1,9 +1,11 @@
+pub use oci_spec::image::{Arch, Os};
+
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
 use maelstrom_util::fs::Fs;
-use oci_spec::image::{Arch, Descriptor, ImageIndex, ImageManifest, Os, Platform, RootFs};
+use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::pin::Pin;
@@ -19,13 +21,13 @@ use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 #[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone)]
 pub struct Config {
     pub user: Option<String>,
-    pub exposed_ports: Option<Vec<String>>,
-    pub env: Option<Vec<String>>,
-    pub entrypoint: Option<Vec<String>>,
-    pub cmd: Option<Vec<String>>,
-    pub volumes: Option<Vec<String>>,
+    pub exposed_ports: Vec<String>,
+    pub env: Vec<String>,
+    pub entrypoint: Vec<String>,
+    pub cmd: Vec<String>,
+    pub volumes: Vec<String>,
     pub working_dir: Option<String>,
-    pub labels: Option<HashMap<String, String>>,
+    pub labels: HashMap<String, String>,
     pub stop_signal: Option<String>,
 }
 
@@ -33,14 +35,29 @@ impl From<oci_spec::image::Config> for Config {
     fn from(other: oci_spec::image::Config) -> Self {
         Self {
             user: other.user().clone(),
-            exposed_ports: other.exposed_ports().clone(),
-            env: other.env().clone(),
-            entrypoint: other.entrypoint().clone(),
-            cmd: other.cmd().clone(),
-            volumes: other.volumes().clone(),
+            exposed_ports: other.exposed_ports().clone().unwrap_or_default(),
+            env: other.env().clone().unwrap_or_default(),
+            entrypoint: other.entrypoint().clone().unwrap_or_default(),
+            cmd: other.cmd().clone().unwrap_or_default(),
+            volumes: other.volumes().clone().unwrap_or_default(),
             working_dir: other.working_dir().clone(),
-            labels: other.labels().clone(),
+            labels: other.labels().clone().unwrap_or_default(),
             stop_signal: other.stop_signal().clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Default, PartialEq, Serialize)]
+pub struct RootFs {
+    pub r#type: String,
+    pub diff_ids: Vec<String>,
+}
+
+impl From<oci_spec::image::RootFs> for RootFs {
+    fn from(other: oci_spec::image::RootFs) -> Self {
+        Self {
+            r#type: other.typ().clone(),
+            diff_ids: other.diff_ids().clone(),
         }
     }
 }
@@ -52,7 +69,7 @@ pub struct ImageConfiguration {
     pub architecture: Arch,
     pub os: Os,
     pub os_version: Option<String>,
-    pub os_features: Option<Vec<String>>,
+    pub os_features: Vec<String>,
     pub variant: Option<String>,
     pub config: Option<Config>,
     pub rootfs: RootFs,
@@ -66,10 +83,10 @@ impl From<oci_spec::image::ImageConfiguration> for ImageConfiguration {
             architecture: other.architecture().clone(),
             os: other.os().clone(),
             os_version: other.os_version().clone(),
-            os_features: other.os_features().clone(),
+            os_features: other.os_features().clone().unwrap_or_default(),
             variant: other.variant().clone(),
             config: other.config().clone().map(Into::into),
-            rootfs: other.rootfs().clone(),
+            rootfs: other.rootfs().clone().into(),
         }
     }
 }
@@ -288,7 +305,7 @@ impl ContainerImage {
     }
 
     pub fn env(&self) -> Option<&Vec<String>> {
-        self.config.config.as_ref().and_then(|c| c.env.as_ref())
+        self.config.config.as_ref().map(|c| &c.env)
     }
 
     pub fn working_dir(&self) -> Option<&String> {

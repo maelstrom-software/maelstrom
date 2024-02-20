@@ -77,14 +77,15 @@
           # Extra inputs (only used for interactive development)
           # can be added here; cargo and rustc are provided by default.
           packages = [
+	    pkgs.gh
+	    pkgs.mdbook
             pkgs.bat
             pkgs.cargo-audit
             pkgs.cargo-binstall
             pkgs.cargo-edit
             pkgs.cargo-nextest
             pkgs.cargo-watch
-	    pkgs.gh
-	    pkgs.mdbook
+            pkgs.protobuf3_20
             pkgs.ripgrep
             pkgs.rust-analyzer
             pkgs.stgit

@@ -6,6 +6,7 @@
 
 pub mod substitute;
 
+use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
@@ -41,7 +42,19 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(
+    IntoProtoBuf,
+    TryFromProtoBuf,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    Hash,
+    PartialEq,
+    Serialize,
+)]
+#[proto(type_path = "proto::PrefixOptions")]
 pub struct PrefixOptions {
     pub strip_prefix: Option<Utf8PathBuf>,
     pub prepend_prefix: Option<Utf8PathBuf>,
@@ -49,31 +62,47 @@ pub struct PrefixOptions {
     pub canonicalize: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(
+    IntoProtoBuf,
+    TryFromProtoBuf,
+    Clone,
+    Debug,
+    Default,
+    Deserialize,
+    Eq,
+    Hash,
+    PartialEq,
+    Serialize,
+)]
+#[proto(type_path = "proto::SymlinkSpec")]
 pub struct SymlinkSpec {
     pub link: Utf8PathBuf,
     pub target: Utf8PathBuf,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(
+    IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize,
+)]
+#[proto(type_path = proto::add_layer_request::Layer)]
 pub enum Layer {
-    Tar {
-        path: Utf8PathBuf,
-    },
+    #[proto(type_path = proto::TarLayer)]
+    Tar { path: Utf8PathBuf },
+    #[proto(type_path = proto::GlobLayer)]
     Glob {
         glob: String,
+        #[proto(option)]
         prefix_options: PrefixOptions,
     },
+    #[proto(type_path = proto::PathsLayer)]
     Paths {
         paths: Vec<Utf8PathBuf>,
+        #[proto(option)]
         prefix_options: PrefixOptions,
     },
-    Stubs {
-        stubs: Vec<String>,
-    },
-    Symlinks {
-        symlinks: Vec<SymlinkSpec>,
-    },
+    #[proto(type_path = proto::StubsLayer)]
+    Stubs { stubs: Vec<String> },
+    #[proto(type_path = proto::SymlinksLayer)]
+    Symlinks { symlinks: Vec<SymlinkSpec> },
 }
 
 impl From<UntaggedLayer> for Layer {

@@ -35,6 +35,16 @@ pub struct ClientId(u32);
 )]
 pub struct ClientJobId(u32);
 
+impl ClientJobId {
+    pub fn from_u32(v: u32) -> Self {
+        Self(v)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ArtifactType {
     /// A .tar file
@@ -107,11 +117,31 @@ pub struct JobMount {
 )]
 pub struct UserId(u32);
 
+impl UserId {
+    pub fn new(v: u32) -> Self {
+        Self(v)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 /// ID of a group. This should be compatible with gid_t.
 #[derive(
     Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
 pub struct GroupId(u32);
+
+impl GroupId {
+    pub fn new(v: u32) -> Self {
+        Self(v)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
 
 /// A count of seconds.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
@@ -120,6 +150,10 @@ pub struct Timeout(NonZeroU32);
 impl Timeout {
     pub fn new(timeout: u32) -> Option<Self> {
         NonZeroU32::new(timeout).map(Timeout)
+    }
+
+    pub fn as_u32(&self) -> u32 {
+        self.0.into()
     }
 }
 
@@ -357,6 +391,33 @@ impl Sha256Digest {
         } else {
             Ok(())
         }
+    }
+}
+
+#[derive(Debug)]
+pub struct Sha256DigestTryFromError;
+
+impl fmt::Display for Sha256DigestTryFromError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "failed to convert to SHA-256 digest")
+    }
+}
+
+impl Error for Sha256DigestTryFromError {}
+
+impl TryFrom<Vec<u8>> for Sha256Digest {
+    type Error = Sha256DigestTryFromError;
+
+    fn try_from(bytes: Vec<u8>) -> Result<Self, Self::Error> {
+        Ok(Self(
+            bytes.try_into().map_err(|_| Sha256DigestTryFromError)?,
+        ))
+    }
+}
+
+impl From<Sha256Digest> for Vec<u8> {
+    fn from(d: Sha256Digest) -> Self {
+        d.0.to_vec()
     }
 }
 

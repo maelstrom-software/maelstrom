@@ -19,7 +19,8 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    ClientDriverMode, JobResponseHandler, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    ClientDriverMode, ClientMessageKind, JobResponseHandler, MANIFEST_DIR, STUB_MANIFEST_DIR,
+    SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
@@ -79,7 +80,7 @@ enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, JobResponseHandler),
-    GetJobStateCounts(SyncSender<JobStateCounts>),
+    GetJobStateCounts(tokio::sync::mpsc::UnboundedSender<JobStateCounts>),
     Stop,
 }
 
@@ -126,7 +127,7 @@ struct Dispatcher {
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
     handlers: HashMap<ClientJobId, JobResponseHandler>,
-    stats_reqs: VecDeque<SyncSender<JobStateCounts>>,
+    stats_reqs: VecDeque<tokio::sync::mpsc::UnboundedSender<JobStateCounts>>,
 }
 
 impl Dispatcher {
@@ -151,20 +152,23 @@ impl Dispatcher {
     /// until the function return false
     fn process_one(&mut self) -> Result<bool> {
         let msg = self.receiver.recv()?;
-        self.handle_message(msg)
+        let (cont, _) = self.handle_message(msg)?;
+        Ok(cont)
     }
 
-    fn try_process_one(&mut self) -> Result<bool> {
-        let msg = self.receiver.try_recv()?;
-        self.handle_message(msg)
+    fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
+        let msg = self.receiver.try_recv().ok()?;
+        let (_, kind) = self.handle_message(msg).ok()?;
+        Some(kind)
     }
 
-    fn handle_message(&mut self, msg: DispatcherMessage) -> Result<bool> {
+    fn handle_message(&mut self, msg: DispatcherMessage) -> Result<(bool, ClientMessageKind)> {
+        let mut kind = ClientMessageKind::Other;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 self.handlers.remove(&cjid).unwrap()(cjid, result);
                 if self.stop_when_all_completed && self.handlers.is_empty() {
-                    return Ok(false);
+                    return Ok((false, kind));
                 }
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -195,10 +199,12 @@ impl Dispatcher {
                     &mut self.stream,
                     ClientToBroker::JobRequest(cjid, spec),
                 )?;
+                kind = ClientMessageKind::AddJob;
             }
             DispatcherMessage::Stop => {
+                kind = ClientMessageKind::Stop;
                 if self.handlers.is_empty() {
-                    return Ok(false);
+                    return Ok((false, kind));
                 }
                 self.stop_when_all_completed = true;
             }
@@ -208,9 +214,10 @@ impl Dispatcher {
                     ClientToBroker::JobStateCountsRequest,
                 )?;
                 self.stats_reqs.push_back(sender);
+                kind = ClientMessageKind::GetJobStateCounts;
             }
         }
-        Ok(true)
+        Ok((true, kind))
     }
 }
 
@@ -386,7 +393,7 @@ trait ClientDriver {
         unimplemented!()
     }
 
-    fn process_client_messages_single_threaded(&self) {
+    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
         unimplemented!()
     }
 
@@ -728,8 +735,10 @@ impl Client {
         Ok(())
     }
 
-    fn get_job_state_counts(&mut self) -> Result<Receiver<JobStateCounts>> {
-        let (sender, recv) = mpsc::sync_channel(1);
+    fn get_job_state_counts(
+        &mut self,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<JobStateCounts>> {
+        let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))?;
         Ok(recv)
@@ -741,7 +750,7 @@ impl Client {
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    fn process_client_messages_single_threaded(&self) {
+    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
         self.driver.process_client_messages_single_threaded()
     }
 
@@ -749,10 +758,4 @@ impl Client {
     fn process_artifact_single_threaded(&self) {
         self.driver.process_artifact_single_threaded()
     }
-}
-
-pub fn main() -> Result<()> {
-    let listener = maelstrom_client_base::listen(std::process::id())?;
-    println!("started");
-    run_process_client(listener.accept()?.0)
 }

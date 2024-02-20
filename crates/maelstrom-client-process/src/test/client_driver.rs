@@ -1,4 +1,4 @@
-use crate::{ClientDeps, ClientDriver};
+use crate::{ClientDeps, ClientDriver, ClientMessageKind};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -23,14 +23,14 @@ impl ClientDriver for SingleThreadedClientDriver {
 
         for _ in 0..count {
             deps.socket_reader.process_one();
-            deps.dispatcher.try_process_one().unwrap();
+            deps.dispatcher.process_one().unwrap();
         }
     }
 
-    fn process_client_messages_single_threaded(&self) {
+    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
         let mut locked_deps = self.deps.lock().unwrap();
         let deps = locked_deps.as_mut().unwrap();
-        while deps.dispatcher.try_process_one().is_ok() {}
+        deps.dispatcher.process_one_and_tell()
     }
 
     fn process_artifact_single_threaded(&self) {

@@ -17,7 +17,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    Client, ClientBgProcess, ClientDriverMode,
+    Client, ClientBgProcess, ClientDriverMode, ClientMessageKind,
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -293,14 +293,14 @@ fn run_app(
         let mut client = get_client();
 
         // process job enqueuing
-        client.process_client_messages_single_threaded();
+        client.process_client_messages_single_threaded(ClientMessageKind::AddJob);
         b_conn.process(1, false /* fetch_layers */);
         if test.desired_state == JobState::Complete {
             client.process_broker_msg_single_threaded(1);
         }
 
         let counts = client.get_job_state_counts().unwrap();
-        client.process_client_messages_single_threaded();
+        client.process_client_messages_single_threaded(ClientMessageKind::GetJobStateCounts);
 
         // process job state request
         b_conn.process(1, false /* fetch_layers */);
@@ -310,7 +310,7 @@ fn run_app(
     }
 
     app.drain().unwrap();
-    get_client().process_client_messages_single_threaded();
+    get_client().process_client_messages_single_threaded(ClientMessageKind::Stop);
 
     if finish {
         app.finish().unwrap();

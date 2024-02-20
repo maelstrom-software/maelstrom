@@ -1,254 +1,281 @@
 use crate::Client as ProcessClient;
-use anyhow::{bail, Result};
-use maelstrom_base::proto;
-use maelstrom_client_base::comm;
-use maelstrom_container::ProgressTracker;
+use anyhow::{anyhow, Result};
+use futures::stream::StreamExt as _;
+use maelstrom_client_base::{proto, IntoProtoBuf, IntoResult, TryFromProtoBuf};
+use maelstrom_container::NullProgressTracker;
+use std::future::Future;
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::thread;
 
-struct ProcessClientSender {
-    sock: Mutex<UnixStream>,
-}
-
-impl ProcessClientSender {
-    fn new(sock: UnixStream) -> Self {
-        Self {
-            sock: Mutex::new(sock),
-        }
-    }
-
-    fn send(&self, id: comm::MessageId, msg: comm::Response) -> Result<()> {
-        self.send_inner(id, true /* finished */, msg)
-    }
-
-    fn send_in_progress(&self, id: comm::MessageId, msg: comm::Response) -> Result<()> {
-        self.send_inner(id, false /* finished */, msg)
-    }
-
-    fn send_inner(&self, id: comm::MessageId, finished: bool, msg: comm::Response) -> Result<()> {
-        let sock = self.sock.lock().unwrap();
-        proto::serialize_into(
-            &*sock,
-            &comm::Message {
-                id,
-                finished,
-                body: msg,
-            },
-        )?;
-        Ok(())
-    }
-}
+type TonicResult<T> = std::result::Result<T, tonic::Status>;
+type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
 #[derive(Clone)]
-struct ProgressSender<ResponseFactoryT> {
-    sender: Arc<ProcessClientSender>,
-    id: comm::MessageId,
-    response_factory: ResponseFactoryT,
+struct Handler {
+    client: Arc<Mutex<Option<ProcessClient>>>,
 }
 
-impl<ResponseFactoryT> ProgressSender<ResponseFactoryT> {
-    fn new(
-        sender: Arc<ProcessClientSender>,
-        id: comm::MessageId,
-        response_factory: ResponseFactoryT,
-    ) -> Self {
+impl Handler {
+    fn new() -> Self {
         Self {
-            sender,
-            id,
-            response_factory,
-        }
-    }
-}
-
-impl<ResponseFactoryT> ProgressTracker for ProgressSender<ResponseFactoryT>
-where
-    ResponseFactoryT: Fn(comm::ProgressInfo) -> comm::Response + Send + Unpin + Clone + 'static,
-{
-    fn set_length(&self, length: u64) {
-        let _ = self.sender.send_in_progress(
-            self.id,
-            (self.response_factory)(comm::ProgressInfo::Length(length)),
-        );
-    }
-
-    fn inc(&self, v: u64) {
-        let _ = self
-            .sender
-            .send_in_progress(self.id, (self.response_factory)(comm::ProgressInfo::Inc(v)));
-    }
-}
-
-struct ProcessClientHandler {
-    sender: Arc<ProcessClientSender>,
-    client: ProcessClient,
-}
-
-impl ProcessClientHandler {
-    fn new(sender: ProcessClientSender, client: ProcessClient) -> Self {
-        Self {
-            sender: Arc::new(sender),
-            client,
+            client: Arc::new(Mutex::new(None)),
         }
     }
 
-    #[allow(clippy::unit_arg)]
-    fn handle_msg<'a, 'b>(
-        &mut self,
-        msg: comm::Message<comm::Request>,
-        scope: &'a thread::Scope<'b, '_>,
-    ) -> Result<()>
-    where
-        'a: 'b,
-    {
-        let id = msg.id;
-        match msg.body {
-            comm::Request::Start { .. } => {
-                self.sender
-                    .send(id, comm::Response::Start(Err("unexpected request".into())))?;
-            }
-            comm::Request::AddArtifact { path } => {
-                self.sender.send(
-                    id,
-                    comm::Response::AddArtifact(
-                        self.client.add_artifact(&path).map_err(|e| e.into()),
-                    ),
-                )?;
-            }
-            comm::Request::AddLayer { layer } => {
-                self.sender.send(
-                    id,
-                    comm::Response::AddLayer(self.client.add_layer(layer).map_err(|e| e.into())),
-                )?;
-            }
-            comm::Request::AddJob { spec } => {
-                let other_sender = self.sender.clone();
-                self.client.add_job(
+    fn with_client<RetT>(
+        &self,
+        body: impl FnOnce(&mut ProcessClient) -> Result<RetT>,
+    ) -> Result<RetT> {
+        let mut guard = self.client.lock().unwrap();
+        body(guard.as_mut().ok_or(anyhow!("must call start first"))?)
+    }
+
+    fn take_client(&self) -> Result<ProcessClient> {
+        let mut guard = self.client.lock().unwrap();
+        guard.take().ok_or(anyhow!("must call start first"))
+    }
+}
+
+async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
+    match body.await {
+        Ok(v) => Ok(tonic::Response::new(v)),
+        Err(e) => Err(tonic::Status::new(tonic::Code::Unknown, e.to_string())),
+    }
+}
+
+#[tonic::async_trait]
+impl proto::client_process_server::ClientProcess for Handler {
+    async fn start(
+        &self,
+        request: tonic::Request<proto::StartRequest>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            let request = request.into_inner();
+            let client = tokio::task::spawn_blocking(move || {
+                ProcessClient::new(
+                    TryFromProtoBuf::try_from_proto_buf(request.driver_mode)?,
+                    TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
+                    PathBuf::try_from_proto_buf(request.project_dir)?,
+                    PathBuf::try_from_proto_buf(request.cache_dir)?,
+                )
+            })
+            .await??;
+            *self.client.lock().unwrap() = Some(client);
+            Ok(proto::Void {})
+        })
+        .await
+    }
+
+    async fn add_artifact(
+        &self,
+        request: tonic::Request<proto::AddArtifactRequest>,
+    ) -> TonicResponse<proto::AddArtifactResponse> {
+        run_handler(async {
+            let request = request.into_inner();
+            let digest = self.with_client(|client| {
+                client.add_artifact(&PathBuf::try_from_proto_buf(request.path)?)
+            })?;
+            Ok(proto::AddArtifactResponse {
+                digest: digest.into_proto_buf(),
+            })
+        })
+        .await
+    }
+
+    async fn add_layer(
+        &self,
+        request: tonic::Request<proto::AddLayerRequest>,
+    ) -> TonicResponse<proto::AddLayerResponse> {
+        run_handler(async {
+            let layer = request.into_inner().into_result()?;
+            let self_clone = self.clone();
+            let spec = tokio::task::spawn_blocking(move || {
+                self_clone.with_client(|client| {
+                    client.add_layer(TryFromProtoBuf::try_from_proto_buf(layer)?)
+                })
+            })
+            .await??;
+            Ok(proto::AddLayerResponse {
+                spec: Some(spec.into_proto_buf()),
+            })
+        })
+        .await
+    }
+
+    async fn get_container_image(
+        &self,
+        request: tonic::Request<proto::GetContainerImageRequest>,
+    ) -> TonicResponse<proto::GetContainerImageResponse> {
+        run_handler(async {
+            let proto::GetContainerImageRequest { name, tag } = request.into_inner();
+            let self_clone = self.clone();
+            let image = tokio::task::spawn_blocking(move || {
+                self_clone.with_client(|client| {
+                    client.get_container_image(&name, &tag, NullProgressTracker)
+                })
+            })
+            .await??;
+            Ok(proto::GetContainerImageResponse {
+                image: Some(image.into_proto_buf()),
+            })
+        })
+        .await
+    }
+
+    async fn stop_accepting(
+        &self,
+        _request: tonic::Request<proto::Void>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            self.with_client(|client| client.stop_accepting())?;
+            Ok(proto::Void {})
+        })
+        .await
+    }
+
+    async fn add_job(
+        &self,
+        request: tonic::Request<proto::AddJobRequest>,
+    ) -> TonicResponse<proto::AddJobResponse> {
+        run_handler(async {
+            let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
+            let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+            self.with_client(|client| {
+                client.add_job(
                     spec,
-                    Box::new(move |cjid, result| {
-                        let _ = other_sender.send(id, comm::Response::AddJob(Ok((cjid, result))));
+                    Box::new(move |cjid, res| {
+                        let _ = send.send((cjid, res));
                     }),
                 );
-            }
-            comm::Request::GetContainerImage { name, tag } => {
-                let prog = ProgressSender::new(self.sender.clone(), id, |v| {
-                    comm::Response::GetContainerImage(Ok(comm::ProgressResponse::InProgress(v)))
-                });
-                self.sender.send(
-                    id,
-                    comm::Response::GetContainerImage(
-                        self.client
-                            .get_container_image(&name, &tag, prog)
-                            .map_err(|e| e.into())
-                            .map(comm::ProgressResponse::Done),
-                    ),
-                )?;
-            }
-            comm::Request::StopAccepting => {
-                self.sender.send(
-                    id,
-                    comm::Response::StopAccepting(
-                        self.client.stop_accepting().map_err(|e| e.into()),
-                    ),
-                )?;
-            }
-            comm::Request::WaitForOutstandingJobs => {
-                self.sender.send(
-                    id,
-                    comm::Response::WaitForOutstandingJobs(
-                        self.client
-                            .wait_for_outstanding_jobs()
-                            .map_err(|e| e.into()),
-                    ),
-                )?;
-            }
-            comm::Request::GetJobStateCounts => match self.client.get_job_state_counts() {
-                Ok(recv) => {
-                    let other_sender = self.sender.clone();
-                    scope.spawn(move || {
-                        other_sender.send(
-                            id,
-                            comm::Response::GetJobStateCounts(
-                                recv.recv().map_err(|_| "unexpected error".into()),
-                            ),
-                        )
-                    });
+                Ok(())
+            })?;
+            let (cjid, res) = recv.recv().await.ok_or(anyhow!("client shutdown"))?;
+            Ok(proto::AddJobResponse {
+                client_job_id: cjid.into_proto_buf(),
+                result: Some(res.into_proto_buf()),
+            })
+        })
+        .await
+    }
+
+    async fn wait_for_outstanding_jobs(
+        &self,
+        _request: tonic::Request<proto::Void>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            let mut client = self.take_client()?;
+            tokio::task::spawn_blocking(move || client.wait_for_outstanding_jobs()).await??;
+            Ok(proto::Void {})
+        })
+        .await
+    }
+
+    async fn get_job_state_counts(
+        &self,
+        _request: tonic::Request<proto::Void>,
+    ) -> TonicResponse<proto::GetJobStateCountsResponse> {
+        run_handler(async {
+            let res = self
+                .with_client(|client| client.get_job_state_counts())?
+                .recv()
+                .await
+                .ok_or(anyhow!("client shutdown"))?;
+            Ok(proto::GetJobStateCountsResponse {
+                counts: Some(res.into_proto_buf()),
+            })
+        })
+        .await
+    }
+
+    async fn process_broker_msg_single_threaded(
+        &self,
+        request: tonic::Request<proto::ProcessBrokerMsgSingleThreadedRequest>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            let request = request.into_inner();
+            let self_clone = self.clone();
+            tokio::task::spawn_blocking(move || {
+                self_clone.with_client(|client| {
+                    client.process_broker_msg_single_threaded(request.count as usize);
+                    Ok(())
+                })
+            })
+            .await??;
+            Ok(proto::Void {})
+        })
+        .await
+    }
+
+    async fn process_client_messages_single_threaded(
+        &self,
+        request: tonic::Request<proto::ProcessClientMessagesSingleThreadedRequest>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
+            let self_clone = self.clone();
+            tokio::task::spawn_blocking(move || -> Result<()> {
+                loop {
+                    let kind = self_clone.with_client(|client| {
+                        Ok(client.process_client_messages_single_threaded())
+                    })?;
+                    if kind.is_some_and(|k| k == wanted) {
+                        break Ok(());
+                    }
                 }
-                Err(e) => self
-                    .sender
-                    .send(id, comm::Response::GetJobStateCounts(Err(e.into())))?,
-            },
-            comm::Request::ProcessBrokerMsgSingleThreaded { count } => {
-                self.sender.send(
-                    id,
-                    comm::Response::ProcessBrokerMsgSingleThreaded(Ok(self
-                        .client
-                        .process_broker_msg_single_threaded(count))),
-                )?;
-            }
-            comm::Request::ProcessClientMessagesSingleThreaded => {
-                self.sender.send(
-                    id,
-                    comm::Response::ProcessClientMessagesSingleThreaded(Ok(self
-                        .client
-                        .process_client_messages_single_threaded())),
-                )?;
-            }
-            comm::Request::ProcessArtifactSingleThreaded => {
-                self.sender.send(
-                    id,
-                    comm::Response::ProcessArtifactSingleThreaded(Ok(self
-                        .client
-                        .process_artifact_single_threaded())),
-                )?;
-            }
-        }
-        Ok(())
+            })
+            .await??;
+            Ok(proto::Void {})
+        })
+        .await
+    }
+
+    async fn process_artifact_single_threaded(
+        &self,
+        _request: tonic::Request<proto::Void>,
+    ) -> TonicResponse<proto::Void> {
+        run_handler(async {
+            let self_clone = self.clone();
+            tokio::task::spawn_blocking(move || {
+                self_clone.with_client(|client| {
+                    client.process_artifact_single_threaded();
+                    Ok(())
+                })
+            })
+            .await??;
+            Ok(proto::Void {})
+        })
+        .await
     }
 }
 
-pub fn run_process_client(mut sock: UnixStream) -> Result<()> {
-    let req: comm::Message<comm::Request> = proto::deserialize_from(&mut sock)?;
-    let comm::Message {
-        id: start_message_id,
-        finished: false,
-        body:
-            comm::Request::Start {
-                driver_mode,
-                broker_addr,
-                project_dir,
-                cache_dir,
-            },
-    } = req
-    else {
-        bail!("expected start message, got {req:?}")
-    };
+type TokioError<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-    let mut read_sock = sock.try_clone()?;
+#[tokio::main]
+pub async fn run_process_client(sock: UnixStream) -> Result<()> {
+    // XXX remi: There is some race going on I can't figure out yet
+    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
 
-    let sender = ProcessClientSender::new(sock);
-
-    let client = match ProcessClient::new(driver_mode, broker_addr, project_dir, cache_dir) {
-        Ok(c) => {
-            sender.send(start_message_id, comm::Response::Start(Ok(())))?;
-            c
-        }
-        Err(e) => {
-            sender.send(start_message_id, comm::Response::Start(Err(e.into())))?;
-            return Ok(());
-        }
-    };
-
-    let mut handler = ProcessClientHandler::new(sender, client);
-
-    thread::scope(|scope| -> Result<()> {
-        loop {
-            match proto::deserialize_from::<_, comm::Message<comm::Request>>(&mut read_sock) {
-                Ok(msg) => handler.handle_msg(msg, scope)?,
-                Err(err) => {
-                    return Err(err.into());
+    let sock1 = tokio::net::UnixStream::from_std(sock.try_clone()?)?;
+    let sock2 = tokio::net::UnixStream::from_std(sock)?;
+    tonic::transport::Server::builder()
+        .add_service(proto::client_process_server::ClientProcessServer::new(
+            Handler::new(),
+        ))
+        .serve_with_incoming_shutdown(
+            tokio_stream::once(TokioError::<_>::Ok(sock1)).chain(tokio_stream::pending()),
+            async move {
+                loop {
+                    let Ok(v) = sock2.ready(tokio::io::Interest::READABLE).await else {
+                        continue;
+                    };
+                    if v.is_read_closed() {
+                        break;
+                    }
+                    tokio::task::yield_now().await
                 }
-            }
-        }
-    })
+            },
+        )
+        .await?;
+    Ok(())
 }

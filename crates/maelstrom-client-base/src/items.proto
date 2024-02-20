@@ -1,0 +1,271 @@
+syntax = "proto3";
+
+package maelstrom_client_base.items;
+
+enum ClientDriverMode {
+    MultiThreaded = 0;
+    SingleThreaded = 1;
+}
+
+enum ClientMessageKind {
+    AddJob = 0;
+    GetJobStateCounts = 1;
+    Stop = 2;
+    Other = 3;
+}
+
+message StartRequest {
+    ClientDriverMode driver_mode = 1;
+    string broker_addr = 2;
+    bytes project_dir = 3;
+    bytes cache_dir = 4;
+}
+
+message AddArtifactRequest {
+    bytes path = 1;
+}
+
+message TarLayer {
+    string path = 1;
+}
+
+message PrefixOptions {
+    optional string strip_prefix = 1;
+    optional string prepend_prefix = 2;
+    bool canonicalize = 3;
+}
+
+message GlobLayer {
+    string glob = 1;
+    PrefixOptions prefix_options = 2;
+}
+
+message PathsLayer {
+    repeated string paths = 1;
+    PrefixOptions prefix_options = 2;
+}
+
+message StubsLayer {
+    repeated string stubs = 1;
+}
+
+message SymlinkSpec {
+    string link = 1;
+    string target = 2;
+}
+
+message SymlinksLayer {
+    repeated SymlinkSpec symlinks = 1;
+}
+
+message AddLayerRequest {
+    oneof Layer {
+        TarLayer tar = 1;
+        GlobLayer glob = 2;
+        PathsLayer paths = 3;
+        StubsLayer stubs = 4;
+        SymlinksLayer symlinks = 5;
+    }
+}
+
+enum ArtifactType {
+    Tar = 0;
+    Manifest = 1;
+}
+
+message LayerSpec {
+    bytes digest = 1;
+    ArtifactType type = 2;
+}
+
+enum JobDevice {
+    Full = 0;
+    Null = 1;
+    Random = 2;
+    Tty = 3;
+    Urandom = 4;
+    Zero = 5;
+}
+
+enum JobMountFsType {
+    Proc = 0;
+    Tmp = 1;
+    Sys = 2;
+}
+
+message JobMount {
+    JobMountFsType fs_type = 1;
+    string mount_point = 2;
+}
+
+message JobSpec {
+    string program = 1;
+    repeated string arguments = 2;
+    repeated string environment = 3;
+    repeated LayerSpec layers = 4;
+    repeated JobDevice devices = 5;
+    repeated JobMount mounts = 6;
+    bool enable_loopback = 7;
+    bool enable_writable_file_system = 8;
+    string working_directory = 9;
+    uint32 user = 10;
+    uint32 group = 11;
+    optional uint32 timeout = 12;
+}
+
+message AddJobRequest {
+    JobSpec spec = 1;
+}
+
+message GetContainerImageRequest {
+    string name = 1;
+    string tag = 2;
+}
+
+message ProcessBrokerMsgSingleThreadedRequest {
+    uint64 count = 1;
+}
+
+message Error {
+    string message_ = 1;
+}
+
+message AddArtifactResponse {
+    bytes digest = 1;
+}
+
+message AddLayerResponse {
+    LayerSpec spec = 1;
+}
+
+message OciConfig {
+    optional string user = 1;
+    repeated string exposed_ports = 2;
+    repeated string env = 3;
+    repeated string entrypoint = 4;
+    repeated string cmd = 5;
+    repeated string volumes = 6;
+    optional string working_dir = 7;
+    map<string, string> labels = 8;
+    optional string stop_signal = 9;
+}
+
+message OciRootFs {
+    string type = 1;
+    repeated string diff_ids = 2;
+}
+
+message OciImageConfiguration {
+    optional string created = 1;
+    optional string author = 2;
+    optional string architecture = 3;
+    optional string os = 4;
+    optional string os_version = 5;
+    repeated string os_features = 6;
+    optional string variant = 7;
+    optional OciConfig config = 8;
+    OciRootFs rootfs = 9;
+}
+
+message ContainerImage {
+    uint32 version = 1;
+    string name = 2;
+    string digest = 3;
+    OciImageConfiguration config = 4;
+    repeated bytes layers = 5;
+}
+
+message GetContainerImageResponse {
+    ContainerImage image = 1;
+}
+
+message GetContainerImageProgressResponse {
+    oneof progress {
+        uint64 progress_length = 1;
+        uint64 progress_inc = 2;
+        GetContainerImageResponse done = 3;
+    }
+}
+
+message JobError {
+    oneof kind {
+        string execution = 1;
+        string system = 2;
+    }
+}
+
+message JobOutputResultTruncated {
+    bytes first = 1;
+    uint64 truncated = 2;
+}
+
+message JobOutputResult {
+    oneof result {
+        Void none = 1;
+        bytes inline = 2;
+        JobOutputResultTruncated truncated = 3;
+    }
+}
+
+message JobEffects {
+    JobOutputResult stdout = 1;
+    JobOutputResult stderr = 2;
+}
+
+message JobOutcomeCompleted {
+    oneof status {
+        uint32 exited = 1;
+        uint32 signaled = 2;
+    }
+    JobEffects effects = 3;
+}
+
+message JobOutcome {
+    oneof outcome {
+        JobOutcomeCompleted completed = 1;
+        JobEffects timed_out = 2;
+    }
+}
+
+message JobOutcomeResult {
+    oneof result {
+        JobError error = 1;
+        JobOutcome outcome = 2;
+    }
+}
+
+message AddJobResponse {
+    uint32 client_job_id = 1;
+    JobOutcomeResult result = 2;
+}
+
+message Void {}
+
+message JobStateCounts {
+    uint64 waiting_for_artifacts = 1;
+    uint64 pending = 2;
+    uint64 running = 3;
+    uint64 complete = 4;
+}
+
+message GetJobStateCountsResponse {
+    JobStateCounts counts = 1;
+}
+
+message ProcessClientMessagesSingleThreadedRequest {
+    ClientMessageKind kind = 1;
+}
+
+service ClientProcess {
+    rpc Start(StartRequest) returns (Void);
+    rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
+    rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
+    rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
+    rpc StopAccepting(Void) returns (Void);
+    rpc AddJob(AddJobRequest) returns (AddJobResponse);
+    rpc WaitForOutstandingJobs(Void) returns (Void);
+    rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);
+    rpc ProcessBrokerMsgSingleThreaded(ProcessBrokerMsgSingleThreadedRequest) returns (Void);
+    rpc ProcessClientMessagesSingleThreaded(ProcessClientMessagesSingleThreadedRequest) returns (Void);
+    rpc ProcessArtifactSingleThreaded(Void) returns(Void);
+}

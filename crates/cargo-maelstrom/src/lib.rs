@@ -169,7 +169,7 @@ where
         .into_iter()
         .collect();
 
-    ind.update_enqueue_status(format!("processing {package_name}"));
+    ind.update_enqueue_status(format!("getting test list for {package_name}"));
     let mut cases = get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_deps.test_listing.lock().unwrap();
@@ -205,10 +205,11 @@ where
     ) -> Result<Self> {
         let binary = PathBuf::from(artifact.executable.clone().unwrap());
 
-        ind.update_enqueue_status(format!("processing {package_name}"));
         let running_tests = queuing_deps.list_action.is_none();
 
         let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
+
+        ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
         let generated_artifacts = running_tests
             .then(|| generate_artifacts(client, &artifact))
             .transpose()?;
@@ -270,6 +271,8 @@ where
         }
 
         let image_lookup = |image: &str| {
+            self.ind
+                .update_enqueue_status(format!("downloading image {image}"));
             let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
             let prog = self
                 .ind
@@ -307,7 +310,7 @@ where
 
         let visitor = JobStatusVisitor::new(
             self.queuing_deps.tracker.clone(),
-            case_str,
+            case_str.clone(),
             self.width,
             self.ind.clone(),
         );
@@ -317,6 +320,8 @@ where
             return Ok(EnqueueResult::Ignored);
         }
 
+        self.ind
+            .update_enqueue_status(format!("submitting job for {case_str}"));
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
         self.client.lock().unwrap().add_job(
             JobSpec {

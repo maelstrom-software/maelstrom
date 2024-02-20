@@ -6,7 +6,7 @@ use maelstrom_base::{
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    Client, ClientBgProcess, ClientDriverMode,
+    Client, ClientBgProcess, ClientDriverMode, ClientMessageKind,
 };
 use maelstrom_test::utf8_path_buf;
 use maelstrom_util::fs::Fs;
@@ -60,7 +60,6 @@ fn basic_job_test(
     let mut broker_conn = broker.accept();
 
     let layers = add_artifacts(&mut client, &artifact_dir);
-    client.process_client_messages_single_threaded();
 
     let spec = JobSpec {
         program: utf8_path_buf!("foo"),
@@ -84,7 +83,7 @@ fn basic_job_test(
         )
         .unwrap();
 
-    client.process_client_messages_single_threaded();
+    client.process_client_messages_single_threaded(ClientMessageKind::AddJob);
     broker_conn.process(1, true /* fetch_layers */);
 
     for _ in 0..layers.len() {

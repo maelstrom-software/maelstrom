@@ -1,0 +1,20 @@
+[package]
+name = "maelstrom-macro"
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[lib]
+proc-macro = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+darling.workspace = true
+proc-macro2.workspace = true
+quote.workspace = true
+syn.workspace = true

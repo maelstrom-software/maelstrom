@@ -1,15 +1,25 @@
-pub mod comm;
 pub mod spec;
+
+pub mod proto {
+    #![allow(clippy::all)]
+    include!(concat!(env!("OUT_DIR"), "/maelstrom_client_base.items.rs"));
+}
 
 // This hack makes some macros in maelstrom_base work correctly
 #[cfg(test)]
 extern crate self as maelstrom_client;
 
-use anyhow::Result;
-use maelstrom_base::{ClientJobId, JobOutcomeResult};
+use anyhow::{anyhow, Result};
+use enum_map::{enum_map, EnumMap};
+use enumset::{EnumSet, EnumSetType};
+use maelstrom_base::{ClientJobId, JobOutcomeResult, Utf8PathBuf};
+use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 use serde::{Deserialize, Serialize};
-use std::os::linux::net::SocketAddrExt as _;
-use std::os::unix::net::{SocketAddr, UnixListener, UnixStream};
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::hash::Hash;
+use std::os::unix::ffi::OsStringExt as _;
+use std::path::{Path, PathBuf};
 
 pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
 
@@ -17,25 +27,612 @@ pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
 pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
 
-#[derive(Default, Debug, Serialize, Deserialize)]
+pub trait IntoProtoBuf {
+    type ProtoBufType;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType;
+}
+
+impl IntoProtoBuf for () {
+    type ProtoBufType = proto::Void;
+
+    fn into_proto_buf(self) -> proto::Void {
+        proto::Void {}
+    }
+}
+
+impl<'a> IntoProtoBuf for &'a Path {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Vec<u8> {
+        self.as_os_str().as_encoded_bytes().to_vec()
+    }
+}
+
+impl IntoProtoBuf for PathBuf {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Vec<u8> {
+        self.into_os_string().into_encoded_bytes()
+    }
+}
+
+impl<V: IntoProtoBuf> IntoProtoBuf for Option<V> {
+    type ProtoBufType = Option<V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Option<V::ProtoBufType> {
+        self.map(|v| v.into_proto_buf())
+    }
+}
+
+impl<V: IntoProtoBuf> IntoProtoBuf for Vec<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Vec<V::ProtoBufType> {
+        self.into_iter().map(|v| v.into_proto_buf()).collect()
+    }
+}
+
+impl IntoProtoBuf for Utf8PathBuf {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.into_string()
+    }
+}
+
+impl IntoProtoBuf for bool {
+    type ProtoBufType = bool;
+
+    fn into_proto_buf(self) -> bool {
+        self
+    }
+}
+
+impl IntoProtoBuf for u8 {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self as u32
+    }
+}
+
+impl IntoProtoBuf for String {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self
+    }
+}
+
+impl<K: IntoProtoBuf + Eq + Hash, V: IntoProtoBuf> IntoProtoBuf for HashMap<K, V>
+where
+    K::ProtoBufType: Eq + Hash,
+{
+    type ProtoBufType = HashMap<K::ProtoBufType, V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.into_iter()
+            .map(|(k, v)| (k.into_proto_buf(), v.into_proto_buf()))
+            .collect()
+    }
+}
+
+impl<V: IntoProtoBuf> IntoProtoBuf for maelstrom_base::NonEmpty<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.into_iter().map(|v| v.into_proto_buf()).collect()
+    }
+}
+
+impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn try_from_proto_buf(v: Vec<V::ProtoBufType>) -> Result<Self> {
+        maelstrom_base::NonEmpty::from_vec(
+            v.into_iter()
+                .map(|v| TryFromProtoBuf::try_from_proto_buf(v))
+                .collect::<Result<Vec<_>>>()?,
+        )
+        .ok_or(anyhow!("malformed NonEmpty"))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::Sha256Digest {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Vec<u8> {
+        self.into()
+    }
+}
+
+impl<V: IntoProtoBuf + EnumSetType> IntoProtoBuf for EnumSet<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.iter().map(|v| v.into_proto_buf()).collect()
+    }
+}
+
+impl<V: TryFromProtoBuf + EnumSetType> TryFromProtoBuf for EnumSet<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn try_from_proto_buf(p: Self::ProtoBufType) -> Result<Self> {
+        p.into_iter()
+            .map(|v| V::try_from_proto_buf(v))
+            .collect::<Result<_>>()
+    }
+}
+
+impl IntoProtoBuf for (maelstrom_base::Sha256Digest, maelstrom_base::ArtifactType) {
+    type ProtoBufType = proto::LayerSpec;
+
+    fn into_proto_buf(self) -> proto::LayerSpec {
+        proto::LayerSpec {
+            digest: self.0.into_proto_buf(),
+            r#type: self.1.into_proto_buf(),
+        }
+    }
+}
+
+impl TryFromProtoBuf for (maelstrom_base::Sha256Digest, maelstrom_base::ArtifactType) {
+    type ProtoBufType = proto::LayerSpec;
+
+    fn try_from_proto_buf(p: Self::ProtoBufType) -> Result<Self> {
+        Ok((
+            TryFromProtoBuf::try_from_proto_buf(p.digest)?,
+            TryFromProtoBuf::try_from_proto_buf(p.r#type)?,
+        ))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::UserId {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self.as_u32()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::UserId {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(Self::new(v))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::GroupId {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self.as_u32()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::GroupId {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(Self::new(v))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::Timeout {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self.as_u32()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::Timeout {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Self::new(v).ok_or(anyhow!("malformed Timeout"))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_util::config::BrokerAddr {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.into()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_util::config::BrokerAddr {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(v: String) -> Result<Self> {
+        Ok(v.try_into()?)
+    }
+}
+
+impl IntoProtoBuf for maelstrom_container::Arch {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.to_string()
+    }
+}
+
+impl IntoProtoBuf for maelstrom_container::Os {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.to_string()
+    }
+}
+
+impl IntoProtoBuf for maelstrom_container::ContainerImageVersion {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self as u32
+    }
+}
+
+pub trait TryFromProtoBuf: Sized {
+    type ProtoBufType;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self>;
+}
+
+impl TryFromProtoBuf for bool {
+    type ProtoBufType = bool;
+
+    fn try_from_proto_buf(v: bool) -> Result<Self> {
+        Ok(v)
+    }
+}
+
+impl TryFromProtoBuf for String {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(v: String) -> Result<Self> {
+        Ok(v)
+    }
+}
+
+impl TryFromProtoBuf for u8 {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(v.try_into()?)
+    }
+}
+
+impl TryFromProtoBuf for Utf8PathBuf {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(s: String) -> Result<Self> {
+        Ok(s.into())
+    }
+}
+
+impl<V: TryFromProtoBuf> TryFromProtoBuf for Vec<V> {
+    type ProtoBufType = Vec<V::ProtoBufType>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        v.into_iter()
+            .map(|e| TryFromProtoBuf::try_from_proto_buf(e))
+            .collect()
+    }
+}
+
+impl<V: TryFromProtoBuf> TryFromProtoBuf for Option<V> {
+    type ProtoBufType = Option<V::ProtoBufType>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        v.map(|e| TryFromProtoBuf::try_from_proto_buf(e))
+            .transpose()
+    }
+}
+
+impl<K: TryFromProtoBuf + Eq + Hash, V: TryFromProtoBuf> TryFromProtoBuf for HashMap<K, V> {
+    type ProtoBufType = HashMap<K::ProtoBufType, V::ProtoBufType>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        v.into_iter()
+            .map(|(k, v)| {
+                Ok((
+                    TryFromProtoBuf::try_from_proto_buf(k)?,
+                    TryFromProtoBuf::try_from_proto_buf(v)?,
+                ))
+            })
+            .collect()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::Sha256Digest {
+    type ProtoBufType = Vec<u8>;
+
+    fn try_from_proto_buf(v: Vec<u8>) -> Result<Self> {
+        Ok(maelstrom_base::Sha256Digest::try_from(v)?)
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_container::Arch {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(v: String) -> Result<Self> {
+        if v.is_empty() {
+            return Err(anyhow!("malformed `Arch`"));
+        }
+        Ok(v.as_str().into())
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_container::Os {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(v: String) -> Result<Self> {
+        if v.is_empty() {
+            return Err(anyhow!("malformed `Os`"));
+        }
+        Ok(v.as_str().into())
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_container::ContainerImageVersion {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        if v != Self::default() as u32 {
+            Err(anyhow!("wrong ContainerImage version"))
+        } else {
+            Ok(Self::default())
+        }
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::ClientJobId {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self.as_u32()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::ClientJobId {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Ok(Self::from_u32(v))
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobOutputResult {
+    type ProtoBufType = proto::JobOutputResult;
+
+    fn try_from_proto_buf(v: proto::JobOutputResult) -> Result<Self> {
+        use proto::job_output_result::Result as ProtoJobOutputResult;
+        match v.result.ok_or(anyhow!("malformed JobOutputResult"))? {
+            ProtoJobOutputResult::None(_) => Ok(Self::None),
+            ProtoJobOutputResult::Inline(bytes) => Ok(Self::Inline(bytes.into())),
+            ProtoJobOutputResult::Truncated(proto::JobOutputResultTruncated {
+                first,
+                truncated,
+            }) => Ok(Self::Truncated {
+                first: first.into(),
+                truncated,
+            }),
+        }
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::JobOutputResult {
+    type ProtoBufType = proto::JobOutputResult;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        use proto::job_output_result::Result as ProtoJobOutputResult;
+        proto::JobOutputResult {
+            result: Some(match self {
+                Self::None => ProtoJobOutputResult::None(proto::Void {}),
+                Self::Inline(bytes) => ProtoJobOutputResult::Inline(bytes.into()),
+                Self::Truncated { first, truncated } => {
+                    ProtoJobOutputResult::Truncated(proto::JobOutputResultTruncated {
+                        first: first.into(),
+                        truncated,
+                    })
+                }
+            }),
+        }
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobOutcome {
+    type ProtoBufType = proto::JobOutcome;
+
+    fn try_from_proto_buf(v: proto::JobOutcome) -> Result<Self> {
+        use proto::job_outcome::Outcome;
+        match v.outcome.ok_or(anyhow!("malformed JobOutcome"))? {
+            Outcome::Completed(proto::JobOutcomeCompleted { status, effects }) => {
+                Ok(Self::Completed {
+                    status: TryFromProtoBuf::try_from_proto_buf(
+                        status.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
+                    )?,
+                    effects: TryFromProtoBuf::try_from_proto_buf(
+                        effects.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
+                    )?,
+                })
+            }
+            Outcome::TimedOut(effects) => Ok(Self::TimedOut(TryFromProtoBuf::try_from_proto_buf(
+                effects,
+            )?)),
+        }
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::JobOutcome {
+    type ProtoBufType = proto::JobOutcome;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        use proto::job_outcome::Outcome;
+        proto::JobOutcome {
+            outcome: Some(match self {
+                Self::Completed { status, effects } => {
+                    Outcome::Completed(proto::JobOutcomeCompleted {
+                        status: Some(status.into_proto_buf()),
+                        effects: Some(effects.into_proto_buf()),
+                    })
+                }
+                Self::TimedOut(effects) => Outcome::TimedOut(effects.into_proto_buf()),
+            }),
+        }
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobError<String> {
+    type ProtoBufType = proto::JobError;
+
+    fn try_from_proto_buf(t: proto::JobError) -> Result<Self> {
+        use proto::job_error::Kind;
+        match t.kind.ok_or(anyhow!("malformed JobError"))? {
+            Kind::Execution(msg) => Ok(Self::Execution(msg)),
+            Kind::System(msg) => Ok(Self::System(msg)),
+        }
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::JobError<String> {
+    type ProtoBufType = proto::JobError;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        use proto::job_error::Kind;
+        proto::JobError {
+            kind: Some(match self {
+                Self::Execution(msg) => Kind::Execution(msg),
+                Self::System(msg) => Kind::System(msg),
+            }),
+        }
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobOutcomeResult {
+    type ProtoBufType = proto::JobOutcomeResult;
+
+    fn try_from_proto_buf(t: proto::JobOutcomeResult) -> Result<Self> {
+        use proto::job_outcome_result::Result as JobOutcomeResult;
+        match t.result.ok_or(anyhow!("malformed JobOutcomeResult"))? {
+            JobOutcomeResult::Error(e) => Ok(Self::Err(TryFromProtoBuf::try_from_proto_buf(e)?)),
+            JobOutcomeResult::Outcome(v) => Ok(Self::Ok(TryFromProtoBuf::try_from_proto_buf(v)?)),
+        }
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::JobOutcomeResult {
+    type ProtoBufType = proto::JobOutcomeResult;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        use proto::job_outcome_result::Result as JobOutcomeResult;
+        proto::JobOutcomeResult {
+            result: Some(match self {
+                Ok(v) => JobOutcomeResult::Outcome(v.into_proto_buf()),
+                Err(e) => JobOutcomeResult::Error(e.into_proto_buf()),
+            }),
+        }
+    }
+}
+
+impl TryFromProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
+    type ProtoBufType = proto::JobStateCounts;
+
+    fn try_from_proto_buf(b: proto::JobStateCounts) -> Result<Self> {
+        use maelstrom_base::stats::JobState;
+        Ok(enum_map! {
+            JobState::WaitingForArtifacts => b.waiting_for_artifacts,
+            JobState::Pending => b.pending,
+            JobState::Running => b.running,
+            JobState::Complete => b.complete,
+        })
+    }
+}
+
+impl IntoProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
+    type ProtoBufType = proto::JobStateCounts;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        use maelstrom_base::stats::JobState;
+        proto::JobStateCounts {
+            waiting_for_artifacts: self[JobState::WaitingForArtifacts],
+            pending: self[JobState::Pending],
+            running: self[JobState::Running],
+            complete: self[JobState::Complete],
+        }
+    }
+}
+
+impl TryFromProtoBuf for PathBuf {
+    type ProtoBufType = Vec<u8>;
+
+    fn try_from_proto_buf(b: Vec<u8>) -> Result<Self> {
+        Ok(OsString::from_vec(b).into())
+    }
+}
+
+impl From<proto::Error> for anyhow::Error {
+    fn from(e: proto::Error) -> Self {
+        anyhow::Error::msg(e.message)
+    }
+}
+
+pub trait IntoResult {
+    type Output;
+    fn into_result(self) -> Result<Self::Output>;
+}
+
+impl IntoResult for proto::Void {
+    type Output = ();
+
+    fn into_result(self) -> Result<()> {
+        Ok(())
+    }
+}
+
+impl<V> IntoResult for anyhow::Result<V> {
+    type Output = V;
+
+    fn into_result(self) -> Result<Self::Output> {
+        self
+    }
+}
+
+impl<V> IntoResult for Option<V> {
+    type Output = V;
+
+    fn into_result(self) -> Result<Self::Output> {
+        match self {
+            Some(res) => Ok(res),
+            None => Err(anyhow!("malformed response")),
+        }
+    }
+}
+
+impl IntoResult for Vec<u8> {
+    type Output = Vec<u8>;
+
+    fn into_result(self) -> Result<Self::Output> {
+        Ok(self)
+    }
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf, Default, Debug, Serialize, Deserialize)]
+#[proto(type_path = "proto::ClientDriverMode")]
 pub enum ClientDriverMode {
     #[default]
     MultiThreaded,
     SingleThreaded,
 }
 
-fn address_from_pid(id: u32) -> Result<SocketAddr> {
-    let mut name = b"maelstrom-client".to_vec();
-    name.extend(id.to_be_bytes());
-    Ok(SocketAddr::from_abstract_name(name)?)
-}
-
-pub fn listen(id: u32) -> Result<UnixListener> {
-    Ok(UnixListener::bind_addr(&address_from_pid(id)?)?)
-}
-
-pub fn connect(id: u32) -> Result<UnixStream> {
-    let mut name = b"maelstrom-client".to_vec();
-    name.extend(id.to_be_bytes());
-    Ok(UnixStream::connect_addr(&address_from_pid(id)?)?)
+#[derive(IntoProtoBuf, TryFromProtoBuf, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[proto(type_path = "proto::ClientMessageKind")]
+pub enum ClientMessageKind {
+    AddJob,
+    GetJobStateCounts,
+    Stop,
+    Other,
 }

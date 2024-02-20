@@ -13,8 +13,10 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+atomicbox.workspace = true
 bracoxide.workspace = true
 chrono.workspace = true
+futures.workspace = true
 globset.workspace = true
 itertools.workspace = true
 maelstrom-base.workspace = true
@@ -26,7 +28,10 @@ serde_repr.workspace = true
 serde_with.workspace = true
 sha2.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
 toml.workspace = true
+tonic.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true

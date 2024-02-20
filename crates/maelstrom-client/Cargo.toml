@@ -21,8 +21,12 @@ maelstrom-client-process.workspace = true
 maelstrom-container.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
+num_enum.workspace = true
 serde.workspace = true
 tempfile.workspace = true
+tokio.workspace = true
+tonic.workspace = true
+tower.workspace = true
 
 [dev-dependencies]
 maelstrom-test.workspace = true
