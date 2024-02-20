@@ -9,7 +9,10 @@ pub mod visitor;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use cargo::{get_cases_from_binary, run_cargo_test, TestArtifactStream, WaitHandle};
+use cargo::{
+    get_cases_from_binary, run_cargo_test, CompilationOptions, FeatureSelectionOptions,
+    ManifestOptions, TestArtifactStream, WaitHandle,
+};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
@@ -82,6 +85,9 @@ struct JobQueuingDeps<StdErrT> {
     expected_job_count: u64,
     test_listing: Mutex<TestListing>,
     list_action: Option<ListAction>,
+    feature_selection_options: FeatureSelectionOptions,
+    compilation_options: CompilationOptions,
+    manifest_options: ManifestOptions,
 }
 
 impl<StdErrT> JobQueuingDeps<StdErrT> {
@@ -95,6 +101,9 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
         test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
+        feature_selection_options: FeatureSelectionOptions,
+        compilation_options: CompilationOptions,
+        manifest_options: ManifestOptions,
     ) -> Self {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -110,6 +119,9 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
             expected_job_count,
             test_listing: Mutex::new(test_listing),
             list_action,
+            feature_selection_options,
+            compilation_options,
+            manifest_options,
         }
     }
 }
@@ -384,6 +396,9 @@ where
                 run_cargo_test(
                     &queuing_deps.cargo,
                     queuing_deps.stderr_color,
+                    &queuing_deps.feature_selection_options,
+                    &queuing_deps.compilation_options,
+                    &queuing_deps.manifest_options,
                     package_names,
                 )
             })
@@ -499,6 +514,9 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         workspace_packages: &[&CargoPackage],
         broker_addr: BrokerAddr,
         driver_mode: ClientDriverMode,
+        feature_selection_options: FeatureSelectionOptions,
+        compilation_options: CompilationOptions,
+        manifest_options: ManifestOptions,
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(
@@ -531,6 +549,9 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 test_metadata,
                 test_listing,
                 list_action,
+                feature_selection_options,
+                compilation_options,
+                manifest_options,
             ),
             cache_dir,
         })

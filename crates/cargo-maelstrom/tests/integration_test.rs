@@ -1,12 +1,13 @@
 use anyhow::Result;
-use cargo_maelstrom::test_listing::{
-    load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
-    LAST_TEST_LISTING_NAME,
-};
 use cargo_maelstrom::{
+    cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
+    test_listing::{
+        load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
+        LAST_TEST_LISTING_NAME,
+    },
     EnqueueResult, ListAction, MainAppDeps,
 };
 use indicatif::InMemoryTerm;
@@ -261,6 +262,9 @@ fn run_app(
         &cargo_metadata.workspace_packages(),
         b.address().clone(),
         ClientDriverMode::SingleThreaded,
+        FeatureSelectionOptions::default(),
+        CompilationOptions::default(),
+        ManifestOptions::default(),
     )
     .unwrap();
     let prog_driver = TestProgressDriver::default();

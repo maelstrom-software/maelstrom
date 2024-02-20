@@ -1,5 +1,6 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
+    cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     config::{Config, ConfigOptions, RunConfigOptions},
     main_app_new,
     progress::DefaultProgressDriver,
@@ -46,6 +47,15 @@ struct CliOptions {
 
     #[command(subcommand)]
     command: CliCommand,
+
+    #[command(flatten, next_help_heading = "Feature Selection")]
+    cargo_feature_selection_options: FeatureSelectionOptions,
+
+    #[command(flatten, next_help_heading = "Compilation Options")]
+    cargo_compilation_options: CompilationOptions,
+
+    #[command(flatten, next_help_heading = "Manifest Options")]
+    cargo_manifest_options: ManifestOptions,
 }
 
 #[derive(Debug, Subcommand)]
@@ -226,6 +236,9 @@ pub fn main() -> Result<ExitCode> {
         &cargo_metadata.workspace_packages(),
         config.broker,
         Default::default(),
+        cli_options.cargo_feature_selection_options,
+        cli_options.cargo_compilation_options,
+        cli_options.cargo_manifest_options,
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
