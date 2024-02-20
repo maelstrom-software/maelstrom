@@ -1098,7 +1098,7 @@ mod tests {
     }
 
     script_test! {
-        requests_start_queueing_at_2x_workers_slot_count,
+        requests_start_queuing_at_2x_workers_slot_count,
         {
             Fixture::new([
                 ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
