@@ -1,11 +1,11 @@
 use anyhow::{bail, Result};
-use camino::Utf8PathBuf;
 use chrono::Local;
 use clap::Parser;
 use regex::Regex;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
+    path::PathBuf,
     result,
 };
 
@@ -43,7 +43,7 @@ fn filter(version: &str, today: &str, input: impl BufRead, mut output: impl Writ
     Ok(())
 }
 
-pub fn main(changelog: Utf8PathBuf, args: CliArgs) -> Result<()> {
+pub fn main(changelog: PathBuf, args: CliArgs) -> Result<()> {
     let mut tempfile = tempfile::Builder::new().tempfile_in(changelog.parent().unwrap())?;
     filter(
         &args.version,

@@ -3,8 +3,8 @@ mod extract_release_notes;
 mod open;
 
 use anyhow::Result;
-use camino::Utf8PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -17,8 +17,13 @@ enum Command {
 #[derive(Debug, Parser)]
 pub struct CliArgs {
     /// Location of changelog.
-    #[arg(long, short, value_name = "PATH", default_value = "CHANGELOG.md")]
-    file: Utf8PathBuf,
+    #[arg(
+        long,
+        short,
+        value_name = "PATH",
+        default_value = PathBuf::from("CHANGELOG.md").into_os_string()
+    )]
+    file: PathBuf,
 
     #[clap(subcommand)]
     command: Command,

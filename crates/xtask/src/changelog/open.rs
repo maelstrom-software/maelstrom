@@ -1,11 +1,12 @@
 use anyhow::{bail, Result};
-use camino::Utf8PathBuf;
 use clap::Parser;
 use regex::Regex;
 use std::{
     fs::File,
     io::{BufRead, BufReader, Write},
-    iter, result,
+    iter,
+    path::PathBuf,
+    result,
 };
 
 fn filter(input: impl BufRead, mut output: impl Write) -> Result<()> {
@@ -87,7 +88,7 @@ fn filter(input: impl BufRead, mut output: impl Write) -> Result<()> {
 #[derive(Debug, Parser)]
 pub struct CliArgs;
 
-pub fn main(changelog: Utf8PathBuf, _args: CliArgs) -> Result<()> {
+pub fn main(changelog: PathBuf, _args: CliArgs) -> Result<()> {
     let mut tempfile = tempfile::Builder::new().tempfile_in(changelog.parent().unwrap())?;
     filter(BufReader::new(File::open(&changelog)?), &mut tempfile)?;
     tempfile.persist(changelog)?;

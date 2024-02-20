@@ -1,9 +1,9 @@
 use anyhow::{bail, Context as _, Result};
-use camino::Utf8PathBuf;
 use clap::Parser;
 use std::{
     fs::File,
     io::{self, BufRead, BufReader, BufWriter, Write},
+    path::PathBuf,
 };
 
 fn filter(version: &str, input: impl BufRead, mut output: impl Write) -> Result<()> {
@@ -81,10 +81,10 @@ pub struct CliArgs {
 
     /// Where to put release notes. If not given, standard output is used.
     #[arg(long, short, value_name = "PATH")]
-    output: Option<Utf8PathBuf>,
+    output: Option<PathBuf>,
 }
 
-pub fn main(changelog: Utf8PathBuf, args: CliArgs) -> Result<()> {
+pub fn main(changelog: PathBuf, args: CliArgs) -> Result<()> {
     filter(
         &args.version,
         BufReader::new(File::open(changelog).context("opening input file")?),
