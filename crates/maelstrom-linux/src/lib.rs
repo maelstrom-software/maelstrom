@@ -579,6 +579,10 @@ fn extract_wait_status(status: c_int) -> WaitStatus {
     }
 }
 
+pub fn fork() -> Result<Option<Pid>, Errno> {
+    Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
+}
+
 pub fn wait() -> Result<WaitResult, Errno> {
     let inner = |status: &mut c_int| {
         let status_ptr = status as *mut c_int;
