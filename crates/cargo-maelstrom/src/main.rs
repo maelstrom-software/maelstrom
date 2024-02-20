@@ -23,19 +23,25 @@ use std::{
     process::Command,
 };
 
-/// This binary build and sends Rust tests to the broker.
+/// Build Rust tests and send them to the broker for execution.
 #[derive(Parser, Debug)]
+#[command(
+    after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
+
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the CARGO_MAELSTROM_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
+"#
+)]
 #[command(version)]
-#[command(styles=clap_util::styles())]
+#[command(styles = clap_util::styles())]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line. If not set, the file
     /// .config/cargo-maelstrom.toml in the workspace root will be used, if it exists.
-    #[arg(short, long)]
+    #[arg(long, short, value_name = "PATH")]
     config_file: Option<PathBuf>,
 
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000".
-    #[arg(short, long)]
+    /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
+    #[arg(long, short, value_name = "SOCKADDR")]
     broker: Option<String>,
 
     #[command(subcommand)]

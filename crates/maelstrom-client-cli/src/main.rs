@@ -32,25 +32,30 @@ use std::{
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
 
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_CLIENT_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
 
 All values except for 'broker' have reasonable defaults.
 "#
 )]
 #[command(version)]
-#[command(styles=maelstrom_util::clap::styles())]
+#[command(styles = maelstrom_util::clap::styles())]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-client-cli.toml").into_os_string())]
+    #[arg(
+        long,
+        short = 'c',
+        value_name="PATH",
+        default_value = PathBuf::from(".config/maelstrom-client-cli.toml").into_os_string()
+    )]
     config_file: PathBuf,
 
-    /// Print configuration and exit
-    #[arg(short = 'P', long)]
+    /// Print configuration and exit.
+    #[arg(long, short = 'P')]
     print_config: bool,
 
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000"
-    #[arg(short = 'b', long)]
+    /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
+    #[arg(long, short = 'b', value_name = "SOCKADDR")]
     broker: Option<String>,
 }
 

@@ -12,7 +12,7 @@ use std::{
 /// Close changelog to prepare for release.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
-    /// Release version.
+    /// Version to release.
     version: String,
 }
 

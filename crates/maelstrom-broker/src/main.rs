@@ -22,42 +22,45 @@ use tokio::{net::TcpListener, runtime::Runtime};
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
 
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
-
-All values except for 'broker' have reasonable defaults.
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_BROKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
 "#
 )]
 #[command(version)]
-#[command(styles=maelstrom_util::clap::styles())]
+#[command(styles = maelstrom_util::clap::styles())]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-broker.toml").into_os_string())]
+    #[arg(
+        long,
+        short,
+        value_name = "PATH",
+        default_value = PathBuf::from(".config/maelstrom-broker.toml").into_os_string()
+    )]
     config_file: PathBuf,
 
-    /// Print configuration and exit
-    #[arg(short = 'P', long)]
+    /// Print configuration and exit.
+    #[arg(long, short = 'P')]
     print_config: bool,
 
-    /// The port the broker listens for connections from workers and clients on
-    #[arg(short = 'p', long)]
+    /// The port the broker listens on for connections from workers and clients.
+    #[arg(long, short, value_name = "PORT")]
     port: Option<u16>,
 
-    /// The port the HTTP UI is served up on
-    #[arg(short = 'H', long)]
+    /// The port the HTTP UI is served on.
+    #[arg(long, short = 'H', value_name = "PORT")]
     http_port: Option<u16>,
 
-    /// The directory to use for the cache
-    #[arg(short = 'r', long)]
+    /// The directory to use for the cache.
+    #[arg(long, short = 'r', value_name = "PATH")]
     cache_root: Option<PathBuf>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative
-    #[arg(short = 'B', long)]
+    /// strictly, so it's best to be conservative.
+    #[arg(long, short = 'B', value_name = "BYTES")]
     cache_bytes_used_target: Option<u64>,
 
     /// Minimum log level to output.
-    #[arg(short = 'l', long, value_enum)]
+    #[arg(long, short, value_name = "LEVEL", value_enum)]
     log_level: Option<LogLevel>,
 }
 

@@ -17,7 +17,7 @@ enum Command {
 #[derive(Debug, Parser)]
 pub struct CliArgs {
     /// Location of changelog.
-    #[arg(long, short, default_value = "CHANGELOG.md")]
+    #[arg(long, short, value_name = "PATH", default_value = "CHANGELOG.md")]
     file: Utf8PathBuf,
 
     #[clap(subcommand)]

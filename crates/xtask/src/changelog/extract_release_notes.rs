@@ -76,11 +76,11 @@ fn filter(version: &str, input: impl BufRead, mut output: impl Write) -> Result<
 /// Extract release notes from changelog.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
-    /// Release version.
+    /// Version to extract.
     version: String,
 
     /// Where to put release notes. If not given, standard output is used.
-    #[arg(long, short)]
+    #[arg(long, short, value_name = "PATH")]
     output: Option<Utf8PathBuf>,
 }
 

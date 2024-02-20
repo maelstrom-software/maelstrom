@@ -27,40 +27,45 @@ All values except for 'broker' have reasonable defaults.
 "#
 )]
 #[command(version)]
-#[command(styles=maelstrom_util::clap::styles())]
+#[command(styles = maelstrom_util::clap::styles())]
 struct CliOptions {
     /// Configuration file. Values set in the configuration file will be overridden by values set
     /// through environment variables and values set on the command line.
-    #[arg(short = 'c', long, default_value=PathBuf::from(".config/maelstrom-worker.toml").into_os_string())]
+    #[arg(
+        long,
+        short = 'c',
+        value_name = "PATH",
+        default_value = PathBuf::from(".config/maelstrom-worker.toml").into_os_string()
+    )]
     config_file: PathBuf,
 
     /// Print configuration and exit
-    #[arg(short = 'P', long)]
+    #[arg(long, short = 'P')]
     print_config: bool,
 
-    /// Socket address of broker. Examples: 127.0.0.1:5000 host.example.com:2000"
-    #[arg(short = 'b', long)]
+    /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
+    #[arg(long, short, value_name = "SOCKADDR")]
     broker: Option<String>,
 
     /// The number of job slots available. Most jobs will take one job slot
-    #[arg(short = 's', long)]
+    #[arg(long, short, value_name = "N")]
     slots: Option<u16>,
 
-    /// The directory to use for the cache
-    #[arg(short = 'r', long)]
+    /// The directory to use for the cache.
+    #[arg(long, short = 'r', value_name = "PATH")]
     cache_root: Option<PathBuf>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative
-    #[arg(short = 'B', long)]
+    /// strictly, so it's best to be conservative.
+    #[arg(long, short = 'B', value_name = "BYTES")]
     cache_bytes_used_target: Option<u64>,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[arg(short = 'i', long)]
+    #[arg(long, short, value_name = "BYTES")]
     inline_limit: Option<u64>,
 
     /// Minimum log level to output.
-    #[arg(short = 'l', long, value_enum)]
+    #[arg(long, short = 'l', value_name = "LEVEL", value_enum)]
     log_level: Option<LogLevel>,
 }
 

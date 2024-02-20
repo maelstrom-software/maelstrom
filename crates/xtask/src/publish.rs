@@ -150,31 +150,29 @@ fn package_published(name: &str, version: &Version) -> Result<bool> {
         .is_some())
 }
 
-/// Publish all of the packages in the workspace.
-///
-/// Packaged marked with publish = false are not published.
+/// Publish all of the packages in the workspace, except those marked with publish = false.
 ///
 /// If there is a dependency cycle, or if a publish package depends on an unpublished package, the
 /// program will exit with an error.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
-    /// Don't try to publish, just check for dependency cycles and unpublished dependencies
+    /// Don't try to publish, just check for dependency cycles and unpublished dependencies.
     #[arg(long)]
     lint: bool,
 
-    /// Don't verify the contents of packages by building them
+    /// Don't verify the contents of packages by building them.
     #[arg(long)]
     no_verify: bool,
 
-    /// Allow package with dirty working directories to be published
+    /// Allow package with dirty working directories to be published.
     #[arg(long)]
     allow_dirty: bool,
 
-    /// Do not print cargo log messages (-qq don't print current package)
+    /// Do not print cargo log messages (-qq don't print current package).
     #[arg(long, short, action = Count)]
     quiet: u8,
 
-    /// Use verbose output (-vv very verbose/build.rs output)
+    /// Use verbose output (-vv very verbose/build.rs output).
     #[arg(long, short, action = Count)]
     verbose: u8,
 }
