@@ -1003,15 +1003,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "compiler_cli_args"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50acef46f3f8aac0ce71654f42a9d887e87decb2068f362cac09d7d8e630707c"
-dependencies = [
- "quote",
-]
-
-[[package]]
 name = "concat-idents"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2654,12 +2645,12 @@ version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
- "compiler_cli_args",
  "indicatif",
  "maelstrom-base",
  "maelstrom-client-base",
  "maelstrom-client-process",
  "maelstrom-container",
+ "maelstrom-linux",
  "maelstrom-test",
  "maelstrom-util",
  "maplit",

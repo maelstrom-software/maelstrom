@@ -16,7 +16,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    Client, ClientDriverMode,
+    Client, ClientBgProcess, ClientDriverMode,
 };
 use maelstrom_util::fs::Fs;
 use std::{
@@ -240,6 +240,7 @@ fn run_app(
     list: Option<ListAction>,
     finish: bool,
 ) -> String {
+    let bg_proc = ClientBgProcess::new_from_thread().unwrap();
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(workspace_root.join("Cargo.toml"))
         .exec()
@@ -249,6 +250,7 @@ fn run_app(
     let mut b = FakeBroker::new(state);
 
     let deps = MainAppDeps::new(
+        bg_proc,
         cargo,
         include_filter,
         exclude_filter,

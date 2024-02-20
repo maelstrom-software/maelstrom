@@ -14,6 +14,7 @@ use figment::{
     Figment,
 };
 use maelstrom_base::Timeout;
+use maelstrom_client::ClientBgProcess;
 use maelstrom_util::process::ExitCode;
 use std::{
     env,
@@ -123,6 +124,8 @@ fn config(config_file: impl AsRef<Path>, cli_options: ConfigOptions) -> Result<C
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
+    let bg_proc = ClientBgProcess::new_from_fork()?;
+
     let mut args = Vec::from_iter(env::args());
     if args.len() > 1 && args[0].ends_with(format!("cargo-{}", args[1]).as_str()) {
         args.remove(1);
@@ -205,6 +208,7 @@ pub fn main() -> Result<ExitCode> {
     };
 
     let deps = MainAppDeps::new(
+        bg_proc,
         "cargo".into(),
         include,
         exclude,

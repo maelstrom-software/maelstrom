@@ -7,30 +7,24 @@ use indicatif::ProgressBar;
 use maelstrom_base::{proto, stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
 use maelstrom_client_base::comm;
 use maelstrom_container::ContainerImage;
-use maelstrom_util::{config::BrokerAddr, fs::Fs};
+use maelstrom_util::config::BrokerAddr;
 use spec::Layer;
 use std::collections::HashMap;
-use std::io::{self, Read as _, Write as _};
-use std::os::unix::fs::PermissionsExt as _;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process;
 use std::sync::{
     mpsc::{channel, Receiver, Sender},
     Mutex,
 };
 use std::thread;
 
-type ResponseCallback = Box<dyn FnMut(comm::Response) + Send + Sync>;
-
-fn print_error(label: &str, res: Result<()>) -> bool {
+fn print_error(label: &str, res: Result<()>) {
     if let Err(e) = res {
         eprintln!("{label}: error: {e:?}");
-        true
-    } else {
-        false
     }
 }
+
+type ResponseCallback = Box<dyn FnMut(comm::Response) + Send + Sync>;
 
 struct Dispatcher {
     sock: UnixStream,
@@ -181,70 +175,88 @@ fn run_progress_bar<Ret>(
     Err(anyhow!("call incomplete"))
 }
 
-fn spawn_process() -> Result<process::Child> {
-    let tempdir = tempfile::tempdir().unwrap();
-    let proc_path = tempdir.path().join("proc");
-    let fs = Fs::new();
+enum ClientBgHandle {
+    Pid(maelstrom_linux::Pid),
+    Thread(Option<thread::JoinHandle<Result<()>>>),
+}
 
-    let mut proc = fs.create_file(&proc_path)?;
-    proc.write_all(include_bytes!(env!("CLIENT_EXE")))?;
-    proc.set_permissions(std::fs::Permissions::from_mode(0o555))?;
-    drop(proc);
-
-    let spawn = || {
-        process::Command::new(&proc_path)
-            .stdout(process::Stdio::piped())
-            .stderr(process::Stdio::piped())
-            .spawn()
-    };
-
-    // Even though we closed the file, we can get ETXTBSY if exec immediately for some reason.
-    let mut child = loop {
-        match spawn() {
-            Ok(child) => break child,
-            Err(e) if format!("{:?}", e.kind()) == "ExecutableFileBusy" => continue,
-            Err(e) => return Err(e.into()),
+impl ClientBgHandle {
+    fn wait(&mut self) -> Result<()> {
+        match self {
+            Self::Pid(pid) => {
+                maelstrom_linux::waitpid(*pid).map_err(|e| anyhow!("waitpid failed: {e}"))?;
+            }
+            Self::Thread(handle) => print_error("process", handle.take().unwrap().join().unwrap()),
         }
-    };
+        Ok(())
+    }
+}
 
-    let mut buf = [0; 1];
-    child.stdout.take().unwrap().read_exact(&mut buf)?;
-    Ok(child)
+pub struct ClientBgProcess {
+    handle: ClientBgHandle,
+    sock: Option<UnixStream>,
+}
+
+impl ClientBgProcess {
+    pub fn new_from_fork() -> Result<Self> {
+        let (sock1, sock2) = UnixStream::pair()?;
+        if let Some(pid) = maelstrom_linux::fork().map_err(|e| anyhow!("fork failed: {e}"))? {
+            Ok(Self {
+                handle: ClientBgHandle::Pid(pid),
+                sock: Some(sock1),
+            })
+        } else {
+            let _ = maelstrom_client_process::run_process_client(sock2);
+            std::process::exit(0)
+        }
+    }
+
+    pub fn new_from_thread() -> Result<Self> {
+        let (sock1, sock2) = UnixStream::pair()?;
+        let handle = thread::spawn(move || maelstrom_client_process::run_process_client(sock1));
+        Ok(Self {
+            handle: ClientBgHandle::Thread(Some(handle)),
+            sock: Some(sock2),
+        })
+    }
+
+    fn take_socket(&mut self) -> UnixStream {
+        self.sock.take().unwrap()
+    }
+
+    fn wait(&mut self) -> Result<()> {
+        self.handle.wait()
+    }
 }
 
 impl Drop for Client {
     fn drop(&mut self) {
         drop(self.requester.take());
-        let dispatcher_errored = print_error(
+        print_error(
             "dispatcher",
             self.dispatcher_handle.take().unwrap().join().unwrap(),
         );
-        let mut process_stderr = self.process_handle.stderr.take().unwrap();
         self.process_handle.wait().unwrap();
-
-        if dispatcher_errored {
-            io::copy(&mut process_stderr, &mut io::stderr()).unwrap();
-        }
     }
 }
 
 pub struct Client {
     requester: Option<RequestSender>,
-    process_handle: process::Child,
+    process_handle: ClientBgProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
 }
 
 impl Client {
     pub fn new(
+        mut process_handle: ClientBgProcess,
         driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
         let (send, recv) = channel();
-        let process_handle = spawn_process()?;
 
-        let sock = maelstrom_client_base::connect(process_handle.id())?;
+        let sock = process_handle.take_socket();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
         let s = Self {
             requester: Some(send),

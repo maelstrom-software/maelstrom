@@ -14,7 +14,7 @@ use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Package
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
-use maelstrom_client::{spec::ImageConfig, Client, ClientDriverMode};
+use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess, ClientDriverMode};
 use maelstrom_util::{config::BrokerAddr, process::ExitCode};
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
@@ -474,6 +474,7 @@ pub struct MainAppDeps<StdErrT> {
 impl<StdErrT> MainAppDeps<StdErrT> {
     /// Creates a new `MainAppDeps`
     ///
+    /// `bg_proc`: handle to background client process
     /// `cargo`: the command to run when invoking cargo
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
@@ -486,6 +487,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        bg_proc: ClientBgProcess,
         cargo: String,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
@@ -499,6 +501,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     ) -> Result<Self> {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(
+            bg_proc,
             driver_mode,
             broker_addr,
             workspace_root,

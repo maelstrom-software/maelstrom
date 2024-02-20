@@ -6,7 +6,7 @@ use maelstrom_base::{
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
-    Client, ClientDriverMode,
+    Client, ClientBgProcess, ClientDriverMode,
 };
 use maelstrom_test::utf8_path_buf;
 use maelstrom_util::fs::Fs;
@@ -23,6 +23,7 @@ fn basic_job_test(
     add_artifacts: impl FnOnce(&mut Client, &Path) -> NonEmpty<(Sha256Digest, ArtifactType)>,
     verify_artifacts: impl FnOnce(&Path, &NonEmpty<(Sha256Digest, ArtifactType)>),
 ) {
+    let bg_proc = ClientBgProcess::new_from_thread().unwrap();
     let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
     let cache_dir = tmp_dir.path().join("cache");
@@ -49,6 +50,7 @@ fn basic_job_test(
     };
     let mut broker = FakeBroker::new(state);
     let mut client = Client::new(
+        bg_proc,
         ClientDriverMode::SingleThreaded,
         broker.address().clone(),
         &artifact_dir,

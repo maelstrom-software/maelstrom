@@ -1,6 +1,8 @@
 mod rpc;
 mod test;
 
+pub use rpc::run_process_client;
+
 use anyhow::{anyhow, Context as _, Result};
 use chrono::{DateTime, Utc};
 use itertools::Itertools as _;
@@ -752,5 +754,5 @@ impl Client {
 pub fn main() -> Result<()> {
     let listener = maelstrom_client_base::listen(std::process::id())?;
     println!("started");
-    rpc::run_process_client(listener.accept()?.0)
+    run_process_client(listener.accept()?.0)
 }
