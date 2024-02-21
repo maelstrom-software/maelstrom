@@ -151,6 +151,8 @@ pub fn main() -> Result<ExitCode> {
 
     let cargo_metadata = Command::new("cargo")
         .args(["metadata", "--format-version=1"])
+        .args(cli_options.cargo_feature_selection_options.iter())
+        .args(cli_options.cargo_manifest_options.iter())
         .output()
         .context("getting cargo metadata")?;
     let cargo_metadata: CargoMetadata =
