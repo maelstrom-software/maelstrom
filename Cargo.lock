@@ -2755,26 +2755,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "maelstrom-client-cli"
-version = "0.6.0-dev"
-dependencies = [
- "anyhow",
- "assert_matches",
- "clap",
- "enumset",
- "figment",
- "indicatif",
- "maelstrom-base",
- "maelstrom-client",
- "maelstrom-test",
- "maelstrom-util",
- "serde",
- "serde_json",
- "serde_with",
- "xdg",
-]
-
-[[package]]
 name = "maelstrom-client-process"
 version = "0.6.0-dev"
 dependencies = [
@@ -2847,6 +2827,26 @@ name = "maelstrom-plot"
 version = "0.6.0-dev"
 dependencies = [
  "egui",
+]
+
+[[package]]
+name = "maelstrom-run"
+version = "0.6.0-dev"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "clap",
+ "enumset",
+ "figment",
+ "indicatif",
+ "maelstrom-base",
+ "maelstrom-client",
+ "maelstrom-test",
+ "maelstrom-util",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "xdg",
 ]
 
 [[package]]

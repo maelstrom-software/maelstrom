@@ -1,6 +1,6 @@
-# Maelstrom Client CLI
+# Maelstrom Run
 
-This CLI can be used to submit arbitrary jobs to a Maelstrom cluster.
+This program can be used to submit arbitrary jobs to a Maelstrom cluster.
 
 See the [Maelstrom book](https://maelstrom-software.github.io/maelstrom/) for
 more information on how to use the program.

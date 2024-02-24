@@ -13,7 +13,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
-use maelstrom_client_cli::spec::job_spec_iter_from_reader;
+use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::BrokerAddr,
     process::{ExitCode, ExitCodeAccumulator},
@@ -28,12 +28,12 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-/// The maelstrom client. This process sends jobs to the broker to be executed.
+/// The maelstrom run client. This process sends jobs to the broker to be executed.
 #[derive(Parser)]
 #[command(
     after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
 
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_CLIENT_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
+The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_RUN_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
 
 All values except for 'broker' have reasonable defaults.
 "#
@@ -47,7 +47,7 @@ struct CliOptions {
         long,
         short = 'c',
         value_name="PATH",
-        default_value = PathBuf::from(".config/maelstrom-client-cli.toml").into_os_string()
+        default_value = PathBuf::from(".config/maelstrom-run.toml").into_os_string()
     )]
     config_file: PathBuf,
 
