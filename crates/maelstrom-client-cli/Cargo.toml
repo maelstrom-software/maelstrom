@@ -14,7 +14,6 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-directories.workspace = true
 enumset.workspace = true
 figment.workspace = true
 indicatif.workspace = true
@@ -24,6 +23,7 @@ maelstrom-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
+xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

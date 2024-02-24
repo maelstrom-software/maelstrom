@@ -26,6 +26,7 @@ use std::{
     path::PathBuf,
     sync::Arc,
 };
+use xdg::BaseDirectories;
 
 /// The maelstrom client. This process sends jobs to the broker to be executed.
 #[derive(Parser)]
@@ -141,10 +142,9 @@ fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccum
 }
 
 fn cache_dir() -> PathBuf {
-    directories::BaseDirs::new()
+    BaseDirectories::with_prefix("maelstrom/client")
         .expect("failed to find cache dir")
-        .cache_dir()
-        .join("maelstrom")
+        .get_cache_file("")
 }
 
 fn main() -> Result<ExitCode> {

@@ -17,6 +17,7 @@ use std::{
 };
 use tokio::{io::AsyncWrite, task};
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
+use xdg::BaseDirectories;
 
 #[derive(Serialize, Deserialize, PartialEq, Eq, Default, Debug, Clone)]
 pub struct Config {
@@ -472,11 +473,9 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     pub fn new(project_dir: impl AsRef<Path>) -> Result<Self> {
         Self::new_with(
             project_dir,
-            directories::BaseDirs::new()
+            BaseDirectories::with_prefix("maelstrom/container")
                 .expect("failed to find cache dir")
-                .cache_dir()
-                .join("maelstrom")
-                .join("containers"),
+                .get_cache_file(""),
             DefaultContainerImageDepotOps::new(),
         )
     }

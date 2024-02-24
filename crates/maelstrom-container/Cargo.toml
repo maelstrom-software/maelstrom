@@ -13,7 +13,6 @@ version.workspace = true
 anyhow.workspace = true
 async-compression.workspace = true
 clap.workspace = true
-directories.workspace = true
 futures.workspace = true
 indicatif.workspace = true
 maelstrom-util.workspace = true
@@ -26,6 +25,7 @@ tempfile.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
 toml.workspace = true
+xdg.workspace = true
 
 [dev-dependencies]
 maplit.workspace = true
