@@ -32,7 +32,7 @@ c_str_macro = "1.0.3"
 camino = { version = "1.1.6", features = ["serde1"] }
 cargo_metadata = "0.18"
 chrono = "0.4"
-clap = { version = "4.2.7", features = ["derive", "string", "wrap_help"] }
+clap = { version = "4.2.7", features = ["cargo", "derive", "string", "wrap_help"] }
 colored = "2.0.4"
 colored-diff = "0.2.3"
 combine = "4"
@@ -69,6 +69,7 @@ maelstrom-broker = { version = "0.6.0-dev", path = "crates/maelstrom-broker" }
 maelstrom-client = { version = "0.6.0-dev", path = "crates/maelstrom-client" }
 maelstrom-client-base = { version = "0.6.0-dev", path = "crates/maelstrom-client-base" }
 maelstrom-client-process = { version = "0.6.0-dev", path = "crates/maelstrom-client-process" }
+maelstrom-config = { version = "0.6.0-dev", path = "crates/maelstrom-config" }
 maelstrom-container = { version = "0.6.0-dev", path = "crates/maelstrom-container" }
 maelstrom-linux = { version = "0.6.0-dev", path = "crates/maelstrom-linux" }
 maelstrom-macro = { version = "0.6.0-dev", path = "crates/maelstrom-macro" }

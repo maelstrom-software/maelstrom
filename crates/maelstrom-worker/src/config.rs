@@ -1,12 +1,19 @@
+use anyhow::{Context as _, Result};
 use bytesize::ByteSize;
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use derive_more::From;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
-use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
+use serde::Deserialize;
 use std::{
-    fmt::{self, Debug, Formatter},
+    env, error,
+    fmt::{self, Debug, Display, Formatter},
+    fs,
+    num::ParseIntError,
     path::PathBuf,
+    process, result,
+    str::FromStr,
 };
+use xdg::BaseDirectories;
 
 #[derive(Deserialize)]
 #[serde(try_from = "u16")]
@@ -37,10 +44,35 @@ impl TryFrom<u16> for Slots {
 }
 
 impl Debug for Slots {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0.fmt(f)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
     }
 }
+
+impl FromStr for Slots {
+    type Err = SlotsFromStrError;
+    fn from_str(slots: &str) -> result::Result<Self, Self::Err> {
+        let slots = u16::from_str(slots).map_err(SlotsFromStrError::Parse)?;
+        Self::try_from(slots).map_err(SlotsFromStrError::Bounds)
+    }
+}
+
+#[derive(Debug)]
+pub enum SlotsFromStrError {
+    Parse(ParseIntError),
+    Bounds(String),
+}
+
+impl Display for SlotsFromStrError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Self::Parse(inner) => Display::fmt(inner, f),
+            Self::Bounds(inner) => write!(f, "{inner}"),
+        }
+    }
+}
+
+impl error::Error for SlotsFromStrError {}
 
 #[derive(Clone, Copy, Deserialize, From)]
 #[serde(from = "u64")]
@@ -54,12 +86,33 @@ impl InlineLimit {
 
 impl Debug for InlineLimit {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        ByteSize::b(self.0).fmt(f)
+        Debug::fmt(&ByteSize::b(self.0), f)
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+impl FromStr for InlineLimit {
+    type Err = InlineLimitFromStrError;
+    fn from_str(slots: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(
+            ByteSize::from_str(slots)
+                .map_err(InlineLimitFromStrError)?
+                .as_u64(),
+        ))
+    }
+}
+
+#[derive(Debug)]
+pub struct InlineLimitFromStrError(String);
+
+impl Display for InlineLimitFromStrError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl error::Error for InlineLimitFromStrError {}
+
+#[derive(Debug)]
 pub struct Config {
     /// Socket address of broker.
     pub broker: BrokerAddr,
@@ -81,26 +134,136 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-#[skip_serializing_none]
-#[derive(Serialize)]
-pub struct ConfigOptions {
-    pub broker: Option<String>,
-    pub slots: Option<u16>,
-    pub cache_root: Option<PathBuf>,
-    pub cache_bytes_used_target: Option<u64>,
-    pub inline_limit: Option<u64>,
-    pub log_level: Option<LogLevel>,
-}
+impl Config {
+    pub fn add_command_line_options(command: Command) -> Command {
+        command
+        .styles(maelstrom_util::clap::styles())
+        .after_help(
+            "Configuration values can be specified in three ways: fields in a config file, \
+            environment variables, or command-line options. Command-line options have the \
+            highest precendence, followed by environment variables.\n\
+            \n\
+            The configuration value 'config_value' would be set via the '--config-value' \
+            command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
+            and the 'config_value' key in a configuration file.\n\
+            \n\
+            All values except for 'broker' have reasonable defaults.")
+        .arg(
+            Arg::new("config-file")
+                .long("config-file")
+                .short('c')
+                .value_name("PATH")
+                .action(ArgAction::Set)
+                .help(
+                    "Configuration file. Values set in the configuration file will be overridden by \
+                    values set through environment variables and values set on the command line"
+                )
+        )
+        .arg(
+            Arg::new("print-config")
+                .long("print-config")
+                .short('P')
+                .action(ArgAction::SetTrue)
+                .help("Print configuration and exit"),
+        )
+        .arg(
+            Arg::new("broker")
+                .long("broker")
+                .short('b')
+                .value_name("SOCKADDR")
+                .action(ArgAction::Set)
+                .help(r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#)
+        )
+        .arg(
+            Arg::new("slots")
+                .long("slots")
+                .short('s')
+                .value_name("N")
+                .action(ArgAction::Set)
+                .help("The number of job slots available. Most jobs will take one job slot")
+        )
+        .arg(
+            Arg::new("cache-root")
+                .long("cache-root")
+                .short('r')
+                .value_name("PATH")
+                .action(ArgAction::Set)
+                .help("The directory to use for the cache")
+        )
+        .arg(
+            Arg::new("cache-bytes-used-target")
+                .long("cache-bytes-used-target")
+                .short('B')
+                .value_name("BYTES")
+                .action(ArgAction::Set)
+                .help(
+                    "The target amount of disk space to use for the cache. \
+                    This bound won't be followed strictly, so it's best to be conservative"
+                )
+        )
+        .arg(
+            Arg::new("inline-limit")
+                .long("inline-limit")
+                .short('i')
+                .value_name("BYTES")
+                .action(ArgAction::Set)
+                .help("The maximum amount of bytes to return inline for captured stdout and stderr")
+        )
+        .arg(
+            Arg::new("log-level")
+                .long("log-level")
+                .short('l')
+                .value_name("LEVEL")
+                .action(ArgAction::Set)
+                .help("Minimum log level to output")
+        )
+    }
 
-impl Default for ConfigOptions {
-    fn default() -> Self {
-        ConfigOptions {
-            broker: None,
-            slots: Some(num_cpus::get().try_into().unwrap()),
-            cache_root: Some(".cache/maelstrom-worker".into()),
-            cache_bytes_used_target: Some(1_000_000_000),
-            inline_limit: Some(1_000_000),
-            log_level: Some(LogLevel::Info),
+    pub fn new(mut args: ArgMatches) -> Result<Self> {
+        let env = env::vars().filter(|(key, _)| key.starts_with("MAELSTROM_WORKER_"));
+
+        let config_files = match args.remove_one::<String>("config-file").as_deref() {
+            Some("-") => vec![],
+            Some(config_file) => vec![PathBuf::from(config_file)],
+            None => BaseDirectories::with_prefix("maelstrom/worker")
+                .context("searching for config files")?
+                .find_config_files("config.toml")
+                .rev()
+                .collect(),
+        };
+        let mut files = vec![];
+        for config_file in config_files {
+            let contents = fs::read_to_string(&config_file).with_context(|| {
+                format!("reading config file `{}`", config_file.to_string_lossy())
+            })?;
+            files.push((config_file.clone(), contents));
         }
+
+        let print_config = args.remove_one::<bool>("print-config").unwrap();
+
+        let config = maelstrom_config::Config::new(args, "MAELSTROM_WORKER_", env, files)
+            .context("loading configuration from environment variables and config files")?;
+
+        let config = Self {
+            broker: config.get("broker")?,
+            slots: config.get_or_else("slots", || {
+                Slots::try_from(u16::try_from(num_cpus::get()).unwrap()).unwrap()
+            })?,
+            cache_root: config.get_or_else("cache-root", || {
+                PathBuf::from(".cache/maelstrom-worker").into()
+            })?,
+            cache_bytes_used_target: config.get_or_else("cache-bytes-used-target", || {
+                CacheBytesUsedTarget::from(1_000_000_000)
+            })?,
+            inline_limit: config.get_or_else("inline-limit", || InlineLimit::from(1_000_000))?,
+            log_level: config.get_or("log-level", LogLevel::Info)?,
+        };
+
+        if print_config {
+            println!("{config:#?}");
+            process::exit(0);
+        }
+
+        Ok(config)
     }
 }

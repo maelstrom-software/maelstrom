@@ -2789,6 +2789,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-config"
+version = "0.6.0-dev"
+dependencies = [
+ "anyhow",
+ "clap",
+ "indoc",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "maelstrom-container"
 version = "0.6.0-dev"
 dependencies = [
@@ -2894,6 +2905,7 @@ dependencies = [
  "serde",
  "sha2",
  "slog",
+ "strum",
  "tempfile",
  "tokio",
  "walkdir",
@@ -2936,11 +2948,11 @@ dependencies = [
  "colored-diff",
  "countio",
  "derive_more",
- "figment",
  "futures",
  "gethostname 0.4.3",
  "itertools",
  "maelstrom-base",
+ "maelstrom-config",
  "maelstrom-linux",
  "maelstrom-test",
  "maelstrom-util",
@@ -2950,7 +2962,6 @@ dependencies = [
  "num_cpus",
  "rand",
  "serde",
- "serde_with",
  "serial_test",
  "sha2",
  "slog",
@@ -2960,6 +2971,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tuple",
+ "xdg",
 ]
 
 [[package]]

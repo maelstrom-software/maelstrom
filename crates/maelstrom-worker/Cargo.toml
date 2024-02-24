@@ -1,7 +1,7 @@
 [package]
 name = "maelstrom-worker"
 categories = ["development-tools::testing", "virtualization"]
-description = "Maelstrom worker binary."
+description = "The maelstrom worker. This process executes jobs as directed by the broker."
 keywords = ["cluster", "containers"]
 documentation.workspace = true
 edition.workspace = true
@@ -19,10 +19,10 @@ c_str_macro.workspace = true
 clap.workspace = true
 countio.workspace = true
 derive_more.workspace = true
-figment.workspace = true
 futures.workspace = true
 gethostname.workspace = true
 maelstrom-base.workspace = true
+maelstrom-config.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true
@@ -31,7 +31,6 @@ netlink-packet-route.workspace = true
 num_cpus.workspace = true
 rand.workspace = true
 serde.workspace = true
-serde_with.workspace = true
 sha2.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
@@ -39,6 +38,7 @@ slog.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tuple.workspace = true
+xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true

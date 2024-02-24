@@ -4,10 +4,14 @@ use derive_more::From;
 use serde::{Deserialize, Serialize};
 use slog::Level;
 use std::{
-    fmt, io,
+    error,
+    fmt::{self, Debug, Display, Formatter},
+    io,
     net::{SocketAddr, ToSocketAddrs},
     path::{Path, PathBuf},
+    str::FromStr,
 };
+use strum::EnumString;
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -28,9 +32,17 @@ impl BrokerAddr {
 }
 
 impl TryFrom<String> for BrokerAddr {
-    type Error = io::Error;
+    type Error = <Self as FromStr>::Err;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_str(value.as_str())
+    }
+}
+
+impl FromStr for BrokerAddr {
+    type Err = io::Error;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
         let addrs: Vec<SocketAddr> = value.to_socket_addrs()?.collect();
         // It's not clear how we could end up with an empty iterator. We'll assume that's
         // impossible until proven wrong.
@@ -44,15 +56,15 @@ impl From<BrokerAddr> for String {
     }
 }
 
-impl fmt::Display for BrokerAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+impl Display for BrokerAddr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
-impl fmt::Debug for BrokerAddr {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+impl Debug for BrokerAddr {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
     }
 }
 
@@ -70,9 +82,17 @@ impl CacheRoot {
     }
 }
 
-impl fmt::Debug for CacheRoot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Debug for CacheRoot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
+    }
+}
+
+impl FromStr for CacheRoot {
+    type Err = <PathBuf as FromStr>::Err;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self(PathBuf::from_str(value)?))
     }
 }
 
@@ -86,15 +106,38 @@ impl CacheBytesUsedTarget {
     }
 }
 
-impl fmt::Debug for CacheBytesUsedTarget {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        ByteSize::b(self.0).fmt(f)
+impl Debug for CacheBytesUsedTarget {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&ByteSize::b(self.0), f)
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, ValueEnum)]
+impl FromStr for CacheBytesUsedTarget {
+    type Err = CacheBytesUsedTargetFromStrError;
+    fn from_str(slots: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from(
+            ByteSize::from_str(slots)
+                .map_err(CacheBytesUsedTargetFromStrError)?
+                .as_u64(),
+        ))
+    }
+}
+
+#[derive(Debug)]
+pub struct CacheBytesUsedTargetFromStrError(String);
+
+impl Display for CacheBytesUsedTargetFromStrError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl error::Error for CacheBytesUsedTargetFromStrError {}
+
+#[derive(Clone, Copy, Debug, Deserialize, EnumString, Serialize, ValueEnum)]
 #[clap(rename_all = "kebab_case")]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum LogLevel {
     Error,
     Warning,

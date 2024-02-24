@@ -1,6 +1,6 @@
 [package]
 name = "maelstrom-container"
-description = "Library of downloading and storing OCI container images."
+description = "Library for downloading and storing OCI container images."
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
