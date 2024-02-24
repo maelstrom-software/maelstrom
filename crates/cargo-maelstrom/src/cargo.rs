@@ -2,7 +2,6 @@ use anyhow::{Error, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
-use clap::Args;
 use regex::Regex;
 use std::{
     ffi::OsString,
@@ -100,19 +99,16 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
         .collect())
 }
 
-#[derive(Args, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct FeatureSelectionOptions {
     /// Space or comma separated list of features to activate
-    #[arg(long, short = 'F', value_name = "FEATURES")]
-    features: Option<Vec<String>>,
+    pub features: Option<String>,
 
     /// Activate all available features
-    #[arg(long)]
-    all_features: bool,
+    pub all_features: bool,
 
     /// Do not activate the `default` feature
-    #[arg(long)]
-    no_default_features: bool,
+    pub no_default_features: bool,
 }
 
 impl FeatureSelectionOptions {
@@ -121,36 +117,28 @@ impl FeatureSelectionOptions {
             .chain(
                 self.features
                     .as_ref()
-                    .map(|v| format!("--features={}", v.join(","))),
+                    .map(|features| format!("--features={features}")),
             )
             .chain(self.all_features.then_some("--all-features".into()))
             .chain(self.all_features.then_some("--no-default-features".into()))
     }
 }
 
-#[derive(Args, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct CompilationOptions {
-    /// Build artifacts in release mode, with optimizations
-    #[arg(long, short)]
-    pub release: bool,
-
     /// Build artifacts with the specified profile
-    #[arg(long, value_name = "PROFILE-NAME")]
     pub profile: Option<String>,
 
     /// Build for the target triple
-    #[arg(long, value_name = "TRIPLE")]
     pub target: Option<String>,
 
     /// Directory for all generated artifacts
-    #[arg(long, value_name = "DIRECTORY")]
     pub target_dir: Option<PathBuf>,
 }
 
 impl CompilationOptions {
     pub fn iter(&self) -> impl Iterator<Item = OsString> {
         iter::empty()
-            .chain(self.release.then_some("--release".into()))
             .chain(
                 self.profile
                     .as_ref()
@@ -171,19 +159,19 @@ impl CompilationOptions {
     }
 }
 
-#[derive(Args, Debug, Default)]
+#[derive(Debug, Default)]
 pub struct ManifestOptions {
     /// Path to Cargo.toml
-    #[arg(long, value_name = "PATH")]
     pub manifest_path: Option<PathBuf>,
 
     /// Require Cargo.lock and cache are up to date
-    #[arg(long)]
     pub frozen: bool,
 
     /// Require Cargo.lock is up to date
-    #[arg(long)]
     pub locked: bool,
+
+    /// Run without accessing the network
+    pub offline: bool,
 }
 
 impl ManifestOptions {
@@ -216,7 +204,7 @@ mod tests {
     #[test]
     fn all_feature_selection_options_iter() {
         let options = FeatureSelectionOptions {
-            features: Some(vec!["feature1".into(), "feature2".into()]),
+            features: Some("feature1,feature2".into()),
             all_features: true,
             no_default_features: true,
         };
@@ -241,7 +229,6 @@ mod tests {
     #[test]
     fn all_compilation_options_iter() {
         let options = CompilationOptions {
-            release: true,
             profile: Some("profile".into()),
             target: Some("target".into()),
             target_dir: Some("target_dir".into()),
@@ -249,7 +236,6 @@ mod tests {
         assert_eq!(
             Vec::<OsString>::from_iter(options.iter()),
             Vec::<OsString>::from_iter([
-                "--release".into(),
                 "--profile=profile".into(),
                 "--target=target".into(),
                 "--target-dir".into(),
@@ -272,6 +258,7 @@ mod tests {
             manifest_path: Some("manifest_path".into()),
             frozen: true,
             locked: true,
+            offline: true,
         };
         assert_eq!(
             Vec::<OsString>::from_iter(options.iter()),
@@ -280,6 +267,7 @@ mod tests {
                 "manifest_path".into(),
                 "--frozen".into(),
                 "--locked".into(),
+                "--offline".into(),
             ]),
         );
     }

@@ -1,9 +1,10 @@
-use anyhow::{bail, Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use clap::{
     parser::{MatchesError, ValueSource},
     ArgMatches,
 };
 use serde::Deserialize;
+use std::result;
 use std::{collections::HashMap, path::PathBuf, str::FromStr};
 use toml::Table;
 
@@ -12,6 +13,12 @@ pub struct Config {
     env_prefix: &'static str,
     env: HashMap<String, String>,
     files: Vec<(PathBuf, Table)>,
+}
+
+struct KeyNames {
+    key: String,
+    env_key: String,
+    toml_key: String,
 }
 
 impl Config {
@@ -39,11 +46,10 @@ impl Config {
         })
     }
 
-    pub fn get_internal<T, F>(&self, key: &str, default: Option<F>) -> Result<T>
+    fn get_internal<T>(&self, key: &str) -> Result<result::Result<T, KeyNames>>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-        F: FnOnce() -> T,
     {
         let mut args_result = self.args.try_get_one::<String>(key);
         if let Err(MatchesError::UnknownArgument { .. }) = args_result {
@@ -58,7 +64,7 @@ impl Config {
             .transpose()
             .with_context(|| format!("error parsing command-line option `--{key}`"))?;
         if let Some(value) = value {
-            return Ok(value);
+            return Ok(Ok(value));
         }
 
         let env_key: String = self
@@ -78,7 +84,7 @@ impl Config {
             .transpose()
             .with_context(|| format!("error parsing environment variable `{env_key}`"))?;
         if let Some(value) = value {
-            return Ok(value);
+            return Ok(Ok(value));
         }
 
         let toml_key: String = key
@@ -90,27 +96,22 @@ impl Config {
             .collect();
         for (path, table) in &self.files {
             if let Some(value) = table.get(&toml_key) {
-                return T::deserialize(value.clone()).with_context(|| {
-                    format!(
-                        "error parsing value for key `{toml_key}` in config file `{}`",
-                        path.to_string_lossy()
-                    )
-                });
+                return T::deserialize(value.clone())
+                    .map(Result::Ok)
+                    .with_context(|| {
+                        format!(
+                            "error parsing value for key `{toml_key}` in config file `{}`",
+                            path.to_string_lossy()
+                        )
+                    });
             }
         }
 
-        if let Some(default) = default {
-            Ok(default())
-        } else {
-            bail!(
-                "config value `{key}` must be set via `--{key}` command-line option, \
-                `{env_key}` environment variable, or `{toml_key}` key in config file"
-            )
-        }
-    }
-
-    fn noop<T>() -> T {
-        panic!()
+        Ok(Err(KeyNames {
+            key: key.to_string(),
+            env_key,
+            toml_key,
+        }))
     }
 
     pub fn get<T>(&self, key: &str) -> Result<T>
@@ -118,9 +119,18 @@ impl Config {
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let mut default = Some(|| Self::noop::<T>());
-        default.take();
-        self.get_internal(key, default)
+        match self.get_internal(key) {
+            Err(err) => Err(err),
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(KeyNames {
+                key,
+                env_key,
+                toml_key,
+            })) => Err(anyhow!(
+                "config value `{key}` must be set via `--{key}` command-line option, \
+                    `{env_key}` environment variable, or `{toml_key}` key in config file"
+            )),
+        }
     }
 
     pub fn get_or<T>(&self, key: &str, default: T) -> Result<T>
@@ -128,16 +138,25 @@ impl Config {
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        self.get_internal(key, Some(|| default))
+        self.get_internal(key).map(|v| v.unwrap_or(default))
     }
 
-    pub fn get_or_else<T, F>(&self, key: &str, default: F) -> Result<T>
+    pub fn get_or_else<T, F>(&self, key: &str, mut default: F) -> Result<T>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
         F: FnMut() -> T,
     {
-        self.get_internal(key, Some(default))
+        self.get_internal(key)
+            .map(|v| v.unwrap_or_else(|_| default()))
+    }
+
+    pub fn get_option<T>(&self, key: &str) -> Result<Option<T>>
+    where
+        T: FromStr + for<'a> Deserialize<'a>,
+        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
+    {
+        self.get_internal(key).map(Result::ok)
     }
 
     pub fn get_flag<T>(&self, key: &str) -> Result<Option<T>>
@@ -172,7 +191,8 @@ impl Config {
             .get(&env_key)
             .map(String::as_str)
             .map(bool::from_str)
-            .transpose()?
+            .transpose()
+            .with_context(|| format!("error parsing environment variable `{env_key}`"))?
             .map(T::from);
 
         if value.is_some() {
@@ -186,9 +206,16 @@ impl Config {
                 c => c,
             })
             .collect();
-        for (_, table) in &self.files {
+        for (path, table) in &self.files {
             if let Some(value) = table.get(&toml_key) {
-                return Ok(Some(T::deserialize(value.clone())).transpose()?);
+                return Some(T::deserialize(value.clone()))
+                    .transpose()
+                    .with_context(|| {
+                        format!(
+                            "error parsing value for key `{toml_key}` in config file `{}`",
+                            path.to_string_lossy(),
+                        )
+                    });
             }
         }
 
