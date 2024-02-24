@@ -7,7 +7,7 @@ use figment::{
 };
 use maelstrom_broker::config::{Config, ConfigOptions};
 use maelstrom_util::config::LogLevel;
-use slog::{info, o, Drain, Level, LevelFilter, Logger};
+use slog::{info, o, Drain, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{
@@ -115,13 +115,7 @@ fn main() -> Result<()> {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
-    let level = match config.log_level {
-        LogLevel::Error => Level::Error,
-        LogLevel::Warning => Level::Warning,
-        LogLevel::Info => Level::Info,
-        LogLevel::Debug => Level::Debug,
-    };
-    let drain = LevelFilter::new(drain, level).fuse();
+    let drain = LevelFilter::new(drain, config.log_level.as_slog_level()).fuse();
     let log = Logger::root(drain, o!());
     Runtime::new()
         .context("starting tokio runtime")?

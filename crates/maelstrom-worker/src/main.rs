@@ -10,7 +10,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{config::LogLevel, fs::Fs};
 use maelstrom_worker::config::{Config, ConfigOptions};
-use slog::{o, Drain, Level, LevelFilter, Logger};
+use slog::{o, Drain, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{path::PathBuf, process, slice, time::Duration};
@@ -174,13 +174,7 @@ fn main() -> Result<()> {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
-    let level = match config.log_level {
-        LogLevel::Error => Level::Error,
-        LogLevel::Warning => Level::Warning,
-        LogLevel::Info => Level::Info,
-        LogLevel::Debug => Level::Debug,
-    };
-    let drain = LevelFilter::new(drain, level).fuse();
+    let drain = LevelFilter::new(drain, config.log_level.as_slog_level()).fuse();
     let log = Logger::root(drain, o!());
     Runtime::new()
         .context("starting tokio runtime")?

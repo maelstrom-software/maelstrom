@@ -2,6 +2,7 @@ use bytesize::ByteSize;
 use clap::ValueEnum;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
+use slog::Level;
 use std::{
     fmt, io,
     net::{SocketAddr, ToSocketAddrs},
@@ -99,4 +100,15 @@ pub enum LogLevel {
     Warning,
     Info,
     Debug,
+}
+
+impl LogLevel {
+    pub fn as_slog_level(&self) -> Level {
+        match self {
+            LogLevel::Error => slog::Level::Error,
+            LogLevel::Warning => slog::Level::Warning,
+            LogLevel::Info => slog::Level::Info,
+            LogLevel::Debug => slog::Level::Debug,
+        }
+    }
 }

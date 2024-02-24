@@ -2904,6 +2904,7 @@ dependencies = [
  "rand",
  "serde",
  "sha2",
+ "slog",
  "tempfile",
  "tokio",
  "walkdir",

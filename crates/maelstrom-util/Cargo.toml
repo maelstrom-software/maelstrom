@@ -21,6 +21,7 @@ globset.workspace = true
 maelstrom-base.workspace = true
 serde.workspace = true
 sha2.workspace = true
+slog.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 walkdir.workspace = true
 
