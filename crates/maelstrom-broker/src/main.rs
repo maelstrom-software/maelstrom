@@ -1,117 +1,18 @@
 use anyhow::{Context, Result};
-use clap::Parser;
-use figment::{
-    error::Kind,
-    providers::{Env, Format, Serialized, Toml},
-    Figment,
-};
-use maelstrom_broker::config::{Config, ConfigOptions};
-use maelstrom_util::config::LogLevel;
+use clap::command;
+use maelstrom_broker::config::Config;
 use slog::{info, o, Drain, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},
-    path::PathBuf,
     process,
 };
 use tokio::{net::TcpListener, runtime::Runtime};
 
-/// The maelstrom broker. This process coordinates between clients and workers.
-#[derive(Parser)]
-#[command(
-    after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
-
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_BROKER_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
-"#
-)]
-#[command(version)]
-#[command(styles = maelstrom_util::clap::styles())]
-struct CliOptions {
-    /// Configuration file. Values set in the configuration file will be overridden by values set
-    /// through environment variables and values set on the command line.
-    #[arg(
-        long,
-        short,
-        value_name = "PATH",
-        default_value = PathBuf::from(".config/maelstrom-broker.toml").into_os_string()
-    )]
-    config_file: PathBuf,
-
-    /// Print configuration and exit.
-    #[arg(long, short = 'P')]
-    print_config: bool,
-
-    /// The port the broker listens on for connections from workers and clients.
-    #[arg(long, short, value_name = "PORT")]
-    port: Option<u16>,
-
-    /// The port the HTTP UI is served on.
-    #[arg(long, short = 'H', value_name = "PORT")]
-    http_port: Option<u16>,
-
-    /// The directory to use for the cache.
-    #[arg(long, short = 'r', value_name = "PATH")]
-    cache_root: Option<PathBuf>,
-
-    /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative.
-    #[arg(long, short = 'B', value_name = "BYTES")]
-    cache_bytes_used_target: Option<u64>,
-
-    /// Minimum log level to output.
-    #[arg(long, short, value_name = "LEVEL", value_enum)]
-    log_level: Option<LogLevel>,
-}
-
-impl Default for CliOptions {
-    fn default() -> Self {
-        CliOptions {
-            config_file: "".into(),
-            print_config: false,
-            port: Some(0),
-            http_port: Some(0),
-            cache_root: Some(".cache/maelstrom-broker".into()),
-            cache_bytes_used_target: Some(1_000_000_000),
-            log_level: Some(LogLevel::Info),
-        }
-    }
-}
-
-impl CliOptions {
-    fn to_config_options(&self) -> ConfigOptions {
-        ConfigOptions {
-            port: self.port,
-            http_port: self.http_port,
-            cache_root: self.cache_root.clone(),
-            cache_bytes_used_target: self.cache_bytes_used_target,
-            log_level: self.log_level,
-        }
-    }
-}
-
 fn main() -> Result<()> {
-    let cli_options = CliOptions::parse();
-    let print_config = cli_options.print_config;
-    let config: Config = Figment::new()
-        .merge(Serialized::defaults(ConfigOptions::default()))
-        .merge(Toml::file(&cli_options.config_file))
-        .merge(Env::prefixed("MAELSTROM_BROKER_"))
-        .merge(Serialized::globals(cli_options.to_config_options()))
-        .extract()
-        .map_err(|mut e| {
-            if let Kind::MissingField(field) = &e.kind {
-                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
-                e
-            } else {
-                e
-            }
-        })
-        .context("reading configuration")?;
-    if print_config {
-        println!("{config:#?}");
-        return Ok(());
-    }
+    let args = Config::add_command_line_options(command!()).get_matches();
+    let config = Config::new(args)?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
@@ -154,10 +55,4 @@ fn main() -> Result<()> {
             info!(log, "exiting");
             Ok(())
         })
-}
-
-#[test]
-fn test_cli() {
-    use clap::CommandFactory;
-    CliOptions::command().debug_assert()
 }
