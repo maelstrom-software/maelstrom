@@ -526,6 +526,7 @@ pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
     queuing_deps: JobQueuingDeps<StdErrT>,
     cache_dir: PathBuf,
+    logger: Logger,
 }
 
 impl<StdErrT> MainAppDeps<StdErrT> {
@@ -558,7 +559,17 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
+        logger: Logger,
     ) -> Result<Self> {
+        let log = logger.build_with_term_output();
+        slog::debug!(
+            log, "creating app dependencies";
+            "include_filter" => ?include_filter,
+            "exclude_filter" => ?exclude_filter,
+            "list_action" => ?list_action,
+            "broker_addr" => ?broker_addr
+        );
+
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Mutex::new(Client::new(
             bg_proc,
@@ -573,11 +584,16 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
-        let selected_packages = workspace_packages
+        let selected_packages: BTreeMap<_, _> = workspace_packages
             .iter()
             .filter(|p| filter_package(p, &filter))
             .map(|&p| (p.id.clone(), p.clone()))
             .collect();
+
+        slog::debug!(
+            log, "filtered packages";
+            "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
+        );
 
         Ok(Self {
             client,
@@ -595,6 +611,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 manifest_options,
             ),
             cache_dir,
+            logger,
         })
     }
 }
@@ -757,7 +774,20 @@ pub enum Logger {
 }
 
 impl Logger {
-    fn build(self, prog: impl ProgressIndicator) -> slog::Logger {
+    fn build_with_term_output(&self) -> slog::Logger {
+        match self {
+            Self::DefaultLogger(level) => {
+                let decorator = slog_term::TermDecorator::new().build();
+                let drain = slog_term::FullFormat::new(decorator).build().fuse();
+                let drain = slog_async::Async::new(drain).build().fuse();
+                let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
+                slog::Logger::root(drain, slog::o!())
+            }
+            Self::GivenLogger(logger) => logger.clone(),
+        }
+    }
+
+    fn build_with_progress_output(&self, prog: impl ProgressIndicator) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
                 let decorator = slog_term::PlainDecorator::new(
@@ -768,7 +798,7 @@ impl Logger {
                 let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
                 slog::Logger::root(drain, slog::o!())
             }
-            Self::GivenLogger(logger) => logger,
+            Self::GivenLogger(logger) => logger.clone(),
         }
     }
 }
@@ -779,7 +809,6 @@ fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
-    logger: Logger,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -793,7 +822,7 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
-    let log = logger.build(prog.clone());
+    let log = deps.logger.build_with_progress_output(prog.clone());
     slog::debug!(log, "main app created");
 
     match deps.queuing_deps.list_action {
@@ -834,7 +863,6 @@ pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     term: TermT,
     driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
-    logger: Logger,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -849,7 +877,6 @@ where
                 term,
                 driver,
                 timeout_override,
-                logger,
             )?)
         } else {
             Ok(new_helper(
@@ -858,7 +885,6 @@ where
                 term,
                 driver,
                 timeout_override,
-                logger,
             )?)
         };
     }
@@ -870,7 +896,6 @@ where
             term,
             driver,
             timeout_override,
-            logger,
         )?),
         (true, false) => Ok(new_helper(
             deps,
@@ -878,7 +903,6 @@ where
             term,
             driver,
             timeout_override,
-            logger,
         )?),
         (false, true) => Ok(new_helper(
             deps,
@@ -886,7 +910,6 @@ where
             term,
             driver,
             timeout_override,
-            logger,
         )?),
         (false, false) => Ok(new_helper(
             deps,
@@ -894,7 +917,6 @@ where
             term,
             driver,
             timeout_override,
-            logger,
         )?),
     }
 }

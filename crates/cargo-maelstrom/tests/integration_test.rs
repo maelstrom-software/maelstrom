@@ -283,6 +283,7 @@ fn run_app(
         FeatureSelectionOptions::default(),
         CompilationOptions::default(),
         ManifestOptions::default(),
+        Logger::GivenLogger(log.clone()),
     )
     .unwrap();
     let prog_driver = TestProgressDriver::default();
@@ -293,7 +294,6 @@ fn run_app(
         term.clone(),
         prog_driver.clone(),
         None,
-        Logger::GivenLogger(log.clone()),
     )
     .unwrap();
 

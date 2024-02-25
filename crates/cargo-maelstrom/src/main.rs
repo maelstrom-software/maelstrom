@@ -247,6 +247,7 @@ pub fn main() -> Result<ExitCode> {
         cli_options.cargo_feature_selection_options,
         cli_options.cargo_compilation_options,
         cli_options.cargo_manifest_options,
+        Logger::DefaultLogger(config.log_level),
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
@@ -258,7 +259,6 @@ pub fn main() -> Result<ExitCode> {
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
             timeout_override,
-            Logger::DefaultLogger(config.log_level),
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;
