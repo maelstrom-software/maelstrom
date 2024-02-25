@@ -5,10 +5,13 @@ use std::process::Command;
 use wasm_bindgen_cli_support::Bindgen;
 
 fn sh<'a>(cmd: impl IntoIterator<Item = &'a str>, dir: impl AsRef<Path>) {
+    let path = std::env::var("PATH").unwrap();
     let cmd: Vec<&str> = cmd.into_iter().collect();
     let status = Command::new(cmd[0])
         .args(&cmd[1..])
         .current_dir(dir)
+        .env_clear()
+        .env("PATH", path)
         .status()
         .unwrap();
     assert!(status.success(), "{cmd:?} failed with status: {status:?}");

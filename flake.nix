@@ -50,7 +50,7 @@
 	  nativeBuildInputs = [
 	    pkgs.binaryen
 	    pkgs.pkg-config
-	    pkgs.rustc-wasm32.llvmPackages.lld
+            pkgs.llvmPackages.bintools
 	  ];
 
           buildInputs = [

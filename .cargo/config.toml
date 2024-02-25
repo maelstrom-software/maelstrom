@@ -3,3 +3,6 @@ xtask = "run --quiet --package xtask --"
 
 #[build]
 #rustdocflags = ["--document-private-items"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-Clink-arg=-fuse-ld=lld"]
