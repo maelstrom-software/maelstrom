@@ -36,7 +36,7 @@ fn job_spec_matcher(spec: &JobSpec) -> JobSpecMatcher {
     }
 }
 
-#[derive(Clone, Hash, PartialOrd, Ord, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialOrd, Ord, PartialEq, Eq)]
 pub struct JobSpecMatcher {
     pub binary: String,
     pub first_arg: String,
@@ -65,16 +65,18 @@ pub struct FakeBroker {
     listener: TcpListener,
     state: FakeBrokerState,
     address: BrokerAddr,
+    log: slog::Logger,
 }
 
 pub struct FakeBrokerConnection {
     messages: MessageStream,
     state: FakeBrokerState,
     pending_response: Option<(ClientJobId, FakeBrokerJobAction)>,
+    log: slog::Logger,
 }
 
 impl FakeBroker {
-    pub fn new(state: FakeBrokerState) -> Self {
+    pub fn new(state: FakeBrokerState, log: slog::Logger) -> Self {
         let listener =
             TcpListener::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, 0, 0, 0)).unwrap();
         let address = BrokerAddr::new(listener.local_addr().unwrap());
@@ -83,6 +85,7 @@ impl FakeBroker {
             listener,
             state,
             address,
+            log,
         }
     }
 
@@ -91,8 +94,10 @@ impl FakeBroker {
     }
 
     pub fn accept(&mut self) -> FakeBrokerConnection {
+        slog::debug!(self.log, "FakeBroker: waiting for connection");
         let (stream, _) = self.listener.accept().unwrap();
         let mut messages = MessageStream { stream };
+        slog::debug!(self.log, "FakeBroker: accepted connection");
 
         let msg: Hello = messages.next().unwrap();
         assert_matches!(msg, Hello::Client);
@@ -101,12 +106,15 @@ impl FakeBroker {
             messages,
             state: self.state.clone(),
             pending_response: None,
+            log: self.log.clone(),
         }
     }
 
     pub fn receive_artifact(&mut self, digest_dir: &Path) {
+        slog::debug!(self.log, "FakeBroker: waiting for artifact connection");
         let (stream, _) = self.listener.accept().unwrap();
         let mut messages = MessageStream { stream };
+        slog::debug!(self.log, "FakeBroker: accepted artifact connection");
 
         let msg: Hello = messages.next().unwrap();
         assert_matches!(msg, Hello::ArtifactPusher);
@@ -116,9 +124,10 @@ impl FakeBroker {
 
         let fs = Fs::new();
         let mut stream = messages.into_inner();
-        let mut file = fs.create_file(destination).unwrap();
+        let mut file = fs.create_file(&destination).unwrap();
         io::copy(&mut FixedSizeReader::new(&mut stream, size), &mut file).unwrap();
         send_message(&stream, &BrokerToArtifactPusher(Ok(())));
+        slog::debug!(self.log, "FakeBroker: got artifact"; "path" => ?destination);
     }
 }
 
@@ -131,6 +140,7 @@ fn send_message(mut stream: &TcpStream, msg: &impl Serialize) {
 impl FakeBrokerConnection {
     fn fetch_layers(&self, spec: &JobSpec) {
         for (digest, _type) in &spec.layers {
+            slog::debug!(self.log, "FakeBroker: asking for layer"; "digest" => ?digest);
             send_message(
                 &self.messages.stream,
                 &BrokerToClient::TransferArtifact(digest.clone()),
@@ -139,6 +149,11 @@ impl FakeBrokerConnection {
     }
 
     pub fn process(&mut self, count: usize, fetch_layers: bool) {
+        slog::debug!(
+            self.log, "FakeBroker: proccess";
+            "count" => count,
+            "fetch_layers" => fetch_layers
+        );
         for _ in 0..count {
             if let Some((id, response)) = self.pending_response.take() {
                 match response {
@@ -153,6 +168,7 @@ impl FakeBrokerConnection {
             let msg = self.messages.next::<ClientToBroker>().unwrap();
             match msg {
                 ClientToBroker::JobRequest(id, spec) => {
+                    slog::debug!(self.log, "FakeBroker: got JobRequest");
                     let job_spec_matcher = job_spec_matcher(&spec);
                     let response = self.state.job_responses.remove(&job_spec_matcher).unwrap();
 
@@ -172,10 +188,13 @@ impl FakeBrokerConnection {
                         FakeBrokerJobAction::Ignore => (),
                     }
                 }
-                ClientToBroker::JobStateCountsRequest => send_message(
-                    &self.messages.stream,
-                    &BrokerToClient::JobStateCountsResponse(self.state.job_states),
-                ),
+                ClientToBroker::JobStateCountsRequest => {
+                    slog::debug!(self.log, "FakeBroker: got JobStateCountsRequest");
+                    send_message(
+                        &self.messages.stream,
+                        &BrokerToClient::JobStateCountsResponse(self.state.job_states),
+                    );
+                }
 
                 _ => (),
             }
@@ -183,13 +202,13 @@ impl FakeBrokerConnection {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum FakeBrokerJobAction {
     Ignore,
     Respond(JobOutcomeResult),
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct FakeBrokerState {
     pub job_responses: HashMap<JobSpecMatcher, FakeBrokerJobAction>,
     pub job_states: JobStateCounts,

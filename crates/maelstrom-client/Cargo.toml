@@ -23,12 +23,15 @@ maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 num_enum.workspace = true
 serde.workspace = true
+slog.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower.workspace = true
 
 [dev-dependencies]
+slog-async.workspace = true
+slog-term.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true
 nonempty.workspace = true

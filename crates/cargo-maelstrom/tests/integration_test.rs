@@ -8,7 +8,7 @@ use cargo_maelstrom::{
         load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
         LAST_TEST_LISTING_NAME,
     },
-    EnqueueResult, ListAction, MainAppDeps,
+    EnqueueResult, ListAction, Logger, MainAppDeps,
 };
 use indicatif::InMemoryTerm;
 use maelstrom_base::{
@@ -19,7 +19,8 @@ use maelstrom_client::{
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
     Client, ClientBgProcess, ClientDriverMode, ClientMessageKind,
 };
-use maelstrom_util::{config::LogLevel, fs::Fs};
+use maelstrom_util::fs::Fs;
+use slog::Drain as _;
 use std::{
     cell::RefCell, io::Write as _, os::unix::fs::PermissionsExt as _, path::Path, rc::Rc,
     sync::Mutex,
@@ -227,6 +228,13 @@ impl<'scope> TestProgressDriver<'scope> {
     }
 }
 
+fn test_logger() -> slog::Logger {
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    slog::Logger::root(drain, slog::o!())
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_app(
     term: InMemoryTerm,
@@ -242,13 +250,23 @@ fn run_app(
     finish: bool,
 ) -> String {
     let bg_proc = ClientBgProcess::new_from_thread().unwrap();
+    let log = test_logger();
+    slog::info!(
+        log, "doing test";
+        "state" => ?state,
+        "quiet" => ?quiet,
+        "include_filter" => ?include_filter,
+        "exclude_filter" => ?exclude_filter,
+        "list" => ?list
+    );
+
     let cargo_metadata = cargo_metadata::MetadataCommand::new()
         .manifest_path(workspace_root.join("Cargo.toml"))
         .exec()
         .unwrap();
 
     let mut stderr = vec![];
-    let mut b = FakeBroker::new(state);
+    let mut b = FakeBroker::new(state, log.clone());
 
     let deps = MainAppDeps::new(
         bg_proc,
@@ -275,7 +293,7 @@ fn run_app(
         term.clone(),
         prog_driver.clone(),
         None,
-        LogLevel::Error,
+        Logger::GivenLogger(log.clone()),
     )
     .unwrap();
 
@@ -316,6 +334,8 @@ fn run_app(
     if finish {
         app.finish().unwrap();
     }
+
+    slog::info!(log, "test complete");
 
     term.contents()
 }

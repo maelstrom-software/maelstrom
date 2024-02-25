@@ -13,17 +13,26 @@ use maelstrom_util::fs::Fs;
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};
 use sha2::{Digest as _, Sha256};
+use slog::Drain as _;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use tempfile::tempdir;
 
+fn test_logger() -> slog::Logger {
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    slog::Logger::root(drain, slog::o!())
+}
+
 fn basic_job_test(
     add_artifacts: impl FnOnce(&mut Client, &Path) -> NonEmpty<(Sha256Digest, ArtifactType)>,
     verify_artifacts: impl FnOnce(&Path, &NonEmpty<(Sha256Digest, ArtifactType)>),
 ) {
     let bg_proc = ClientBgProcess::new_from_thread().unwrap();
+    let log = test_logger();
     let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
     let cache_dir = tmp_dir.path().join("cache");
@@ -48,7 +57,7 @@ fn basic_job_test(
         },
         ..Default::default()
     };
-    let mut broker = FakeBroker::new(state);
+    let mut broker = FakeBroker::new(state, log.clone());
     let mut client = Client::new(
         bg_proc,
         ClientDriverMode::SingleThreaded,

@@ -42,6 +42,7 @@ use std::{
 use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
+#[derive(Debug)]
 pub enum ListAction {
     ListTests,
     ListBinaries,
@@ -750,13 +751,35 @@ fn list_binaries<ProgressIndicatorT>(
     }
 }
 
+pub enum Logger {
+    DefaultLogger(LogLevel),
+    GivenLogger(slog::Logger),
+}
+
+impl Logger {
+    fn build(self, prog: impl ProgressIndicator) -> slog::Logger {
+        match self {
+            Self::DefaultLogger(level) => {
+                let decorator = slog_term::PlainDecorator::new(
+                    progress::ProgressWriteAdapter::new(prog.clone()),
+                );
+                let drain = slog_term::FullFormat::new(decorator).build().fuse();
+                let drain = slog_async::Async::new(drain).build().fuse();
+                let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
+                slog::Logger::root(drain, slog::o!())
+            }
+            Self::GivenLogger(logger) => logger,
+        }
+    }
+}
+
 fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
     deps: &'deps MainAppDeps<StdErrT>,
     prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
-    log_level: LogLevel,
+    logger: Logger,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -770,12 +793,7 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
-    let decorator =
-        slog_term::PlainDecorator::new(progress::ProgressWriteAdapter::new(prog.clone()));
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let drain = slog::LevelFilter::new(drain, log_level.as_slog_level()).fuse();
-    let log = slog::Logger::root(drain, slog::o!());
+    let log = logger.build(prog.clone());
     slog::debug!(log, "main app created");
 
     match deps.queuing_deps.list_action {
@@ -816,7 +834,7 @@ pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     term: TermT,
     driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
-    log_level: LogLevel,
+    logger: Logger,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -831,7 +849,7 @@ where
                 term,
                 driver,
                 timeout_override,
-                log_level,
+                logger,
             )?)
         } else {
             Ok(new_helper(
@@ -840,7 +858,7 @@ where
                 term,
                 driver,
                 timeout_override,
-                log_level,
+                logger,
             )?)
         };
     }
@@ -852,7 +870,7 @@ where
             term,
             driver,
             timeout_override,
-            log_level,
+            logger,
         )?),
         (true, false) => Ok(new_helper(
             deps,
@@ -860,7 +878,7 @@ where
             term,
             driver,
             timeout_override,
-            log_level,
+            logger,
         )?),
         (false, true) => Ok(new_helper(
             deps,
@@ -868,7 +886,7 @@ where
             term,
             driver,
             timeout_override,
-            log_level,
+            logger,
         )?),
         (false, false) => Ok(new_helper(
             deps,
@@ -876,7 +894,7 @@ where
             term,
             driver,
             timeout_override,
-            log_level,
+            logger,
         )?),
     }
 }

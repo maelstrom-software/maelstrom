@@ -4,7 +4,7 @@ use cargo_maelstrom::{
     config::{Config, ConfigOptions, RunConfigOptions},
     main_app_new,
     progress::DefaultProgressDriver,
-    ListAction, MainAppDeps,
+    ListAction, Logger, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{Args, Parser, Subcommand};
@@ -258,7 +258,7 @@ pub fn main() -> Result<ExitCode> {
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
             timeout_override,
-            config.log_level,
+            Logger::DefaultLogger(config.log_level),
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;
