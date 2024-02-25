@@ -64,12 +64,14 @@ fn build_manifest(
     paths: Vec<PathBuf>,
     strip_prefix: impl AsRef<Path>,
     data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+    log: slog::Logger,
 ) -> Result<()> {
     let manifest_file = fs.create_file(manifest_path)?;
     let mut manifest =
         ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
 
     for path in &paths {
+        slog::debug!(log, "build manifest: builder.add_file"; "path" => ?path);
         manifest.add_file(path, path.strip_prefix(strip_prefix.as_ref()).unwrap())?;
     }
 
@@ -93,6 +95,7 @@ fn create_artifact_for_binary(
         vec![binary_path.to_path_buf()],
         binary_path.parent().unwrap(),
         data_upload,
+        log,
     )?;
     Ok(manifest_path)
 }
@@ -151,7 +154,7 @@ fn create_artifact_for_binary_deps(
     )?;
 
     slog::debug!(log, "building manifest for binary deps"; "path" => ?manifest_path);
-    build_manifest(&fs, &manifest_path, paths, "/", data_upload)?;
+    build_manifest(&fs, &manifest_path, paths, "/", data_upload, log)?;
     Ok(manifest_path)
 }
 

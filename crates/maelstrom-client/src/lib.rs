@@ -223,19 +223,23 @@ impl Client {
     }
 
     pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+        slog::debug!(self.log, "client.add_artifact"; "path" => ?path);
         let msg = proto::AddArtifactRequest {
             path: path.into_proto_buf(),
         };
         let digest =
             self.send_sync(move |mut client| async move { client.add_artifact(msg).await })?;
+        slog::debug!(self.log, "client.add_artifact complete");
         Ok(digest.try_into()?)
     }
 
     pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        slog::debug!(self.log, "client.add_layer"; "layer" => ?layer);
         let msg = proto::AddLayerRequest {
             layer: Some(layer.into_proto_buf()),
         };
         let spec = self.send_sync(move |mut client| async move { client.add_layer(msg).await })?;
+        slog::debug!(self.log, "client.add_layer complete");
         Ok((
             TryFromProtoBuf::try_from_proto_buf(spec.digest)?,
             TryFromProtoBuf::try_from_proto_buf(spec.r#type)?,
