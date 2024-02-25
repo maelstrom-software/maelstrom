@@ -16,7 +16,7 @@ use figment::{
 };
 use maelstrom_base::Timeout;
 use maelstrom_client::ClientBgProcess;
-use maelstrom_util::{clap as clap_util, process::ExitCode};
+use maelstrom_util::{clap as clap_util, config::LogLevel, process::ExitCode};
 use std::{
     env,
     io::IsTerminal as _,
@@ -44,6 +44,10 @@ struct CliOptions {
     /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
     #[arg(long, short, value_name = "SOCKADDR")]
     broker: Option<String>,
+
+    /// Minimum log level to output.
+    #[arg(long, short, value_name = "LEVEL", value_enum)]
+    log_level: Option<LogLevel>,
 
     #[command(subcommand)]
     command: CliCommand,
@@ -184,6 +188,7 @@ pub fn main() -> Result<ExitCode> {
                 ConfigOptions {
                     broker: cli_options.broker,
                     run: RunConfigOptions { quiet: None },
+                    log_level: cli_options.log_level,
                 },
             )?;
             if print_config {
@@ -216,6 +221,7 @@ pub fn main() -> Result<ExitCode> {
                     run: RunConfigOptions {
                         quiet: quiet.then_some(true),
                     },
+                    log_level: cli_options.log_level,
                 },
             )?;
             if print_config {
@@ -252,6 +258,7 @@ pub fn main() -> Result<ExitCode> {
             Term::buffered_stdout(),
             DefaultProgressDriver::new(scope),
             timeout_override,
+            config.log_level,
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;

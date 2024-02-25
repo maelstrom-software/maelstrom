@@ -79,12 +79,14 @@ fn build_manifest(
 fn create_artifact_for_binary(
     binary_path: &Path,
     data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+    log: slog::Logger,
 ) -> Result<PathBuf> {
     let fs = Fs::new();
 
     let mut manifest_path = PathBuf::from(binary_path);
     assert!(manifest_path.set_extension("manifest"));
 
+    slog::debug!(log, "building manifest for binary"; "path" => ?manifest_path);
     build_manifest(
         &fs,
         &manifest_path,
@@ -95,10 +97,13 @@ fn create_artifact_for_binary(
     Ok(manifest_path)
 }
 
-fn read_shared_libraries(fs: &Fs, path: &Path) -> Result<Vec<PathBuf>> {
+fn read_shared_libraries(fs: &Fs, path: &Path, log: slog::Logger) -> Result<Vec<PathBuf>> {
     if let Some(paths) = check_for_cached_so_listing(fs, path)? {
+        slog::debug!(log, "found cached shared libraries"; "path" => ?path);
         return Ok(paths);
     }
+
+    slog::debug!(log, "reading shared libraries"; "path" => ?path);
 
     let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
     let deps = dep_tree.analyze(path)?;
@@ -132,18 +137,20 @@ fn read_shared_libraries(fs: &Fs, path: &Path) -> Result<Vec<PathBuf>> {
 fn create_artifact_for_binary_deps(
     binary_path: &Path,
     data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
+    log: slog::Logger,
 ) -> Result<PathBuf> {
     let fs = Fs::new();
 
     let mut manifest_path = PathBuf::from(binary_path);
     assert!(manifest_path.set_extension("deps.manifest"));
 
-    let paths = read_shared_libraries(&fs, binary_path)?;
+    let paths = read_shared_libraries(&fs, binary_path, log.clone())?;
     encode_paths(
         &paths,
         fs.create_file(so_listing_path_from_binary_path(binary_path))?,
     )?;
 
+    slog::debug!(log, "building manifest for binary deps"; "path" => ?manifest_path);
     build_manifest(&fs, &manifest_path, paths, "/", data_upload)?;
     Ok(manifest_path)
 }
@@ -156,11 +163,16 @@ pub struct GeneratedArtifacts {
 pub fn add_generated_artifacts(
     client: &Mutex<Client>,
     binary_path: &Path,
+    log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
     let upload = |p: &Path| client.lock().unwrap().add_artifact(p);
 
-    let binary_artifact = upload(&create_artifact_for_binary(binary_path, upload)?)?;
-    let deps_artifact = upload(&create_artifact_for_binary_deps(binary_path, upload)?)?;
+    let binary_artifact = upload(&create_artifact_for_binary(
+        binary_path,
+        upload,
+        log.clone(),
+    )?)?;
+    let deps_artifact = upload(&create_artifact_for_binary_deps(binary_path, upload, log)?)?;
     Ok(GeneratedArtifacts {
         binary: binary_artifact,
         deps: deps_artifact,

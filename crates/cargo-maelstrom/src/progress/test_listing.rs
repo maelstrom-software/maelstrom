@@ -1,6 +1,7 @@
 use super::ProgressIndicator;
 use anyhow::Result;
 use indicatif::{ProgressBar, TermLike};
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -65,7 +66,7 @@ impl<TermT> TestListingProgressNoSpinner<TermT> {
 
 impl<TermT> ProgressIndicator for TestListingProgressNoSpinner<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
     fn println(&self, msg: String) {
         self.term.write_line(&msg).ok();

@@ -14,9 +14,11 @@ pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
 pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
+use std::io;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
-pub trait ProgressIndicator: Clone + Send + Sync + 'static {
+pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
 
@@ -59,6 +61,39 @@ pub trait ProgressIndicator: Clone + Send + Sync + 'static {
 
     /// Called when all jobs are done
     fn finished(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+pub struct ProgressWriteAdapter<ProgressIndicatorT> {
+    prog: ProgressIndicatorT,
+    line: String,
+}
+
+impl<ProgressIndicatorT> ProgressWriteAdapter<ProgressIndicatorT> {
+    pub fn new(prog: ProgressIndicatorT) -> Self {
+        Self {
+            prog,
+            line: String::new(),
+        }
+    }
+}
+
+impl<ProgressIndicatorT> io::Write for ProgressWriteAdapter<ProgressIndicatorT>
+where
+    ProgressIndicatorT: ProgressIndicator,
+{
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.line += &String::from_utf8_lossy(buf);
+        if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
+            let remaining = self.line.split_off(p);
+            let line = std::mem::replace(&mut self.line, remaining[1..].into());
+            self.prog.println(line);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }

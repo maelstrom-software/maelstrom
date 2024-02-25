@@ -19,7 +19,7 @@ use maelstrom_client::{
     test::fake_broker::{FakeBroker, FakeBrokerJobAction, FakeBrokerState, JobSpecMatcher},
     Client, ClientBgProcess, ClientDriverMode, ClientMessageKind,
 };
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{config::LogLevel, fs::Fs};
 use std::{
     cell::RefCell, io::Write as _, os::unix::fs::PermissionsExt as _, path::Path, rc::Rc,
     sync::Mutex,
@@ -275,6 +275,7 @@ fn run_app(
         term.clone(),
         prog_driver.clone(),
         None,
+        LogLevel::Error,
     )
     .unwrap();
 

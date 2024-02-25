@@ -1,6 +1,7 @@
 use super::ProgressIndicator;
 use anyhow::Result;
 use indicatif::TermLike;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 
 #[derive(Clone)]
 pub struct NoBar<TermT> {
@@ -15,7 +16,7 @@ impl<TermT> NoBar<TermT> {
 
 impl<TermT> ProgressIndicator for NoBar<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + RefUnwindSafe + UnwindSafe + 'static,
 {
     fn println(&self, msg: String) {
         self.term.write_line(&msg).ok();

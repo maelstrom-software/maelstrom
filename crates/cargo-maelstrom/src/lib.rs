@@ -18,12 +18,17 @@ use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess, ClientDriverMode};
-use maelstrom_util::{config::BrokerAddr, process::ExitCode};
+use maelstrom_util::{
+    config::{BrokerAddr, LogLevel},
+    process::ExitCode,
+};
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
     TestListingProgress, TestListingProgressNoSpinner,
 };
+use slog::Drain as _;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::{
     collections::{BTreeMap, HashSet},
     io,
@@ -136,6 +141,7 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
 struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
+    log: slog::Logger,
     queuing_deps: &'a JobQueuingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
@@ -185,16 +191,19 @@ where
 fn generate_artifacts(
     client: &Mutex<Client>,
     artifact: &CargoArtifact,
+    log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    artifacts::add_generated_artifacts(client, &binary)
+    artifacts::add_generated_artifacts(client, &binary, log)
 }
 
 impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
+    #[allow(clippy::too_many_arguments)]
     fn new(
+        log: slog::Logger,
         queuing_deps: &'a JobQueuingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
@@ -210,11 +219,17 @@ where
         let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
+        slog::debug!(
+            log,
+            "generating artifacts";
+            "package_name" => &package_name,
+            "artifact" => ?artifact);
         let generated_artifacts = running_tests
-            .then(|| generate_artifacts(client, &artifact))
+            .then(|| generate_artifacts(client, &artifact, log.clone()))
             .transpose()?;
 
         Ok(Self {
+            log,
             queuing_deps,
             client,
             width,
@@ -236,7 +251,10 @@ where
         let mut layers = test_metadata
             .layers
             .iter()
-            .map(|layer| self.client.lock().unwrap().add_layer(layer.clone()))
+            .map(|layer| {
+                slog::debug!(self.log, "adding layer"; "layer" => ?layer);
+                self.client.lock().unwrap().add_layer(layer.clone())
+            })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
         if test_metadata.include_shared_libraries() {
@@ -264,6 +282,7 @@ where
         let case_str = self.format_case_str(case);
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
+        slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
         if self.queuing_deps.list_action.is_some() {
             self.ind.println(case_str);
@@ -279,6 +298,11 @@ where
                 .new_side_progress(format!("downloading image {image}"))
                 .unwrap_or_else(ProgressBar::hidden);
             let mut client = self.client.lock().unwrap();
+            slog::debug!(
+                self.log, "getting container image";
+                "image" => &image,
+                "version" => &version,
+            );
             let image = client.get_container_image(image, version, prog)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
@@ -299,6 +323,7 @@ where
             .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
         self.ind
             .update_enqueue_status(format!("calculating layers for {case_str}"));
+        slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
@@ -322,6 +347,7 @@ where
 
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
+        slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
         self.client.lock().unwrap().add_job(
             JobSpec {
@@ -364,6 +390,7 @@ where
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
 struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
+    log: slog::Logger,
     queuing_deps: &'a JobQueuingDeps<StdErrT>,
     client: &'a Mutex<Client>,
     width: usize,
@@ -381,6 +408,7 @@ where
     StdErrT: io::Write,
 {
     fn new(
+        log: slog::Logger,
         queuing_deps: &'a JobQueuingDeps<StdErrT>,
         client: &'a Mutex<Client>,
         width: usize,
@@ -411,6 +439,7 @@ where
             .unzip();
 
         Ok(Self {
+            log,
             queuing_deps,
             client,
             width,
@@ -426,6 +455,7 @@ where
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
         self.ind.update_enqueue_status("building artifacts...");
 
+        slog::debug!(self.log, "getting artifact from cargo");
         let Some(ref mut artifacts) = self.artifacts else {
             return Ok(false);
         };
@@ -434,6 +464,7 @@ where
         };
         let artifact = artifact?;
 
+        slog::debug!(self.log, "got artifact"; "artifact" => ?artifact);
         let package_name = &self
             .queuing_deps
             .packages
@@ -442,6 +473,7 @@ where
             .name;
 
         self.artifact_queuing = Some(ArtifactQueuing::new(
+            self.log.clone(),
             self.queuing_deps,
             self.client,
             self.width,
@@ -457,6 +489,7 @@ where
     /// Meant to be called when the user has enqueued all the jobs they want. Checks for deferred
     /// errors from cargo or otherwise
     fn finish(&mut self) -> Result<()> {
+        slog::debug!(self.log, "checking for cargo errors");
         if let Some(wh) = self.wait_handle.take() {
             wh.wait(&mut *self.queuing_deps.stderr.lock().unwrap())?;
         }
@@ -468,6 +501,8 @@ where
     /// Returns an `EnqueueResult` describing what happened. Meant to be called it returns
     /// `EnqueueResult::Done`
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
+        slog::debug!(self.log, "enqueuing a job");
+
         if self.artifact_queuing.is_none() && !self.start_queuing_from_artifact()? {
             self.finish()?;
             return Ok(EnqueueResult::Done);
@@ -645,6 +680,7 @@ where
     }
 
     fn drain(&mut self) -> Result<()> {
+        slog::debug!(self.queuing.log, "draining");
         self.prog
             .update_length(self.deps.queuing_deps.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
@@ -654,6 +690,7 @@ where
     }
 
     fn finish(&mut self) -> Result<ExitCode> {
+        slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.deps
             .client
             .lock()
@@ -719,6 +756,7 @@ fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
+    log_level: LogLevel,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
@@ -732,6 +770,14 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
+    let decorator =
+        slog_term::PlainDecorator::new(progress::ProgressWriteAdapter::new(prog.clone()));
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let drain = slog::LevelFilter::new(drain, log_level.as_slog_level()).fuse();
+    let log = slog::Logger::root(drain, slog::o!());
+    slog::debug!(log, "main app created");
+
     match deps.queuing_deps.list_action {
         Some(ListAction::ListPackages) => list_packages(&prog, &deps.queuing_deps.packages),
 
@@ -740,6 +786,7 @@ where
     }
 
     let queuing = JobQueuing::new(
+        log,
         &deps.queuing_deps,
         &deps.client,
         width,
@@ -769,10 +816,11 @@ pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     term: TermT,
     driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
+    log_level: LogLevel,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     StdErrT: io::Write + Send,
-    TermT: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
     'deps: 'scope,
 {
     if deps.queuing_deps.list_action.is_some() {
@@ -783,6 +831,7 @@ where
                 term,
                 driver,
                 timeout_override,
+                log_level,
             )?)
         } else {
             Ok(new_helper(
@@ -791,6 +840,7 @@ where
                 term,
                 driver,
                 timeout_override,
+                log_level,
             )?)
         };
     }
@@ -802,6 +852,7 @@ where
             term,
             driver,
             timeout_override,
+            log_level,
         )?),
         (true, false) => Ok(new_helper(
             deps,
@@ -809,6 +860,7 @@ where
             term,
             driver,
             timeout_override,
+            log_level,
         )?),
         (false, true) => Ok(new_helper(
             deps,
@@ -816,6 +868,7 @@ where
             term,
             driver,
             timeout_override,
+            log_level,
         )?),
         (false, false) => Ok(new_helper(
             deps,
@@ -823,6 +876,7 @@ where
             term,
             driver,
             timeout_override,
+            log_level,
         )?),
     }
 }

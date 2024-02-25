@@ -1,6 +1,7 @@
 use super::ProgressIndicator;
 use anyhow::Result;
 use indicatif::TermLike;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 
 #[derive(Clone)]
 pub struct QuietNoBar<TermT> {
@@ -15,7 +16,7 @@ impl<TermT> QuietNoBar<TermT> {
 
 impl<TermT> ProgressIndicator for QuietNoBar<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + 'static,
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
     fn println(&self, _msg: String) {
         // quiet mode doesn't print anything

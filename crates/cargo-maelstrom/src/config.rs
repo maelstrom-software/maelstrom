@@ -1,5 +1,5 @@
 use derive_more::From;
-use maelstrom_util::config::BrokerAddr;
+use maelstrom_util::config::{BrokerAddr, LogLevel};
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
 use std::fmt::{self, Debug, Formatter};
@@ -25,6 +25,7 @@ impl Debug for Quiet {
 pub struct Config {
     pub broker: BrokerAddr,
     pub run: RunConfig,
+    pub log_level: LogLevel,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +39,7 @@ pub struct RunConfig {
 pub struct ConfigOptions {
     pub broker: Option<String>,
     pub run: RunConfigOptions,
+    pub log_level: Option<LogLevel>,
 }
 
 #[skip_serializing_none]
@@ -51,6 +53,7 @@ impl Default for ConfigOptions {
         ConfigOptions {
             broker: None,
             run: RunConfigOptions { quiet: Some(false) },
+            log_level: Some(LogLevel::Error),
         }
     }
 }
