@@ -257,6 +257,7 @@ const CACHED_IMAGE_FILE_NAME: &str = "maelstrom-cached-digests.toml";
 struct DigestRespository {
     fs: Fs,
     path: PathBuf,
+    cache: Option<DigestRepositoryContents>,
 }
 
 impl DigestRespository {
@@ -264,10 +265,11 @@ impl DigestRespository {
         Self {
             fs: Fs::new(),
             path: path.into(),
+            cache: None,
         }
     }
 
-    fn add(&self, path: PathBuf, mtime: SystemTime, digest: Sha256Digest) -> Result<()> {
+    fn add(&mut self, path: PathBuf, mtime: SystemTime, digest: Sha256Digest) -> Result<()> {
         self.fs.create_dir_all(&self.path)?;
         let mut file = self
             .fs
@@ -289,22 +291,27 @@ impl DigestRespository {
         file.set_len(0)?;
         file.write_all(digests.to_pretty_string().as_bytes())?;
 
+        self.cache = Some(digests);
+
         Ok(())
     }
 
-    fn get(&self, path: &PathBuf) -> Result<Option<Sha256Digest>> {
-        let Some(contents) = self
-            .fs
-            .read_to_string_if_exists(self.path.join(CACHED_IMAGE_FILE_NAME))?
-        else {
-            return Ok(None);
-        };
-        let mut digests = DigestRepositoryContents::from_str(&contents).unwrap_or_default();
-        let Some(entry) = digests.digests.remove(path) else {
+    fn get(&mut self, path: &PathBuf) -> Result<Option<Sha256Digest>> {
+        if self.cache.is_none() {
+            let Some(contents) = self
+                .fs
+                .read_to_string_if_exists(self.path.join(CACHED_IMAGE_FILE_NAME))?
+            else {
+                return Ok(None);
+            };
+            self.cache = Some(DigestRepositoryContents::from_str(&contents).unwrap_or_default());
+        }
+
+        let Some(entry) = self.cache.as_ref().unwrap().digests.get(path) else {
             return Ok(None);
         };
         let current_mtime: DateTime<Utc> = self.fs.metadata(path)?.modified()?.into();
-        Ok((current_mtime == entry.mtime).then_some(entry.digest))
+        Ok((current_mtime == entry.mtime).then_some(entry.digest.clone()))
     }
 }
 
@@ -312,7 +319,7 @@ impl DigestRespository {
 fn digest_repository_simple_add_get() {
     let fs = Fs::new();
     let tmp_dir = tempfile::tempdir().unwrap();
-    let repo = DigestRespository::new(tmp_dir.path());
+    let mut repo = DigestRespository::new(tmp_dir.path());
 
     let foo_path = tmp_dir.path().join("foo.tar");
     fs.write(&foo_path, "foo").unwrap();
@@ -326,7 +333,7 @@ fn digest_repository_simple_add_get() {
 fn digest_repository_simple_add_get_after_modify() {
     let fs = Fs::new();
     let tmp_dir = tempfile::tempdir().unwrap();
-    let repo = DigestRespository::new(tmp_dir.path());
+    let mut repo = DigestRespository::new(tmp_dir.path());
 
     let foo_path = tmp_dir.path().join("foo.tar");
     fs.write(&foo_path, "foo").unwrap();
