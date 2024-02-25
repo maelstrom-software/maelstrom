@@ -132,6 +132,7 @@ pub struct Client {
     requester: Option<RequestSender>,
     process_handle: ClientBgProcess,
     dispatcher_handle: Option<thread::JoinHandle<Result<()>>>,
+    log: slog::Logger,
 }
 
 fn flatten_rpc_result<ProtRetT>(
@@ -150,6 +151,7 @@ impl Client {
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
+        log: slog::Logger,
     ) -> Result<Self> {
         let (send, recv) = tokio::sync::mpsc::unbounded_channel();
 
@@ -159,8 +161,15 @@ impl Client {
             requester: Some(send),
             process_handle,
             dispatcher_handle: Some(dispatcher_handle),
+            log,
         };
 
+        slog::debug!(s.log, "client sending start";
+            "driver_mode" => ?driver_mode,
+            "broker_addr" => ?broker_addr,
+            "project_dir" => ?project_dir.as_ref(),
+            "cache_dir" => ?cache_dir.as_ref(),
+        );
         let msg = proto::StartRequest {
             driver_mode: driver_mode.into_proto_buf(),
             broker_addr: broker_addr.into_proto_buf(),
@@ -168,8 +177,13 @@ impl Client {
             cache_dir: cache_dir.as_ref().into_proto_buf(),
         };
         s.send_sync(|mut client| async move { client.start(msg).await })?;
+        slog::debug!(s.log, "client completed start");
 
         Ok(s)
+    }
+
+    pub fn set_logger(&mut self, log: slog::Logger) {
+        self.log = log;
     }
 
     fn send_async<BuilderT, FutureT, ProtRetT>(
@@ -294,6 +308,7 @@ impl Client {
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_broker_msg_single_threaded(&self, count: usize) {
+        slog::debug!(self.log, "client.process_broker_msg_single_threaded"; "count" => count);
         self.send_sync(move |mut client| async move {
             client
                 .process_broker_msg_single_threaded(proto::ProcessBrokerMsgSingleThreadedRequest {
@@ -302,10 +317,18 @@ impl Client {
                 .await
         })
         .unwrap();
+        slog::debug!(
+            self.log,
+            "client.process_broker_msg_single_threaded complete"
+        );
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_client_messages_single_threaded(&self, kind: ClientMessageKind) {
+        slog::debug!(
+            self.log, "client.process_client_messages_single_threaded";
+            "kind" => ?kind
+        );
         self.send_sync(move |mut client| async move {
             client
                 .process_client_messages_single_threaded(
@@ -316,15 +339,21 @@ impl Client {
                 .await
         })
         .unwrap();
+        slog::debug!(
+            self.log,
+            "client.process_client_messages_single_threaded complete"
+        );
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     pub fn process_artifact_single_threaded(&self) {
+        slog::debug!(self.log, "client.process_artifact_single_threaded");
         self.send_sync(move |mut client| async move {
             client
                 .process_artifact_single_threaded(proto::Void {})
                 .await
         })
         .unwrap();
+        slog::debug!(self.log, "client.process_artifact_single_threaded complete");
     }
 }

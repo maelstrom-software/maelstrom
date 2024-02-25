@@ -64,6 +64,7 @@ fn basic_job_test(
         broker.address().clone(),
         &artifact_dir,
         cache_dir,
+        log.clone(),
     )
     .unwrap();
     let mut broker_conn = broker.accept();

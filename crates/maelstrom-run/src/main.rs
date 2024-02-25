@@ -15,11 +15,12 @@ use maelstrom_client::{
 };
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
-    config::BrokerAddr,
+    config::{BrokerAddr, LogLevel},
     process::{ExitCode, ExitCodeAccumulator},
 };
 use serde::{Deserialize, Serialize};
 use serde_with::skip_serializing_none;
+use slog::Drain as _;
 use std::{
     cell::RefCell,
     io::{self, Read, Write as _},
@@ -55,6 +56,10 @@ struct CliOptions {
     #[arg(long, short = 'P')]
     print_config: bool,
 
+    /// Minimum log level to output.
+    #[arg(long, short, value_name = "LEVEL", value_enum)]
+    log_level: Option<LogLevel>,
+
     /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
     #[arg(long, short = 'b', value_name = "SOCKADDR")]
     broker: Option<String>,
@@ -64,6 +69,7 @@ impl CliOptions {
     fn to_config_options(&self) -> ConfigOptions {
         ConfigOptions {
             broker: self.broker.clone(),
+            log_level: self.log_level,
         }
     }
 }
@@ -73,12 +79,24 @@ impl CliOptions {
 pub struct Config {
     /// Socket address of broker.
     pub broker: BrokerAddr,
+    /// Minimum log level to output.
+    pub log_level: LogLevel,
 }
 
 #[skip_serializing_none]
-#[derive(Default, Serialize)]
+#[derive(Serialize)]
 pub struct ConfigOptions {
     pub broker: Option<String>,
+    pub log_level: Option<LogLevel>,
+}
+
+impl Default for ConfigOptions {
+    fn default() -> Self {
+        Self {
+            broker: None,
+            log_level: Some(LogLevel::Error),
+        }
+    }
 }
 
 fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -> Result<()> {
@@ -172,8 +190,22 @@ fn main() -> Result<ExitCode> {
         println!("{config:#?}");
         return Ok(ExitCode::SUCCESS);
     }
+
+    let decorator = slog_term::TermDecorator::new().build();
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    let drain = slog::LevelFilter::new(drain, config.log_level.as_slog_level()).fuse();
+    let log = slog::Logger::root(drain, slog::o!());
+
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let client = Client::new(bg_proc, Default::default(), config.broker, ".", cache_dir())?;
+    let client = Client::new(
+        bg_proc,
+        Default::default(),
+        config.broker,
+        ".",
+        cache_dir(),
+        log,
+    )?;
     let client = RefCell::new(client);
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let image_lookup = |image: &str| {

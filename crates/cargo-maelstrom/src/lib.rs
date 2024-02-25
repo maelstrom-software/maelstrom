@@ -577,6 +577,7 @@ impl<StdErrT> MainAppDeps<StdErrT> {
             broker_addr,
             workspace_root,
             cache_dir.clone(),
+            log.clone(),
         )?);
         let test_metadata = AllMetadata::load(workspace_root)?;
         let mut test_listing =
@@ -824,6 +825,7 @@ where
 
     let log = deps.logger.build_with_progress_output(prog.clone());
     slog::debug!(log, "main app created");
+    deps.client.lock().unwrap().set_logger(log.clone());
 
     match deps.queuing_deps.list_action {
         Some(ListAction::ListPackages) => list_packages(&prog, &deps.queuing_deps.packages),
