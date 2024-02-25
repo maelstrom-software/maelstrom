@@ -163,6 +163,7 @@ struct TestListingResult {
 }
 
 fn list_test_cases<ProgressIndicatorT, StdErrT>(
+    log: slog::Logger,
     queuing_deps: &JobQueuingDeps<StdErrT>,
     ind: &ProgressIndicatorT,
     artifact: &CargoArtifact,
@@ -171,12 +172,15 @@ fn list_test_cases<ProgressIndicatorT, StdErrT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
+    ind.update_enqueue_status(format!("getting test list for {package_name}"));
+
+    slog::debug!(log, "listing ignored tests"; "binary" => ?artifact.executable);
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
     let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
         .into_iter()
         .collect();
 
-    ind.update_enqueue_status(format!("getting test list for {package_name}"));
+    slog::debug!(log, "listing tests"; "binary" => ?artifact.executable);
     let mut cases = get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_deps.test_listing.lock().unwrap();
@@ -217,7 +221,7 @@ where
 
         let running_tests = queuing_deps.list_action.is_none();
 
-        let listing = list_test_cases(queuing_deps, &ind, &artifact, &package_name)?;
+        let listing = list_test_cases(log.clone(), queuing_deps, &ind, &artifact, &package_name)?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
         slog::debug!(
