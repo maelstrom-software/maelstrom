@@ -73,9 +73,13 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::AddArtifactResponse> {
         run_handler(async {
             let request = request.into_inner();
-            let digest = self.with_client(|client| {
-                client.add_artifact(&PathBuf::try_from_proto_buf(request.path)?)
-            })?;
+            let self_clone = self.clone();
+            let digest = tokio::task::spawn_blocking(move || {
+                self_clone.with_client(|client| {
+                    client.add_artifact(&PathBuf::try_from_proto_buf(request.path)?)
+                })
+            })
+            .await??;
             Ok(proto::AddArtifactResponse {
                 digest: digest.into_proto_buf(),
             })
