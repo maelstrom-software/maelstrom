@@ -4,18 +4,15 @@ use maelstrom_client::Client;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     thread,
     time::Duration,
 };
 
 pub trait ProgressDriver<'scope> {
-    fn drive<'dep, ProgressIndicatorT>(
-        &mut self,
-        client: &'dep Mutex<Client>,
-        ind: ProgressIndicatorT,
-    ) where
+    fn drive<'dep, ProgressIndicatorT>(&mut self, client: &'dep Client, ind: ProgressIndicatorT)
+    where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope;
 
@@ -45,11 +42,8 @@ impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
 }
 
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
-    fn drive<'dep, ProgressIndicatorT>(
-        &mut self,
-        client: &'dep Mutex<Client>,
-        ind: ProgressIndicatorT,
-    ) where
+    fn drive<'dep, ProgressIndicatorT>(&mut self, client: &'dep Client, ind: ProgressIndicatorT)
+    where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
@@ -62,7 +56,7 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                     }
                 });
                 while !canceled.load(Ordering::Acquire) {
-                    let counts = client.lock().unwrap().get_job_state_counts()?;
+                    let counts = client.get_job_state_counts()?;
                     if !ind.update_job_states(counts.recv()??)? {
                         break;
                     }

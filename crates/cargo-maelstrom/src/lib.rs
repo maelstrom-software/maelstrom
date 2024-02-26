@@ -144,7 +144,7 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
     log: slog::Logger,
     queuing_deps: &'a JobQueuingDeps<StdErrT>,
-    client: &'a Mutex<Client>,
+    client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
     artifact: CargoArtifact,
@@ -194,7 +194,7 @@ where
 }
 
 fn generate_artifacts(
-    client: &Mutex<Client>,
+    client: &Client,
     artifact: &CargoArtifact,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
@@ -210,7 +210,7 @@ where
     fn new(
         log: slog::Logger,
         queuing_deps: &'a JobQueuingDeps<StdErrT>,
-        client: &'a Mutex<Client>,
+        client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
         artifact: CargoArtifact,
@@ -258,7 +258,7 @@ where
             .iter()
             .map(|layer| {
                 slog::debug!(self.log, "adding layer"; "layer" => ?layer);
-                self.client.lock().unwrap().add_layer(layer.clone())
+                self.client.add_layer(layer.clone())
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
@@ -302,13 +302,12 @@ where
                 .ind
                 .new_side_progress(format!("downloading image {image}"))
                 .unwrap_or_else(ProgressBar::hidden);
-            let client = self.client.lock().unwrap();
             slog::debug!(
                 self.log, "getting container image";
                 "image" => &image,
                 "version" => &version,
             );
-            let image = client.get_container_image(image, version, prog)?;
+            let image = self.client.get_container_image(image, version, prog)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
@@ -354,7 +353,7 @@ where
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
-        self.client.lock().unwrap().add_job(
+        self.client.add_job(
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
@@ -397,7 +396,7 @@ where
 struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
     log: slog::Logger,
     queuing_deps: &'a JobQueuingDeps<StdErrT>,
-    client: &'a Mutex<Client>,
+    client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
     wait_handle: Option<WaitHandle>,
@@ -415,7 +414,7 @@ where
     fn new(
         log: slog::Logger,
         queuing_deps: &'a JobQueuingDeps<StdErrT>,
-        client: &'a Mutex<Client>,
+        client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
@@ -527,7 +526,7 @@ where
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppDeps<StdErrT> {
-    pub client: Mutex<Client>,
+    pub client: Client,
     queuing_deps: JobQueuingDeps<StdErrT>,
     cache_dir: PathBuf,
     logging_output: LoggingOutput,
@@ -577,14 +576,14 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         );
 
         let cache_dir = workspace_root.as_ref().join("target");
-        let client = Mutex::new(Client::new(
+        let client = Client::new(
             bg_proc,
             driver_mode,
             broker_addr,
             workspace_root,
             cache_dir.clone(),
             log.clone(),
-        )?);
+        )?;
         let test_metadata = AllMetadata::load(workspace_root)?;
         let mut test_listing =
             load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
@@ -711,17 +710,13 @@ where
             .update_length(self.deps.queuing_deps.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
-        self.deps.client.lock().unwrap().stop_accepting()?;
+        self.deps.client.stop_accepting()?;
         Ok(())
     }
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.deps
-            .client
-            .lock()
-            .unwrap()
-            .wait_for_outstanding_jobs()?;
+        self.deps.client.wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
         if self.deps.queuing_deps.list_action.is_none() {

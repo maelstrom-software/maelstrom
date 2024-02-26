@@ -15,7 +15,6 @@ use maelstrom_util::{
 };
 use slog::Drain as _;
 use std::{
-    cell::RefCell,
     env, fs,
     io::{self, Read, Write as _},
     path::PathBuf,
@@ -208,12 +207,10 @@ fn main() -> Result<ExitCode> {
         cache_dir(),
         log,
     )?;
-    let client = RefCell::new(client);
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let image_lookup = |image: &str| {
         let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
         let prog = ProgressBar::hidden();
-        let client = client.borrow();
         let image = client.get_container_image(image, version, prog)?;
         Ok(ImageConfig {
             layers: image.layers.clone(),
@@ -223,17 +220,17 @@ fn main() -> Result<ExitCode> {
     };
     let job_specs = job_spec_iter_from_reader(
         reader,
-        |layer| client.borrow_mut().add_layer(layer),
+        |layer| client.add_layer(layer),
         std_env_lookup,
         image_lookup,
     );
     for job_spec in job_specs {
         let accum_clone = accum.clone();
-        client.borrow_mut().add_job(
+        client.add_job(
             job_spec?,
             Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
         )?;
     }
-    client.into_inner().wait_for_outstanding_jobs()?;
+    client.wait_for_outstanding_jobs()?;
     Ok(accum.get())
 }

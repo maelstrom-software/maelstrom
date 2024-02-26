@@ -9,7 +9,6 @@ use std::{
     collections::{BTreeSet, HashMap},
     io,
     path::{Path, PathBuf},
-    sync::Mutex,
 };
 
 fn so_listing_path_from_binary_path(path: &Path) -> PathBuf {
@@ -164,11 +163,11 @@ pub struct GeneratedArtifacts {
 }
 
 pub fn add_generated_artifacts(
-    client: &Mutex<Client>,
+    client: &Client,
     binary_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
-    let upload = |p: &Path| client.lock().unwrap().add_artifact(p);
+    let upload = |p: &Path| client.add_artifact(p);
 
     let binary_artifact = upload(&create_artifact_for_binary(
         binary_path,

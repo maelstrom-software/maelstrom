@@ -21,10 +21,7 @@ use maelstrom_client::{
 };
 use maelstrom_util::fs::Fs;
 use slog::Drain as _;
-use std::{
-    cell::RefCell, io::Write as _, os::unix::fs::PermissionsExt as _, path::Path, rc::Rc,
-    sync::Mutex,
-};
+use std::{cell::RefCell, io::Write as _, os::unix::fs::PermissionsExt as _, path::Path, rc::Rc};
 use tempfile::{tempdir, TempDir};
 
 fn path_file_name(path: &Path) -> String {
@@ -206,11 +203,8 @@ struct TestProgressDriver<'scope> {
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
-    fn drive<'dep, ProgressIndicatorT>(
-        &mut self,
-        _client: &'dep Mutex<Client>,
-        ind: ProgressIndicatorT,
-    ) where
+    fn drive<'dep, ProgressIndicatorT>(&mut self, _client: &'dep Client, ind: ProgressIndicatorT)
+    where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
@@ -298,7 +292,6 @@ fn run_app(
     .unwrap();
 
     let mut b_conn = b.accept();
-    let get_client = || deps.client.lock().unwrap();
 
     loop {
         let res = app.enqueue_one().unwrap();
@@ -309,27 +302,28 @@ fn run_app(
         };
         let test = fake_tests.get(&package_name, &case);
 
-        let mut client = get_client();
-
         // process job enqueuing
-        client.process_client_messages_single_threaded(ClientMessageKind::AddJob);
+        deps.client
+            .process_client_messages_single_threaded(ClientMessageKind::AddJob);
         b_conn.process(1, false /* fetch_layers */);
         if test.desired_state == JobState::Complete {
-            client.process_broker_msg_single_threaded(1);
+            deps.client.process_broker_msg_single_threaded(1);
         }
 
-        let counts = client.get_job_state_counts().unwrap();
-        client.process_client_messages_single_threaded(ClientMessageKind::GetJobStateCounts);
+        let counts = deps.client.get_job_state_counts().unwrap();
+        deps.client
+            .process_client_messages_single_threaded(ClientMessageKind::GetJobStateCounts);
 
         // process job state request
         b_conn.process(1, false /* fetch_layers */);
-        client.process_broker_msg_single_threaded(1);
+        deps.client.process_broker_msg_single_threaded(1);
 
         prog_driver.update(counts.recv().unwrap().unwrap()).unwrap();
     }
 
     app.drain().unwrap();
-    get_client().process_client_messages_single_threaded(ClientMessageKind::Stop);
+    deps.client
+        .process_client_messages_single_threaded(ClientMessageKind::Stop);
 
     if finish {
         app.finish().unwrap();
