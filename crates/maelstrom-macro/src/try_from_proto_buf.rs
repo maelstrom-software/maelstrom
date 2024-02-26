@@ -59,6 +59,7 @@ fn try_from_proto_buf_unit_enum(
         }
     });
 
+    let self_name = self_path.segments.last().unwrap().ident.to_string();
     Ok(parse_quote! {
         impl crate::TryFromProtoBuf for #self_path {
             type ProtoBufType = i32;
@@ -66,7 +67,7 @@ fn try_from_proto_buf_unit_enum(
             fn try_from_proto_buf(p: Self::ProtoBufType) -> ::anyhow::Result<Self> {
                 match #proto_buf_type::try_from(p) {
                     #(#arms,)*
-                    _ => Err(::anyhow::anyhow!("malformed response"))
+                    _ => Err(::anyhow::anyhow!("malformed `{}`", #self_name))
                 }
             }
         }
@@ -83,6 +84,7 @@ fn try_from_proto_buf_enum(
         std::mem::swap(&mut self_path, &mut proto_buf_type);
     }
 
+    let self_name = self_path.segments.last().unwrap().ident.to_string();
     let arms = variants.iter().map(|v| -> Result<Arm> {
         let variant_ident = &v.ident;
         Ok(match v.fields.style {
@@ -120,7 +122,7 @@ fn try_from_proto_buf_enum(
                     if v.option {
                         parse_quote!{
                             crate::TryFromProtoBuf::try_from_proto_buf(
-                                #ident.ok_or(::anyhow::anyhow!("malformed response"))?
+                                #ident.ok_or(::anyhow::anyhow!("malformed `{}`", #self_name))?
                             )?
                         }
                     } else {
@@ -145,7 +147,7 @@ fn try_from_proto_buf_enum(
             fn try_from_proto_buf(p: Self::ProtoBufType) -> ::anyhow::Result<Self> {
                 match p {
                     #(#arms,)*
-                    _ => Err(::anyhow::anyhow!("malformed response"))
+                    _ => Err(::anyhow::anyhow!("malformed `{}`", #self_name))
                 }
             }
         }
