@@ -1,20 +1,22 @@
 mod artifact_upload;
 mod digest_repo;
+mod dispatcher;
 mod rpc;
 mod test;
 
 use anyhow::{anyhow, Context as _, Result};
 use artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
 use digest_repo::DigestRepository;
+use dispatcher::{ArtifactPushRequest, Dispatcher, DispatcherMessage};
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{
         ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
         UnixTimestamp,
     },
-    proto::{BrokerToClient, ClientToBroker, Hello},
+    proto::Hello,
     stats::JobStateCounts,
-    ArtifactType, ClientJobId, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
+    ArtifactType, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
@@ -22,18 +24,16 @@ use maelstrom_client_base::{
     STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
-use maelstrom_util::{
-    config::BrokerAddr, ext::OptionExt as _, fs::Fs, manifest::ManifestBuilder, net,
-};
+use maelstrom_util::{config::BrokerAddr, fs::Fs, manifest::ManifestBuilder, net};
 pub use rpc::run_process_client;
 use sha2::{Digest as _, Sha256};
 
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     fmt,
     net::TcpStream,
     path::{Path, PathBuf},
-    sync::mpsc::{self, Receiver, SyncSender},
+    sync::mpsc::{self, SyncSender},
     thread::{self, JoinHandle},
     time::SystemTime,
 };
@@ -54,121 +54,6 @@ fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let mtime = f.metadata()?.modified()?;
 
     Ok((mtime, Sha256Digest::new(hasher.finalize().into())))
-}
-
-enum DispatcherMessage {
-    BrokerToClient(BrokerToClient),
-    AddArtifact(PathBuf, Sha256Digest),
-    AddJob(JobSpec, JobResponseHandler),
-    GetJobStateCounts(tokio::sync::mpsc::UnboundedSender<JobStateCounts>),
-    Stop,
-}
-
-struct ArtifactPushRequest {
-    path: PathBuf,
-    digest: Sha256Digest,
-}
-
-struct Dispatcher {
-    receiver: Receiver<DispatcherMessage>,
-    stream: TcpStream,
-    artifact_pusher: SyncSender<ArtifactPushRequest>,
-    stop_when_all_completed: bool,
-    next_client_job_id: u32,
-    artifacts: HashMap<Sha256Digest, PathBuf>,
-    handlers: HashMap<ClientJobId, JobResponseHandler>,
-    stats_reqs: VecDeque<tokio::sync::mpsc::UnboundedSender<JobStateCounts>>,
-}
-
-impl Dispatcher {
-    fn new(
-        receiver: Receiver<DispatcherMessage>,
-        stream: TcpStream,
-        artifact_pusher: SyncSender<ArtifactPushRequest>,
-    ) -> Self {
-        Self {
-            receiver,
-            stream,
-            artifact_pusher,
-            stop_when_all_completed: false,
-            next_client_job_id: 0u32,
-            artifacts: Default::default(),
-            handlers: Default::default(),
-            stats_reqs: Default::default(),
-        }
-    }
-
-    /// Processes one request. In order to drive the dispatcher, this should be called in a loop
-    /// until the function return false
-    fn process_one(&mut self) -> Result<bool> {
-        let msg = self.receiver.recv()?;
-        let (cont, _) = self.handle_message(msg)?;
-        Ok(cont)
-    }
-
-    fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
-        let msg = self.receiver.try_recv().ok()?;
-        let (_, kind) = self.handle_message(msg).ok()?;
-        Some(kind)
-    }
-
-    fn handle_message(&mut self, msg: DispatcherMessage) -> Result<(bool, ClientMessageKind)> {
-        let mut kind = ClientMessageKind::Other;
-        match msg {
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                self.handlers.remove(&cjid).unwrap()(cjid, result);
-                if self.stop_when_all_completed && self.handlers.is_empty() {
-                    return Ok((false, kind));
-                }
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                let path = self
-                    .artifacts
-                    .get(&digest)
-                    .unwrap_or_else(|| {
-                        panic!("got request for unknown artifact with digest {digest}")
-                    })
-                    .clone();
-                self.artifact_pusher
-                    .send(ArtifactPushRequest { path, digest })?;
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
-                unimplemented!("this client doesn't send statistics requests")
-            }
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
-                self.stats_reqs.pop_front().unwrap().send(res).ok();
-            }
-            DispatcherMessage::AddArtifact(path, digest) => {
-                self.artifacts.insert(digest, path);
-            }
-            DispatcherMessage::AddJob(spec, handler) => {
-                let cjid = self.next_client_job_id.into();
-                self.handlers.insert(cjid, handler).assert_is_none();
-                self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
-                net::write_message_to_socket(
-                    &mut self.stream,
-                    ClientToBroker::JobRequest(cjid, spec),
-                )?;
-                kind = ClientMessageKind::AddJob;
-            }
-            DispatcherMessage::Stop => {
-                kind = ClientMessageKind::Stop;
-                if self.handlers.is_empty() {
-                    return Ok((false, kind));
-                }
-                self.stop_when_all_completed = true;
-            }
-            DispatcherMessage::GetJobStateCounts(sender) => {
-                net::write_message_to_socket(
-                    &mut self.stream,
-                    ClientToBroker::JobStateCountsRequest,
-                )?;
-                self.stats_reqs.push_back(sender);
-                kind = ClientMessageKind::GetJobStateCounts;
-            }
-        }
-        Ok((true, kind))
-    }
 }
 
 struct SocketReader {
