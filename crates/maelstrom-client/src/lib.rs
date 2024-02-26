@@ -207,10 +207,6 @@ impl Client {
         Ok(s)
     }
 
-    pub fn set_logger(&mut self, log: slog::Logger) {
-        self.log = log;
-    }
-
     fn send_async<BuilderT, FutureT, ProtRetT>(
         &self,
         builder: BuilderT,
