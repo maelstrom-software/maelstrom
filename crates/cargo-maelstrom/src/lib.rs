@@ -530,7 +530,8 @@ pub struct MainAppDeps<StdErrT> {
     pub client: Mutex<Client>,
     queuing_deps: JobQueuingDeps<StdErrT>,
     cache_dir: PathBuf,
-    logger: Logger,
+    logging_output: LoggingOutput,
+    log: slog::Logger,
 }
 
 impl<StdErrT> MainAppDeps<StdErrT> {
@@ -565,7 +566,8 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         manifest_options: ManifestOptions,
         logger: Logger,
     ) -> Result<Self> {
-        let log = logger.build_with_term_output();
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
         slog::debug!(
             log, "creating app dependencies";
             "include_filter" => ?include_filter,
@@ -616,7 +618,8 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 manifest_options,
             ),
             cache_dir,
-            logger,
+            logging_output,
+            log,
         })
     }
 }
@@ -773,34 +776,53 @@ fn list_binaries<ProgressIndicatorT>(
     }
 }
 
+#[derive(Default)]
+struct LoggingOutputInner {
+    prog: Option<Box<dyn io::Write + Send + Sync + 'static>>,
+}
+
+#[derive(Clone, Default)]
+struct LoggingOutput {
+    inner: Arc<Mutex<LoggingOutputInner>>,
+}
+
+impl LoggingOutput {
+    fn update(&self, prog: impl io::Write + Send + Sync + 'static) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.prog = Some(Box::new(prog));
+    }
+}
+
+impl io::Write for LoggingOutput {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(prog) = &mut inner.prog {
+            prog.write(buf)
+        } else {
+            io::stdout().write(buf)
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        let mut inner = self.inner.lock().unwrap();
+        if let Some(prog) = &mut inner.prog {
+            prog.flush()
+        } else {
+            io::stdout().flush()
+        }
+    }
+}
+
 pub enum Logger {
     DefaultLogger(LogLevel),
     GivenLogger(slog::Logger),
 }
 
 impl Logger {
-    fn build_with_term_output(&self) -> slog::Logger {
+    fn build(&self, out: LoggingOutput) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
-                let decorator = slog_term::TermDecorator::new()
-                    .force_plain()
-                    .stdout()
-                    .build();
-                let drain = slog_term::FullFormat::new(decorator).build().fuse();
-                let drain = slog_async::Async::new(drain).build().fuse();
-                let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
-                slog::Logger::root(drain, slog::o!())
-            }
-            Self::GivenLogger(logger) => logger.clone(),
-        }
-    }
-
-    fn build_with_progress_output(&self, prog: impl ProgressIndicator) -> slog::Logger {
-        match self {
-            Self::DefaultLogger(level) => {
-                let decorator = slog_term::PlainDecorator::new(
-                    progress::ProgressWriteAdapter::new(prog.clone()),
-                );
+                let decorator = slog_term::PlainDecorator::new(out);
                 let drain = slog_term::FullFormat::new(decorator).build().fuse();
                 let drain = slog_async::Async::new(drain).build().fuse();
                 let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
@@ -830,9 +852,9 @@ where
     prog_driver.drive(&deps.client, prog.clone());
     prog.update_length(deps.queuing_deps.expected_job_count);
 
-    let log = deps.logger.build_with_progress_output(prog.clone());
-    slog::debug!(log, "main app created");
-    deps.client.lock().unwrap().set_logger(log.clone());
+    deps.logging_output
+        .update(progress::ProgressWriteAdapter::new(prog.clone()));
+    slog::debug!(deps.log, "main app created");
 
     match deps.queuing_deps.list_action {
         Some(ListAction::ListPackages) => list_packages(&prog, &deps.queuing_deps.packages),
@@ -842,7 +864,7 @@ where
     }
 
     let queuing = JobQueuing::new(
-        log,
+        deps.log.clone(),
         &deps.queuing_deps,
         &deps.client,
         width,
