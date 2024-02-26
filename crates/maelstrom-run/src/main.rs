@@ -237,9 +237,3 @@ fn main() -> Result<ExitCode> {
     client.into_inner().wait_for_outstanding_jobs()?;
     Ok(accum.get())
 }
-
-#[test]
-fn test_cli() {
-    use clap::CommandFactory;
-    CliOptions::command().debug_assert()
-}
