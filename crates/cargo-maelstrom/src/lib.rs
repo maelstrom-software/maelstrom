@@ -302,7 +302,7 @@ where
                 .ind
                 .new_side_progress(format!("downloading image {image}"))
                 .unwrap_or_else(ProgressBar::hidden);
-            let mut client = self.client.lock().unwrap();
+            let client = self.client.lock().unwrap();
             slog::debug!(
                 self.log, "getting container image";
                 "image" => &image,

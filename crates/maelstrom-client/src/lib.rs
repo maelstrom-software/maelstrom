@@ -243,7 +243,7 @@ impl Client {
         self.send_async(builder)?.recv()?
     }
 
-    pub fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+    pub fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
         slog::debug!(self.log, "client.add_artifact"; "path" => ?path);
         let msg = proto::AddArtifactRequest {
             path: path.into_proto_buf(),
@@ -254,7 +254,7 @@ impl Client {
         Ok(digest.try_into()?)
     }
 
-    pub fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+    pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         slog::debug!(self.log, "client.add_layer"; "layer" => ?layer);
         let msg = proto::AddLayerRequest {
             layer: Some(layer.into_proto_buf()),
@@ -268,7 +268,7 @@ impl Client {
     }
 
     pub fn get_container_image(
-        &mut self,
+        &self,
         name: &str,
         tag: &str,
         prog: ProgressBar,
@@ -283,7 +283,7 @@ impl Client {
         TryFromProtoBuf::try_from_proto_buf(img)
     }
 
-    pub fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) -> Result<()> {
+    pub fn add_job(&self, spec: JobSpec, handler: JobResponseHandler) -> Result<()> {
         let msg = proto::AddJobRequest {
             spec: Some(spec.into_proto_buf()),
         };
@@ -309,14 +309,14 @@ impl Client {
         Ok(())
     }
 
-    pub fn stop_accepting(&mut self) -> Result<()> {
+    pub fn stop_accepting(&self) -> Result<()> {
         self.send_sync(
             move |mut client| async move { client.stop_accepting(proto::Void {}).await },
         )?;
         Ok(())
     }
 
-    pub fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+    pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.send_sync(move |mut client| async move {
             client.wait_for_outstanding_jobs(proto::Void {}).await
         })?;
@@ -324,7 +324,7 @@ impl Client {
     }
 
     pub fn get_job_state_counts(
-        &mut self,
+        &self,
     ) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
         self.send_async(move |mut client| async move {
             let res = client.get_job_state_counts(proto::Void {}).await?;

@@ -213,7 +213,7 @@ fn main() -> Result<ExitCode> {
     let image_lookup = |image: &str| {
         let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
         let prog = ProgressBar::hidden();
-        let mut client = client.borrow_mut();
+        let client = client.borrow();
         let image = client.get_container_image(image, version, prog)?;
         Ok(ImageConfig {
             layers: image.layers.clone(),
