@@ -782,7 +782,10 @@ impl Logger {
     fn build_with_term_output(&self) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
-                let decorator = slog_term::TermDecorator::new().build();
+                let decorator = slog_term::TermDecorator::new()
+                    .force_plain()
+                    .stdout()
+                    .build();
                 let drain = slog_term::FullFormat::new(decorator).build().fuse();
                 let drain = slog_async::Async::new(drain).build().fuse();
                 let drain = slog::LevelFilter::new(drain, level.as_slog_level()).fuse();
