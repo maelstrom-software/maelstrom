@@ -621,7 +621,7 @@ impl IntoResult for Vec<u8> {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Default, Debug, Serialize, Deserialize)]
-#[proto(type_path = "proto::ClientDriverMode")]
+#[proto(other_type = "proto::ClientDriverMode")]
 pub enum ClientDriverMode {
     #[default]
     MultiThreaded,
@@ -629,7 +629,7 @@ pub enum ClientDriverMode {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[proto(type_path = "proto::ClientMessageKind")]
+#[proto(other_type = "proto::ClientMessageKind")]
 pub enum ClientMessageKind {
     AddJob,
     GetJobStateCounts,

@@ -112,7 +112,7 @@ fn try_from_proto_buf_enum(
                 let field_idents1 = v.fields.iter().map(|f| &f.ident);
                 let field_idents2 = field_idents1.clone();
                 let variant_type = v
-                    .type_path
+                    .other_type
                     .as_ref()
                     .ok_or(Error::new(variant_ident.span(), "missing path_type"))?;
                 let field_exprs = v.fields.iter().map(|v| -> Expr {
@@ -161,7 +161,7 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
             self_path,
             input.option_all,
             input.remote,
-            input.type_path,
+            input.other_type,
             fields,
         ),
         darling::ast::Data::Enum(variants) => {
@@ -170,9 +170,9 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
                 .all(|f| f.fields.style == darling::ast::Style::Unit);
 
             if all_unit {
-                try_from_proto_buf_unit_enum(self_path, input.remote, input.type_path, variants)
+                try_from_proto_buf_unit_enum(self_path, input.remote, input.other_type, variants)
             } else {
-                try_from_proto_buf_enum(self_path, input.remote, input.type_path, variants)
+                try_from_proto_buf_enum(self_path, input.remote, input.other_type, variants)
             }
         }
     }
@@ -192,7 +192,7 @@ struct TryFromProtoBufStructField {
 struct TryFromProtoBufEnumVariant {
     ident: Ident,
     fields: darling::ast::Fields<TryFromProtoBufStructField>,
-    type_path: Option<Path>,
+    other_type: Option<Path>,
 }
 
 #[derive(Clone, Debug, FromDeriveInput)]
@@ -201,7 +201,7 @@ struct TryFromProtoBufEnumVariant {
 struct TryFromProtoBufInput {
     ident: Ident,
     data: darling::ast::Data<TryFromProtoBufEnumVariant, TryFromProtoBufStructField>,
-    type_path: Path,
+    other_type: Path,
     #[darling(default)]
     remote: bool,
     #[darling(default)]

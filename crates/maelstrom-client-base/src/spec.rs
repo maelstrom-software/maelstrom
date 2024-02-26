@@ -54,7 +54,7 @@ where
     PartialEq,
     Serialize,
 )]
-#[proto(type_path = "proto::PrefixOptions")]
+#[proto(other_type = "proto::PrefixOptions")]
 pub struct PrefixOptions {
     pub strip_prefix: Option<Utf8PathBuf>,
     pub prepend_prefix: Option<Utf8PathBuf>,
@@ -74,7 +74,7 @@ pub struct PrefixOptions {
     PartialEq,
     Serialize,
 )]
-#[proto(type_path = "proto::SymlinkSpec")]
+#[proto(other_type = "proto::SymlinkSpec")]
 pub struct SymlinkSpec {
     pub link: Utf8PathBuf,
     pub target: Utf8PathBuf,
@@ -83,25 +83,25 @@ pub struct SymlinkSpec {
 #[derive(
     IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize,
 )]
-#[proto(type_path = proto::add_layer_request::Layer)]
+#[proto(other_type = proto::add_layer_request::Layer)]
 pub enum Layer {
-    #[proto(type_path = proto::TarLayer)]
+    #[proto(other_type = proto::TarLayer)]
     Tar { path: Utf8PathBuf },
-    #[proto(type_path = proto::GlobLayer)]
+    #[proto(other_type = proto::GlobLayer)]
     Glob {
         glob: String,
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
-    #[proto(type_path = proto::PathsLayer)]
+    #[proto(other_type = proto::PathsLayer)]
     Paths {
         paths: Vec<Utf8PathBuf>,
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
-    #[proto(type_path = proto::StubsLayer)]
+    #[proto(other_type = proto::StubsLayer)]
     Stubs { stubs: Vec<String> },
-    #[proto(type_path = proto::SymlinksLayer)]
+    #[proto(other_type = proto::SymlinksLayer)]
     Symlinks { symlinks: Vec<SymlinkSpec> },
 }
 
