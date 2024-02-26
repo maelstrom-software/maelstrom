@@ -229,7 +229,7 @@ impl<'scope> TestProgressDriver<'scope> {
 }
 
 fn test_logger() -> slog::Logger {
-    let decorator = slog_term::TermDecorator::new().build();
+    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     slog::Logger::root(drain, slog::o!())
