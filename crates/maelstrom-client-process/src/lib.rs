@@ -19,8 +19,8 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    ClientDriverMode, ClientMessageKind, JobResponseHandler, MANIFEST_DIR, STUB_MANIFEST_DIR,
-    SYMLINK_MANIFEST_DIR,
+    ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, JobResponseHandler, MANIFEST_DIR,
+    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
@@ -31,6 +31,10 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
 use sha2::{Digest as _, Sha256};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
+};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     fmt,
@@ -50,19 +54,98 @@ fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
     }
 }
 
-fn push_one_artifact(broker_addr: BrokerAddr, path: PathBuf, digest: Sha256Digest) -> Result<()> {
+fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
+    let digest_string = digest.to_string();
+    let short_digest = &digest_string[digest_string.len() - 7..];
+    let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    format!("{short_digest} {file_name}")
+}
+
+struct UploadProgressReader<ReadT> {
+    prog: Arc<UploadProgress>,
+    read: ReadT,
+}
+
+impl<ReadT> UploadProgressReader<ReadT> {
+    fn new(prog: Arc<UploadProgress>, read: ReadT) -> Self {
+        Self { prog, read }
+    }
+}
+
+impl<ReadT: io::Read> io::Read for UploadProgressReader<ReadT> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let amount_read = self.read.read(buf)?;
+        self.prog
+            .progress
+            .fetch_add(amount_read as u64, Ordering::AcqRel);
+        Ok(amount_read)
+    }
+}
+
+struct UploadProgress {
+    size: u64,
+    progress: AtomicU64,
+}
+
+#[derive(Clone, Default)]
+struct ArtifactUploadTracker {
+    uploads: Arc<Mutex<HashMap<String, Arc<UploadProgress>>>>,
+}
+
+impl ArtifactUploadTracker {
+    fn new_upload(&self, name: impl Into<String>, size: u64) -> Arc<UploadProgress> {
+        let mut uploads = self.uploads.lock().unwrap();
+        let prog = Arc::new(UploadProgress {
+            size,
+            progress: AtomicU64::new(0),
+        });
+        uploads.insert(name.into(), prog.clone());
+        prog
+    }
+
+    fn remove_upload(&self, name: &str) {
+        let mut uploads = self.uploads.lock().unwrap();
+        uploads.remove(name);
+    }
+
+    fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
+        let uploads = self.uploads.lock().unwrap();
+        uploads
+            .iter()
+            .map(|(name, p)| ArtifactUploadProgress {
+                name: name.clone(),
+                size: p.size,
+                progress: p.progress.load(Ordering::Acquire),
+            })
+            .collect()
+    }
+}
+
+fn push_one_artifact(
+    upload_tracker: ArtifactUploadTracker,
+    broker_addr: BrokerAddr,
+    path: PathBuf,
+    digest: Sha256Digest,
+) -> Result<()> {
     let mut stream = TcpStream::connect(broker_addr.inner())?;
     net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
 
     let fs = Fs::new();
-    let file = fs.open_file(path)?;
+    let file = fs.open_file(&path)?;
     let size = file.metadata()?.len();
-    let mut file = FixedSizeReader::new(file, size);
+
+    let upload_name = construct_upload_name(&digest, &path);
+    let prog = upload_tracker.new_upload(&upload_name, size);
+
+    let mut file = UploadProgressReader::new(prog, FixedSizeReader::new(file, size));
 
     net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
     let copied = io::copy(&mut file, &mut stream)?;
     assert_eq!(copied, size);
+
     let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
+
+    upload_tracker.remove_upload(&upload_name);
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
@@ -92,13 +175,19 @@ struct ArtifactPushRequest {
 struct ArtifactPusher {
     broker_addr: BrokerAddr,
     receiver: Receiver<ArtifactPushRequest>,
+    upload_tracker: ArtifactUploadTracker,
 }
 
 impl ArtifactPusher {
-    fn new(broker_addr: BrokerAddr, receiver: Receiver<ArtifactPushRequest>) -> Self {
+    fn new(
+        broker_addr: BrokerAddr,
+        receiver: Receiver<ArtifactPushRequest>,
+        upload_tracker: ArtifactUploadTracker,
+    ) -> Self {
         Self {
             broker_addr,
             receiver,
+            upload_tracker,
         }
     }
 
@@ -109,9 +198,12 @@ impl ArtifactPusher {
         'a: 'b,
     {
         if let Ok(msg) = self.receiver.recv() {
+            let upload_tracker = self.upload_tracker.clone();
             let broker_addr = self.broker_addr;
             // N.B. We are ignoring this Result<_>
-            scope.spawn(move || push_one_artifact(broker_addr, msg.path, msg.digest));
+            scope.spawn(move || {
+                push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
+            });
             true
         } else {
             false
@@ -375,7 +467,7 @@ struct ClientDeps {
 }
 
 impl ClientDeps {
-    fn new(broker_addr: BrokerAddr) -> Result<Self> {
+    fn new(broker_addr: BrokerAddr, upload_tracker: ArtifactUploadTracker) -> Result<Self> {
         let mut stream = TcpStream::connect(broker_addr.inner())
             .with_context(|| format!("failed to connect to {broker_addr}"))?;
         net::write_message_to_socket(&mut stream, Hello::Client)?;
@@ -385,7 +477,7 @@ impl ClientDeps {
         let stream_clone = stream.try_clone()?;
         Ok(Self {
             dispatcher: Dispatcher::new(dispatcher_receiver, stream_clone, artifact_send),
-            artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv),
+            artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
             socket_reader: SocketReader::new(stream, dispatcher_sender.clone()),
             dispatcher_sender,
         })
@@ -505,6 +597,7 @@ struct Client {
     cache_dir: PathBuf,
     project_dir: PathBuf,
     cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
+    upload_tracker: ArtifactUploadTracker,
 }
 
 impl Client {
@@ -515,7 +608,8 @@ impl Client {
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
         let mut driver = new_driver(driver_mode);
-        let deps = ClientDeps::new(broker_addr)?;
+        let upload_tracker = ArtifactUploadTracker::default();
+        let deps = ClientDeps::new(broker_addr, upload_tracker.clone())?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
         driver.drive(deps);
 
@@ -533,6 +627,7 @@ impl Client {
             cache_dir: cache_dir.as_ref().to_owned(),
             project_dir: project_dir.as_ref().to_owned(),
             cached_layers: HashMap::new(),
+            upload_tracker,
         })
     }
 
@@ -749,6 +844,10 @@ impl Client {
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))?;
         Ok(recv)
+    }
+
+    fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
+        self.upload_tracker.get_artifact_upload_progress()
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`

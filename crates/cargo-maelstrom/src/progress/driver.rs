@@ -1,6 +1,8 @@
 use super::ProgressIndicator;
 use anyhow::Result;
-use maelstrom_client::Client;
+use indicatif::ProgressBar;
+use maelstrom_client::{ArtifactUploadProgress, Client};
+use std::collections::{HashMap, HashSet};
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -41,6 +43,50 @@ impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
     }
 }
 
+#[derive(Default)]
+struct UploadProgressBarTracker {
+    uploads: HashMap<String, ProgressBar>,
+}
+
+impl UploadProgressBarTracker {
+    fn update(&mut self, ind: &impl ProgressIndicator, states: Vec<ArtifactUploadProgress>) {
+        let mut existing = HashSet::new();
+        for state in states {
+            existing.insert(state.name.clone());
+
+            let prog = match self.uploads.get(&state.name) {
+                Some(prog) => prog.clone(),
+                None => {
+                    let Some(prog) = ind.new_side_progress(&state.name) else {
+                        continue;
+                    };
+                    self.uploads.insert(state.name, prog.clone());
+                    prog
+                }
+            };
+            prog.set_length(state.size);
+            prog.set_position(state.progress);
+        }
+
+        self.uploads.retain(|name, bar| {
+            if !existing.contains(name) {
+                bar.finish_and_clear();
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
+impl Drop for UploadProgressBarTracker {
+    fn drop(&mut self) {
+        for bar in self.uploads.values() {
+            bar.finish_and_clear();
+        }
+    }
+}
+
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
     fn drive<'dep, ProgressIndicatorT>(&mut self, client: &'dep Client, ind: ProgressIndicatorT)
     where
@@ -55,7 +101,11 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                         thread::sleep(Duration::from_millis(500))
                     }
                 });
+                let mut upload_bar_tracker = UploadProgressBarTracker::default();
                 while !canceled.load(Ordering::Acquire) {
+                    let upload_state = client.get_artifact_upload_progress()?;
+                    upload_bar_tracker.update(&ind, upload_state);
+
                     let counts = client.get_job_state_counts()?;
                     if !ind.update_job_states(counts.recv()??)? {
                         break;

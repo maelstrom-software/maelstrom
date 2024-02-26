@@ -250,6 +250,19 @@ impl proto::client_process_server::ClientProcess for Handler {
         .await
     }
 
+    async fn get_artifact_upload_progress(
+        &self,
+        _request: tonic::Request<proto::Void>,
+    ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
+        run_handler(async {
+            let res = self.with_client(|client| Ok(client.get_artifact_upload_progress()))?;
+            Ok(proto::GetArtifactUploadProgressResponse {
+                progress: res.into_proto_buf(),
+            })
+        })
+        .await
+    }
+
     async fn process_broker_msg_single_threaded(
         &self,
         request: tonic::Request<proto::ProcessBrokerMsgSingleThreadedRequest>,

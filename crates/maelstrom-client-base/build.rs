@@ -1,8 +1,9 @@
-const INTO_RESULT: [&str; 6] = [
+const INTO_RESULT: [&str; 7] = [
     "AddArtifactResponse",
     "AddJobRequest",
     "AddLayerRequest",
     "AddLayerResponse",
+    "GetArtifactUploadProgressResponse",
     "GetContainerImageResponse",
     "GetJobStateCountsResponse",
 ];

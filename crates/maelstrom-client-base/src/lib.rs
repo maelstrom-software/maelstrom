@@ -60,8 +60,8 @@ impl<V> IntoResult for Option<V> {
     }
 }
 
-impl IntoResult for Vec<u8> {
-    type Output = Vec<u8>;
+impl<V> IntoResult for Vec<V> {
+    type Output = Vec<V>;
 
     fn into_result(self) -> Result<Self::Output> {
         Ok(self)
@@ -83,4 +83,12 @@ pub enum ClientMessageKind {
     GetJobStateCounts,
     Stop,
     Other,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(other_type = "proto::ArtifactUploadProgress")]
+pub struct ArtifactUploadProgress {
+    pub name: String,
+    pub size: u64,
+    pub progress: u64,
 }

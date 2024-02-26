@@ -68,6 +68,22 @@ impl TryFromProtoBuf for u8 {
     }
 }
 
+impl IntoProtoBuf for u64 {
+    type ProtoBufType = u64;
+
+    fn into_proto_buf(self) -> u64 {
+        self
+    }
+}
+
+impl TryFromProtoBuf for u64 {
+    type ProtoBufType = u64;
+
+    fn try_from_proto_buf(v: u64) -> Result<Self> {
+        Ok(v)
+    }
+}
+
 //      _      _
 //  ___| |_ __| |
 // / __| __/ _` |

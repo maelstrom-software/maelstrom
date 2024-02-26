@@ -256,6 +256,16 @@ message ProcessClientMessagesSingleThreadedRequest {
     ClientMessageKind kind = 1;
 }
 
+message ArtifactUploadProgress {
+    string name = 1;
+    uint64 size = 2;
+    uint64 progress = 3;
+}
+
+message GetArtifactUploadProgressResponse {
+    repeated ArtifactUploadProgress progress = 1;
+}
+
 service ClientProcess {
     rpc Start(StartRequest) returns (Void);
     rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
@@ -265,6 +275,7 @@ service ClientProcess {
     rpc AddJob(AddJobRequest) returns (AddJobResponse);
     rpc WaitForOutstandingJobs(Void) returns (Void);
     rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);
+    rpc GetArtifactUploadProgress(Void) returns (GetArtifactUploadProgressResponse);
     rpc ProcessBrokerMsgSingleThreaded(ProcessBrokerMsgSingleThreadedRequest) returns (Void);
     rpc ProcessClientMessagesSingleThreaded(ProcessClientMessagesSingleThreadedRequest) returns (Void);
     rpc ProcessArtifactSingleThreaded(Void) returns(Void);
