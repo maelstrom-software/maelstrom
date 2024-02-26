@@ -1,5 +1,6 @@
-use crate::{ClientDeps, ClientDriver, ClientMessageKind};
+use crate::driver::{ClientDeps, ClientDriver};
 use anyhow::Result;
+use maelstrom_client_base::ClientMessageKind;
 use std::sync::{Arc, Mutex};
 use std::thread;
 

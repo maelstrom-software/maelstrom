@@ -1,20 +1,21 @@
 mod artifact_upload;
 mod digest_repo;
 mod dispatcher;
+mod driver;
 mod rpc;
 mod test;
 
-use anyhow::{anyhow, Context as _, Result};
-use artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
+use anyhow::{anyhow, Result};
+use artifact_upload::ArtifactUploadTracker;
 use digest_repo::DigestRepository;
-use dispatcher::{ArtifactPushRequest, Dispatcher, DispatcherMessage};
+use dispatcher::{ArtifactPushRequest, DispatcherMessage};
+use driver::{new_driver, ClientDeps, ClientDriver};
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{
         ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
         UnixTimestamp,
     },
-    proto::Hello,
     stats::JobStateCounts,
     ArtifactType, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -24,27 +25,16 @@ use maelstrom_client_base::{
     STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
-use maelstrom_util::{config::BrokerAddr, fs::Fs, manifest::ManifestBuilder, net};
+use maelstrom_util::{config::BrokerAddr, fs::Fs, manifest::ManifestBuilder};
 pub use rpc::run_process_client;
 use sha2::{Digest as _, Sha256};
-
 use std::{
     collections::{HashMap, HashSet},
     fmt,
-    net::TcpStream,
     path::{Path, PathBuf},
-    sync::mpsc::{self, SyncSender},
-    thread::{self, JoinHandle},
+    sync::mpsc::SyncSender,
     time::SystemTime,
 };
-use test::client_driver::SingleThreadedClientDriver;
-
-fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
-    match mode {
-        ClientDriverMode::MultiThreaded => Box::<MultiThreadedClientDriver>::default(),
-        ClientDriverMode::SingleThreaded => Box::<SingleThreadedClientDriver>::default(),
-    }
-}
 
 fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = Fs::new();
@@ -54,95 +44,6 @@ fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let mtime = f.metadata()?.modified()?;
 
     Ok((mtime, Sha256Digest::new(hasher.finalize().into())))
-}
-
-struct SocketReader {
-    stream: TcpStream,
-    channel: SyncSender<DispatcherMessage>,
-}
-
-impl SocketReader {
-    fn new(stream: TcpStream, channel: SyncSender<DispatcherMessage>) -> Self {
-        Self { stream, channel }
-    }
-
-    fn process_one(&mut self) -> bool {
-        let Ok(msg) = net::read_message_from_socket(&mut self.stream) else {
-            return false;
-        };
-        self.channel
-            .send(DispatcherMessage::BrokerToClient(msg))
-            .is_ok()
-    }
-}
-
-struct ClientDeps {
-    dispatcher: Dispatcher,
-    artifact_pusher: ArtifactPusher,
-    socket_reader: SocketReader,
-    dispatcher_sender: SyncSender<DispatcherMessage>,
-}
-
-impl ClientDeps {
-    fn new(broker_addr: BrokerAddr, upload_tracker: ArtifactUploadTracker) -> Result<Self> {
-        let mut stream = TcpStream::connect(broker_addr.inner())
-            .with_context(|| format!("failed to connect to {broker_addr}"))?;
-        net::write_message_to_socket(&mut stream, Hello::Client)?;
-
-        let (dispatcher_sender, dispatcher_receiver) = mpsc::sync_channel(1000);
-        let (artifact_send, artifact_recv) = mpsc::sync_channel(1000);
-        let stream_clone = stream.try_clone()?;
-        Ok(Self {
-            dispatcher: Dispatcher::new(dispatcher_receiver, stream_clone, artifact_send),
-            artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
-            socket_reader: SocketReader::new(stream, dispatcher_sender.clone()),
-            dispatcher_sender,
-        })
-    }
-}
-
-trait ClientDriver {
-    fn drive(&mut self, deps: ClientDeps);
-    fn stop(&mut self) -> Result<()>;
-
-    fn process_broker_msg_single_threaded(&self, _count: usize) {
-        unimplemented!()
-    }
-
-    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
-        unimplemented!()
-    }
-
-    fn process_artifact_single_threaded(&self) {
-        unimplemented!()
-    }
-}
-
-#[derive(Default)]
-struct MultiThreadedClientDriver {
-    handle: Option<JoinHandle<Result<()>>>,
-}
-
-impl ClientDriver for MultiThreadedClientDriver {
-    fn drive(&mut self, mut deps: ClientDeps) {
-        assert!(self.handle.is_none());
-        self.handle = Some(thread::spawn(move || {
-            thread::scope(|scope| {
-                let dispatcher_handle = scope.spawn(move || {
-                    while deps.dispatcher.process_one()? {}
-                    deps.dispatcher.stream.shutdown(std::net::Shutdown::Both)?;
-                    Ok(())
-                });
-                scope.spawn(move || while deps.artifact_pusher.process_one(scope) {});
-                scope.spawn(move || while deps.socket_reader.process_one() {});
-                dispatcher_handle.join().unwrap()
-            })
-        }));
-    }
-
-    fn stop(&mut self) -> Result<()> {
-        self.handle.take().unwrap().join().unwrap()
-    }
 }
 
 #[derive(Default)]
