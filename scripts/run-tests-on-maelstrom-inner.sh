@@ -17,7 +17,7 @@ PORT=$( \
 	| sed -Ee 's/^.*\baddr: [^,]*:([0-9]+),.*$/\1/' \
 )
 cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT &
-cargo run --release --bin cargo-maelstrom -- --broker=localhost:$PORT --log-level=debug run
+cargo run --release --bin cargo-maelstrom -- --broker=localhost:$PORT --release --log-level=debug run
 CARGO_MAELSTROM_STATUS=$?
 kill -9 $BROKER_PID
 rm "$TEMPFILE"
@@ -25,4 +25,4 @@ if [ $CARGO_MAELSTROM_STATUS != 0 ]; then
 	exit $CARGO_MAELSTROM_STATUS
 fi
 
-exec cargo test --doc
+exec cargo test --release --doc
