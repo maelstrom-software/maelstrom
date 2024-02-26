@@ -2736,6 +2736,7 @@ dependencies = [
  "slog-term",
  "tempfile",
  "tokio",
+ "tokio-stream",
  "tonic",
  "tower",
 ]

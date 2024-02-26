@@ -19,6 +19,7 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::pin::Pin;
 use std::thread;
+use tokio_stream::StreamExt as _;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -29,6 +30,9 @@ type RequestFn = Box<
 >;
 type RequestReceiver = tokio::sync::mpsc::UnboundedReceiver<RequestFn>;
 type RequestSender = tokio::sync::mpsc::UnboundedSender<RequestFn>;
+
+type TonicResult<T> = std::result::Result<T, tonic::Status>;
+type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
 fn run_dispatcher(sock: UnixStream, requester: RequestReceiver) -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
@@ -136,13 +140,33 @@ pub struct Client {
     log: slog::Logger,
 }
 
-fn flatten_rpc_result<ProtRetT>(
-    res: std::result::Result<tonic::Response<ProtRetT>, tonic::Status>,
-) -> Result<ProtRetT::Output>
+fn flatten_rpc_result<ProtRetT>(res: TonicResponse<ProtRetT>) -> Result<ProtRetT::Output>
 where
     ProtRetT: IntoResult,
 {
     res?.into_inner().into_result()
+}
+
+async fn run_progress_bar(
+    prog: ProgressBar,
+    stream: tonic::Response<tonic::Streaming<proto::GetContainerImageProgressResponse>>,
+) -> TonicResponse<proto::GetContainerImageResponse> {
+    use proto::get_container_image_progress_response::Progress;
+    let (meta, mut stream, ext) = stream.into_parts();
+    while let Some(msg) = stream.next().await {
+        match msg?.progress {
+            Some(Progress::ProgressLength(len)) => prog.set_length(len),
+            Some(Progress::ProgressInc(v)) => prog.inc(v),
+            Some(Progress::Done(v)) => {
+                return Ok(tonic::Response::from_parts(meta, v, ext));
+            }
+            None => break,
+        }
+    }
+    Err(tonic::Status::new(
+        tonic::Code::Unknown,
+        "malformed progress response",
+    ))
 }
 
 impl Client {
@@ -251,14 +275,15 @@ impl Client {
         &mut self,
         name: &str,
         tag: &str,
-        _prog: ProgressBar,
+        prog: ProgressBar,
     ) -> Result<ContainerImage> {
         let msg = proto::GetContainerImageRequest {
             name: name.into(),
             tag: tag.into(),
         };
-        let img =
-            self.send_sync(move |mut client| async move { client.get_container_image(msg).await })?;
+        let img = self.send_sync(move |mut client| async move {
+            run_progress_bar(prog, client.get_container_image(msg).await?).await
+        })?;
         TryFromProtoBuf::try_from_proto_buf(img)
     }
 

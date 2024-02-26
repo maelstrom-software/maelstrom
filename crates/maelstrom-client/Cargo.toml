@@ -25,6 +25,7 @@ num_enum.workspace = true
 serde.workspace = true
 slog.workspace = true
 tempfile.workspace = true
+tokio-stream.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower.workspace = true

@@ -2,11 +2,14 @@ use crate::Client as ProcessClient;
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{proto, IntoProtoBuf, IntoResult, TryFromProtoBuf};
-use maelstrom_container::NullProgressTracker;
+use maelstrom_container::ProgressTracker;
 use std::future::Future;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 type TonicResult<T> = std::result::Result<T, tonic::Status>;
 type TonicResponse<T> = TonicResult<tonic::Response<T>>;
@@ -44,8 +47,57 @@ async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicRes
     }
 }
 
+fn map_err<RetT>(body: impl FnOnce() -> Result<RetT>) -> TonicResult<RetT> {
+    body().map_err(|e| tonic::Status::new(tonic::Code::Unknown, e.to_string()))
+}
+
+#[derive(Clone)]
+struct ChannelProgressTracker {
+    sender: mpsc::UnboundedSender<TonicResult<proto::GetContainerImageProgressResponse>>,
+}
+
+impl ChannelProgressTracker {
+    fn new(
+        sender: mpsc::UnboundedSender<TonicResult<proto::GetContainerImageProgressResponse>>,
+    ) -> Self {
+        Self { sender }
+    }
+
+    fn finish(self, resp: TonicResult<proto::GetContainerImageResponse>) {
+        use proto::get_container_image_progress_response::Progress;
+        let _ = self
+            .sender
+            .send(resp.map(|v| proto::GetContainerImageProgressResponse {
+                progress: Some(Progress::Done(v)),
+            }));
+    }
+}
+
+impl ProgressTracker for ChannelProgressTracker {
+    fn set_length(&self, length: u64) {
+        use proto::get_container_image_progress_response::Progress;
+        let _ = self
+            .sender
+            .send(Ok(proto::GetContainerImageProgressResponse {
+                progress: Some(Progress::ProgressLength(length)),
+            }));
+    }
+
+    fn inc(&self, v: u64) {
+        use proto::get_container_image_progress_response::Progress;
+        let _ = self
+            .sender
+            .send(Ok(proto::GetContainerImageProgressResponse {
+                progress: Some(Progress::ProgressInc(v)),
+            }));
+    }
+}
+
 #[tonic::async_trait]
 impl proto::client_process_server::ClientProcess for Handler {
+    type GetContainerImageStream =
+        Pin<Box<dyn Stream<Item = TonicResult<proto::GetContainerImageProgressResponse>> + Send>>;
+
     async fn start(
         &self,
         request: tonic::Request<proto::StartRequest>,
@@ -110,19 +162,25 @@ impl proto::client_process_server::ClientProcess for Handler {
     async fn get_container_image(
         &self,
         request: tonic::Request<proto::GetContainerImageRequest>,
-    ) -> TonicResponse<proto::GetContainerImageResponse> {
+    ) -> TonicResponse<Self::GetContainerImageStream> {
         run_handler(async {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let tracker = ChannelProgressTracker::new(sender);
             let proto::GetContainerImageRequest { name, tag } = request.into_inner();
             let self_clone = self.clone();
-            let image = tokio::task::spawn_blocking(move || {
+            tokio::task::spawn_blocking(move || {
                 self_clone.with_client(|client| {
-                    client.get_container_image(&name, &tag, NullProgressTracker)
+                    let result = map_err(|| {
+                        let image = client.get_container_image(&name, &tag, tracker.clone())?;
+                        Ok(proto::GetContainerImageResponse {
+                            image: Some(image.into_proto_buf()),
+                        })
+                    });
+                    tracker.finish(result);
+                    Ok(())
                 })
-            })
-            .await??;
-            Ok(proto::GetContainerImageResponse {
-                image: Some(image.into_proto_buf()),
-            })
+            });
+            Ok(Box::pin(UnboundedReceiverStream::new(receiver)) as Self::GetContainerImageStream)
         })
         .await
     }
@@ -144,7 +202,7 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::AddJobResponse> {
         run_handler(async {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
-            let (send, mut recv) = tokio::sync::mpsc::unbounded_channel();
+            let (send, mut recv) = mpsc::unbounded_channel();
             self.with_client(|client| {
                 client.add_job(
                     spec,
