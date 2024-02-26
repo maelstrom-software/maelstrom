@@ -18,7 +18,7 @@ fn main() {
             name,
             format!(
                 "#[derive(maelstrom_macro::IntoProtoBuf, maelstrom_macro::TryFromProtoBuf)] \
-                 #[proto(type_path = {remote}, reverse)]"
+                 #[proto(type_path = {remote}, remote)]"
             ),
         );
     };
@@ -31,7 +31,7 @@ fn main() {
             name,
             format!(
                 "#[derive(maelstrom_macro::IntoProtoBuf, maelstrom_macro::TryFromProtoBuf)] \
-                 #[proto(type_path = {remote}, reverse)]"
+                 #[proto(type_path = {remote}, remote)]"
             ),
         );
     };
@@ -41,13 +41,13 @@ fn main() {
     b = b.message_attribute(
         "ContainerImage",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_container::ContainerImage, reverse)]",
+         #[proto(type_path = maelstrom_container::ContainerImage, remote)]",
     );
     b = b.field_attribute("ContainerImage.config", "#[proto(option)]");
     b = b.message_attribute(
         "OciImageConfiguration",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_container::ImageConfiguration, reverse)]",
+         #[proto(type_path = maelstrom_container::ImageConfiguration, remote)]",
     );
     b = b.field_attribute("OciImageConfiguration.architecture", "#[proto(option)]");
     b = b.field_attribute("OciImageConfiguration.os", "#[proto(option)]");
@@ -55,22 +55,22 @@ fn main() {
     b = b.message_attribute(
         "OciConfig",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_container::Config, reverse)]",
+         #[proto(type_path = maelstrom_container::Config, remote)]",
     );
     b = b.message_attribute(
         "OciRootFs",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_container::RootFs, reverse)]",
+         #[proto(type_path = maelstrom_container::RootFs, remote)]",
     );
     b = b.enum_attribute(
         "JobOutcomeCompleted.status",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_base::JobStatus, reverse)]",
+         #[proto(type_path = maelstrom_base::JobStatus, remote)]",
     );
     b = b.message_attribute(
         "JobEffects",
         "#[derive(maelstrom_macro::TryFromProtoBuf, maelstrom_macro::IntoProtoBuf)] \
-         #[proto(type_path = maelstrom_base::JobEffects, reverse, option_all)]",
+         #[proto(type_path = maelstrom_base::JobEffects, remote, option_all)]",
     );
 
     b.compile(&["src/items.proto"], &["src/"]).unwrap();

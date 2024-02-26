@@ -5,11 +5,11 @@ use syn::{parse_quote, Arm, DeriveInput, Error, Expr, Ident, ItemImpl, Path, Res
 fn try_from_proto_buf_struct(
     mut self_ident: Path,
     option_all: bool,
-    reverse: bool,
+    remote: bool,
     mut proto_buf_type: Path,
     fields: darling::ast::Fields<TryFromProtoBufStructField>,
 ) -> Result<ItemImpl> {
-    if reverse {
+    if remote {
         std::mem::swap(&mut self_ident, &mut proto_buf_type);
     }
     let field_idents = fields.fields.iter().map(|f| f.ident.as_ref().unwrap());
@@ -44,11 +44,11 @@ fn try_from_proto_buf_struct(
 
 fn try_from_proto_buf_unit_enum(
     mut self_path: Path,
-    reverse: bool,
+    remote: bool,
     mut proto_buf_type: Path,
     variants: Vec<TryFromProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
-    if reverse {
+    if remote {
         std::mem::swap(&mut self_path, &mut proto_buf_type);
     }
 
@@ -75,11 +75,11 @@ fn try_from_proto_buf_unit_enum(
 
 fn try_from_proto_buf_enum(
     mut self_path: Path,
-    reverse: bool,
+    remote: bool,
     mut proto_buf_type: Path,
     variants: Vec<TryFromProtoBufEnumVariant>,
 ) -> Result<ItemImpl> {
-    if reverse {
+    if remote {
         std::mem::swap(&mut self_path, &mut proto_buf_type);
     }
 
@@ -160,7 +160,7 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
         darling::ast::Data::Struct(fields) => try_from_proto_buf_struct(
             self_path,
             input.option_all,
-            input.reverse,
+            input.remote,
             input.type_path,
             fields,
         ),
@@ -170,9 +170,9 @@ pub fn main(input: DeriveInput) -> Result<ItemImpl> {
                 .all(|f| f.fields.style == darling::ast::Style::Unit);
 
             if all_unit {
-                try_from_proto_buf_unit_enum(self_path, input.reverse, input.type_path, variants)
+                try_from_proto_buf_unit_enum(self_path, input.remote, input.type_path, variants)
             } else {
-                try_from_proto_buf_enum(self_path, input.reverse, input.type_path, variants)
+                try_from_proto_buf_enum(self_path, input.remote, input.type_path, variants)
             }
         }
     }
@@ -203,7 +203,7 @@ struct TryFromProtoBufInput {
     data: darling::ast::Data<TryFromProtoBufEnumVariant, TryFromProtoBufStructField>,
     type_path: Path,
     #[darling(default)]
-    reverse: bool,
+    remote: bool,
     #[darling(default)]
     option_all: bool,
 }
