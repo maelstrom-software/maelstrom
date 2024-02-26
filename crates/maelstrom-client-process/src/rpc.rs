@@ -257,9 +257,7 @@ type TokioError<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
 pub async fn run_process_client(sock: UnixStream) -> Result<()> {
-    // XXX remi: There is some race going on I can't figure out yet
-    tokio::time::sleep(tokio::time::Duration::from_millis(300)).await;
-
+    sock.set_nonblocking(true)?;
     let sock1 = tokio::net::UnixStream::from_std(sock.try_clone()?)?;
     let sock2 = tokio::net::UnixStream::from_std(sock)?;
     tonic::transport::Server::builder()

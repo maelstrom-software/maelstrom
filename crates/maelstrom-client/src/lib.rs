@@ -39,6 +39,7 @@ fn run_dispatcher(sock: UnixStream, requester: RequestReceiver) -> Result<()> {
 }
 
 async fn run_dispatcher_async(std_sock: UnixStream, mut requester: RequestReceiver) -> Result<()> {
+    std_sock.set_nonblocking(true)?;
     let sock = tokio::net::UnixStream::from_std(std_sock.try_clone()?)?;
     let mut closure =
         Some(move || async move { std::result::Result::<_, tower::BoxError>::Ok(sock) });
