@@ -19,7 +19,8 @@ where
     TermT: TermLike + Clone + Send + Sync + RefUnwindSafe + UnwindSafe + 'static,
 {
     fn println(&self, msg: String) {
-        self.term.write_line(&msg).ok();
+        let _ = self.term.write_line(&msg);
+        let _ = self.term.flush();
     }
 
     fn finished(&self) -> Result<()> {
