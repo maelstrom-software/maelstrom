@@ -1,10 +1,5 @@
 use anyhow::{Context as _, Result};
-use clap::Parser;
-use figment::{
-    error::Kind,
-    providers::{Env, Format, Serialized, Toml},
-    Figment,
-};
+use clap::{command, Arg, ArgAction, ArgMatches, Command};
 use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
@@ -18,64 +13,18 @@ use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
     process::{ExitCode, ExitCodeAccumulator},
 };
-use serde::{Deserialize, Serialize};
-use serde_with::skip_serializing_none;
 use slog::Drain as _;
 use std::{
     cell::RefCell,
+    env, fs,
     io::{self, Read, Write as _},
     path::PathBuf,
+    process,
     sync::Arc,
 };
 use xdg::BaseDirectories;
 
-/// The maelstrom run client. This process sends jobs to the broker to be executed.
-#[derive(Parser)]
-#[command(
-    after_help = r#"Configuration values can be specified in three ways: fields in a config file, environment variables, or command-line options. Command-line options have the highest precendence, followed by environment variables.
-
-The configuration value 'config_value' would be set via the '--config-value' command-line option, the MAELSTROM_RUN_CONFIG_VALUE environment variable, and the 'config_value' key in a configuration file.
-
-All values except for 'broker' have reasonable defaults.
-"#
-)]
-#[command(version)]
-#[command(styles = maelstrom_util::clap::styles())]
-struct CliOptions {
-    /// Configuration file. Values set in the configuration file will be overridden by values set
-    /// through environment variables and values set on the command line.
-    #[arg(
-        long,
-        short = 'c',
-        value_name="PATH",
-        default_value = PathBuf::from(".config/maelstrom-run.toml").into_os_string()
-    )]
-    config_file: PathBuf,
-
-    /// Print configuration and exit.
-    #[arg(long, short = 'P')]
-    print_config: bool,
-
-    /// Minimum log level to output.
-    #[arg(long, short, value_name = "LEVEL", value_enum)]
-    log_level: Option<LogLevel>,
-
-    /// Socket address of broker. Examples: "[::]:5000", "host.example.com:2000".
-    #[arg(long, short = 'b', value_name = "SOCKADDR")]
-    broker: Option<String>,
-}
-
-impl CliOptions {
-    fn to_config_options(&self) -> ConfigOptions {
-        ConfigOptions {
-            broker: self.broker.clone(),
-            log_level: self.log_level,
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug)]
 pub struct Config {
     /// Socket address of broker.
     pub broker: BrokerAddr,
@@ -83,19 +32,92 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-#[skip_serializing_none]
-#[derive(Serialize)]
-pub struct ConfigOptions {
-    pub broker: Option<String>,
-    pub log_level: Option<LogLevel>,
-}
+impl Config {
+    pub fn add_command_line_options(command: Command) -> Command {
+        command
+        .styles(maelstrom_util::clap::styles())
+        .after_help(
+            "Configuration values can be specified in three ways: fields in a config file, \
+            environment variables, or command-line options. Command-line options have the \
+            highest precendence, followed by environment variables.\n\
+            \n\
+            The configuration value 'config_value' would be set via the '--config-value' \
+            command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
+            and the 'config_value' key in a configuration file.\n\
+            \n\
+            All values except for 'broker' have reasonable defaults.")
+        .arg(
+            Arg::new("config-file")
+                .long("config-file")
+                .short('c')
+                .value_name("PATH")
+                .action(ArgAction::Set)
+                .help(
+                    "Configuration file. Values set in the configuration file will be overridden by \
+                    values set through environment variables and values set on the command line"
+                )
+        )
+        .arg(
+            Arg::new("print-config")
+                .long("print-config")
+                .short('P')
+                .action(ArgAction::SetTrue)
+                .help("Print configuration and exit"),
+        )
+        .arg(
+            Arg::new("broker")
+                .long("broker")
+                .short('b')
+                .value_name("SOCKADDR")
+                .action(ArgAction::Set)
+                .help(r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#)
+        )
+        .arg(
+            Arg::new("log-level")
+                .long("log-level")
+                .short('l')
+                .value_name("LEVEL")
+                .action(ArgAction::Set)
+                .help("Minimum log level to output")
+        )
+    }
 
-impl Default for ConfigOptions {
-    fn default() -> Self {
-        Self {
-            broker: None,
-            log_level: Some(LogLevel::Error),
+    pub fn new(mut args: ArgMatches) -> Result<Self> {
+        let env = env::vars().filter(|(key, _)| key.starts_with("MAELSTROM_RUN_"));
+
+        let config_files = match args.remove_one::<String>("config-file").as_deref() {
+            Some("-") => vec![],
+            Some(config_file) => vec![PathBuf::from(config_file)],
+            None => BaseDirectories::with_prefix("maelstrom/run")
+                .context("searching for config files")?
+                .find_config_files("config.toml")
+                .rev()
+                .collect(),
+        };
+        let mut files = vec![];
+        for config_file in config_files {
+            let contents = fs::read_to_string(&config_file).with_context(|| {
+                format!("reading config file `{}`", config_file.to_string_lossy())
+            })?;
+            files.push((config_file.clone(), contents));
         }
+
+        let print_config = args.remove_one::<bool>("print-config").unwrap();
+
+        let config = maelstrom_config::Config::new(args, "MAELSTROM_RUN_", env, files)
+            .context("loading configuration from environment variables and config files")?;
+
+        let config = Self {
+            broker: config.get("broker")?,
+            log_level: config.get_or("log-level", LogLevel::Info)?,
+        };
+
+        if print_config {
+            println!("{config:#?}");
+            process::exit(0);
+        }
+
+        Ok(config)
     }
 }
 
@@ -166,30 +188,10 @@ fn cache_dir() -> PathBuf {
 }
 
 fn main() -> Result<ExitCode> {
+    let args = Config::add_command_line_options(command!()).get_matches();
+    let config = Config::new(args)?;
+
     let bg_proc = ClientBgProcess::new_from_fork()?;
-
-    let cli_options = CliOptions::parse();
-    let print_config = cli_options.print_config;
-    let config: Config = Figment::new()
-        .merge(Serialized::defaults(ConfigOptions::default()))
-        .merge(Toml::file(&cli_options.config_file))
-        .merge(Env::prefixed("MAELSTROM_CLIENT_"))
-        .merge(Serialized::globals(cli_options.to_config_options()))
-        .extract()
-        .map_err(|mut e| {
-            if let Kind::MissingField(field) = &e.kind {
-                e.kind = Kind::Message(format!("configuration value \"{field}\" was no provided"));
-                e
-            } else {
-                e
-            }
-        })
-        .context("reading configuration")?;
-
-    if print_config {
-        println!("{config:#?}");
-        return Ok(ExitCode::SUCCESS);
-    }
 
     let decorator = slog_term::TermDecorator::new().build();
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
