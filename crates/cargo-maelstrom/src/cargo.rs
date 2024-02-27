@@ -120,7 +120,7 @@ impl FeatureSelectionOptions {
                     .map(|features| format!("--features={features}")),
             )
             .chain(self.all_features.then_some("--all-features".into()))
-            .chain(self.all_features.then_some("--no-default-features".into()))
+            .chain(self.no_default_features.then_some("--no-default-features".into()))
     }
 }
 
@@ -185,7 +185,8 @@ impl ManifestOptions {
                     .flatten(),
             )
             .chain(self.frozen.then_some("--frozen".into()))
-            .chain(self.frozen.then_some("--locked".into()))
+            .chain(self.locked.then_some("--locked".into()))
+            .chain(self.offline.then_some("--offline".into()))
     }
 }
 
@@ -194,7 +195,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_feature_selection_options_iter() {
+    fn feature_selection_options_iter_default() {
         assert_eq!(
             Vec::<String>::from_iter(FeatureSelectionOptions::default().iter()),
             Vec::<String>::new(),
@@ -202,7 +203,43 @@ mod tests {
     }
 
     #[test]
-    fn all_feature_selection_options_iter() {
+    fn feature_selection_options_iter_features() {
+        let options = FeatureSelectionOptions {
+            features: Some("feature1,feature2".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<String>::from_iter(options.iter()),
+            Vec::<String>::from_iter(["--features=feature1,feature2".into()]),
+        );
+    }
+
+    #[test]
+    fn feature_selection_options_iter_all_features() {
+        let options = FeatureSelectionOptions {
+            all_features: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<String>::from_iter(options.iter()),
+            Vec::<String>::from_iter(["--all-features".into()]),
+        );
+    }
+
+    #[test]
+    fn feature_selection_options_iter_no_default_features() {
+        let options = FeatureSelectionOptions {
+            no_default_features: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<String>::from_iter(options.iter()),
+            Vec::<String>::from_iter(["--no-default-features".into()]),
+        );
+    }
+
+    #[test]
+    fn feature_selection_options_iter_all() {
         let options = FeatureSelectionOptions {
             features: Some("feature1,feature2".into()),
             all_features: true,
@@ -219,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn default_compilation_options_iter() {
+    fn compilation_options_iter_default() {
         assert_eq!(
             Vec::<OsString>::from_iter(CompilationOptions::default().iter()),
             Vec::<OsString>::new(),
@@ -227,7 +264,43 @@ mod tests {
     }
 
     #[test]
-    fn all_compilation_options_iter() {
+    fn compilation_options_iter_profile() {
+        let options = CompilationOptions {
+            profile: Some("a-profile".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--profile=a-profile".into()]),
+        );
+    }
+
+    #[test]
+    fn compilation_options_iter_target() {
+        let options = CompilationOptions {
+            target: Some("a-target".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--target=a-target".into()]),
+        );
+    }
+
+    #[test]
+    fn compilation_options_iter_target_dir() {
+        let options = CompilationOptions {
+            target_dir: Some("a-target-dir".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--target-dir".into(), "a-target-dir".into()]),
+        );
+    }
+
+    #[test]
+    fn compilation_options_iter_all() {
         let options = CompilationOptions {
             profile: Some("profile".into()),
             target: Some("target".into()),
@@ -245,7 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn default_manifest_options_iter() {
+    fn manifest_options_iter_default() {
         assert_eq!(
             Vec::<OsString>::from_iter(ManifestOptions::default().iter()),
             Vec::<OsString>::new(),
@@ -253,7 +326,55 @@ mod tests {
     }
 
     #[test]
-    fn all_manifest_options_iter() {
+    fn manifest_options_iter_manifest_path() {
+        let options = ManifestOptions {
+            manifest_path: Some("manifest_path".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--manifest-path".into(), "manifest_path".into() ]),
+        );
+    }
+
+    #[test]
+    fn manifest_options_iter_frozen() {
+        let options = ManifestOptions {
+            frozen: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--frozen".into()]),
+        );
+    }
+
+    #[test]
+    fn manifest_options_iter_locked() {
+        let options = ManifestOptions {
+            locked: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--locked".into()]),
+        );
+    }
+
+    #[test]
+    fn manifest_options_iter_offline() {
+        let options = ManifestOptions {
+            offline: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            Vec::<OsString>::from_iter(options.iter()),
+            Vec::<OsString>::from_iter(["--offline".into()]),
+        );
+    }
+
+    #[test]
+    fn manifest_options_iter_all() {
         let options = ManifestOptions {
             manifest_path: Some("manifest_path".into()),
             frozen: true,
