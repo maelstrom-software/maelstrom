@@ -10,6 +10,7 @@ use maelstrom_base::{
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
+use tokio::io::{AsyncWrite, AsyncWriteExt as _};
 
 pub struct ManifestReader<ReadT> {
     r: ReadT,
@@ -74,6 +75,38 @@ impl<WriteT: io::Write> ManifestWriter<WriteT> {
     ) -> io::Result<()> {
         for entry in entries {
             self.write_entry(entry)?
+        }
+        Ok(())
+    }
+}
+
+pub struct AsyncManifestWriter<WriteT> {
+    w: WriteT,
+}
+
+impl<WriteT: AsyncWrite + Unpin> AsyncManifestWriter<WriteT> {
+    pub async fn new(mut w: WriteT) -> io::Result<Self> {
+        let mut buf = vec![];
+        proto::serialize_into(&mut buf, &ManifestVersion::default())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        w.write_all(&buf).await?;
+        Ok(Self { w })
+    }
+
+    pub async fn write_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
+        let mut buf = vec![];
+        proto::serialize_into(&mut buf, entry)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        self.w.write_all(&buf).await?;
+        Ok(())
+    }
+
+    pub async fn write_entries<'entry>(
+        &mut self,
+        entries: impl IntoIterator<Item = &'entry ManifestEntry>,
+    ) -> io::Result<()> {
+        for entry in entries {
+            self.write_entry(entry).await?
         }
         Ok(())
     }
@@ -159,7 +192,6 @@ impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
 mod tests {
     use super::*;
     use crate::fs::Fs;
-    use maelstrom_util::manifest::ManifestReader;
     use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
 
