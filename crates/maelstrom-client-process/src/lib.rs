@@ -12,10 +12,7 @@ use dispatcher::{ArtifactPushRequest, DispatcherMessage};
 use driver::{new_driver, ClientDeps, ClientDriver};
 use itertools::Itertools as _;
 use maelstrom_base::{
-    manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
-        UnixTimestamp,
-    },
+    manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
     stats::JobStateCounts,
     ArtifactType, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -25,7 +22,11 @@ use maelstrom_client_base::{
     STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
-use maelstrom_util::{config::BrokerAddr, fs::Fs, manifest::ManifestBuilder};
+use maelstrom_util::{
+    config::BrokerAddr,
+    fs::Fs,
+    manifest::{ManifestBuilder, ManifestWriter},
+};
 pub use rpc::run_process_client;
 use sha2::{Digest as _, Sha256};
 use std::{

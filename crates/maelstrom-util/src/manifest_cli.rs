@@ -1,4 +1,4 @@
-use maelstrom_base::manifest::ManifestReader;
+use maelstrom_util::manifest::ManifestReader;
 use std::{env, io};
 
 fn main() -> io::Result<()> {

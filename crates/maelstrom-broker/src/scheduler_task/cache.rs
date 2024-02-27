@@ -6,10 +6,11 @@
 
 use anyhow::{anyhow, bail, Result};
 use bytesize::ByteSize;
-use maelstrom_base::{manifest::ManifestReader, ClientId, JobId, Sha256Digest};
+use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
     config::{CacheBytesUsedTarget, CacheRoot},
     heap::{Heap, HeapDeps, HeapIndex},
+    manifest::ManifestReader,
 };
 use slog::debug;
 use std::{
@@ -509,10 +510,10 @@ impl<FsT: CacheFs> Cache<FsT> {
 mod tests {
     use super::*;
     use maelstrom_base::manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
-        UnixTimestamp,
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp,
     };
     use maelstrom_test::*;
+    use maelstrom_util::manifest::ManifestWriter;
     use std::{cell::RefCell, rc::Rc};
     use TestMessage::*;
 

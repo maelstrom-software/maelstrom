@@ -4,7 +4,7 @@
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use anyhow::Result;
 use maelstrom_base::{
-    manifest::{ManifestEntryData, ManifestReader},
+    manifest::ManifestEntryData,
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
@@ -15,6 +15,7 @@ use maelstrom_base::{
 use maelstrom_util::{
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
+    manifest::ManifestReader,
 };
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -690,10 +691,11 @@ mod tests {
     use enum_map::enum_map;
     use itertools::Itertools;
     use maelstrom_base::{
-        manifest::{ManifestEntry, ManifestEntryMetadata, ManifestWriter, Mode, UnixTimestamp},
+        manifest::{ManifestEntry, ManifestEntryMetadata, Mode, UnixTimestamp},
         proto::BrokerToWorker::{self, *},
     };
     use maelstrom_test::*;
+    use maelstrom_util::manifest::ManifestWriter;
     use maplit::hashmap;
     use std::{cell::RefCell, rc::Rc};
 

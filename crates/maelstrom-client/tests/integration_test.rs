@@ -1,5 +1,5 @@
 use maelstrom_base::{
-    manifest::{ManifestEntry, ManifestEntryData, ManifestReader, Mode},
+    manifest::{ManifestEntry, ManifestEntryData, Mode},
     ArtifactType, JobEffects, JobOutcome, JobOutputResult, JobSpec, JobStatus, Sha256Digest,
     Utf8Path, Utf8PathBuf,
 };
@@ -9,7 +9,7 @@ use maelstrom_client::{
     Client, ClientBgProcess, ClientDriverMode, ClientMessageKind,
 };
 use maelstrom_test::utf8_path_buf;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{fs::Fs, manifest::ManifestReader};
 use maplit::hashmap;
 use nonempty::{nonempty, NonEmpty};
 use sha2::{Digest as _, Sha256};

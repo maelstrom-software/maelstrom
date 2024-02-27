@@ -2,14 +2,82 @@ use crate::fs::{self, Fs};
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestWriter, Mode,
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestVersion, Mode,
         UnixTimestamp,
     },
-    Sha256Digest, Utf8PathBuf,
+    proto, Sha256Digest, Utf8PathBuf,
 };
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
+
+pub struct ManifestReader<ReadT> {
+    r: ReadT,
+    stream_end: u64,
+}
+
+impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
+    pub fn new(mut r: ReadT) -> io::Result<Self> {
+        let stream_start = r.stream_position()?;
+        r.seek(io::SeekFrom::End(0))?;
+        let stream_end = r.stream_position()?;
+        r.seek(io::SeekFrom::Start(stream_start))?;
+
+        let version: ManifestVersion =
+            proto::deserialize_from(&mut r).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        if version != ManifestVersion::default() {
+            return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
+        }
+
+        Ok(Self { r, stream_end })
+    }
+
+    fn next_inner(&mut self) -> io::Result<Option<ManifestEntry>> {
+        if self.r.stream_position()? == self.stream_end {
+            return Ok(None);
+        }
+        Ok(Some(
+            proto::deserialize_from(&mut self.r)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+        ))
+    }
+}
+
+impl<ReadT: io::Read + io::Seek> Iterator for ManifestReader<ReadT> {
+    type Item = io::Result<ManifestEntry>;
+
+    fn next(&mut self) -> Option<io::Result<ManifestEntry>> {
+        self.next_inner().transpose()
+    }
+}
+
+pub struct ManifestWriter<WriteT> {
+    w: WriteT,
+}
+
+impl<WriteT: io::Write> ManifestWriter<WriteT> {
+    pub fn new(mut w: WriteT) -> io::Result<Self> {
+        proto::serialize_into(&mut w, &ManifestVersion::default())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(Self { w })
+    }
+
+    pub fn write_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
+        proto::serialize_into(&mut self.w, entry)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        Ok(())
+    }
+
+    pub fn write_entries<'entry>(
+        &mut self,
+        entries: impl IntoIterator<Item = &'entry ManifestEntry>,
+    ) -> io::Result<()> {
+        for entry in entries {
+            self.write_entry(entry)?
+        }
+        Ok(())
+    }
+}
 
 fn to_utf8_path(path: impl AsRef<Path>) -> Utf8PathBuf {
     path.as_ref().to_owned().try_into().unwrap()
@@ -91,7 +159,7 @@ impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
 mod tests {
     use super::*;
     use crate::fs::Fs;
-    use maelstrom_base::manifest::ManifestReader;
+    use maelstrom_util::manifest::ManifestReader;
     use std::path::PathBuf;
     use tempfile::{tempdir, TempDir};
 
