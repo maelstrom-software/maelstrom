@@ -33,6 +33,7 @@ message PrefixOptions {
     optional string strip_prefix = 1;
     optional string prepend_prefix = 2;
     bool canonicalize = 3;
+    bool follow_symlinks = 4;
 }
 
 message GlobLayer {

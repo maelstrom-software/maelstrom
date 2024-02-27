@@ -60,6 +60,8 @@ pub struct PrefixOptions {
     pub prepend_prefix: Option<Utf8PathBuf>,
     #[serde(default)]
     pub canonicalize: bool,
+    #[serde(default)]
+    pub follow_symlinks: bool,
 }
 
 #[derive(

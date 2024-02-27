@@ -197,8 +197,8 @@ impl Client {
         let tmp_file_path = self.build_manifest_path(&".temp");
         let manifest_file = fs.create_file(&tmp_file_path)?;
         let data_upload = |path: &_| self.add_artifact(path);
-        let mut builder =
-            ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
+        let follow_symlinks = prefix_options.follow_symlinks;
+        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, data_upload)?;
         let mut path_hasher = PathHasher::new();
         for maybe_path in paths {
             let mut path = maybe_path?.as_ref().to_owned();
