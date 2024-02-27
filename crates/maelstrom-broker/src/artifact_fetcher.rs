@@ -163,20 +163,21 @@ mod tests {
     use assert_matches::assert_matches;
     use maelstrom_base::manifest::{ManifestEntryMetadata, Mode, UnixTimestamp};
     use maelstrom_test::*;
-    use maelstrom_util::{io::ChunkedReader, manifest::ManifestWriter};
+    use maelstrom_util::{async_fs, io::ChunkedReader, manifest::AsyncManifestWriter};
     use std::io::Read as _;
     use std::os::unix::fs::MetadataExt as _;
     use std::path::Path;
     use std::thread;
     use tempfile::{tempdir, TempDir};
+    use tokio::io::AsyncSeekExt as _;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn write_manifest(path: &Path, entries: Vec<ManifestEntry>) -> u64 {
-        let fs = Fs::new();
-        let mut f = fs.create_file(path).unwrap();
-        let mut writer = ManifestWriter::new(&mut f).unwrap();
-        writer.write_entries(&entries).unwrap();
-        f.stream_position().unwrap()
+    async fn write_manifest(path: &Path, entries: Vec<ManifestEntry>) -> u64 {
+        let fs = async_fs::Fs::new();
+        let mut f = fs.create_file(path).await.unwrap();
+        let mut writer = AsyncManifestWriter::new(&mut f).await.unwrap();
+        writer.write_entries(&entries).await.unwrap();
+        f.stream_position().await.unwrap()
     }
 
     async fn send_manifest(
@@ -189,13 +190,13 @@ mod tests {
             panic!()
         };
         let manifest_path = tmp_dir.path().join(format!("{digest}.manifest"));
-        let size = write_manifest(&manifest_path, manifest_entries);
+        let size = write_manifest(&manifest_path, manifest_entries).await;
         sender.send(Ok((manifest_path, size))).unwrap();
     }
 
-    fn put_file(path: &Path, data: &[u8]) {
-        let fs = Fs::new();
-        fs.write(path, data).unwrap();
+    async fn put_file(path: &Path, data: &[u8]) {
+        let fs = async_fs::Fs::new();
+        fs.write(path, data).await.unwrap();
     }
 
     async fn send_binary(
@@ -208,7 +209,7 @@ mod tests {
             panic!()
         };
         let bin_path = tmp_dir.path().join(format!("{digest}.bin"));
-        put_file(&bin_path, data);
+        put_file(&bin_path, data).await;
         sender.send(Ok((bin_path, data.len() as u64))).unwrap();
     }
 
