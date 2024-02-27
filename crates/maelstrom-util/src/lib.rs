@@ -2,6 +2,7 @@
 //! absolutely necessary for all of them. In the future, we may want to move some of this
 //! functionality up to [`maelstrom_base`].
 
+pub mod async_fs;
 pub mod clap;
 pub mod config;
 pub mod ext;

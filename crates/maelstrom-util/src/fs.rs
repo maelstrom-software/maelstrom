@@ -90,8 +90,8 @@ impl fmt::Debug for DirEntry {
 }
 
 pub struct Metadata {
-    inner: std::fs::Metadata,
-    path: PathBuf,
+    pub(crate) inner: std::fs::Metadata,
+    pub(crate) path: PathBuf,
 }
 
 impl Metadata {
