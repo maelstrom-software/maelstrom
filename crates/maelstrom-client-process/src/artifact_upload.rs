@@ -5,19 +5,20 @@ use maelstrom_base::{
     Sha256Digest,
 };
 use maelstrom_client_base::ArtifactUploadProgress;
-use maelstrom_util::{config::BrokerAddr, fs::Fs, io::FixedSizeReader, net};
+use maelstrom_util::{async_fs::Fs, config::BrokerAddr, net};
+use std::pin::{pin, Pin};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc, Mutex,
+    Arc,
 };
 use std::{
     collections::HashMap,
-    io,
-    net::TcpStream,
     path::{Path, PathBuf},
 };
+use tokio::io::{self, AsyncRead, AsyncReadExt as _};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 
 struct UploadProgress {
     size: u64,
@@ -30,8 +31,8 @@ pub struct ArtifactUploadTracker {
 }
 
 impl ArtifactUploadTracker {
-    fn new_upload(&self, name: impl Into<String>, size: u64) -> Arc<UploadProgress> {
-        let mut uploads = self.uploads.lock().unwrap();
+    async fn new_upload(&self, name: impl Into<String>, size: u64) -> Arc<UploadProgress> {
+        let mut uploads = self.uploads.lock().await;
         let prog = Arc::new(UploadProgress {
             size,
             progress: AtomicU64::new(0),
@@ -40,13 +41,13 @@ impl ArtifactUploadTracker {
         prog
     }
 
-    fn remove_upload(&self, name: &str) {
-        let mut uploads = self.uploads.lock().unwrap();
+    async fn remove_upload(&self, name: &str) {
+        let mut uploads = self.uploads.lock().await;
         uploads.remove(name);
     }
 
-    pub fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
-        let uploads = self.uploads.lock().unwrap();
+    pub async fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
+        let uploads = self.uploads.lock().await;
         uploads
             .iter()
             .map(|(name, p)| ArtifactUploadProgress {
@@ -69,13 +70,20 @@ impl<ReadT> UploadProgressReader<ReadT> {
     }
 }
 
-impl<ReadT: io::Read> io::Read for UploadProgressReader<ReadT> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        let amount_read = self.read.read(buf)?;
-        self.prog
+impl<ReadT: AsyncRead + Unpin> AsyncRead for UploadProgressReader<ReadT> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        dst: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<io::Result<()>> {
+        let start_len = dst.filled().len();
+        let me = self.get_mut();
+        let result = AsyncRead::poll_read(pin!(&mut me.read), cx, dst);
+        let amount_read = dst.filled().len() - start_len;
+        me.prog
             .progress
             .fetch_add(amount_read as u64, Ordering::AcqRel);
-        Ok(amount_read)
+        result
     }
 }
 
@@ -86,31 +94,31 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
     format!("{short_digest} {file_name}")
 }
 
-fn push_one_artifact(
+async fn push_one_artifact(
     upload_tracker: ArtifactUploadTracker,
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
 ) -> Result<()> {
-    let mut stream = TcpStream::connect(broker_addr.inner())?;
-    net::write_message_to_socket(&mut stream, Hello::ArtifactPusher)?;
+    let mut stream = TcpStream::connect(broker_addr.inner()).await?;
+    net::write_message_to_async_socket(&mut stream, Hello::ArtifactPusher).await?;
 
     let fs = Fs::new();
-    let file = fs.open_file(&path)?;
-    let size = file.metadata()?.len();
+    let file = fs.open_file(&path).await?;
+    let size = file.metadata().await?.len();
 
     let upload_name = construct_upload_name(&digest, &path);
-    let prog = upload_tracker.new_upload(&upload_name, size);
+    let prog = upload_tracker.new_upload(&upload_name, size).await;
 
-    let mut file = UploadProgressReader::new(prog, FixedSizeReader::new(file, size));
+    let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
 
-    net::write_message_to_socket(&mut stream, ArtifactPusherToBroker(digest, size))?;
-    let copied = io::copy(&mut file, &mut stream)?;
+    net::write_message_to_async_socket(&mut stream, ArtifactPusherToBroker(digest, size)).await?;
+    let copied = io::copy(&mut file, &mut stream).await?;
     assert_eq!(copied, size);
 
-    let BrokerToArtifactPusher(resp) = net::read_message_from_socket(&mut stream)?;
+    let BrokerToArtifactPusher(resp) = net::read_message_from_async_socket(&mut stream).await?;
 
-    upload_tracker.remove_upload(&upload_name);
+    upload_tracker.remove_upload(&upload_name).await;
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
@@ -148,9 +156,11 @@ impl ArtifactPusher {
         let broker_addr = self.broker_addr;
         let sem = self.sem.clone();
         self.pending_uploads += 1;
-        tokio::task::spawn_blocking(move || {
+        tokio::task::spawn(async move {
             // N.B. We are ignoring this Result<_>
-            push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest).ok();
+            push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
+                .await
+                .ok();
             sem.add_permits(1);
         });
         true

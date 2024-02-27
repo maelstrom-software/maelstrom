@@ -406,8 +406,8 @@ impl Client {
         Ok(recv)
     }
 
-    fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
-        self.upload_tracker.get_artifact_upload_progress()
+    async fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
+        self.upload_tracker.get_artifact_upload_progress().await
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
