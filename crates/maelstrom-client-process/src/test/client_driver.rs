@@ -12,11 +12,11 @@ pub struct SingleThreadedClientDriver {
 
 #[async_trait]
 impl ClientDriver for SingleThreadedClientDriver {
-    async fn drive(&mut self, deps: ClientDeps) {
+    async fn drive(&self, deps: ClientDeps) {
         *self.deps.lock().await = Some(deps);
     }
 
-    async fn stop(&mut self) -> Result<()> {
+    async fn stop(&self) -> Result<()> {
         Ok(())
     }
 

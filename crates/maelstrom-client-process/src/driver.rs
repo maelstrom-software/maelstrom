@@ -7,8 +7,8 @@ use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::BrokerAddr, net};
 use tokio::net::{tcp, TcpStream};
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::{self, JoinHandle};
 
 pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
@@ -70,8 +70,8 @@ impl ClientDeps {
 
 #[async_trait]
 pub trait ClientDriver {
-    async fn drive(&mut self, deps: ClientDeps);
-    async fn stop(&mut self) -> Result<()>;
+    async fn drive(&self, deps: ClientDeps);
+    async fn stop(&self) -> Result<()>;
 
     async fn process_broker_msg_single_threaded(&self, _count: usize) {
         unimplemented!()
@@ -88,14 +88,15 @@ pub trait ClientDriver {
 
 #[derive(Default)]
 struct MultiThreadedClientDriver {
-    handle: Option<JoinHandle<Result<()>>>,
+    handle: Mutex<Option<JoinHandle<Result<()>>>>,
 }
 
 #[async_trait]
 impl ClientDriver for MultiThreadedClientDriver {
-    async fn drive(&mut self, mut deps: ClientDeps) {
-        assert!(self.handle.is_none());
-        self.handle = Some(task::spawn(async move {
+    async fn drive(&self, mut deps: ClientDeps) {
+        let mut locked_handle = self.handle.lock().await;
+        assert!(locked_handle.is_none());
+        *locked_handle = Some(task::spawn(async move {
             let dispatcher_handle = task::spawn(async move {
                 while deps.dispatcher.process_one().await? {}
                 Ok(())
@@ -115,7 +116,7 @@ impl ClientDriver for MultiThreadedClientDriver {
         }));
     }
 
-    async fn stop(&mut self) -> Result<()> {
-        self.handle.take().unwrap().await?
+    async fn stop(&self) -> Result<()> {
+        self.handle.lock().await.take().unwrap().await?
     }
 }

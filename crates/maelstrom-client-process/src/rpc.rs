@@ -8,7 +8,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, RwLock};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 type TonicResult<T> = std::result::Result<T, tonic::Status>;
@@ -16,18 +16,18 @@ type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
 #[derive(Clone)]
 struct Handler {
-    client: Arc<Mutex<Option<ProcessClient>>>,
+    client: Arc<RwLock<Option<ProcessClient>>>,
 }
 
 impl Handler {
     fn new() -> Self {
         Self {
-            client: Arc::new(Mutex::new(None)),
+            client: Arc::new(RwLock::new(None)),
         }
     }
 
     async fn take_client(&self) -> Result<ProcessClient> {
-        let mut guard = self.client.lock().await;
+        let mut guard = self.client.write().await;
         guard.take().ok_or(anyhow!("must call start first"))
     }
 }
@@ -35,9 +35,9 @@ impl Handler {
 macro_rules! with_client_async {
     ($s:expr, |$client:ident| { $($body:expr);* }) => {
         async {
-            let mut client_guard = $s.client.lock().await;
+            let client_guard = $s.client.read().await;
             let $client = client_guard
-                .as_mut()
+                .as_ref()
                 .ok_or(anyhow!("must call start first"))?;
             let res: Result::<_, anyhow::Error> = { $($body);* };
             res
@@ -118,7 +118,7 @@ impl proto::client_process_server::ClientProcess for Handler {
                 PathBuf::try_from_proto_buf(request.cache_dir)?,
             )
             .await?;
-            *self.client.lock().await = Some(client);
+            *self.client.write().await = Some(client);
             Ok(proto::Void {})
         })
         .await
@@ -228,7 +228,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            let mut client = self.take_client().await?;
+            let client = self.take_client().await?;
             client.wait_for_outstanding_jobs().await?;
             Ok(proto::Void {})
         })

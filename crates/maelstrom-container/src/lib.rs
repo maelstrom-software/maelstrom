@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
+use tokio::sync::Mutex;
 use tokio::{io::AsyncWrite, task};
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use xdg::BaseDirectories;
@@ -473,7 +474,7 @@ pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDe
     cache_dir: PathBuf,
     project_dir: PathBuf,
     ops: ContainerImageDepotOpsT,
-    cache: HashMap<(String, String), ContainerImage>,
+    cache: Mutex<HashMap<(String, String), ContainerImage>>,
 }
 
 impl ContainerImageDepot<DefaultContainerImageDepotOps> {
@@ -602,7 +603,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     }
 
     pub async fn get_container_image(
-        &mut self,
+        &self,
         name: &str,
         tag: &str,
         prog: impl ProgressTracker,
@@ -610,7 +611,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         self.fs.create_dir_all(&self.cache_dir).await?;
 
         let cache_key = (name.into(), tag.into());
-        if let Some(img) = self.cache.get(&cache_key) {
+        if let Some(img) = self.cache.lock().await.get(&cache_key) {
             return Ok(img.clone());
         }
 
@@ -630,7 +631,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             .await?;
         tags.write().await?;
 
-        self.cache.insert(cache_key, img.clone());
+        self.cache.lock().await.insert(cache_key, img.clone());
         Ok(img)
     }
 }
@@ -710,7 +711,7 @@ async fn container_image_depot_download_dir_structure() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -745,7 +746,7 @@ async fn container_image_depot_download_then_reload() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -759,7 +760,7 @@ async fn container_image_depot_download_then_reload() {
         .unwrap();
     drop(depot);
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         PanicContainerImageDepotOps,
@@ -779,7 +780,7 @@ async fn container_image_depot_redownload_corrupt() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -796,7 +797,7 @@ async fn container_image_depot_redownload_corrupt() {
         .await
         .unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -825,7 +826,7 @@ async fn container_image_depot_update_image() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -851,7 +852,7 @@ async fn container_image_depot_update_image() {
         .await
         .unwrap();
 
-    let mut depot = ContainerImageDepot::new_with(
+    let depot = ContainerImageDepot::new_with(
         project_dir.path(),
         image_dir.path(),
         FakeContainerImageDepotOps(maplit::hashmap! {
@@ -905,7 +906,7 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
         "foo-latest".into() => "sha256:abcdef".into(),
         "bar-latest".into() => "sha256:ghijk".into(),
     });
-    let mut depot =
+    let depot =
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops.clone()).unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
@@ -920,8 +921,7 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
         .await
         .unwrap();
 
-    let mut depot =
-        ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
+    let depot = ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
         .await

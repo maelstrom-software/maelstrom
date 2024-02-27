@@ -39,7 +39,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tokio::sync::mpsc::Sender;
+use tokio::sync::{mpsc::Sender, Mutex};
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let path = path.to_owned();
@@ -111,7 +111,7 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 }
 
 #[async_trait]
-impl<'a> maelstrom_util::manifest::DataUpload for &'a mut Client {
+impl<'a> maelstrom_util::manifest::DataUpload for &'a Client {
     async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         self.add_artifact(path).await
     }
@@ -122,16 +122,20 @@ impl<'a> maelstrom_util::manifest::DataUpload for &'a mut Client {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
+struct ClientState {
+    digest_repo: DigestRepository,
+    processed_artifact_paths: HashSet<PathBuf>,
+    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
+}
+
 struct Client {
     dispatcher_sender: Sender<DispatcherMessage>,
-    driver: Box<dyn ClientDriver + Send + Sync>,
-    digest_repo: DigestRepository,
-    container_image_depot: ContainerImageDepot,
-    processed_artifact_paths: HashSet<PathBuf>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
-    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
     upload_tracker: ArtifactUploadTracker,
+    container_image_depot: ContainerImageDepot,
+    driver: Box<dyn ClientDriver + Send + Sync>,
+    state: Mutex<ClientState>,
 }
 
 impl Client {
@@ -141,7 +145,7 @@ impl Client {
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
-        let mut driver = new_driver(driver_mode);
+        let driver = new_driver(driver_mode);
         let upload_tracker = ArtifactUploadTracker::default();
         let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
@@ -154,35 +158,39 @@ impl Client {
 
         Ok(Client {
             dispatcher_sender,
-            driver,
-            digest_repo: DigestRepository::new(cache_dir.as_ref()),
-            container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
-            processed_artifact_paths: HashSet::default(),
             cache_dir: cache_dir.as_ref().to_owned(),
             project_dir: project_dir.as_ref().to_owned(),
-            cached_layers: HashMap::new(),
             upload_tracker,
+            container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
+            driver,
+            state: Mutex::new(ClientState {
+                digest_repo: DigestRepository::new(cache_dir.as_ref()),
+                processed_artifact_paths: HashSet::default(),
+                cached_layers: HashMap::new(),
+            }),
         })
     }
 
-    async fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+    async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
         let fs = async_fs::Fs::new();
         let path = fs.canonicalize(path).await?;
 
-        let digest = if let Some(digest) = self.digest_repo.get(&path).await? {
+        let mut state = self.state.lock().await;
+        let digest = if let Some(digest) = state.digest_repo.get(&path).await? {
             digest
         } else {
             let (mtime, digest) = calculate_digest(&path).await?;
-            self.digest_repo
+            state
+                .digest_repo
                 .add(path.clone(), mtime, digest.clone())
                 .await?;
             digest
         };
-        if !self.processed_artifact_paths.contains(&path) {
+        if !state.processed_artifact_paths.contains(&path) {
+            state.processed_artifact_paths.insert(path.clone());
             self.dispatcher_sender
-                .send(DispatcherMessage::AddArtifact(path.clone(), digest.clone()))
+                .send(DispatcherMessage::AddArtifact(path, digest.clone()))
                 .await?;
-            self.processed_artifact_paths.insert(path);
         }
         Ok(digest)
     }
@@ -206,7 +214,7 @@ impl Client {
     }
 
     async fn build_manifest(
-        &mut self,
+        &self,
         mut paths: impl futures::stream::Stream<Item = Result<impl AsRef<Path>>>,
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
@@ -215,7 +223,7 @@ impl Client {
         let tmp_file_path = self.build_manifest_path(&".temp");
         let manifest_file = fs.create_file(&tmp_file_path).await?;
         let follow_symlinks = prefix_options.follow_symlinks;
-        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, &mut *self).await?;
+        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, self).await?;
         let mut path_hasher = PathHasher::new();
         let mut pinned_paths = pin!(paths);
         while let Some(maybe_path) = pinned_paths.next().await {
@@ -242,7 +250,7 @@ impl Client {
         Ok(manifest_path)
     }
 
-    async fn build_stub_manifest(&mut self, stubs: Vec<String>) -> Result<PathBuf> {
+    async fn build_stub_manifest(&self, stubs: Vec<String>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
         let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
@@ -274,7 +282,7 @@ impl Client {
         Ok(manifest_path)
     }
 
-    async fn build_symlink_manifest(&mut self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
+    async fn build_symlink_manifest(&self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
         let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
@@ -301,8 +309,8 @@ impl Client {
         Ok(manifest_path)
     }
 
-    async fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        if let Some(l) = self.cached_layers.get(&layer) {
+    async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        if let Some(l) = self.state.lock().await.cached_layers.get(&layer) {
             return Ok(l.clone());
         }
 
@@ -360,12 +368,16 @@ impl Client {
             }
         };
 
-        self.cached_layers.insert(layer, res.clone());
+        self.state
+            .lock()
+            .await
+            .cached_layers
+            .insert(layer, res.clone());
         Ok(res)
     }
 
     async fn get_container_image(
-        &mut self,
+        &self,
         name: &str,
         tag: &str,
         prog: impl ProgressTracker,
@@ -375,7 +387,7 @@ impl Client {
             .await
     }
 
-    async fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
+    async fn add_job(&self, spec: JobSpec, handler: JobResponseHandler) {
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
@@ -385,20 +397,18 @@ impl Client {
             .ok();
     }
 
-    async fn stop_accepting(&mut self) -> Result<()> {
+    async fn stop_accepting(&self) -> Result<()> {
         self.dispatcher_sender.send(DispatcherMessage::Stop).await?;
         Ok(())
     }
 
-    async fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+    async fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.stop_accepting().await.ok();
         self.driver.stop().await?;
         Ok(())
     }
 
-    async fn get_job_state_counts(
-        &mut self,
-    ) -> Result<tokio::sync::mpsc::Receiver<JobStateCounts>> {
+    async fn get_job_state_counts(&self) -> Result<tokio::sync::mpsc::Receiver<JobStateCounts>> {
         let (sender, recv) = tokio::sync::mpsc::channel(1);
         self.dispatcher_sender
             .send(DispatcherMessage::GetJobStateCounts(sender))
