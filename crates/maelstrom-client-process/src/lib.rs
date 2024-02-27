@@ -37,9 +37,9 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
-    sync::mpsc::SyncSender,
     time::SystemTime,
 };
+use tokio::sync::mpsc::Sender;
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let path = path.to_owned();
@@ -123,7 +123,7 @@ impl<'a> maelstrom_util::manifest::DataUpload for &'a mut Client {
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
 struct Client {
-    dispatcher_sender: SyncSender<DispatcherMessage>,
+    dispatcher_sender: Sender<DispatcherMessage>,
     driver: Box<dyn ClientDriver + Send + Sync>,
     digest_repo: DigestRepository,
     container_image_depot: ContainerImageDepot,
@@ -135,7 +135,7 @@ struct Client {
 }
 
 impl Client {
-    fn new(
+    async fn new(
         driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
@@ -143,13 +143,13 @@ impl Client {
     ) -> Result<Self> {
         let mut driver = new_driver(driver_mode);
         let upload_tracker = ArtifactUploadTracker::default();
-        let deps = ClientDeps::new(broker_addr, upload_tracker.clone())?;
+        let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
-        driver.drive(deps);
+        driver.drive(deps).await;
 
-        let fs = Fs::new();
+        let fs = async_fs::Fs::new();
         for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
-            fs.create_dir_all(cache_dir.as_ref().join(d))?;
+            fs.create_dir_all(cache_dir.as_ref().join(d)).await?;
         }
 
         Ok(Client {
@@ -180,7 +180,8 @@ impl Client {
         };
         if !self.processed_artifact_paths.contains(&path) {
             self.dispatcher_sender
-                .send(DispatcherMessage::AddArtifact(path.clone(), digest.clone()))?;
+                .send(DispatcherMessage::AddArtifact(path.clone(), digest.clone()))
+                .await?;
             self.processed_artifact_paths.insert(path);
         }
         Ok(digest)
@@ -374,32 +375,34 @@ impl Client {
             .await
     }
 
-    fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
+    async fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
-        let _ = self
-            .dispatcher_sender
-            .send(DispatcherMessage::AddJob(spec, handler));
-    }
-
-    fn stop_accepting(&mut self) -> Result<()> {
-        self.dispatcher_sender.send(DispatcherMessage::Stop)?;
-        Ok(())
-    }
-
-    fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
-        self.stop_accepting().ok();
-        self.driver.stop()?;
-        Ok(())
-    }
-
-    fn get_job_state_counts(
-        &mut self,
-    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<JobStateCounts>> {
-        let (sender, recv) = tokio::sync::mpsc::unbounded_channel();
         self.dispatcher_sender
-            .send(DispatcherMessage::GetJobStateCounts(sender))?;
+            .send(DispatcherMessage::AddJob(spec, handler))
+            .await
+            .ok();
+    }
+
+    async fn stop_accepting(&mut self) -> Result<()> {
+        self.dispatcher_sender.send(DispatcherMessage::Stop).await?;
+        Ok(())
+    }
+
+    async fn wait_for_outstanding_jobs(&mut self) -> Result<()> {
+        self.stop_accepting().await.ok();
+        self.driver.stop().await?;
+        Ok(())
+    }
+
+    async fn get_job_state_counts(
+        &mut self,
+    ) -> Result<tokio::sync::mpsc::Receiver<JobStateCounts>> {
+        let (sender, recv) = tokio::sync::mpsc::channel(1);
+        self.dispatcher_sender
+            .send(DispatcherMessage::GetJobStateCounts(sender))
+            .await?;
         Ok(recv)
     }
 
@@ -408,17 +411,17 @@ impl Client {
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    fn process_broker_msg_single_threaded(&self, count: usize) {
-        self.driver.process_broker_msg_single_threaded(count)
+    async fn process_broker_msg_single_threaded(&self, count: usize) {
+        self.driver.process_broker_msg_single_threaded(count).await
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
-        self.driver.process_client_messages_single_threaded()
+    async fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
+        self.driver.process_client_messages_single_threaded().await
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    fn process_artifact_single_threaded(&self) {
-        self.driver.process_artifact_single_threaded()
+    async fn process_artifact_single_threaded(&self) {
+        self.driver.process_artifact_single_threaded().await
     }
 }

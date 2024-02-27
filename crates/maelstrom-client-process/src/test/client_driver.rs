@@ -1,44 +1,45 @@
 use crate::driver::{ClientDeps, ClientDriver};
 use anyhow::Result;
+use async_trait::async_trait;
 use maelstrom_client_base::ClientMessageKind;
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Default, Clone)]
 pub struct SingleThreadedClientDriver {
     deps: Arc<Mutex<Option<ClientDeps>>>,
 }
 
+#[async_trait]
 impl ClientDriver for SingleThreadedClientDriver {
-    fn drive(&mut self, deps: ClientDeps) {
-        *self.deps.lock().unwrap() = Some(deps);
+    async fn drive(&mut self, deps: ClientDeps) {
+        *self.deps.lock().await = Some(deps);
     }
 
-    fn stop(&mut self) -> Result<()> {
+    async fn stop(&mut self) -> Result<()> {
         Ok(())
     }
 
-    fn process_broker_msg_single_threaded(&self, count: usize) {
-        let mut locked_deps = self.deps.lock().unwrap();
+    async fn process_broker_msg_single_threaded(&self, count: usize) {
+        let mut locked_deps = self.deps.lock().await;
         let deps = locked_deps.as_mut().unwrap();
 
         for _ in 0..count {
-            deps.socket_reader.process_one();
-            deps.dispatcher.process_one().unwrap();
+            deps.socket_reader.process_one().await;
+            deps.dispatcher.process_one().await.unwrap();
         }
     }
 
-    fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
-        let mut locked_deps = self.deps.lock().unwrap();
+    async fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
+        let mut locked_deps = self.deps.lock().await;
         let deps = locked_deps.as_mut().unwrap();
-        deps.dispatcher.process_one_and_tell()
+        deps.dispatcher.process_one_and_tell().await
     }
 
-    fn process_artifact_single_threaded(&self) {
-        let mut locked_deps = self.deps.lock().unwrap();
+    async fn process_artifact_single_threaded(&self) {
+        let mut locked_deps = self.deps.lock().await;
         let deps = locked_deps.as_mut().unwrap();
-        thread::scope(|scope| {
-            deps.artifact_pusher.process_one(scope);
-        });
+        deps.artifact_pusher.process_one().await;
+        deps.artifact_pusher.wait().await;
     }
 }

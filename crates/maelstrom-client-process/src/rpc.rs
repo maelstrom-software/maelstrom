@@ -26,14 +26,6 @@ impl Handler {
         }
     }
 
-    fn with_client<RetT>(
-        &self,
-        body: impl FnOnce(&mut ProcessClient) -> Result<RetT>,
-    ) -> Result<RetT> {
-        let mut guard = self.client.blocking_lock();
-        body(guard.as_mut().ok_or(anyhow!("must call start first"))?)
-    }
-
     async fn take_client(&self) -> Result<ProcessClient> {
         let mut guard = self.client.lock().await;
         guard.take().ok_or(anyhow!("must call start first"))
@@ -107,6 +99,7 @@ impl ProgressTracker for ChannelProgressTracker {
     }
 }
 
+#[allow(clippy::unit_arg)]
 #[tonic::async_trait]
 impl proto::client_process_server::ClientProcess for Handler {
     type GetContainerImageStream =
@@ -118,15 +111,13 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
-            let client = tokio::task::spawn_blocking(move || {
-                ProcessClient::new(
-                    TryFromProtoBuf::try_from_proto_buf(request.driver_mode)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
-                    PathBuf::try_from_proto_buf(request.project_dir)?,
-                    PathBuf::try_from_proto_buf(request.cache_dir)?,
-                )
-            })
-            .await??;
+            let client = ProcessClient::new(
+                TryFromProtoBuf::try_from_proto_buf(request.driver_mode)?,
+                TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
+                PathBuf::try_from_proto_buf(request.project_dir)?,
+                PathBuf::try_from_proto_buf(request.cache_dir)?,
+            )
+            .await?;
             *self.client.lock().await = Some(client);
             Ok(proto::Void {})
         })
@@ -199,7 +190,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            with_client_async!(self, |client| { client.stop_accepting() }).await?;
+            with_client_async!(self, |client| { client.stop_accepting().await }).await?;
             Ok(proto::Void {})
         })
         .await
@@ -213,13 +204,14 @@ impl proto::client_process_server::ClientProcess for Handler {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
             let (send, mut recv) = mpsc::unbounded_channel();
             with_client_async!(self, |client| {
-                client.add_job(
-                    spec,
-                    Box::new(move |cjid, res| {
-                        let _ = send.send((cjid, res));
-                    }),
-                );
-                Ok(())
+                Ok(client
+                    .add_job(
+                        spec,
+                        Box::new(move |cjid, res| {
+                            let _ = send.send((cjid, res));
+                        }),
+                    )
+                    .await)
             })
             .await?;
             let (cjid, res) = recv.recv().await.ok_or(anyhow!("client shutdown"))?;
@@ -237,7 +229,7 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let mut client = self.take_client().await?;
-            tokio::task::spawn_blocking(move || client.wait_for_outstanding_jobs()).await??;
+            client.wait_for_outstanding_jobs().await?;
             Ok(proto::Void {})
         })
         .await
@@ -248,7 +240,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
         run_handler(async {
-            let res = with_client_async!(self, |client| { client.get_job_state_counts() })
+            let res = with_client_async!(self, |client| { client.get_job_state_counts().await })
                 .await?
                 .recv()
                 .await
@@ -281,14 +273,12 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
-            let self_clone = self.clone();
-            tokio::task::spawn_blocking(move || {
-                self_clone.with_client(|client| {
-                    client.process_broker_msg_single_threaded(request.count as usize);
-                    Ok(())
-                })
+            with_client_async!(self, |client| {
+                Ok(client
+                    .process_broker_msg_single_threaded(request.count as usize)
+                    .await)
             })
-            .await??;
+            .await?;
             Ok(proto::Void {})
         })
         .await
@@ -300,18 +290,15 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
-            let self_clone = self.clone();
-            tokio::task::spawn_blocking(move || -> Result<()> {
-                loop {
-                    let kind = self_clone.with_client(|client| {
-                        Ok(client.process_client_messages_single_threaded())
-                    })?;
-                    if kind.is_some_and(|k| k == wanted) {
-                        break Ok(());
-                    }
+            loop {
+                let kind = with_client_async!(self, |client| {
+                    Ok(client.process_client_messages_single_threaded().await)
+                })
+                .await?;
+                if kind.is_some_and(|k| k == wanted) {
+                    break;
                 }
-            })
-            .await??;
+            }
             Ok(proto::Void {})
         })
         .await
@@ -322,14 +309,10 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            let self_clone = self.clone();
-            tokio::task::spawn_blocking(move || {
-                self_clone.with_client(|client| {
-                    client.process_artifact_single_threaded();
-                    Ok(())
-                })
+            with_client_async!(self, |client| {
+                Ok(client.process_artifact_single_threaded().await)
             })
-            .await??;
+            .await?;
             Ok(proto::Void {})
         })
         .await

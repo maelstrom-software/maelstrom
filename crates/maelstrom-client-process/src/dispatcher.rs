@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::JobStateCounts,
@@ -8,16 +8,16 @@ use maelstrom_client_base::{ClientMessageKind, JobResponseHandler};
 use maelstrom_util::{ext::OptionExt as _, net};
 use std::{
     collections::{HashMap, VecDeque},
-    net::TcpStream,
     path::PathBuf,
-    sync::mpsc::{Receiver, SyncSender},
 };
+use tokio::net::tcp;
+use tokio::sync::mpsc::{Receiver, Sender};
 
 pub enum DispatcherMessage {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, JobResponseHandler),
-    GetJobStateCounts(tokio::sync::mpsc::UnboundedSender<JobStateCounts>),
+    GetJobStateCounts(Sender<JobStateCounts>),
     Stop,
 }
 
@@ -28,20 +28,20 @@ pub struct ArtifactPushRequest {
 
 pub struct Dispatcher {
     receiver: Receiver<DispatcherMessage>,
-    pub stream: TcpStream,
-    artifact_pusher: SyncSender<ArtifactPushRequest>,
+    pub stream: tcp::OwnedWriteHalf,
+    artifact_pusher: Sender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
     handlers: HashMap<ClientJobId, JobResponseHandler>,
-    stats_reqs: VecDeque<tokio::sync::mpsc::UnboundedSender<JobStateCounts>>,
+    stats_reqs: VecDeque<Sender<JobStateCounts>>,
 }
 
 impl Dispatcher {
     pub fn new(
         receiver: Receiver<DispatcherMessage>,
-        stream: TcpStream,
-        artifact_pusher: SyncSender<ArtifactPushRequest>,
+        stream: tcp::OwnedWriteHalf,
+        artifact_pusher: Sender<ArtifactPushRequest>,
     ) -> Self {
         Self {
             receiver,
@@ -57,19 +57,26 @@ impl Dispatcher {
 
     /// Processes one request. In order to drive the dispatcher, this should be called in a loop
     /// until the function return false
-    pub fn process_one(&mut self) -> Result<bool> {
-        let msg = self.receiver.recv()?;
-        let (cont, _) = self.handle_message(msg)?;
+    pub async fn process_one(&mut self) -> Result<bool> {
+        let msg = self
+            .receiver
+            .recv()
+            .await
+            .ok_or(anyhow!("dispatcher hangup"))?;
+        let (cont, _) = self.handle_message(msg).await?;
         Ok(cont)
     }
 
-    pub fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
+    pub async fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
         let msg = self.receiver.try_recv().ok()?;
-        let (_, kind) = self.handle_message(msg).ok()?;
+        let (_, kind) = self.handle_message(msg).await.ok()?;
         Some(kind)
     }
 
-    fn handle_message(&mut self, msg: DispatcherMessage) -> Result<(bool, ClientMessageKind)> {
+    async fn handle_message(
+        &mut self,
+        msg: DispatcherMessage,
+    ) -> Result<(bool, ClientMessageKind)> {
         let mut kind = ClientMessageKind::Other;
         match msg {
             DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
@@ -87,13 +94,14 @@ impl Dispatcher {
                     })
                     .clone();
                 self.artifact_pusher
-                    .send(ArtifactPushRequest { path, digest })?;
+                    .send(ArtifactPushRequest { path, digest })
+                    .await?;
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
             }
             DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
-                self.stats_reqs.pop_front().unwrap().send(res).ok();
+                self.stats_reqs.pop_front().unwrap().send(res).await.ok();
             }
             DispatcherMessage::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
@@ -102,10 +110,11 @@ impl Dispatcher {
                 let cjid = self.next_client_job_id.into();
                 self.handlers.insert(cjid, handler).assert_is_none();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
-                net::write_message_to_socket(
+                net::write_message_to_async_socket(
                     &mut self.stream,
                     ClientToBroker::JobRequest(cjid, spec),
-                )?;
+                )
+                .await?;
                 kind = ClientMessageKind::AddJob;
             }
             DispatcherMessage::Stop => {
@@ -116,10 +125,11 @@ impl Dispatcher {
                 self.stop_when_all_completed = true;
             }
             DispatcherMessage::GetJobStateCounts(sender) => {
-                net::write_message_to_socket(
+                net::write_message_to_async_socket(
                     &mut self.stream,
                     ClientToBroker::JobStateCountsRequest,
-                )?;
+                )
+                .await?;
                 self.stats_reqs.push_back(sender);
                 kind = ClientMessageKind::GetJobStateCounts;
             }

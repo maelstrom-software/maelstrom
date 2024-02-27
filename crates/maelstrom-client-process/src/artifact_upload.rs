@@ -15,9 +15,9 @@ use std::{
     io,
     net::TcpStream,
     path::{Path, PathBuf},
-    sync::mpsc::Receiver,
-    thread::{self},
 };
+use tokio::sync::mpsc::Receiver;
+use tokio::sync::Semaphore;
 
 struct UploadProgress {
     size: u64,
@@ -118,6 +118,8 @@ pub struct ArtifactPusher {
     broker_addr: BrokerAddr,
     receiver: Receiver<ArtifactPushRequest>,
     upload_tracker: ArtifactUploadTracker,
+    pending_uploads: u32,
+    sem: Arc<Semaphore>,
 }
 
 impl ArtifactPusher {
@@ -130,25 +132,36 @@ impl ArtifactPusher {
             broker_addr,
             receiver,
             upload_tracker,
+            pending_uploads: 0,
+            sem: Arc::new(Semaphore::new(0)),
         }
     }
 
     /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
     /// until the function return false
-    pub fn process_one<'a, 'b>(&mut self, scope: &'a thread::Scope<'b, '_>) -> bool
-    where
-        'a: 'b,
-    {
-        if let Ok(msg) = self.receiver.recv() {
-            let upload_tracker = self.upload_tracker.clone();
-            let broker_addr = self.broker_addr;
+    pub async fn process_one(&mut self) -> bool {
+        let Some(msg) = self.receiver.recv().await else {
+            return false;
+        };
+
+        let upload_tracker = self.upload_tracker.clone();
+        let broker_addr = self.broker_addr;
+        let sem = self.sem.clone();
+        self.pending_uploads += 1;
+        tokio::task::spawn_blocking(move || {
             // N.B. We are ignoring this Result<_>
-            scope.spawn(move || {
-                push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
-            });
-            true
-        } else {
-            false
-        }
+            push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest).ok();
+            sem.add_permits(1);
+        });
+        true
+    }
+
+    pub async fn wait(&mut self) {
+        self.sem
+            .acquire_many(self.pending_uploads)
+            .await
+            .unwrap()
+            .forget();
+        self.pending_uploads = 0;
     }
 }
