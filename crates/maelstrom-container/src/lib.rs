@@ -2,19 +2,22 @@ pub use oci_spec::image::{Arch, Os};
 
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
+use async_trait::async_trait;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::async_fs::{self as fs, Fs};
 use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::future::Future;
 use std::pin::Pin;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
-    io::{self, Read as _, Seek as _, SeekFrom, Write as _},
+    io::{self, SeekFrom},
     path::{Path, PathBuf},
 };
+use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 use tokio::{io::AsyncWrite, task};
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
 use xdg::BaseDirectories;
@@ -295,13 +298,15 @@ pub struct ContainerImage {
 }
 
 impl ContainerImage {
-    fn from_path(fs: &Fs, path: impl AsRef<Path>) -> Result<Self> {
-        let c = fs.read_to_string(path)?;
+    async fn from_path(fs: &Fs, path: impl AsRef<Path>) -> Result<Self> {
+        let c = fs.read_to_string(path).await?;
         Ok(serde_json::from_str(&c)?)
     }
 
-    fn from_dir(fs: &Fs, path: impl AsRef<Path>) -> Option<Self> {
-        let i = ContainerImage::from_path(fs, path.as_ref().join("config.json")).ok()?;
+    async fn from_dir(fs: &Fs, path: impl AsRef<Path>) -> Option<Self> {
+        let i = ContainerImage::from_path(fs, path.as_ref().join("config.json"))
+            .await
+            .ok()?;
         (i.version == ContainerImageVersion::default()).then_some(i)
     }
 
@@ -422,9 +427,10 @@ impl LockedContainerImageTags {
     }
 }
 
+#[async_trait]
 pub trait ContainerImageDepotOps {
-    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String>;
-    fn download_image(
+    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String>;
+    async fn download_image(
         &self,
         name: &str,
         digest: &str,
@@ -445,19 +451,20 @@ impl DefaultContainerImageDepotOps {
     }
 }
 
+#[async_trait]
 impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
-    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
-        resolve_tag_sync(&self.client, name, tag)
+    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
+        resolve_tag(&self.client, name, tag).await
     }
 
-    fn download_image(
+    async fn download_image(
         &self,
         name: &str,
         digest: &str,
         layer_dir: &Path,
         prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
-        download_image_sync(&self.client, name, digest, layer_dir, prog)
+        download_image(&self.client, name, digest, layer_dir, prog).await
     }
 }
 
@@ -483,6 +490,26 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
 
 const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
 
+struct LockedTagsHandle<'fs> {
+    locked_tags: LockedContainerImageTags,
+    lock_file: fs::File<'fs>,
+}
+
+impl<'fs> LockedTagsHandle<'fs> {
+    async fn write(mut self) -> Result<()> {
+        self.lock_file.seek(SeekFrom::Start(0)).await?;
+        self.lock_file.set_len(0).await?;
+        self.lock_file
+            .write_all(
+                toml::to_string_pretty(&self.locked_tags)
+                    .unwrap()
+                    .as_bytes(),
+            )
+            .await?;
+        Ok(())
+    }
+}
+
 impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<ContainerImageDepotOpsT> {
     fn new_with(
         project_dir: impl AsRef<Path>,
@@ -493,8 +520,6 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         let project_dir = project_dir.as_ref();
         let cache_dir = cache_dir.as_ref();
 
-        fs.create_dir_all(cache_dir)?;
-
         Ok(Self {
             fs,
             project_dir: project_dir.to_owned(),
@@ -504,7 +529,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         })
     }
 
-    fn get_image_digest(
+    async fn get_image_digest(
         &self,
         locked_tags: &mut LockedContainerImageTags,
         name: &str,
@@ -513,17 +538,17 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         Ok(if let Some(digest) = locked_tags.get(name, tag) {
             digest.into()
         } else {
-            let digest = self.ops.resolve_tag(name, tag)?;
+            let digest = self.ops.resolve_tag(name, tag).await?;
             locked_tags.add(name.into(), tag.into(), digest.clone());
             digest
         })
     }
 
-    fn get_cached_image(&self, digest: &str) -> Option<ContainerImage> {
-        ContainerImage::from_dir(&self.fs, self.cache_dir.join(digest))
+    async fn get_cached_image(&self, digest: &str) -> Option<ContainerImage> {
+        ContainerImage::from_dir(&self.fs, self.cache_dir.join(digest)).await
     }
 
-    fn download_image(
+    async fn download_image(
         &self,
         name: &str,
         digest: &str,
@@ -531,74 +556,79 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     ) -> Result<ContainerImage> {
         let output_dir = self.cache_dir.join(digest);
         if output_dir.exists() {
-            self.fs.remove_dir_all(&output_dir)?;
+            self.fs.remove_dir_all(&output_dir).await?;
         }
-        self.fs.create_dir(&output_dir)?;
+        self.fs.create_dir(&output_dir).await?;
 
-        let img = self.ops.download_image(name, digest, &output_dir, prog)?;
-        self.fs.write(
-            output_dir.join("config.json"),
-            serde_json::to_vec(&img).unwrap(),
-        )?;
+        let img = self
+            .ops
+            .download_image(name, digest, &output_dir, prog)
+            .await?;
+        self.fs
+            .write(
+                output_dir.join("config.json"),
+                serde_json::to_vec(&img).unwrap(),
+            )
+            .await?;
 
         Ok(img)
     }
 
-    fn with_cache_lock<Ret>(
+    async fn with_cache_lock<RetT>(
         &self,
         digest: &str,
-        body: impl FnOnce() -> Result<Ret>,
-    ) -> Result<Ret> {
+        body: impl Future<Output = Result<RetT>>,
+    ) -> Result<RetT> {
         let lock_file_path = self.cache_dir.join(format!(".{digest}.flock"));
-        let lock_file = self.fs.create_file(lock_file_path)?;
-        lock_file.lock_exclusive()?;
-        body()
+        let lock_file = self.fs.create_file(lock_file_path).await?;
+        lock_file.lock_exclusive().await?;
+        body.await
     }
 
-    fn with_locked_tags<Ret>(
-        &self,
-        body: impl FnOnce(&mut LockedContainerImageTags) -> Result<Ret>,
-    ) -> Result<Ret> {
+    async fn lock_tags(&self) -> Result<LockedTagsHandle<'_>> {
         let mut lock_file = self
             .fs
-            .open_or_create_file(self.project_dir.join(TAG_FILE_NAME))?;
-        lock_file.lock_exclusive()?;
+            .open_or_create_file(self.project_dir.join(TAG_FILE_NAME))
+            .await?;
+        lock_file.lock_exclusive().await?;
 
         let mut contents = String::new();
-        lock_file.read_to_string(&mut contents)?;
-        let mut locked_tags = LockedContainerImageTags::from_str(&contents).unwrap_or_default();
-
-        let ret = body(&mut locked_tags);
-
-        lock_file.seek(SeekFrom::Start(0))?;
-        lock_file.set_len(0)?;
-        lock_file.write_all(toml::to_string_pretty(&locked_tags).unwrap().as_bytes())?;
-
-        ret
+        lock_file.read_to_string(&mut contents).await?;
+        let locked_tags = LockedContainerImageTags::from_str(&contents).unwrap_or_default();
+        Ok(LockedTagsHandle {
+            locked_tags,
+            lock_file,
+        })
     }
 
-    pub fn get_container_image(
+    pub async fn get_container_image(
         &mut self,
         name: &str,
         tag: &str,
         prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
+        self.fs.create_dir_all(&self.cache_dir).await?;
+
         let cache_key = (name.into(), tag.into());
         if let Some(img) = self.cache.get(&cache_key) {
             return Ok(img.clone());
         }
 
-        let img = self.with_locked_tags(|locked_tags| {
-            let digest = self.get_image_digest(locked_tags, name, tag)?;
+        let mut tags = self.lock_tags().await?;
+        let digest = self
+            .get_image_digest(&mut tags.locked_tags, name, tag)
+            .await?;
 
-            self.with_cache_lock(&digest, || {
-                Ok(if let Some(img) = self.get_cached_image(&digest) {
+        let img = self
+            .with_cache_lock(&digest, async {
+                Ok(if let Some(img) = self.get_cached_image(&digest).await {
                     img
                 } else {
-                    self.download_image(name, &digest, prog)?
+                    self.download_image(name, &digest, prog).await?
                 })
             })
-        })?;
+            .await?;
+        tags.write().await?;
 
         self.cache.insert(cache_key, img.clone());
         Ok(img)
@@ -609,12 +639,13 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
 struct PanicContainerImageDepotOps;
 
 #[cfg(test)]
+#[async_trait]
 impl ContainerImageDepotOps for PanicContainerImageDepotOps {
-    fn resolve_tag(&self, _name: &str, _tag: &str) -> Result<String> {
+    async fn resolve_tag(&self, _name: &str, _tag: &str) -> Result<String> {
         panic!()
     }
 
-    fn download_image(
+    async fn download_image(
         &self,
         _name: &str,
         _digest: &str,
@@ -630,12 +661,13 @@ impl ContainerImageDepotOps for PanicContainerImageDepotOps {
 struct FakeContainerImageDepotOps(HashMap<String, String>);
 
 #[cfg(test)]
+#[async_trait]
 impl ContainerImageDepotOps for FakeContainerImageDepotOps {
-    fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
+    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
         Ok(self.0.get(&format!("{name}-{tag}")).unwrap().clone())
     }
 
-    fn download_image(
+    async fn download_image(
         &self,
         name: &str,
         digest: &str,
@@ -653,27 +685,27 @@ impl ContainerImageDepotOps for FakeContainerImageDepotOps {
 }
 
 #[cfg(test)]
-fn sorted_dir_listing(fs: &Fs, path: impl AsRef<Path>) -> Vec<String> {
-    let mut listing: Vec<String> = fs
-        .read_dir(path)
-        .unwrap()
-        .map(|d| {
-            d.unwrap()
-                .path()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .into()
-        })
-        .filter(|n: &String| !n.starts_with('.'))
-        .collect();
+async fn sorted_dir_listing(fs: &Fs, path: impl AsRef<Path>) -> Vec<String> {
+    let mut listing = vec![];
+    let mut read_dir = fs.read_dir(path).await.unwrap();
+    while let Some(entry) = read_dir.next_entry().await.unwrap() {
+        let name = entry
+            .path()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_owned();
+        if !name.starts_with('.') {
+            listing.push(name);
+        }
+    }
     listing.sort();
     listing
 }
 
-#[test]
-fn container_image_depot_download_dir_structure() {
+#[tokio::test]
+async fn container_image_depot_download_dir_structure() {
     let fs = Fs::new();
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
@@ -688,10 +720,12 @@ fn container_image_depot_download_dir_structure() {
     .unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
 
     assert_eq!(
         fs.read_to_string(project_dir.path().join(TAG_FILE_NAME))
+            .await
             .unwrap(),
         "\
             version = 0\n\
@@ -701,13 +735,13 @@ fn container_image_depot_download_dir_structure() {
         "
     );
     assert_eq!(
-        sorted_dir_listing(&fs, image_dir.path()),
+        sorted_dir_listing(&fs, image_dir.path()).await,
         vec!["sha256:abcdef"]
     );
 }
 
-#[test]
-fn container_image_depot_download_then_reload() {
+#[tokio::test]
+async fn container_image_depot_download_then_reload() {
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
 
@@ -721,6 +755,7 @@ fn container_image_depot_download_then_reload() {
     .unwrap();
     let img1 = depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     drop(depot);
 
@@ -732,13 +767,14 @@ fn container_image_depot_download_then_reload() {
     .unwrap();
     let img2 = depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
 
     assert_eq!(img1, img2);
 }
 
-#[test]
-fn container_image_depot_redownload_corrupt() {
+#[tokio::test]
+async fn container_image_depot_redownload_corrupt() {
     let fs = Fs::new();
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
@@ -753,9 +789,11 @@ fn container_image_depot_redownload_corrupt() {
     .unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     drop(depot);
     fs.remove_file(image_dir.path().join("sha256:abcdef").join("config.json"))
+        .await
         .unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
@@ -768,20 +806,21 @@ fn container_image_depot_redownload_corrupt() {
     .unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
 
     assert_eq!(
-        sorted_dir_listing(&fs, project_dir.path()),
+        sorted_dir_listing(&fs, project_dir.path()).await,
         vec![TAG_FILE_NAME]
     );
     assert_eq!(
-        sorted_dir_listing(&fs, image_dir.path()),
+        sorted_dir_listing(&fs, image_dir.path()).await,
         vec!["sha256:abcdef"]
     );
 }
 
-#[test]
-fn container_image_depot_update_image() {
+#[tokio::test]
+async fn container_image_depot_update_image() {
     let fs = Fs::new();
     let project_dir = tempfile::tempdir().unwrap();
     let image_dir = tempfile::tempdir().unwrap();
@@ -797,14 +836,20 @@ fn container_image_depot_update_image() {
     .unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     depot
         .get_container_image("bar", "latest", NullProgressTracker)
+        .await
         .unwrap();
     drop(depot);
     fs.remove_file(project_dir.path().join(TAG_FILE_NAME))
+        .await
         .unwrap();
-    let bar_meta_before = fs.metadata(image_dir.path().join("sha256:ghijk")).unwrap();
+    let bar_meta_before = fs
+        .metadata(image_dir.path().join("sha256:ghijk"))
+        .await
+        .unwrap();
 
     let mut depot = ContainerImageDepot::new_with(
         project_dir.path(),
@@ -818,15 +863,20 @@ fn container_image_depot_update_image() {
     #[allow(clippy::disallowed_names)]
     let foo = depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     depot
         .get_container_image("bar", "latest", NullProgressTracker)
+        .await
         .unwrap();
 
     // ensure we get new foo
     assert_eq!(foo.digest, "sha256:lmnop");
 
-    let bar_meta_after = fs.metadata(image_dir.path().join("sha256:ghijk")).unwrap();
+    let bar_meta_after = fs
+        .metadata(image_dir.path().join("sha256:ghijk"))
+        .await
+        .unwrap();
 
     // ensure we didn't re-download bar
     assert_eq!(
@@ -835,17 +885,17 @@ fn container_image_depot_update_image() {
     );
 
     assert_eq!(
-        sorted_dir_listing(&fs, project_dir.path()),
+        sorted_dir_listing(&fs, project_dir.path()).await,
         vec![TAG_FILE_NAME]
     );
     assert_eq!(
-        sorted_dir_listing(&fs, image_dir.path()),
+        sorted_dir_listing(&fs, image_dir.path()).await,
         vec!["sha256:abcdef", "sha256:ghijk", "sha256:lmnop",]
     );
 }
 
-#[test]
-fn container_image_depot_update_image_but_nothing_to_do() {
+#[tokio::test]
+async fn container_image_depot_update_image_but_nothing_to_do() {
     let fs = Fs::new();
 
     let project_dir = tempfile::tempdir().unwrap();
@@ -859,25 +909,31 @@ fn container_image_depot_update_image_but_nothing_to_do() {
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops.clone()).unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     depot
         .get_container_image("bar", "latest", NullProgressTracker)
+        .await
         .unwrap();
     drop(depot);
     fs.remove_file(project_dir.path().join(TAG_FILE_NAME))
+        .await
         .unwrap();
 
     let mut depot =
         ContainerImageDepot::new_with(project_dir.path(), image_dir.path(), ops).unwrap();
     depot
         .get_container_image("foo", "latest", NullProgressTracker)
+        .await
         .unwrap();
     depot
         .get_container_image("bar", "latest", NullProgressTracker)
+        .await
         .unwrap();
 
     assert_eq!(
         fs.read_to_string(project_dir.path().join(TAG_FILE_NAME))
+            .await
             .unwrap(),
         "\
             version = 0\n\
@@ -890,23 +946,7 @@ fn container_image_depot_update_image_but_nothing_to_do() {
         "
     );
     assert_eq!(
-        sorted_dir_listing(&fs, image_dir.path()),
+        sorted_dir_listing(&fs, image_dir.path()).await,
         vec!["sha256:abcdef", "sha256:ghijk"]
     );
-}
-
-#[tokio::main]
-pub async fn resolve_tag_sync(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
-    resolve_tag(client, name, tag).await
-}
-
-#[tokio::main]
-pub async fn download_image_sync(
-    client: &reqwest::Client,
-    name: &str,
-    tag_or_digest: &str,
-    layer_dir: impl AsRef<Path>,
-    prog: impl ProgressTracker,
-) -> Result<ContainerImage> {
-    download_image(client, name, tag_or_digest, layer_dir, prog).await
 }

@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-compression.workspace = true
+async-trait.workspace = true
 clap.workspace = true
 futures.workspace = true
 indicatif.workspace = true

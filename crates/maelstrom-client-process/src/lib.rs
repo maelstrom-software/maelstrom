@@ -325,7 +325,7 @@ impl Client {
         Ok(res)
     }
 
-    fn get_container_image(
+    async fn get_container_image(
         &mut self,
         name: &str,
         tag: &str,
@@ -333,6 +333,7 @@ impl Client {
     ) -> Result<ContainerImage> {
         self.container_image_depot
             .get_container_image(name, tag, prog)
+            .await
     }
 
     fn add_job(&mut self, spec: JobSpec, handler: JobResponseHandler) {

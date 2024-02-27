@@ -7,8 +7,8 @@ use std::future::Future;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use tokio::sync::mpsc;
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 type TonicResult<T> = std::result::Result<T, tonic::Status>;
@@ -30,14 +30,27 @@ impl Handler {
         &self,
         body: impl FnOnce(&mut ProcessClient) -> Result<RetT>,
     ) -> Result<RetT> {
-        let mut guard = self.client.lock().unwrap();
+        let mut guard = self.client.blocking_lock();
         body(guard.as_mut().ok_or(anyhow!("must call start first"))?)
     }
 
-    fn take_client(&self) -> Result<ProcessClient> {
-        let mut guard = self.client.lock().unwrap();
+    async fn take_client(&self) -> Result<ProcessClient> {
+        let mut guard = self.client.lock().await;
         guard.take().ok_or(anyhow!("must call start first"))
     }
+}
+
+macro_rules! with_client_async {
+    ($s:expr, |$client:ident| { $($body:expr);* }) => {
+        async {
+            let mut client_guard = $s.client.lock().await;
+            let $client = client_guard
+                .as_mut()
+                .ok_or(anyhow!("must call start first"))?;
+            let res: Result::<_, anyhow::Error> = { $($body);* };
+            res
+        }
+    };
 }
 
 async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
@@ -47,8 +60,9 @@ async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicRes
     }
 }
 
-fn map_err<RetT>(body: impl FnOnce() -> Result<RetT>) -> TonicResult<RetT> {
-    body().map_err(|e| tonic::Status::new(tonic::Code::Unknown, e.to_string()))
+async fn map_err<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResult<RetT> {
+    body.await
+        .map_err(|e| tonic::Status::new(tonic::Code::Unknown, e.to_string()))
 }
 
 #[derive(Clone)]
@@ -113,7 +127,7 @@ impl proto::client_process_server::ClientProcess for Handler {
                 )
             })
             .await??;
-            *self.client.lock().unwrap() = Some(client);
+            *self.client.lock().await = Some(client);
             Ok(proto::Void {})
         })
         .await
@@ -167,18 +181,22 @@ impl proto::client_process_server::ClientProcess for Handler {
             let (sender, receiver) = mpsc::unbounded_channel();
             let tracker = ChannelProgressTracker::new(sender);
             let proto::GetContainerImageRequest { name, tag } = request.into_inner();
+
             let self_clone = self.clone();
-            tokio::task::spawn_blocking(move || {
-                self_clone.with_client(|client| {
-                    let result = map_err(|| {
-                        let image = client.get_container_image(&name, &tag, tracker.clone())?;
-                        Ok(proto::GetContainerImageResponse {
-                            image: Some(image.into_proto_buf()),
-                        })
-                    });
-                    tracker.finish(result);
-                    Ok(())
+            tokio::task::spawn(async move {
+                let result = map_err(async {
+                    let image = with_client_async!(self_clone, |client| {
+                        client
+                            .get_container_image(&name, &tag, tracker.clone())
+                            .await
+                    })
+                    .await?;
+                    Ok(proto::GetContainerImageResponse {
+                        image: Some(image.into_proto_buf()),
+                    })
                 })
+                .await;
+                tracker.finish(result);
             });
             Ok(Box::pin(UnboundedReceiverStream::new(receiver)) as Self::GetContainerImageStream)
         })
@@ -190,7 +208,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            self.with_client(|client| client.stop_accepting())?;
+            with_client_async!(self, |client| { client.stop_accepting() }).await?;
             Ok(proto::Void {})
         })
         .await
@@ -203,7 +221,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         run_handler(async {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
             let (send, mut recv) = mpsc::unbounded_channel();
-            self.with_client(|client| {
+            with_client_async!(self, |client| {
                 client.add_job(
                     spec,
                     Box::new(move |cjid, res| {
@@ -211,7 +229,8 @@ impl proto::client_process_server::ClientProcess for Handler {
                     }),
                 );
                 Ok(())
-            })?;
+            })
+            .await?;
             let (cjid, res) = recv.recv().await.ok_or(anyhow!("client shutdown"))?;
             Ok(proto::AddJobResponse {
                 client_job_id: cjid.into_proto_buf(),
@@ -226,7 +245,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            let mut client = self.take_client()?;
+            let mut client = self.take_client().await?;
             tokio::task::spawn_blocking(move || client.wait_for_outstanding_jobs()).await??;
             Ok(proto::Void {})
         })
@@ -238,8 +257,8 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
         run_handler(async {
-            let res = self
-                .with_client(|client| client.get_job_state_counts())?
+            let res = with_client_async!(self, |client| { client.get_job_state_counts() })
+                .await?
                 .recv()
                 .await
                 .ok_or(anyhow!("client shutdown"))?;
@@ -255,7 +274,9 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
         run_handler(async {
-            let res = self.with_client(|client| Ok(client.get_artifact_upload_progress()))?;
+            let res =
+                with_client_async!(self, |client| { Ok(client.get_artifact_upload_progress()) })
+                    .await?;
             Ok(proto::GetArtifactUploadProgressResponse {
                 progress: res.into_proto_buf(),
             })

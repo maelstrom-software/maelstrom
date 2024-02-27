@@ -2777,6 +2777,7 @@ version = "0.6.0-dev"
 dependencies = [
  "anyhow",
  "async-compression",
+ "async-trait",
  "clap",
  "futures",
  "indicatif",
