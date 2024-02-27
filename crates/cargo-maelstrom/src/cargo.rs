@@ -120,7 +120,10 @@ impl FeatureSelectionOptions {
                     .map(|features| format!("--features={features}")),
             )
             .chain(self.all_features.then_some("--all-features".into()))
-            .chain(self.no_default_features.then_some("--no-default-features".into()))
+            .chain(
+                self.no_default_features
+                    .then_some("--no-default-features".into()),
+            )
     }
 }
 
@@ -333,7 +336,7 @@ mod tests {
         };
         assert_eq!(
             Vec::<OsString>::from_iter(options.iter()),
-            Vec::<OsString>::from_iter(["--manifest-path".into(), "manifest_path".into() ]),
+            Vec::<OsString>::from_iter(["--manifest-path".into(), "manifest_path".into()]),
         );
     }
 
