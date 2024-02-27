@@ -1,6 +1,7 @@
 pub use crate::fs::Metadata;
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
+use futures_lite::stream::StreamExt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
@@ -209,6 +210,101 @@ impl Fs {
             path: path.as_ref().into(),
         })
     }
+
+    pub fn glob_walk<'fs, 'glob, P: AsRef<Path>>(
+        &'fs self,
+        path: P,
+        glob: &'glob globset::GlobSet,
+    ) -> GlobWalker<'fs, 'glob> {
+        GlobWalker::new(self, path.as_ref(), glob)
+    }
+}
+
+pub struct GlobWalker<'fs, 'glob> {
+    start_path: PathBuf,
+    fs_walker: async_walkdir::WalkDir,
+    glob: &'glob globset::GlobSet,
+    #[allow(dead_code)]
+    fs: &'fs Fs,
+}
+
+impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
+    fn new(fs: &'fs Fs, path: &Path, glob: &'glob globset::GlobSet) -> Self {
+        Self {
+            start_path: path.to_owned(),
+            fs_walker: async_walkdir::WalkDir::new(path),
+            glob,
+            fs,
+        }
+    }
+
+    fn matches(&self, path: &Path) -> bool {
+        self.glob.is_match_candidate(&globset::Candidate::new(
+            path.strip_prefix(&self.start_path).unwrap(),
+        ))
+    }
+
+    pub async fn next(&mut self) -> Result<Option<PathBuf>> {
+        loop {
+            match self.fs_walker.next().await {
+                Some(Ok(entry)) if self.matches(&entry.path()) => return Ok(Some(entry.path())),
+                Some(Err(e)) => return Err(e.into()),
+                None => return Ok(None),
+                _ => continue,
+            }
+        }
+    }
+
+    pub fn as_stream<'a>(&'a mut self) -> impl futures::Stream<Item = Result<PathBuf>> + 'a
+    where
+        'a: 'glob,
+        'a: 'fs,
+    {
+        futures::stream::unfold(self, |self_| async {
+            self_.next().await.transpose().map(|v| (v, self_))
+        })
+    }
+}
+
+#[cfg(test)]
+async fn glob_walker_test(glob: &str, input: Vec<&str>, expected: Vec<&str>) {
+    use globset::{Glob, GlobSet};
+
+    let temp_dir = tempfile::tempdir().unwrap();
+    let fs = Fs::new();
+    for p in input {
+        let path = temp_dir.path().join(p);
+        fs.create_dir_all(path.parent().unwrap()).await.unwrap();
+        fs.write(path, b"").await.unwrap();
+    }
+
+    let mut builder = GlobSet::builder();
+    builder.add(Glob::new(glob).unwrap());
+    let glob = builder.build().unwrap();
+
+    let mut paths = vec![];
+    let mut entries = fs.glob_walk(temp_dir.path(), &glob);
+    while let Some(e) = entries.next().await.unwrap() {
+        paths.push(e);
+    }
+
+    let expected: Vec<_> = expected
+        .into_iter()
+        .map(|e| temp_dir.path().join(e))
+        .collect();
+    assert_eq!(paths, expected);
+}
+
+#[tokio::test]
+async fn glob_walker_basic() {
+    glob_walker_test("*.txt", vec!["a.txt", "b.bin"], vec!["a.txt"]).await;
+    glob_walker_test("foo/*", vec!["foo/a", "bar/b"], vec!["foo/a"]).await;
+    glob_walker_test(
+        "foo/**",
+        vec!["foo/bar/baz", "bar/b"],
+        vec!["foo/bar", "foo/bar/baz"],
+    )
+    .await;
 }
 
 #[cfg(unix)]

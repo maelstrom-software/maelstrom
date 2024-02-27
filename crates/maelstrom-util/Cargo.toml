@@ -12,11 +12,14 @@ version.workspace = true
 [dependencies]
 anstyle.workspace = true
 anyhow.workspace = true
+async-walkdir.workspace = true
 byteorder.workspace = true
 bytesize.workspace = true
 clap.workspace = true
 derive_more.workspace = true
 fs2.workspace = true
+futures-lite.workspace = true
+futures.workspace = true
 globset.workspace = true
 maelstrom-base.workspace = true
 serde.workspace = true
