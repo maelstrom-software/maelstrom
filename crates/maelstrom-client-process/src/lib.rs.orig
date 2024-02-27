@@ -7,11 +7,9 @@ mod test;
 
 use anyhow::{anyhow, Result};
 use artifact_upload::ArtifactUploadTracker;
-use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use dispatcher::{ArtifactPushRequest, DispatcherMessage};
 use driver::{new_driver, ClientDeps, ClientDriver};
-use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
@@ -25,14 +23,12 @@ use maelstrom_client_base::{
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
-    async_fs,
     config::BrokerAddr,
     fs::Fs,
-    manifest::{AsyncManifestWriter, ManifestBuilder},
+    manifest::{ManifestBuilder, ManifestWriter},
 };
 pub use rpc::run_process_client;
 use sha2::{Digest as _, Sha256};
-use std::pin::pin;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -41,18 +37,14 @@ use std::{
     time::SystemTime,
 };
 
-async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
-    let path = path.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let fs = Fs::new();
-        let mut hasher = Sha256::new();
-        let mut f = fs.open_file(path)?;
-        std::io::copy(&mut f, &mut hasher)?;
-        let mtime = f.metadata()?.modified()?;
+fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
+    let fs = Fs::new();
+    let mut hasher = Sha256::new();
+    let mut f = fs.open_file(path)?;
+    std::io::copy(&mut f, &mut hasher)?;
+    let mtime = f.metadata()?.modified()?;
 
-        Ok((mtime, Sha256Digest::new(hasher.finalize().into())))
-    })
-    .await?
+    Ok((mtime, Sha256Digest::new(hasher.finalize().into())))
 }
 
 #[derive(Default)]
@@ -110,13 +102,6 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
     }
 }
 
-#[async_trait]
-impl<'a> maelstrom_util::manifest::DataUpload for &'a mut Client {
-    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
-        self.add_artifact(path).await
-    }
-}
-
 /// Having some deterministic time-stamp for files we create in manifests is useful for testing and
 /// potentially caching.
 /// I picked this time arbitrarily 2024-1-11 11:11:11
@@ -165,17 +150,15 @@ impl Client {
         })
     }
 
-    async fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
-        let fs = async_fs::Fs::new();
-        let path = fs.canonicalize(path).await?;
+    fn add_artifact(&mut self, path: &Path) -> Result<Sha256Digest> {
+        let fs = Fs::new();
+        let path = fs.canonicalize(path)?;
 
-        let digest = if let Some(digest) = self.digest_repo.get(&path).await? {
+        let digest = if let Some(digest) = self.digest_repo.get(&path)? {
             digest
         } else {
-            let (mtime, digest) = calculate_digest(&path).await?;
-            self.digest_repo
-                .add(path.clone(), mtime, digest.clone())
-                .await?;
+            let (mtime, digest) = calculate_digest(&path)?;
+            self.digest_repo.add(path.clone(), mtime, digest.clone())?;
             digest
         };
         if !self.processed_artifact_paths.contains(&path) {
@@ -204,20 +187,20 @@ impl Client {
             .join(format!("{name}.manifest"))
     }
 
-    async fn build_manifest(
+    fn build_manifest(
         &mut self,
-        mut paths: impl futures::stream::Stream<Item = Result<impl AsRef<Path>>>,
+        paths: impl Iterator<Item = Result<impl AsRef<Path>>>,
         prefix_options: PrefixOptions,
     ) -> Result<PathBuf> {
-        let fs = async_fs::Fs::new();
+        let fs = Fs::new();
         let project_dir = self.project_dir.clone();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let manifest_file = fs.create_file(&tmp_file_path).await?;
+        let manifest_file = fs.create_file(&tmp_file_path)?;
+        let data_upload = |path: &_| self.add_artifact(path);
         let follow_symlinks = prefix_options.follow_symlinks;
-        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, &mut *self).await?;
+        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, data_upload)?;
         let mut path_hasher = PathHasher::new();
-        let mut pinned_paths = pin!(paths);
-        while let Some(maybe_path) = pinned_paths.next().await {
+        for maybe_path in paths {
             let mut path = maybe_path?.as_ref().to_owned();
             let input_path_relative = path.is_relative();
             if input_path_relative {
@@ -232,19 +215,19 @@ impl Client {
                 utf8_path
             };
             let dest = calculate_manifest_entry_path(entry_path, &project_dir, &prefix_options)?;
-            builder.add_file(utf8_path, dest).await?;
+            builder.add_file(utf8_path, dest)?;
         }
         drop(builder);
 
         let manifest_path = self.build_manifest_path(&path_hasher.finish());
-        fs.rename(tmp_file_path, &manifest_path).await?;
+        fs.rename(tmp_file_path, &manifest_path)?;
         Ok(manifest_path)
     }
 
-    async fn build_stub_manifest(&mut self, stubs: Vec<String>) -> Result<PathBuf> {
-        let fs = async_fs::Fs::new();
+    fn build_stub_manifest(&mut self, stubs: Vec<String>) -> Result<PathBuf> {
+        let fs = Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
+        let mut writer = ManifestWriter::new(fs.create_file(&tmp_file_path)?)?;
         let mut path_hasher = PathHasher::new();
         for maybe_stub in stubs.iter().map(|s| expand_braces(s)).flatten_ok() {
             let stub = Utf8PathBuf::from(maybe_stub?);
@@ -265,18 +248,18 @@ impl Client {
                 metadata,
                 data,
             };
-            writer.write_entry(&entry).await?;
+            writer.write_entry(&entry)?;
         }
 
         let manifest_path = self.build_stub_manifest_path(&path_hasher.finish());
-        fs.rename(tmp_file_path, &manifest_path).await?;
+        fs.rename(tmp_file_path, &manifest_path)?;
         Ok(manifest_path)
     }
 
-    async fn build_symlink_manifest(&mut self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
-        let fs = async_fs::Fs::new();
+    fn build_symlink_manifest(&mut self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
+        let fs = Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
+        let mut writer = ManifestWriter::new(fs.create_file(&tmp_file_path)?)?;
         let mut path_hasher = PathHasher::new();
         for SymlinkSpec { link, target } in symlinks {
             path_hasher.hash_path(&link);
@@ -292,35 +275,27 @@ impl Client {
                 metadata,
                 data,
             };
-            writer.write_entry(&entry).await?;
+            writer.write_entry(&entry)?;
         }
 
         let manifest_path = self.build_symlink_manifest_path(&path_hasher.finish());
-        fs.rename(tmp_file_path, &manifest_path).await?;
+        fs.rename(tmp_file_path, &manifest_path)?;
         Ok(manifest_path)
     }
 
-    async fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+    fn add_layer(&mut self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         if let Some(l) = self.cached_layers.get(&layer) {
             return Ok(l.clone());
         }
 
         let res = match layer.clone() {
-            Layer::Tar { path } => (
-                self.add_artifact(path.as_std_path()).await?,
-                ArtifactType::Tar,
-            ),
+            Layer::Tar { path } => (self.add_artifact(path.as_std_path())?, ArtifactType::Tar),
             Layer::Paths {
                 paths,
                 prefix_options,
             } => {
-                let manifest_path = self
-                    .build_manifest(futures::stream::iter(paths.iter().map(Ok)), prefix_options)
-                    .await?;
-                (
-                    self.add_artifact(&manifest_path).await?,
-                    ArtifactType::Manifest,
-                )
+                let manifest_path = self.build_manifest(paths.iter().map(Ok), prefix_options)?;
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
             Layer::Glob {
                 glob,
@@ -328,34 +303,22 @@ impl Client {
             } => {
                 let mut glob_builder = globset::GlobSet::builder();
                 glob_builder.add(globset::Glob::new(&glob)?);
-                let fs = async_fs::Fs::new();
+                let fs = Fs::new();
                 let project_dir = self.project_dir.clone();
-                let manifest_path = self
-                    .build_manifest(
-                        fs.glob_walk(&self.project_dir, &glob_builder.build()?)
-                            .as_stream()
-                            .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
-                        prefix_options,
-                    )
-                    .await?;
-                (
-                    self.add_artifact(&manifest_path).await?,
-                    ArtifactType::Manifest,
-                )
+                let manifest_path = self.build_manifest(
+                    fs.glob_walk(&self.project_dir, &glob_builder.build()?)
+                        .map(|p| p.map(|p| p.strip_prefix(&project_dir).unwrap().to_owned())),
+                    prefix_options,
+                )?;
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
             Layer::Stubs { stubs } => {
-                let manifest_path = self.build_stub_manifest(stubs).await?;
-                (
-                    self.add_artifact(&manifest_path).await?,
-                    ArtifactType::Manifest,
-                )
+                let manifest_path = self.build_stub_manifest(stubs)?;
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
             Layer::Symlinks { symlinks } => {
-                let manifest_path = self.build_symlink_manifest(symlinks).await?;
-                (
-                    self.add_artifact(&manifest_path).await?,
-                    ArtifactType::Manifest,
-                )
+                let manifest_path = self.build_symlink_manifest(symlinks)?;
+                (self.add_artifact(&manifest_path)?, ArtifactType::Manifest)
             }
         };
 

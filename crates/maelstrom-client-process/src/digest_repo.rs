@@ -1,16 +1,17 @@
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use maelstrom_base::Sha256Digest;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::async_fs::Fs;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr};
 use std::{
     collections::HashMap,
-    io::{Read as _, Seek as _, SeekFrom, Write as _},
+    io::SeekFrom,
     path::{Path, PathBuf},
     time::SystemTime,
 };
+use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _};
 
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
@@ -60,15 +61,21 @@ impl DigestRepository {
         }
     }
 
-    pub fn add(&mut self, path: PathBuf, mtime: SystemTime, digest: Sha256Digest) -> Result<()> {
-        self.fs.create_dir_all(&self.path)?;
+    pub async fn add(
+        &mut self,
+        path: PathBuf,
+        mtime: SystemTime,
+        digest: Sha256Digest,
+    ) -> Result<()> {
+        self.fs.create_dir_all(&self.path).await?;
         let mut file = self
             .fs
-            .open_or_create_file(self.path.join(CACHED_IMAGE_FILE_NAME))?;
-        file.lock_exclusive()?;
+            .open_or_create_file(self.path.join(CACHED_IMAGE_FILE_NAME))
+            .await?;
+        file.lock_exclusive().await?;
 
         let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
+        file.read_to_string(&mut contents).await?;
         let mut digests = DigestRepositoryContents::from_str(&contents).unwrap_or_default();
         digests.digests.insert(
             path,
@@ -78,20 +85,22 @@ impl DigestRepository {
             },
         );
 
-        file.seek(SeekFrom::Start(0))?;
-        file.set_len(0)?;
-        file.write_all(digests.to_pretty_string().as_bytes())?;
+        file.seek(SeekFrom::Start(0)).await?;
+        file.set_len(0).await?;
+        file.write_all(digests.to_pretty_string().as_bytes())
+            .await?;
 
         self.cache = Some(digests);
 
         Ok(())
     }
 
-    pub fn get(&mut self, path: &PathBuf) -> Result<Option<Sha256Digest>> {
+    pub async fn get(&mut self, path: &PathBuf) -> Result<Option<Sha256Digest>> {
         if self.cache.is_none() {
             let Some(contents) = self
                 .fs
-                .read_to_string_if_exists(self.path.join(CACHED_IMAGE_FILE_NAME))?
+                .read_to_string_if_exists(self.path.join(CACHED_IMAGE_FILE_NAME))
+                .await?
             else {
                 return Ok(None);
             };
@@ -101,39 +110,43 @@ impl DigestRepository {
         let Some(entry) = self.cache.as_ref().unwrap().digests.get(path) else {
             return Ok(None);
         };
-        let current_mtime: DateTime<Utc> = self.fs.metadata(path)?.modified()?.into();
+        let current_mtime: DateTime<Utc> = self.fs.metadata(path).await?.modified()?.into();
         Ok((current_mtime == entry.mtime).then_some(entry.digest.clone()))
     }
 }
 
-#[test]
-fn digest_repository_simple_add_get() {
+#[tokio::test]
+async fn digest_repository_simple_add_get() {
     let fs = Fs::new();
     let tmp_dir = tempfile::tempdir().unwrap();
     let mut repo = DigestRepository::new(tmp_dir.path());
 
     let foo_path = tmp_dir.path().join("foo.tar");
-    fs.write(&foo_path, "foo").unwrap();
-    let (mtime, digest) = crate::calculate_digest(&foo_path).unwrap();
-    repo.add(foo_path.clone(), mtime, digest.clone()).unwrap();
+    fs.write(&foo_path, "foo").await.unwrap();
+    let (mtime, digest) = crate::calculate_digest(&foo_path).await.unwrap();
+    repo.add(foo_path.clone(), mtime, digest.clone())
+        .await
+        .unwrap();
 
-    assert_eq!(repo.get(&foo_path).unwrap(), Some(digest));
+    assert_eq!(repo.get(&foo_path).await.unwrap(), Some(digest));
 }
 
-#[test]
-fn digest_repository_simple_add_get_after_modify() {
+#[tokio::test]
+async fn digest_repository_simple_add_get_after_modify() {
     let fs = Fs::new();
     let tmp_dir = tempfile::tempdir().unwrap();
     let mut repo = DigestRepository::new(tmp_dir.path());
 
     let foo_path = tmp_dir.path().join("foo.tar");
-    fs.write(&foo_path, "foo").unwrap();
-    let (mtime, digest) = crate::calculate_digest(&foo_path).unwrap();
-    repo.add(foo_path.clone(), mtime, digest.clone()).unwrap();
+    fs.write(&foo_path, "foo").await.unwrap();
+    let (mtime, digest) = crate::calculate_digest(&foo_path).await.unwrap();
+    repo.add(foo_path.clone(), mtime, digest.clone())
+        .await
+        .unwrap();
 
     // apparently depending on the file-system mtime can have up to a 10ms granularity
-    std::thread::sleep(std::time::Duration::from_millis(20));
-    fs.write(&foo_path, "bar").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    fs.write(&foo_path, "bar").await.unwrap();
 
-    assert_eq!(repo.get(&foo_path).unwrap(), None);
+    assert_eq!(repo.get(&foo_path).await.unwrap(), None);
 }

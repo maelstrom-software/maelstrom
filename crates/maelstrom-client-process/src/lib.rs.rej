@@ -1,0 +1,39 @@
+--- crates/maelstrom-client-process/src/lib.rs
++++ crates/maelstrom-client-process/src/lib.rs
+@@ -26,7 +27,7 @@ use maelstrom_client_base::{
+     STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+ };
+ use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
+-use maelstrom_util::{config::BrokerAddr, fs::Fs, manifest::ManifestBuilder};
++use maelstrom_util::{async_fs, config::BrokerAddr, fs::Fs, manifest::ManifestBuilder};
+ pub use rpc::run_process_client;
+ use sha2::{Digest as _, Sha256};
+ use std::{
+@@ -193,20 +200,21 @@ impl Client {
+             .join(format!("{name}.manifest"))
+     }
+ 
+-    fn build_manifest(
++    async fn build_manifest(
+         &mut self,
+-        paths: impl Iterator<Item = Result<impl AsRef<Path>>>,
++        mut paths: impl futures::stream::Stream<Item = Result<impl AsRef<Path>>> + Unpin,
+         prefix_options: PrefixOptions,
+     ) -> Result<PathBuf> {
+-        let fs = Fs::new();
++        let fs = async_fs::Fs::new();
+         let project_dir = self.project_dir.clone();
+         let tmp_file_path = self.build_manifest_path(&".temp");
+-        let manifest_file = fs.create_file(&tmp_file_path)?;
++        let manifest_file = fs.create_file(&tmp_file_path).await?;
+         let data_upload = |path: &_| self.add_artifact(path);
++
+         let mut builder =
+-            ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload)?;
++            ManifestBuilder::new(manifest_file, false /* follow_symlinks */, data_upload).await?;
+         let mut path_hasher = PathHasher::new();
+-        for maybe_path in paths {
++        while let Some(maybe_path) = paths.next().await {
+             let mut path = maybe_path?.as_ref().to_owned();
+             let input_path_relative = path.is_relative();
+             if input_path_relative {

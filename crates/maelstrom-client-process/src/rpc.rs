@@ -139,13 +139,9 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::AddArtifactResponse> {
         run_handler(async {
             let request = request.into_inner();
-            let self_clone = self.clone();
-            let digest = tokio::task::spawn_blocking(move || {
-                self_clone.with_client(|client| {
-                    client.add_artifact(&PathBuf::try_from_proto_buf(request.path)?)
-                })
-            })
-            .await??;
+            let path = PathBuf::try_from_proto_buf(request.path)?;
+            let digest =
+                with_client_async!(self, |client| { client.add_artifact(&path).await }).await?;
             Ok(proto::AddArtifactResponse {
                 digest: digest.into_proto_buf(),
             })
@@ -159,13 +155,8 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::AddLayerResponse> {
         run_handler(async {
             let layer = request.into_inner().into_result()?;
-            let self_clone = self.clone();
-            let spec = tokio::task::spawn_blocking(move || {
-                self_clone.with_client(|client| {
-                    client.add_layer(TryFromProtoBuf::try_from_proto_buf(layer)?)
-                })
-            })
-            .await??;
+            let layer = TryFromProtoBuf::try_from_proto_buf(layer)?;
+            let spec = with_client_async!(self, |client| { client.add_layer(layer).await }).await?;
             Ok(proto::AddLayerResponse {
                 spec: Some(spec.into_proto_buf()),
             })

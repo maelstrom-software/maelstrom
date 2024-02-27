@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 anstyle.workspace = true
 anyhow.workspace = true
+async-trait.workspace = true
 async-walkdir.workspace = true
 byteorder.workspace = true
 bytesize.workspace = true

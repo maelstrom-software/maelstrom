@@ -1,5 +1,6 @@
-use crate::fs::{self, Fs};
+use crate::async_fs::{self, Fs};
 use anyhow::{anyhow, Result};
+use async_trait::async_trait;
 use maelstrom_base::{
     manifest::{
         ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestVersion, Mode,
@@ -116,7 +117,7 @@ fn to_utf8_path(path: impl AsRef<Path>) -> Utf8PathBuf {
     path.as_ref().to_owned().try_into().unwrap()
 }
 
-fn convert_metadata(meta: &fs::Metadata) -> ManifestEntryMetadata {
+fn convert_metadata(meta: &async_fs::Metadata) -> ManifestEntryMetadata {
     ManifestEntryMetadata {
         size: meta.is_file().then(|| meta.size()).unwrap_or(0),
         mode: Mode(meta.mode()),
@@ -124,32 +125,35 @@ fn convert_metadata(meta: &fs::Metadata) -> ManifestEntryMetadata {
     }
 }
 
-type DataUploadCb<'cb> = Box<dyn FnMut(&Path) -> Result<Sha256Digest> + 'cb>;
+#[async_trait]
+pub trait DataUpload: Send {
+    async fn upload(&mut self, path: &Path) -> Result<Sha256Digest>;
+}
 
 pub struct ManifestBuilder<'cb, WriteT> {
     fs: Fs,
-    writer: ManifestWriter<WriteT>,
+    writer: AsyncManifestWriter<WriteT>,
     follow_symlinks: bool,
-    data_upload: DataUploadCb<'cb>,
+    data_upload: Box<dyn DataUpload + 'cb>,
 }
 
-impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
-    pub fn new(
+impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
+    pub async fn new(
         writer: WriteT,
         follow_symlinks: bool,
-        data_upload: impl FnMut(&Path) -> Result<Sha256Digest> + 'cb,
+        data_upload: impl DataUpload + 'cb,
     ) -> io::Result<Self> {
         Ok(Self {
             fs: Fs::new(),
-            writer: ManifestWriter::new(writer)?,
+            writer: AsyncManifestWriter::new(writer).await?,
             data_upload: Box::new(data_upload),
             follow_symlinks,
         })
     }
 
-    fn add_entry(
+    async fn add_entry(
         &mut self,
-        meta: &fs::Metadata,
+        meta: &async_fs::Metadata,
         path: impl AsRef<Path>,
         data: ManifestEntryData,
     ) -> Result<()> {
@@ -158,30 +162,39 @@ impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
             metadata: convert_metadata(meta),
             data,
         };
-        self.writer.write_entry(&entry)?;
+        self.writer.write_entry(&entry).await?;
         Ok(())
     }
 
-    pub fn add_file(&mut self, source: impl AsRef<Path>, dest: impl AsRef<Path>) -> Result<()> {
+    pub async fn add_file(
+        &mut self,
+        source: impl AsRef<Path>,
+        dest: impl AsRef<Path>,
+    ) -> Result<()> {
         let meta = if self.follow_symlinks {
-            self.fs.metadata(source.as_ref())?
+            self.fs.metadata(source.as_ref()).await?
         } else {
-            self.fs.symlink_metadata(source.as_ref())?
+            self.fs.symlink_metadata(source.as_ref()).await?
         };
         if meta.is_file() {
-            let data = (meta.size() > 0)
-                .then(|| (self.data_upload)(source.as_ref()))
-                .transpose()?;
+            let data = if meta.size() > 0 {
+                Some(self.data_upload.upload(source.as_ref()).await?)
+            } else {
+                None
+            };
             self.add_entry(&meta, dest, ManifestEntryData::File(data))
+                .await
         } else if meta.is_dir() {
             self.add_entry(&meta, dest, ManifestEntryData::Directory)
+                .await
         } else if meta.is_symlink() {
-            let data = self.fs.read_link(source.as_ref())?;
+            let data = self.fs.read_link(source.as_ref()).await?;
             self.add_entry(
                 &meta,
                 dest,
                 ManifestEntryData::Symlink(data.into_os_string().into_encoded_bytes()),
             )
+            .await
         } else {
             Err(anyhow!("unknown file type {}", source.as_ref().display()))
         }
@@ -191,8 +204,9 @@ impl<'cb, WriteT: io::Write> ManifestBuilder<'cb, WriteT> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::Fs;
+    use std::future::Future;
     use std::path::PathBuf;
+    use std::pin::Pin;
     use tempfile::{tempdir, TempDir};
 
     struct Fixture {
@@ -212,28 +226,48 @@ mod tests {
         }
     }
 
-    fn assert_entry(
-        build: impl FnOnce(&mut Fixture, &mut ManifestBuilder<&mut Vec<u8>>),
+    struct TestDataUpload;
+
+    #[async_trait]
+    impl DataUpload for TestDataUpload {
+        async fn upload(&mut self, _path: &Path) -> Result<Sha256Digest> {
+            Ok(42u64.into())
+        }
+    }
+
+    async fn assert_entry<BuildT>(
+        build: BuildT,
         follow_symlinks: bool,
         expected_path: &str,
         expected_size: u64,
         data: ManifestEntryData,
-    ) {
+    ) where
+        BuildT: for<'a> FnOnce(
+            &'a mut Fixture,
+            &'a mut ManifestBuilder<&mut Vec<u8>>,
+        ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+    {
         let mut buffer = vec![];
-        let mut builder =
-            ManifestBuilder::new(&mut buffer, follow_symlinks, |_| Ok(42u64.into())).unwrap();
+        let mut builder = ManifestBuilder::new(&mut buffer, follow_symlinks, TestDataUpload)
+            .await
+            .unwrap();
 
         let mut fixture = Fixture::new();
-        build(&mut fixture, &mut builder);
+        build(&mut fixture, &mut builder).await;
 
         let actual_entries: Vec<_> = ManifestReader::new(io::Cursor::new(buffer))
             .unwrap()
             .map(|e| e.unwrap())
             .collect();
+
         let input_meta = if follow_symlinks {
-            fixture.fs.metadata(&fixture.input_path).unwrap()
+            fixture.fs.metadata(&fixture.input_path).await.unwrap()
         } else {
-            fixture.fs.symlink_metadata(&fixture.input_path).unwrap()
+            fixture
+                .fs
+                .symlink_metadata(&fixture.input_path)
+                .await
+                .unwrap()
         };
         assert_eq!(
             actual_entries,
@@ -248,65 +282,97 @@ mod tests {
         );
     }
 
-    #[test]
-    fn builder_file() {
+    #[tokio::test]
+    async fn builder_file() {
         assert_entry(
             |fixture, builder| {
-                fixture.fs.write(&fixture.input_path, b"foobar").unwrap();
-                builder
-                    .add_file(&fixture.input_path, "foo/bar.txt")
-                    .unwrap();
+                Box::pin(async {
+                    fixture
+                        .fs
+                        .write(&fixture.input_path, b"foobar")
+                        .await
+                        .unwrap();
+                    builder
+                        .add_file(&fixture.input_path, "foo/bar.txt")
+                        .await
+                        .unwrap();
+                })
             },
             false, /* follow_symlinks */
             "foo/bar.txt",
             6,
             ManifestEntryData::File(Some(42u64.into())),
-        );
+        )
+        .await;
     }
 
-    #[test]
-    fn builder_directory() {
+    #[tokio::test]
+    async fn builder_directory() {
         assert_entry(
             |fixture, builder| {
-                fixture.fs.create_dir(&fixture.input_path).unwrap();
-                builder.add_file(&fixture.input_path, "foo/bar").unwrap();
+                Box::pin(async {
+                    fixture.fs.create_dir(&fixture.input_path).await.unwrap();
+                    builder
+                        .add_file(&fixture.input_path, "foo/bar")
+                        .await
+                        .unwrap();
+                })
             },
             false, /* follow_symlinks */
             "foo/bar",
             0,
             ManifestEntryData::Directory,
-        );
+        )
+        .await;
     }
 
-    #[test]
-    fn builder_symlink() {
+    #[tokio::test]
+    async fn builder_symlink() {
         assert_entry(
             |fixture, builder| {
-                fixture.fs.symlink("../baz", &fixture.input_path).unwrap();
-                builder.add_file(&fixture.input_path, "foo/bar").unwrap();
+                Box::pin(async {
+                    fixture
+                        .fs
+                        .symlink("../baz", &fixture.input_path)
+                        .await
+                        .unwrap();
+                    builder
+                        .add_file(&fixture.input_path, "foo/bar")
+                        .await
+                        .unwrap();
+                })
             },
             false, /* follow_symlinks */
             "foo/bar",
             0,
             ManifestEntryData::Symlink(b"../baz".to_vec()),
-        );
+        )
+        .await;
     }
 
-    #[test]
-    fn builder_follows_symlinks() {
+    #[tokio::test]
+    async fn builder_follows_symlinks() {
         assert_entry(
             |fixture, builder| {
-                let real_file = fixture.temp_dir.path().join("real");
-                fixture.fs.write(&real_file, b"foobar").unwrap();
-                fixture.fs.symlink(&real_file, &fixture.input_path).unwrap();
-                builder
-                    .add_file(&fixture.input_path, "foo/bar.txt")
-                    .unwrap();
+                Box::pin(async {
+                    let real_file = fixture.temp_dir.path().join("real");
+                    fixture.fs.write(&real_file, b"foobar").await.unwrap();
+                    fixture
+                        .fs
+                        .symlink(&real_file, &fixture.input_path)
+                        .await
+                        .unwrap();
+                    builder
+                        .add_file(&fixture.input_path, "foo/bar.txt")
+                        .await
+                        .unwrap();
+                })
             },
             true, /* follow_symlinks */
             "foo/bar.txt",
             6,
             ManifestEntryData::File(Some(42u64.into())),
-        );
+        )
+        .await;
     }
 }

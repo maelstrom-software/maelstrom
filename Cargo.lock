@@ -2759,6 +2759,7 @@ name = "maelstrom-client-process"
 version = "0.6.0-dev"
 dependencies = [
  "anyhow",
+ "async-trait",
  "atomicbox",
  "bracoxide",
  "chrono",
@@ -2887,6 +2888,7 @@ version = "0.6.0-dev"
 dependencies = [
  "anstyle",
  "anyhow",
+ "async-trait",
  "async-walkdir",
  "byteorder",
  "bytesize",
