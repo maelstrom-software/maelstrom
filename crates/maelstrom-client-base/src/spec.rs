@@ -86,18 +86,24 @@ pub struct SymlinkSpec {
     IntoProtoBuf, TryFromProtoBuf, Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize,
 )]
 #[proto(other_type = proto::add_layer_request::Layer)]
+#[serde(untagged, deny_unknown_fields)]
 pub enum Layer {
     #[proto(other_type = proto::TarLayer)]
-    Tar { path: Utf8PathBuf },
+    Tar {
+        #[serde(rename = "tar")]
+        path: Utf8PathBuf,
+    },
     #[proto(other_type = proto::GlobLayer)]
     Glob {
         glob: String,
+        #[serde(flatten)]
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
     #[proto(other_type = proto::PathsLayer)]
     Paths {
         paths: Vec<Utf8PathBuf>,
+        #[serde(flatten)]
         #[proto(option)]
         prefix_options: PrefixOptions,
     },
@@ -105,64 +111,6 @@ pub enum Layer {
     Stubs { stubs: Vec<String> },
     #[proto(other_type = proto::SymlinksLayer)]
     Symlinks { symlinks: Vec<SymlinkSpec> },
-}
-
-impl From<UntaggedLayer> for Layer {
-    fn from(other: UntaggedLayer) -> Self {
-        match other {
-            UntaggedLayer::Tar { path } => Self::Tar { path },
-            UntaggedLayer::Glob {
-                glob,
-                prefix_options,
-            } => Self::Glob {
-                glob,
-                prefix_options,
-            },
-            UntaggedLayer::Paths {
-                paths,
-                prefix_options,
-            } => Self::Paths {
-                paths,
-                prefix_options,
-            },
-            UntaggedLayer::Stubs { stubs } => Self::Stubs { stubs },
-            UntaggedLayer::Symlinks { symlinks } => Self::Symlinks { symlinks },
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-#[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
-pub enum UntaggedLayer {
-    Tar {
-        #[serde(rename = "tar")]
-        path: Utf8PathBuf,
-    },
-    Glob {
-        glob: String,
-        #[serde(flatten)]
-        prefix_options: PrefixOptions,
-    },
-    Paths {
-        paths: Vec<Utf8PathBuf>,
-        #[serde(flatten)]
-        prefix_options: PrefixOptions,
-    },
-    Stubs {
-        stubs: Vec<String>,
-    },
-    Symlinks {
-        symlinks: Vec<SymlinkSpec>,
-    },
-}
-
-impl<'de> serde_with::DeserializeAs<'de, Layer> for UntaggedLayer {
-    fn deserialize_as<D>(deserializer: D) -> std::result::Result<Layer, D::Error>
-    where
-        D: serde::de::Deserializer<'de>,
-    {
-        Ok(UntaggedLayer::deserialize(deserializer)?.into())
-    }
 }
 
 /// An enum and struct (`EnumSet<ImageUse>`) used for deserializing "image use" statements in JSON,

@@ -3,9 +3,8 @@ use anyhow::Result;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, Timeout, UserId, Utf8PathBuf,
 };
-use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage, UntaggedLayer};
+use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use serde_with::de::DeserializeAsWrap;
 use std::{collections::BTreeMap, str};
 
 #[derive(PartialEq, Eq, Debug, Default)]
@@ -184,14 +183,10 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                         &added_layers,
                         "field `layers` cannot be set after `added_layers`",
                     )?;
-                    let untagged_layers: DeserializeAsWrap<_, Vec<UntaggedLayer>> =
-                        map.next_value()?;
-                    layers = Some(PossiblyImage::Explicit(untagged_layers.into_inner()));
+                    layers = Some(PossiblyImage::Explicit(map.next_value()?));
                 }
                 DirectiveField::AddedLayers => {
-                    let untagged_layers: DeserializeAsWrap<_, Vec<UntaggedLayer>> =
-                        map.next_value()?;
-                    added_layers = Some(untagged_layers.into_inner());
+                    added_layers = Some(map.next_value()?);
                 }
                 DirectiveField::Environment => {
                     incompatible(

@@ -5,10 +5,8 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{
     incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, Layer, PossiblyImage,
-    UntaggedLayer,
 };
 use serde::{de, Deserialize, Deserializer};
-use serde_with::de::DeserializeAsWrap;
 use std::{collections::BTreeMap, io::Read};
 
 struct JobSpecIterator<InnerT, LayerMapperT, EnvLookupT, ImageLookupT> {
@@ -264,10 +262,8 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                             "`layers` is also set (try `added_layers` instead)"
                         ),
                     )?;
-                    let untagged_layers: DeserializeAsWrap<_, Vec<UntaggedLayer>> =
-                        map.next_value()?;
                     layers = Some(PossiblyImage::Explicit(
-                        NonEmpty::from_vec(untagged_layers.into_inner()).ok_or_else(|| {
+                        NonEmpty::from_vec(map.next_value()?).ok_or_else(|| {
                             de::Error::custom(format_args!("field `layers` cannot be empty"))
                         })?,
                     ));
@@ -278,9 +274,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                         "field `added_layers` set before `image` with a `use` of `layers`",
                         "field `added_layers` cannot be set with `layer` field",
                     )?;
-                    let untagged_layers: DeserializeAsWrap<_, Vec<UntaggedLayer>> =
-                        map.next_value()?;
-                    added_layers = Some(untagged_layers.into_inner());
+                    added_layers = Some(map.next_value()?);
                 }
                 JobField::Devices => {
                     devices = Some(map.next_value()?);
