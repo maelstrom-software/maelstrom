@@ -1,8 +1,11 @@
 use anyhow::{bail, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
-use maelstrom_client::Client;
-use maelstrom_util::{fs::Fs, manifest::ManifestBuilder};
+use maelstrom_client::{
+    spec::{Layer, PrefixOptions},
+    Client,
+};
+use maelstrom_util::fs::Fs;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt as _;
 use std::{
@@ -57,46 +60,18 @@ fn decode_paths(mut input: impl io::Read) -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn build_manifest(
-    fs: &Fs,
-    manifest_path: &Path,
-    paths: Vec<PathBuf>,
-    strip_prefix: impl AsRef<Path>,
-    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
-    log: slog::Logger,
-) -> Result<()> {
-    let manifest_file = fs.create_file(manifest_path)?;
-    let mut manifest =
-        ManifestBuilder::new(manifest_file, true /* follow_symlinks */, data_upload)?;
-
-    for path in &paths {
-        slog::debug!(log, "build manifest: builder.add_file"; "path" => ?path);
-        manifest.add_file(path, path.strip_prefix(strip_prefix.as_ref()).unwrap())?;
-    }
-
-    Ok(())
-}
-
-fn create_artifact_for_binary(
-    binary_path: &Path,
-    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
-    log: slog::Logger,
-) -> Result<PathBuf> {
-    let fs = Fs::new();
-
+fn create_artifact_for_binary(binary_path: &Path, log: slog::Logger) -> Result<Layer> {
     let mut manifest_path = PathBuf::from(binary_path);
     assert!(manifest_path.set_extension("manifest"));
 
-    slog::debug!(log, "building manifest for binary"; "path" => ?manifest_path);
-    build_manifest(
-        &fs,
-        &manifest_path,
-        vec![binary_path.to_path_buf()],
-        binary_path.parent().unwrap(),
-        data_upload,
-        log,
-    )?;
-    Ok(manifest_path)
+    slog::debug!(log, "adding layer for binary"; "binary" => ?binary_path);
+    Ok(Layer::Paths {
+        paths: vec![binary_path.to_path_buf().try_into()?],
+        prefix_options: PrefixOptions {
+            strip_prefix: Some(binary_path.parent().unwrap().to_path_buf().try_into()?),
+            ..Default::default()
+        },
+    })
 }
 
 fn read_shared_libraries(fs: &Fs, path: &Path, log: slog::Logger) -> Result<Vec<PathBuf>> {
@@ -136,15 +111,8 @@ fn read_shared_libraries(fs: &Fs, path: &Path, log: slog::Logger) -> Result<Vec<
     Ok(paths.into_iter().collect())
 }
 
-fn create_artifact_for_binary_deps(
-    binary_path: &Path,
-    data_upload: impl FnMut(&Path) -> Result<Sha256Digest>,
-    log: slog::Logger,
-) -> Result<PathBuf> {
+fn create_artifact_for_binary_deps(binary_path: &Path, log: slog::Logger) -> Result<Layer> {
     let fs = Fs::new();
-
-    let mut manifest_path = PathBuf::from(binary_path);
-    assert!(manifest_path.set_extension("deps.manifest"));
 
     let paths = read_shared_libraries(&fs, binary_path, log.clone())?;
     encode_paths(
@@ -152,9 +120,18 @@ fn create_artifact_for_binary_deps(
         fs.create_file(so_listing_path_from_binary_path(binary_path))?,
     )?;
 
-    slog::debug!(log, "building manifest for binary deps"; "path" => ?manifest_path);
-    build_manifest(&fs, &manifest_path, paths, "/", data_upload, log)?;
-    Ok(manifest_path)
+    slog::debug!(log, "adding layer for binary deps"; "binary" => ?binary_path);
+    Ok(Layer::Paths {
+        paths: paths
+            .into_iter()
+            .map(|p| p.try_into())
+            .collect::<std::result::Result<_, _>>()?,
+        prefix_options: PrefixOptions {
+            strip_prefix: Some("/".into()),
+            follow_symlinks: true,
+            ..Default::default()
+        },
+    })
 }
 
 pub struct GeneratedArtifacts {
@@ -167,14 +144,10 @@ pub fn add_generated_artifacts(
     binary_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
-    let upload = |p: &Path| client.add_artifact(p);
-
-    let binary_artifact = upload(&create_artifact_for_binary(
-        binary_path,
-        upload,
-        log.clone(),
-    )?)?;
-    let deps_artifact = upload(&create_artifact_for_binary_deps(binary_path, upload, log)?)?;
+    let (binary_artifact, _) =
+        client.add_layer(create_artifact_for_binary(binary_path, log.clone())?)?;
+    let (deps_artifact, _) =
+        client.add_layer(create_artifact_for_binary_deps(binary_path, log)?)?;
     Ok(GeneratedArtifacts {
         binary: binary_artifact,
         deps: deps_artifact,
