@@ -240,11 +240,8 @@ impl proto::client_process_server::ClientProcess for Handler {
         _request: tonic::Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
         run_handler(async {
-            let res = with_client_async!(self, |client| { client.get_job_state_counts().await })
-                .await?
-                .recv()
-                .await
-                .ok_or(anyhow!("client shutdown"))?;
+            let res =
+                with_client_async!(self, |client| { client.get_job_state_counts().await }).await?;
             Ok(proto::GetJobStateCountsResponse {
                 counts: Some(res.into_proto_buf()),
             })
