@@ -32,6 +32,7 @@ use maelstrom_util::{
 };
 pub use rpc::run_process_client;
 use sha2::{Digest as _, Sha256};
+use slog::Drain as _;
 use std::pin::pin;
 use std::{
     collections::{HashMap, HashSet},
@@ -135,6 +136,7 @@ struct Client {
     upload_tracker: ArtifactUploadTracker,
     container_image_depot: ContainerImageDepot,
     driver: Box<dyn ClientDriver + Send + Sync>,
+    log: slog::Logger,
     state: Mutex<ClientState>,
 }
 
@@ -145,16 +147,27 @@ impl Client {
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
     ) -> Result<Self> {
+        let fs = async_fs::Fs::new();
+        for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
+            fs.create_dir_all(cache_dir.as_ref().join(d)).await?;
+        }
+
+        let log_file = fs
+            .open_or_create_file(cache_dir.as_ref().join("cargo-maelstrom.log"))
+            .await?;
+        let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        let log = slog::Logger::root(drain, slog::o!());
+
+        slog::debug!(log, "client starting");
         let driver = new_driver(driver_mode);
         let upload_tracker = ArtifactUploadTracker::default();
         let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
         driver.drive(deps).await;
 
-        let fs = async_fs::Fs::new();
-        for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
-            fs.create_dir_all(cache_dir.as_ref().join(d)).await?;
-        }
+        slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
         Ok(Client {
             dispatcher_sender,
@@ -163,6 +176,7 @@ impl Client {
             upload_tracker,
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
             driver,
+            log,
             state: Mutex::new(ClientState {
                 digest_repo: DigestRepository::new(cache_dir.as_ref()),
                 processed_artifact_paths: HashSet::default(),
@@ -172,6 +186,8 @@ impl Client {
     }
 
     async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
+        slog::debug!(self.log, "add_artifact"; "path" => ?path);
+
         let fs = async_fs::Fs::new();
         let path = fs.canonicalize(path).await?;
 
@@ -310,6 +326,8 @@ impl Client {
     }
 
     async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        slog::debug!(self.log, "add_layer"; "layer" => ?layer);
+
         if let Some(l) = self.state.lock().await.cached_layers.get(&layer) {
             return Ok(l.clone());
         }
@@ -382,12 +400,15 @@ impl Client {
         tag: &str,
         prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
+        slog::debug!(self.log, "get_container_image"; "name" => name, "tag" => tag);
         self.container_image_depot
             .get_container_image(name, tag, prog)
             .await
     }
 
     async fn add_job(&self, spec: JobSpec, handler: JobResponseHandler) {
+        slog::debug!(self.log, "add_job"; "spec" => ?spec);
+
         // We will only get an error if the dispatcher has closed its receiver, which will only
         // happen if it ran into an error. We'll get that error when we wait in
         // `wait_for_oustanding_job`.
@@ -398,11 +419,13 @@ impl Client {
     }
 
     async fn stop_accepting(&self) -> Result<()> {
+        slog::debug!(self.log, "stop_accepting");
         self.dispatcher_sender.send(DispatcherMessage::Stop).await?;
         Ok(())
     }
 
     async fn wait_for_outstanding_jobs(&self) -> Result<()> {
+        slog::debug!(self.log, "wait_for_outstanding_jobs");
         self.stop_accepting().await.ok();
         self.driver.stop().await?;
         Ok(())
@@ -422,11 +445,13 @@ impl Client {
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     async fn process_broker_msg_single_threaded(&self, count: usize) {
+        slog::debug!(self.log, "process_broker_msg_single_threaded");
         self.driver.process_broker_msg_single_threaded(count).await
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     async fn process_client_messages_single_threaded(&self, wanted: ClientMessageKind) {
+        slog::debug!(self.log, "process_client_messages_single_threaded"; "wanted" => ?wanted);
         self.driver
             .process_client_messages_single_threaded(wanted)
             .await
@@ -434,6 +459,7 @@ impl Client {
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
     async fn process_artifact_single_threaded(&self) {
+        slog::debug!(self.log, "process_artifact_single_threaded");
         self.driver.process_artifact_single_threaded().await
     }
 }

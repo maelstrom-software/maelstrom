@@ -1306,6 +1306,7 @@ fn filtering_none_does_not_build() {
     assert_eq!(
         entries,
         vec![
+            "cargo-maelstrom.log".to_owned(),
             maelstrom_client::MANIFEST_DIR.to_owned(),
             LAST_TEST_LISTING_NAME.to_owned(),
         ]
