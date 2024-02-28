@@ -17,12 +17,14 @@ type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 #[derive(Clone)]
 struct Handler {
     client: Arc<RwLock<Option<ProcessClient>>>,
+    log: Option<slog::Logger>,
 }
 
 impl Handler {
-    fn new() -> Self {
+    fn new(log: Option<slog::Logger>) -> Self {
         Self {
             client: Arc::new(RwLock::new(None)),
+            log,
         }
     }
 
@@ -116,6 +118,7 @@ impl proto::client_process_server::ClientProcess for Handler {
                 TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
                 PathBuf::try_from_proto_buf(request.project_dir)?,
                 PathBuf::try_from_proto_buf(request.cache_dir)?,
+                self.log.clone(),
             )
             .await?;
             *self.client.write().await = Some(client);
@@ -315,13 +318,13 @@ impl proto::client_process_server::ClientProcess for Handler {
 type TokioError<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn run_process_client(sock: UnixStream) -> Result<()> {
+pub async fn run_process_client(sock: UnixStream, log: Option<slog::Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let sock1 = tokio::net::UnixStream::from_std(sock.try_clone()?)?;
     let sock2 = tokio::net::UnixStream::from_std(sock)?;
     tonic::transport::Server::builder()
         .add_service(proto::client_process_server::ClientProcessServer::new(
-            Handler::new(),
+            Handler::new(log),
         ))
         .serve_with_incoming_shutdown(
             tokio_stream::once(TokioError::<_>::Ok(sock1)).chain(tokio_stream::pending()),

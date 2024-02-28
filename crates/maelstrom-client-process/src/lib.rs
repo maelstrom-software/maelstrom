@@ -123,6 +123,16 @@ impl<'a> maelstrom_util::manifest::DataUpload for &'a Client {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
+async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<slog::Logger> {
+    let log_file = fs
+        .open_or_create_file(cache_dir.join("cargo-maelstrom.log"))
+        .await?;
+    let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    Ok(slog::Logger::root(drain, slog::o!()))
+}
+
 struct ClientState {
     digest_repo: DigestRepository,
     processed_artifact_paths: HashSet<PathBuf>,
@@ -146,19 +156,17 @@ impl Client {
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
+        log: Option<slog::Logger>,
     ) -> Result<Self> {
         let fs = async_fs::Fs::new();
         for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
             fs.create_dir_all(cache_dir.as_ref().join(d)).await?;
         }
 
-        let log_file = fs
-            .open_or_create_file(cache_dir.as_ref().join("cargo-maelstrom.log"))
-            .await?;
-        let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        let log = slog::Logger::root(drain, slog::o!());
+        let log = match log {
+            Some(l) => l,
+            None => default_log(&fs, cache_dir.as_ref()).await?,
+        };
 
         slog::debug!(log, "client starting");
         let driver = new_driver(driver_mode);
