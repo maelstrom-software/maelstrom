@@ -35,15 +35,8 @@ type RequestSender = tokio::sync::mpsc::UnboundedSender<RequestFn>;
 type TonicResult<T> = std::result::Result<T, tonic::Status>;
 type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
-fn run_dispatcher(sock: UnixStream, requester: RequestReceiver) -> Result<()> {
-    tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .build()
-        .unwrap()
-        .block_on(async { run_dispatcher_async(sock, requester).await })
-}
-
-async fn run_dispatcher_async(std_sock: UnixStream, mut requester: RequestReceiver) -> Result<()> {
+#[tokio::main]
+async fn run_dispatcher(std_sock: UnixStream, mut requester: RequestReceiver) -> Result<()> {
     std_sock.set_nonblocking(true)?;
     let sock = tokio::net::UnixStream::from_std(std_sock.try_clone()?)?;
     let mut closure =
