@@ -6,7 +6,7 @@ pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/maelstrom_client_base.items.rs"));
 }
 
-// This hack makes some macros in maelstrom_base work correctly
+// This hack makes some macros in maelstrom_test work correctly
 #[cfg(test)]
 extern crate self as maelstrom_client;
 
