@@ -288,15 +288,10 @@ impl proto::client_process_server::ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
-            loop {
-                let kind = with_client_async!(self, |client| {
-                    Ok(client.process_client_messages_single_threaded().await)
-                })
-                .await?;
-                if kind.is_some_and(|k| k == wanted) {
-                    break;
-                }
-            }
+            with_client_async!(self, |client| {
+                Ok(client.process_client_messages_single_threaded(wanted).await)
+            })
+            .await?;
             Ok(proto::Void {})
         })
         .await

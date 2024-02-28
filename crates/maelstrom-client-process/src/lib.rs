@@ -426,8 +426,10 @@ impl Client {
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    async fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
-        self.driver.process_client_messages_single_threaded().await
+    async fn process_client_messages_single_threaded(&self, wanted: ClientMessageKind) {
+        self.driver
+            .process_client_messages_single_threaded(wanted)
+            .await
     }
 
     /// Must only be called if created with `ClientDriverMode::SingleThreaded`

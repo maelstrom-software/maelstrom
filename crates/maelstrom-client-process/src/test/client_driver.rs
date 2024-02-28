@@ -30,10 +30,15 @@ impl ClientDriver for SingleThreadedClientDriver {
         }
     }
 
-    async fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
-        let mut locked_deps = self.deps.lock().await;
-        let deps = locked_deps.as_mut().unwrap();
-        deps.dispatcher.process_one_and_tell().await
+    async fn process_client_messages_single_threaded(&self, wanted: ClientMessageKind) {
+        loop {
+            let mut locked_deps = self.deps.lock().await;
+            let deps = locked_deps.as_mut().unwrap();
+            let kind = deps.dispatcher.process_one_and_tell().await;
+            if kind.is_some_and(|k| k == wanted) {
+                break;
+            }
+        }
     }
 
     async fn process_artifact_single_threaded(&self) {

@@ -77,7 +77,7 @@ pub trait ClientDriver {
         unimplemented!()
     }
 
-    async fn process_client_messages_single_threaded(&self) -> Option<ClientMessageKind> {
+    async fn process_client_messages_single_threaded(&self, _wanted: ClientMessageKind) {
         unimplemented!()
     }
 
