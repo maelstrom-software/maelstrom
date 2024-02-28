@@ -2,12 +2,11 @@ use crate::driver::{ClientDeps, ClientDriver};
 use anyhow::Result;
 use async_trait::async_trait;
 use maelstrom_client_base::ClientMessageKind;
-use std::sync::Arc;
 use tokio::sync::Mutex;
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub struct SingleThreadedClientDriver {
-    deps: Arc<Mutex<Option<ClientDeps>>>,
+    deps: Mutex<Option<ClientDeps>>,
 }
 
 #[async_trait]
