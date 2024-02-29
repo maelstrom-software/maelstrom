@@ -507,6 +507,7 @@ impl<'fs> LockedTagsHandle<'fs> {
                     .as_bytes(),
             )
             .await?;
+        self.lock_file.flush().await?;
         Ok(())
     }
 }
