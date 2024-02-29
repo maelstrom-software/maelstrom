@@ -21,12 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
 - `--timeout` command-line option to override the timeout for the test
   specified. A value of 0 indicates no timeout.
+- Progress bars for uploads being done to the broker
+- `canonicalize` layer option added to glob and paths layer
+- `follow-symlinks` option added to glob and paths layer
+
+### Changed
+- Tweaked spinner text to provide more information
 
 ### `maelstrom-client-cli`
 #### Added
 - The new layer types from `cargo-maelstrom` have also been added.
 - `timeout` job field which specifies the timeout in seconds. A value of
   0 indicates no timeout.
+- `canonicalize` layer option added to glob and paths layer
+- `follow_symlinks` option added to glob and paths layer
 
 ## [0.5.0] - 2024-02-08
 
