@@ -1,5 +1,6 @@
 [package]
 name = "maelstrom-macro"
+description = "Macros for Maelstrom internal usage"
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true

@@ -1,6 +1,6 @@
-# Background process for Maelstrom Client
+# Macros for Maelstrom Binaries and Libraries
 
-This is a crate internal to the Maelstrom client library.
+This is a macro library for use by Maelstrom code.
 
 For more information, see the [Maelstrom project on
 GitHub](https://github.com/maelstrom-software/maelstrom).
