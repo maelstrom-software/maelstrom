@@ -166,22 +166,6 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for Vec<V> {
     }
 }
 
-impl IntoProtoBuf for Utf8PathBuf {
-    type ProtoBufType = String;
-
-    fn into_proto_buf(self) -> String {
-        self.into_string()
-    }
-}
-
-impl TryFromProtoBuf for Utf8PathBuf {
-    type ProtoBufType = String;
-
-    fn try_from_proto_buf(s: String) -> Result<Self> {
-        Ok(s.into())
-    }
-}
-
 impl<K: IntoProtoBuf + Eq + Hash, V: IntoProtoBuf> IntoProtoBuf for HashMap<K, V>
 where
     K::ProtoBufType: Eq + Hash,
@@ -217,6 +201,22 @@ impl<K: TryFromProtoBuf + Eq + Hash, V: TryFromProtoBuf> TryFromProtoBuf for Has
 // |____/|_|  \__,_|     | .__/ \__,_|_|   \__|\__, |
 //                       |_|                   |___/
 //
+
+impl IntoProtoBuf for Utf8PathBuf {
+    type ProtoBufType = String;
+
+    fn into_proto_buf(self) -> String {
+        self.into_string()
+    }
+}
+
+impl TryFromProtoBuf for Utf8PathBuf {
+    type ProtoBufType = String;
+
+    fn try_from_proto_buf(s: String) -> Result<Self> {
+        Ok(s.into())
+    }
+}
 
 impl<V: IntoProtoBuf + EnumSetType> IntoProtoBuf for EnumSet<V> {
     type ProtoBufType = Vec<V::ProtoBufType>;
