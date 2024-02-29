@@ -85,7 +85,9 @@ fn into_proto_buf_enum(
         let field_idents2 = field_idents1.clone();
         Ok(match v.fields.style {
             darling::ast::Style::Unit => {
-                return Err(Error::new(variant_ident.span(), "unit not allowed here"));
+                parse_quote! {
+                    Self::#variant_ident => #proto_buf_type::#variant_ident(super::Void {}),
+                }
             }
             darling::ast::Style::Tuple => {
                 let num_fields = v.fields.len();
@@ -110,7 +112,7 @@ fn into_proto_buf_enum(
                 let variant_type = v
                     .other_type
                     .as_ref()
-                    .ok_or(Error::new(variant_ident.span(), "missing path_type"))?;
+                    .ok_or(Error::new(variant_ident.span(), "missing other_type"))?;
                 let field_exprs = v.fields.iter().map(|v| -> Expr {
                     let ident = &v.ident;
                     if v.option {
