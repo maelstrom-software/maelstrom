@@ -2,7 +2,7 @@ use crate::scheduler_task::{SchedulerMessage, SchedulerSender};
 use anyhow::Result;
 use maelstrom_base::proto::{ArtifactPusherToBroker, BrokerToArtifactPusher};
 use maelstrom_util::{
-    io::{FixedSizeReader, Sha256Reader},
+    io::{FixedSizeReader, Sha256Stream},
     net,
 };
 use slog::{debug, Logger};
@@ -24,7 +24,7 @@ fn handle_one_message(
         .suffix(".tar")
         .tempfile_in(cache_tmp_path)?;
     let fixed_size_reader = FixedSizeReader::new(socket, size);
-    let mut sha_reader = Sha256Reader::new(fixed_size_reader);
+    let mut sha_reader = Sha256Stream::new(fixed_size_reader);
     let copied = io::copy(&mut sha_reader, &mut tmp)?;
     assert_eq!(copied, size);
     let (_, actual_digest) = sha_reader.finalize();

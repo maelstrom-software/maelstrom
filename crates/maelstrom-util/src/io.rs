@@ -3,7 +3,10 @@
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
 use sha2::{Digest as _, Sha256};
-use std::io::{self, Chain, Read, Repeat, Take};
+use std::io::{self, Chain, Read, Repeat, Take, Write};
+use std::pin::{pin, Pin};
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// A [`Read`]er wrapper that will always reads a specific number of bytes, except on error. If the
 /// inner, wrapped, reader returns EOF before the specified number of bytes have been returned,
@@ -27,16 +30,15 @@ impl<InnerT: Read> Read for FixedSizeReader<InnerT> {
     }
 }
 
-/// A [`Read`]er wrapper that computes the SHA-256 digest of the bytes that are read from its inner
-/// reader.
-pub struct Sha256Reader<InnerT> {
+/// A IO wrapper that computes the SHA-256 digest of the bytes that are read from or written to it.
+pub struct Sha256Stream<InnerT> {
     inner: InnerT,
     hasher: Sha256,
 }
 
-impl<InnerT> Sha256Reader<InnerT> {
+impl<InnerT> Sha256Stream<InnerT> {
     pub fn new(inner: InnerT) -> Self {
-        Sha256Reader {
+        Self {
             inner,
             hasher: Sha256::new(),
         }
@@ -48,12 +50,108 @@ impl<InnerT> Sha256Reader<InnerT> {
     }
 }
 
-impl<InnerT: Read> Read for Sha256Reader<InnerT> {
+impl<InnerT: Read> Read for Sha256Stream<InnerT> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let size = self.inner.read(buf)?;
         self.hasher.update(&buf[..size]);
         Ok(size)
     }
+}
+
+impl<InnerT: Write> Write for Sha256Stream<InnerT> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let size = self.inner.write(buf)?;
+        self.hasher.update(&buf[..size]);
+        Ok(size)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl<InnerT: AsyncRead + Unpin> AsyncRead for Sha256Stream<InnerT> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        dst: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let start_len = dst.filled().len();
+        let me = self.get_mut();
+        let result = AsyncRead::poll_read(pin!(&mut me.inner), cx, dst);
+        if matches!(result, Poll::Ready(Ok(_))) {
+            me.hasher.update(&dst.filled()[start_len..]);
+        }
+        result
+    }
+}
+
+impl<InnerT: AsyncWrite + Unpin> AsyncWrite for Sha256Stream<InnerT> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        src: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        let me = self.get_mut();
+        let result = AsyncWrite::poll_write(pin!(&mut me.inner), cx, src);
+        if let Poll::Ready(Ok(size)) = &result {
+            me.hasher.update(&src[..*size]);
+        }
+        result
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let me = self.get_mut();
+        AsyncWrite::poll_flush(pin!(&mut me.inner), cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
+        let me = self.get_mut();
+        AsyncWrite::poll_shutdown(pin!(&mut me.inner), cx)
+    }
+}
+
+#[cfg(test)]
+fn calculate_read_hash(mut input: &[u8]) -> Sha256Digest {
+    let mut reader = Sha256Stream::new(&mut input);
+    std::io::copy(&mut reader, &mut std::io::sink()).unwrap();
+    reader.finalize().1
+}
+
+#[cfg(test)]
+fn calculate_write_hash(mut input: &[u8]) -> Sha256Digest {
+    let mut writer = Sha256Stream::new(std::io::sink());
+    std::io::copy(&mut input, &mut writer).unwrap();
+    writer.finalize().1
+}
+
+#[cfg(test)]
+async fn calculate_async_read_hash(mut input: &[u8]) -> Sha256Digest {
+    let mut reader = Sha256Stream::new(&mut input);
+    tokio::io::copy(&mut reader, &mut tokio::io::sink())
+        .await
+        .unwrap();
+    reader.finalize().1
+}
+
+#[cfg(test)]
+async fn calculate_async_write_hash(mut input: &[u8]) -> Sha256Digest {
+    let mut writer = Sha256Stream::new(tokio::io::sink());
+    tokio::io::copy(&mut input, &mut writer).await.unwrap();
+    writer.finalize().1
+}
+
+#[tokio::test]
+async fn sha256_stream_impls_consistent() {
+    let test_bytes = Vec::from_iter([1, 2, 3, 4, 5, 6, 7].into_iter().cycle().take(1000));
+    let read_hash = calculate_read_hash(&test_bytes);
+    let write_hash = calculate_write_hash(&test_bytes);
+    let async_read_hash = calculate_async_read_hash(&test_bytes).await;
+    let async_write_hash = calculate_async_write_hash(&test_bytes).await;
+
+    assert_eq!(read_hash, write_hash);
+    assert_eq!(read_hash, async_read_hash);
+    assert_eq!(read_hash, async_write_hash);
 }
 
 struct Chunk<ReaderT> {
