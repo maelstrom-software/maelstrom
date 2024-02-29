@@ -27,7 +27,7 @@ use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
     async_fs,
     config::BrokerAddr,
-    fs::Fs,
+    io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
 };
 pub use rpc::run_process_client;
@@ -43,17 +43,13 @@ use std::{
 use tokio::sync::{mpsc::Sender, Mutex};
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
-    let path = path.to_owned();
-    tokio::task::spawn_blocking(move || {
-        let fs = Fs::new();
-        let mut hasher = Sha256::new();
-        let mut f = fs.open_file(path)?;
-        std::io::copy(&mut f, &mut hasher)?;
-        let mtime = f.metadata()?.modified()?;
+    let fs = async_fs::Fs::new();
+    let mut f = fs.open_file(path).await?;
+    let mut hasher = Sha256Stream::new(tokio::io::sink());
+    tokio::io::copy(&mut f, &mut hasher).await?;
+    let mtime = f.metadata().await?.modified()?;
 
-        Ok((mtime, Sha256Digest::new(hasher.finalize().into())))
-    })
-    .await?
+    Ok((mtime, hasher.finalize().1))
 }
 
 #[derive(Default)]
