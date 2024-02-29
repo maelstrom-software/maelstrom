@@ -47,6 +47,40 @@ field sets the layers itself. The `added_layers` field can still be used though.
 If this field is provided, `include_shared_libraries` is also set to `false`,
 unless it is explicitly set to `true`.
 
+### Layer Options
+The `paths` and `glob` layers support some options that can be used to control how the resulting
+layer is created. They apply to all paths included in the layer. These options can be combined, and
+in such a scenario you can think of them taking effect in the given order
+
+- `follow-symlinks` don't include symlinks, instead use what they point to
+- `canonicalize` use absolute form of path, with components normalized and symlinks resolved
+- `strip-prefix` remove the given prefix from paths
+- `prepend-prefix` add the given prefix to paths
+
+Here are some examples.
+
+```toml
+{ glob = "test/d/e.bin", follow-symlinks = true },
+```
+If `test/d/e.bin` is a symlink which points to `test/d/f.bin` this layer will put a file in the
+container at `/test/d/e.bin` with the contents of `test/d/f.bin`
+
+```toml
+{ glob = "layers/c/*.bin", canonicalize = true },
+```
+If your workspace directory is `/home/bob/project` this layer will put files in the container at
+`/home/bob/project/layers/c/*.bin`
+
+```toml
+{ paths = ["layers/a/b.bin", "layers/a/c.bin"], strip-preifx = "layers/" },
+```
+This layer will puts files in the container at `/a/b.bin` and `/a/c.bin`
+
+```toml
+{ glob = "layers/b/**", prepend-prefix = "test/" },
+```
+This layer will put files in the container at `/test/layers/b/**`
+
 ## The `added_layers` Field
 
 This field is just like the `layers` field except that the given layers are
