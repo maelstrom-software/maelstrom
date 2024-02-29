@@ -111,7 +111,7 @@ These other expressions are useful occasionally
 - **`false`, `none`**: selects no tests
 
 When you provide no filter to `cargo-maelstrom` it acts as if you typed `cargo
-maelstrom run -i all`
+maelstrom -i all`
 
 ## Abbreviations
 

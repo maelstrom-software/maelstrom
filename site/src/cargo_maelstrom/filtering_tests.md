@@ -1,8 +1,7 @@
 # Filtering Tests
 
-When running `cargo maelstrom run` or `cargo maelstrom list` without any
-arguments it runs or lists all the tests it finds as part of your project. If
-you wish to run or list only a subset of tests a filter can be applied via the
+When running `cargo maelstrom` without any arguments it runs or lists all the tests it finds as part
+of your project. If you wish to run or list only a subset of tests a filter can be applied via the
 command line.
 
 The means of filtering is a DSL (domain specific language) that specifies some

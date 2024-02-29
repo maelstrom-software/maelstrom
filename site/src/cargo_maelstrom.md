@@ -4,7 +4,7 @@ cargo-maelstrom is a replacement for `cargo test` which will run tests as jobs
 on a distributed clustered job runner. Each test runs in a lightweight container
 where it is isolated from computer it is running on and other tests.
 
-Running your tests using it can be as simple as running `cargo maelstrom run`
+Running your tests using it can be as simple as running `cargo maelstrom`
 instead of `cargo test`, (see [Running
 Tests](./cargo_maelstrom/running_tests.md) for details) but due to the tests
 running in a very isolated environment by default, there can be some
