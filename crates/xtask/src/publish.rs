@@ -10,6 +10,12 @@ struct PackageInfo<'a> {
     path: &'a Utf8Path,
     version: &'a Version,
     dependencies: Vec<&'a str>, // Only intra-workspace dependencies are included.
+    license: Option<&'a str>,
+    description: Option<&'a str>,
+    homepage: Option<&'a str>,
+    documentation: Option<&'a str>,
+    repository: Option<&'a str>,
+    readme: Option<&'a Utf8Path>,
 }
 
 type Packages<'a> = HashMap<&'a str, PackageInfo<'a>>;
@@ -25,6 +31,12 @@ fn extract_workspace_packages(metadata: &Metadata) -> Packages {
                 path: pkg.manifest_path.parent().unwrap(),
                 version: &pkg.version,
                 dependencies: pkg.dependencies.iter().map(|d| d.name.as_str()).collect(),
+                license: pkg.license.as_deref(),
+                description: pkg.description.as_deref(),
+                homepage: pkg.homepage.as_deref(),
+                documentation: pkg.documentation.as_deref(),
+                repository: pkg.repository.as_deref(),
+                readme: pkg.readme.as_deref(),
             },
         )
     }));
@@ -62,6 +74,24 @@ fn get_publishable_packages<'a>(packages: &Packages<'a>) -> Result<Vec<&'a str>>
                             {dependency} isn't publishable",
                     );
                 }
+            }
+            if info.license.is_none() {
+                bail!("cannot publish {package} because it doesn't have a license field")
+            }
+            if info.description.is_none() {
+                bail!("cannot publish {package} because it doesn't have a description field")
+            }
+            if info.homepage.is_none() {
+                bail!("cannot publish {package} because it doesn't have a homepage field")
+            }
+            if info.documentation.is_none() {
+                bail!("cannot publish {package} because it doesn't have a documentation field")
+            }
+            if info.repository.is_none() {
+                bail!("cannot publish {package} because it doesn't have a repository field")
+            }
+            if info.readme.is_none() {
+                bail!("cannot publish {package} because it doesn't have a README")
             }
             Ok(*package)
         })
@@ -429,6 +459,12 @@ mod tests {
                         path: "/home/user/workspace/crates/in-workspace-1".into(),
                         version: &Version::parse("0.6.0-dev").unwrap(),
                         dependencies: vec!["in-workspace-2"],
+                        license: None,
+                        description: None,
+                        homepage: None,
+                        documentation: None,
+                        repository: None,
+                        readme: None,
                     }
                 ),
                 (
@@ -438,6 +474,12 @@ mod tests {
                         path: "/home/user/workspace/crates/in-workspace-2".into(),
                         version: &Version::parse("0.6.0-dev").unwrap(),
                         dependencies: vec![],
+                        license: None,
+                        description: None,
+                        homepage: None,
+                        documentation: None,
+                        repository: None,
+                        readme: None,
                     }
                 ),
                 (
@@ -447,6 +489,12 @@ mod tests {
                         path: "/home/user/workspace/crates/in-workspace-3".into(),
                         version: &Version::parse("0.6.0-dev").unwrap(),
                         dependencies: vec!["in-workspace-1"],
+                        license: None,
+                        description: None,
+                        homepage: None,
+                        documentation: None,
+                        repository: None,
+                        readme: None,
                     }
                 )
             ])
@@ -464,6 +512,12 @@ mod tests {
                     path: "/foo".into(),
                     version,
                     dependencies: vec!["bar"],
+                    license: "foo-license".into(),
+                    description: "foo-description".into(),
+                    homepage: "foo-homepage".into(),
+                    documentation: "foo-documentation".into(),
+                    repository: "foo-respository".into(),
+                    readme: Utf8Path::new("foo-readme").into(),
                 },
             ),
             (
@@ -473,6 +527,12 @@ mod tests {
                     path: "/bar".into(),
                     version,
                     dependencies: vec![],
+                    license: "bar-license".into(),
+                    description: "bar-description".into(),
+                    homepage: "bar-homepage".into(),
+                    documentation: "bar-documentation".into(),
+                    repository: "bar-respository".into(),
+                    readme: Utf8Path::new("bar-readme").into(),
                 },
             ),
             (
@@ -482,6 +542,12 @@ mod tests {
                     path: "/baz".into(),
                     version,
                     dependencies: vec!["bar"],
+                    license: None,
+                    description: None,
+                    homepage: None,
+                    documentation: None,
+                    repository: None,
+                    readme: None,
                 },
             ),
         ]);
@@ -502,6 +568,12 @@ mod tests {
                     path: "/foo".into(),
                     version,
                     dependencies: vec!["bar"],
+                    license: "foo-license".into(),
+                    description: "foo-description".into(),
+                    homepage: "foo-homepage".into(),
+                    documentation: "foo-documentation".into(),
+                    repository: "foo-respository".into(),
+                    readme: Utf8Path::new("foo-readme").into(),
                 },
             ),
             (
@@ -511,6 +583,12 @@ mod tests {
                     path: "/bar".into(),
                     version,
                     dependencies: vec![],
+                    license: None,
+                    description: None,
+                    homepage: None,
+                    documentation: None,
+                    repository: None,
+                    readme: None,
                 },
             ),
         ]);
@@ -518,6 +596,156 @@ mod tests {
         assert_eq!(
             format!("{error}"),
             "cannot publish foo because its dependency bar isn't publishable"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_license() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: None,
+                description: "foo-description".into(),
+                homepage: "foo-homepage".into(),
+                documentation: "foo-documentation".into(),
+                repository: "foo-respository".into(),
+                readme: Utf8Path::new("foo-readme").into(),
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a license field"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_description() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: "foo-license".into(),
+                description: None,
+                homepage: "foo-homepage".into(),
+                documentation: "foo-documentation".into(),
+                repository: "foo-respository".into(),
+                readme: Utf8Path::new("foo-readme").into(),
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a description field"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_homepage() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: "foo-license".into(),
+                description: "foo-description".into(),
+                homepage: None,
+                documentation: "foo-documentation".into(),
+                repository: "foo-respository".into(),
+                readme: Utf8Path::new("foo-readme").into(),
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a homepage field"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_documentation() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: "foo-license".into(),
+                description: "foo-description".into(),
+                homepage: "foo-homepage".into(),
+                documentation: None,
+                repository: "foo-respository".into(),
+                readme: Utf8Path::new("foo-readme").into(),
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a documentation field"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_repository() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: "foo-license".into(),
+                description: "foo-description".into(),
+                homepage: "foo-homepage".into(),
+                documentation: "foo-documentation".into(),
+                repository: None,
+                readme: Utf8Path::new("foo-readme").into(),
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a repository field"
+        );
+    }
+
+    #[test]
+    fn get_publishable_packages_missing_readme() {
+        let version = &Version::new(1, 2, 3);
+        let packages = Packages::from_iter([(
+            "foo",
+            PackageInfo {
+                to_publish: true,
+                path: "/foo".into(),
+                version,
+                dependencies: vec![],
+                license: "foo-license".into(),
+                description: "foo-description".into(),
+                homepage: "foo-homepage".into(),
+                documentation: "foo-documentation".into(),
+                repository: "foo-respository".into(),
+                readme: None,
+            },
+        )]);
+        let error = get_publishable_packages(&packages).unwrap_err();
+        assert_eq!(
+            format!("{error}"),
+            "cannot publish foo because it doesn't have a README"
         );
     }
 }
