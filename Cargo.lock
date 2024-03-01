@@ -2810,6 +2810,7 @@ dependencies = [
  "maelstrom-util",
  "serde",
  "toml",
+ "xdg",
 ]
 
 [[package]]

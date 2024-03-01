@@ -7,6 +7,7 @@ use serde::Deserialize;
 use std::result;
 use std::{collections::HashMap, iter, path::PathBuf, str::FromStr};
 use toml::Table;
+use xdg::BaseDirectories;
 
 pub struct Config {
     args: ArgMatches,
@@ -226,42 +227,84 @@ impl Config {
 pub struct ConfigBuilder {
     command: Command,
     env_var_prefix: &'static str,
+    #[allow(dead_code)]
+    base_directories: BaseDirectories,
 }
 
 impl ConfigBuilder {
     pub fn new(command: clap::Command, env_var_prefix: &'static str) -> Result<Self> {
+        let base_directories = BaseDirectories::new()?;
+        let config_files = iter::once(base_directories.get_config_home())
+            .chain(base_directories.get_config_dirs())
+            .map(|pb| pb.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         let command = command
+            .disable_help_flag(true)
+            .disable_version_flag(true)
             .styles(maelstrom_util::clap::styles())
             .after_help(format!(
-                "Configuration values can be specified in three ways: fields in a config file, \
-                environment variables, or command-line options. Command-line options have the \
+                "Configuration values can be specified in three ways: fields in a configuration \
+                file, environment variables, or command-line options. Command-line options have the \
                 highest precendence, followed by environment variables.\n\
                 \n\
-                The configuration value 'config_value' would be set via the '--config-value' \
-                command-line option, the {env_var_prefix}_CONFIG_VALUE environment variable, \
-                and the 'config_value' key in a configuration file."))
+                The hyptothetical configuration value \"config_value\" would be set via the \
+                --config-value command-line option, the {env_var_prefix}_CONFIG_VALUE \
+                environment variable, and the \"config-value\" key in a configuration file.\n\
+                \n\
+                See the help information for --config-file for more information."))
+            .next_help_heading("Print-and-Exit Options")
             .arg(
-                Arg::new("config-file")
-                    .long("config-file")
-                    .short('c')
-                    .value_name("PATH")
-                    .action(ArgAction::Set)
-                    .help(
-                        "Configuration file. Values set in the configuration file will be overridden by \
-                        values set through environment variables and values set on the command line."
-                    )
+                Arg::new("help")
+                    .long("help")
+                    .short('h')
+                    .action(ArgAction::HelpLong)
+                    .help("Print help and exit."),
+            )
+            .arg(
+                Arg::new("version")
+                    .long("version")
+                    .short('v')
+                    .action(ArgAction::Version)
+                    .help("Print version and exit."),
             )
             .arg(
                 Arg::new("print-config")
                     .long("print-config")
                     .short('P')
                     .action(ArgAction::SetTrue)
-                    .help("Print configuration and exit."),
-            );
+                    .help("Print all configuration values and exit."),
+            )
+            .next_help_heading("Config File Option")
+            .arg(
+                Arg::new("config-file")
+                    .long("config-file")
+                    .short('c')
+                    .value_name("PATH")
+                    .action(ArgAction::Set)
+                    .next_line_help(true)
+                    .help(format!(
+                        "File to read configuration values from. Must be in TOML format.\n\
+                        \n\
+                        The special path \"-\" indicates that no configuration file should be read.\n\
+                        \n\
+                        If this option is not set, multiple configuration files will be read, \
+                        as described in the XDG Base Directories specification. With the present \
+                        settings, the list of files to be read, in order, is: {config_files}.\n\
+                        \n\
+                        Values set by earlier files override values set by later files. \
+                        Values set by environment variables override values set by files. \
+                        Values set by command-line-options override values set by environment \
+                        variables and files."
+                    ))
+            )
+            .next_help_heading("Config Options")
+            ;
 
         Ok(Self {
             command,
             env_var_prefix,
+            base_directories,
         })
     }
 
