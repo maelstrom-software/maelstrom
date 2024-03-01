@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Context as _, Result};
 use clap::{
+    command,
     parser::{MatchesError, ValueSource},
-    ArgMatches,
+    Arg, ArgAction, ArgMatches, Command,
 };
 use serde::Deserialize;
 use std::result;
@@ -220,6 +221,51 @@ impl Config {
         }
 
         Ok(None)
+    }
+}
+
+pub struct ConfigBuilder {
+    command: Command,
+}
+
+impl ConfigBuilder {
+    pub fn new() -> Result<Self> {
+        let command = command!()
+            .styles(maelstrom_util::clap::styles())
+            .after_help(
+                "Configuration values can be specified in three ways: fields in a config file, \
+                environment variables, or command-line options. Command-line options have the \
+                highest precendence, followed by environment variables.\n\
+                \n\
+                The configuration value 'config_value' would be set via the '--config-value' \
+                command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
+                and the 'config_value' key in a configuration file.\n\
+                \n\
+                All values except for 'broker' have reasonable defaults.")
+            .arg(
+                Arg::new("config-file")
+                    .long("config-file")
+                    .short('c')
+                    .value_name("PATH")
+                    .action(ArgAction::Set)
+                    .help(
+                        "Configuration file. Values set in the configuration file will be overridden by \
+                        values set through environment variables and values set on the command line"
+                    )
+            )
+            .arg(
+                Arg::new("print-config")
+                    .long("print-config")
+                    .short('P')
+                    .action(ArgAction::SetTrue)
+                    .help("Print configuration and exit"),
+            );
+
+        Ok(Self { command })
+    }
+
+    pub fn build(self) -> Command {
+        self.command
     }
 }
 

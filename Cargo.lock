@@ -2807,6 +2807,7 @@ dependencies = [
  "anyhow",
  "clap",
  "indoc",
+ "maelstrom-util",
  "serde",
  "toml",
 ]
