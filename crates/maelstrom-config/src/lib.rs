@@ -1,12 +1,11 @@
 use anyhow::{anyhow, Context as _, Result};
 use clap::{
-    command,
     parser::{MatchesError, ValueSource},
     Arg, ArgAction, ArgMatches, Command,
 };
 use serde::Deserialize;
 use std::result;
-use std::{collections::HashMap, path::PathBuf, str::FromStr};
+use std::{collections::HashMap, iter, path::PathBuf, str::FromStr};
 use toml::Table;
 
 pub struct Config {
@@ -226,42 +225,53 @@ impl Config {
 
 pub struct ConfigBuilder {
     command: Command,
+    env_var_prefix: &'static str,
 }
 
 impl ConfigBuilder {
-    pub fn new() -> Result<Self> {
-        let command = command!()
-        .styles(maelstrom_util::clap::styles())
-        .after_help(
-            "Configuration values can be specified in three ways: fields in a config file, \
-            environment variables, or command-line options. Command-line options have the \
-            highest precendence, followed by environment variables.\n\
-            \n\
-            The configuration value 'config_value' would be set via the '--config-value' \
-            command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
-            and the 'config_value' key in a configuration file.\n\
-            \n\
-            All values except for 'broker' have reasonable defaults.")
-        .arg(
-            Arg::new("config-file")
-                .long("config-file")
-                .short('c')
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help(
-                    "Configuration file. Values set in the configuration file will be overridden by \
-                    values set through environment variables and values set on the command line"
-                )
-        )
-        .arg(
-            Arg::new("print-config")
-                .long("print-config")
-                .short('P')
-                .action(ArgAction::SetTrue)
-                .help("Print configuration and exit"),
-        );
+    pub fn new(command: clap::Command, env_var_prefix: &'static str) -> Result<Self> {
+        let command = command
+            .styles(maelstrom_util::clap::styles())
+            .after_help(format!(
+                "Configuration values can be specified in three ways: fields in a config file, \
+                environment variables, or command-line options. Command-line options have the \
+                highest precendence, followed by environment variables.\n\
+                \n\
+                The configuration value 'config_value' would be set via the '--config-value' \
+                command-line option, the {env_var_prefix}_CONFIG_VALUE environment variable, \
+                and the 'config_value' key in a configuration file."))
+            .arg(
+                Arg::new("config-file")
+                    .long("config-file")
+                    .short('c')
+                    .value_name("PATH")
+                    .action(ArgAction::Set)
+                    .help(
+                        "Configuration file. Values set in the configuration file will be overridden by \
+                        values set through environment variables and values set on the command line."
+                    )
+            )
+            .arg(
+                Arg::new("print-config")
+                    .long("print-config")
+                    .short('P')
+                    .action(ArgAction::SetTrue)
+                    .help("Print configuration and exit."),
+            );
 
-        Ok(Self { command })
+        Ok(Self {
+            command,
+            env_var_prefix,
+        })
+    }
+
+    fn env_var_from_field(&self, field: &'static str) -> String {
+        self.env_var_prefix
+            .chars()
+            .chain(iter::once('_'))
+            .chain(field.chars())
+            .map(|c| c.to_ascii_uppercase())
+            .collect()
     }
 
     pub fn value(
@@ -272,17 +282,21 @@ impl ConfigBuilder {
         help: &'static str,
     ) -> Self {
         fn name_from_field(field: &'static str) -> String {
-            field.chars().map(|c| c.to_ascii_uppercase()).collect()
+            field
+                .chars()
+                .map(|c| if c == '_' { '-' } else { c })
+                .collect()
         }
 
         let name = name_from_field(field);
+        let env_var = self.env_var_from_field(field);
         self.command = self.command.arg(
             Arg::new(name.clone())
                 .long(name)
                 .short(short)
                 .value_name(value_name)
                 .action(ArgAction::Set)
-                .help(help),
+                .help(format!("{help} [env: {env_var}]")),
         );
         self
     }

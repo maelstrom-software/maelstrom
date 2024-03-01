@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use bytesize::ByteSize;
-use clap::{ArgMatches, Command};
+use clap::{command, ArgMatches, Command};
 use derive_more::From;
 use maelstrom_config::ConfigBuilder;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
@@ -137,39 +137,39 @@ pub struct Config {
 
 impl Config {
     pub fn add_command_line_options() -> Result<Command> {
-        Ok(ConfigBuilder::new()?
+        Ok(ConfigBuilder::new(command!(), "MAELSTROM_WORKER")?
             .value(
                 "broker",
                 'b',
                 "SOCKADDR",
-                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#,
+                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
             )
             .value(
                 "slots",
                 's',
                 "N",
-                "The number of job slots available. Most jobs will take one job slot",
+                "The number of job slots available. Most jobs will take one job slot.",
             )
             .value(
-                "cache-root",
+                "cache_root",
                 'r',
                 "PATH",
-                "The directory to use for the cache",
+                "The directory to use for the cache.",
             )
             .value(
-                "cache-bytes-used-target",
+                "cache_bytes_used_target",
                 'B',
                 "BYTES",
                 "The target amount of disk space to use for the cache. \
-                This bound won't be followed strictly, so it's best to be conservative",
+                This bound won't be followed strictly, so it's best to be conservative.",
             )
             .value(
-                "inline-limit",
+                "inline_limit",
                 'i',
                 "BYTES",
-                "The maximum amount of bytes to return inline for captured stdout and stderr",
+                "The maximum amount of bytes to return inline for captured stdout and stderr.",
             )
-            .value("log-level", 'l', "LEVEL", "Minimum log level to output")
+            .value("log_level", 'l', "LEVEL", "Minimum log level to output.")
             .build())
     }
 
