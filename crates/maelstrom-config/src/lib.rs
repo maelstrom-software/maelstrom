@@ -227,16 +227,17 @@ impl Config {
 pub struct ConfigBuilder {
     command: Command,
     env_var_prefix: &'static str,
-    #[allow(dead_code)]
-    base_directories: BaseDirectories,
 }
 
 impl ConfigBuilder {
-    pub fn new(command: clap::Command, env_var_prefix: &'static str) -> Result<Self> {
-        let base_directories = BaseDirectories::new()?;
+    pub fn new(
+        command: clap::Command,
+        base_directories: BaseDirectories,
+        env_var_prefix: &'static str,
+    ) -> Self {
         let config_files = iter::once(base_directories.get_config_home())
             .chain(base_directories.get_config_dirs())
-            .map(|pb| pb.to_string_lossy().to_string())
+            .map(|pb| pb.join("config.toml").to_string_lossy().to_string())
             .collect::<Vec<_>>()
             .join(", ");
         let command = command
@@ -301,11 +302,10 @@ impl ConfigBuilder {
             .next_help_heading("Config Options")
             ;
 
-        Ok(Self {
+        Self {
             command,
             env_var_prefix,
-            base_directories,
-        })
+        }
     }
 
     fn env_var_from_field(&self, field: &'static str) -> String {
@@ -322,6 +322,7 @@ impl ConfigBuilder {
         field: &'static str,
         short: char,
         value_name: &'static str,
+        default: Option<String>,
         help: &'static str,
     ) -> Self {
         fn name_from_field(field: &'static str) -> String {
@@ -333,13 +334,14 @@ impl ConfigBuilder {
 
         let name = name_from_field(field);
         let env_var = self.env_var_from_field(field);
+        let default = default.unwrap_or("no default, must be specified".to_string());
         self.command = self.command.arg(
             Arg::new(name.clone())
                 .long(name)
                 .short(short)
                 .value_name(value_name)
                 .action(ArgAction::Set)
-                .help(format!("{help} [env: {env_var}]")),
+                .help(format!("{help} [default: {default}] [env: {env_var}]")),
         );
         self
     }

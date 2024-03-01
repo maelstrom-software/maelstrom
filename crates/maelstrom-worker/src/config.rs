@@ -137,40 +137,54 @@ pub struct Config {
 
 impl Config {
     pub fn add_command_line_options() -> Result<Command> {
-        Ok(ConfigBuilder::new(command!(), "MAELSTROM_WORKER")?
-            .value(
-                "broker",
-                'b',
-                "SOCKADDR",
-                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
-            )
-            .value(
-                "slots",
-                's',
-                "N",
-                "The number of job slots available. Most jobs will take one job slot.",
-            )
-            .value(
-                "cache_root",
-                'r',
-                "PATH",
-                "The directory to use for the cache.",
-            )
-            .value(
-                "cache_bytes_used_target",
-                'B',
-                "BYTES",
-                "The target amount of disk space to use for the cache. \
+        let base_directories = BaseDirectories::with_prefix("maelstrom/worker")?;
+        Ok(
+            ConfigBuilder::new(command!(), base_directories, "MAELSTROM_WORKER")
+                .value(
+                    "broker",
+                    'b',
+                    "SOCKADDR",
+                    None,
+                    r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
+                )
+                .value(
+                    "slots",
+                    's',
+                    "N",
+                    Some(num_cpus::get().to_string()),
+                    "The number of job slots available. Most jobs will take one job slot.",
+                )
+                .value(
+                    "cache_root",
+                    'r',
+                    "PATH",
+                    Some(".cache/maelstrom-worker".to_string()),
+                    "The directory to use for the cache.",
+                )
+                .value(
+                    "cache_bytes_used_target",
+                    'B',
+                    "BYTES",
+                    Some(1_000_000_000.to_string()),
+                    "The target amount of disk space to use for the cache. \
                 This bound won't be followed strictly, so it's best to be conservative.",
-            )
-            .value(
-                "inline_limit",
-                'i',
-                "BYTES",
-                "The maximum amount of bytes to return inline for captured stdout and stderr.",
-            )
-            .value("log_level", 'l', "LEVEL", "Minimum log level to output.")
-            .build())
+                )
+                .value(
+                    "inline_limit",
+                    'i',
+                    "BYTES",
+                    Some(1_000_000.to_string()),
+                    "The maximum amount of bytes to return inline for captured stdout and stderr.",
+                )
+                .value(
+                    "log_level",
+                    'l',
+                    "LEVEL",
+                    Some("info".to_string()),
+                    "Minimum log level to output.",
+                )
+                .build(),
+        )
     }
 
     pub fn new(mut args: ArgMatches) -> Result<Self> {
