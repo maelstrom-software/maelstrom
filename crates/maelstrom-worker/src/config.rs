@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use bytesize::ByteSize;
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use clap::{ArgMatches, Command};
 use derive_more::From;
 use maelstrom_config::ConfigBuilder;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
@@ -137,58 +137,40 @@ pub struct Config {
 
 impl Config {
     pub fn add_command_line_options() -> Result<Command> {
-        Ok(ConfigBuilder::new()?.build()
-        .arg(
-            Arg::new("broker")
-                .long("broker")
-                .short('b')
-                .value_name("SOCKADDR")
-                .action(ArgAction::Set)
-                .help(r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#)
-        )
-        .arg(
-            Arg::new("slots")
-                .long("slots")
-                .short('s')
-                .value_name("N")
-                .action(ArgAction::Set)
-                .help("The number of job slots available. Most jobs will take one job slot")
-        )
-        .arg(
-            Arg::new("cache-root")
-                .long("cache-root")
-                .short('r')
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help("The directory to use for the cache")
-        )
-        .arg(
-            Arg::new("cache-bytes-used-target")
-                .long("cache-bytes-used-target")
-                .short('B')
-                .value_name("BYTES")
-                .action(ArgAction::Set)
-                .help(
-                    "The target amount of disk space to use for the cache. \
-                    This bound won't be followed strictly, so it's best to be conservative"
-                )
-        )
-        .arg(
-            Arg::new("inline-limit")
-                .long("inline-limit")
-                .short('i')
-                .value_name("BYTES")
-                .action(ArgAction::Set)
-                .help("The maximum amount of bytes to return inline for captured stdout and stderr")
-        )
-        .arg(
-            Arg::new("log-level")
-                .long("log-level")
-                .short('l')
-                .value_name("LEVEL")
-                .action(ArgAction::Set)
-                .help("Minimum log level to output")
-        ))
+        Ok(ConfigBuilder::new()?
+            .value(
+                "broker",
+                'b',
+                "SOCKADDR",
+                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#,
+            )
+            .value(
+                "slots",
+                's',
+                "N",
+                "The number of job slots available. Most jobs will take one job slot",
+            )
+            .value(
+                "cache-root",
+                'r',
+                "PATH",
+                "The directory to use for the cache",
+            )
+            .value(
+                "cache-bytes-used-target",
+                'B',
+                "BYTES",
+                "The target amount of disk space to use for the cache. \
+                This bound won't be followed strictly, so it's best to be conservative",
+            )
+            .value(
+                "inline-limit",
+                'i',
+                "BYTES",
+                "The maximum amount of bytes to return inline for captured stdout and stderr",
+            )
+            .value("log-level", 'l', "LEVEL", "Minimum log level to output")
+            .build())
     }
 
     pub fn new(mut args: ArgMatches) -> Result<Self> {
