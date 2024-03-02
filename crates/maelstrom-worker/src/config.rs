@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use bytesize::ByteSize;
 use clap::{command, ArgMatches, Command};
 use derive_more::From;
-use maelstrom_config::ConfigBuilder;
+use maelstrom_config::{ConfigBuilder, FromConfig};
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
@@ -137,7 +137,8 @@ pub struct Config {
 
 impl Config {
     pub fn add_command_line_options() -> Result<Command> {
-        let base_directories = BaseDirectories::with_prefix("maelstrom/worker")?;
+        let base_directories = BaseDirectories::with_prefix("maelstrom/worker")
+            .context("searching for config files")?;
         Ok(
             ConfigBuilder::new(command!(), base_directories, "MAELSTROM_WORKER")
                 .value(
@@ -209,10 +210,23 @@ impl Config {
 
         let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-        let config = maelstrom_config::Config::new(args, "MAELSTROM_WORKER_", env, files)
+        let mut config = maelstrom_config::Config::new(args, "MAELSTROM_WORKER_", env, files)
             .context("loading configuration from environment variables and config files")?;
 
-        let config = Self {
+        let config = Self::from_config(&mut config)?;
+
+        if print_config {
+            println!("{config:#?}");
+            process::exit(0);
+        }
+
+        Ok(config)
+    }
+}
+
+impl FromConfig for Config {
+    fn from_config(config: &mut maelstrom_config::Config) -> Result<Self> {
+        Ok(Self {
             broker: config.get("broker")?,
             slots: config.get_or_else("slots", || {
                 Slots::try_from(u16::try_from(num_cpus::get()).unwrap()).unwrap()
@@ -225,13 +239,6 @@ impl Config {
             })?,
             inline_limit: config.get_or_else("inline-limit", || InlineLimit::from(1_000_000))?,
             log_level: config.get_or("log-level", LogLevel::Info)?,
-        };
-
-        if print_config {
-            println!("{config:#?}");
-            process::exit(0);
-        }
-
-        Ok(config)
+        })
     }
 }

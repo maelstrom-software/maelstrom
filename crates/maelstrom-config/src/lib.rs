@@ -224,6 +224,10 @@ impl Config {
     }
 }
 
+pub trait FromConfig: Sized {
+    fn from_config(config: &mut Config) -> Result<Self>;
+}
+
 pub struct ConfigBuilder {
     command: Command,
     env_var_prefix: &'static str,
