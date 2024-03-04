@@ -95,6 +95,10 @@ impl Errno {
         self.0.try_into().unwrap()
     }
 
+    pub fn as_i32(&self) -> i32 {
+        self.0
+    }
+
     pub fn name(&self) -> Option<&'static str> {
         let errno = unsafe { strerrorname_np(self.0) };
         (!errno.is_null()).then(|| unsafe { CStr::from_ptr(errno) }.to_str().unwrap())
@@ -114,6 +118,43 @@ impl Errno {
             Ok(value)
         }
     }
+
+    pub const ENOSYS: Self = Self(libc::ENOSYS);
+    pub const EPERM: Self = Self(libc::EPERM);
+    pub const ENOENT: Self = Self(libc::ENOENT);
+    pub const ESRCH: Self = Self(libc::ESRCH);
+    pub const EINTR: Self = Self(libc::EINTR);
+    pub const EIO: Self = Self(libc::EIO);
+    pub const ENXIO: Self = Self(libc::ENXIO);
+    pub const E2BIG: Self = Self(libc::E2BIG);
+    pub const ENOEXEC: Self = Self(libc::ENOEXEC);
+    pub const EBADF: Self = Self(libc::EBADF);
+    pub const ECHILD: Self = Self(libc::ECHILD);
+    pub const EAGAIN: Self = Self(libc::EAGAIN);
+    pub const ENOMEM: Self = Self(libc::ENOMEM);
+    pub const EACCES: Self = Self(libc::EACCES);
+    pub const EFAULT: Self = Self(libc::EFAULT);
+    pub const ENOTBLK: Self = Self(libc::ENOTBLK);
+    pub const EBUSY: Self = Self(libc::EBUSY);
+    pub const EEXIST: Self = Self(libc::EEXIST);
+    pub const EXDEV: Self = Self(libc::EXDEV);
+    pub const ENODEV: Self = Self(libc::ENODEV);
+    pub const ENOTDIR: Self = Self(libc::ENOTDIR);
+    pub const EISDIR: Self = Self(libc::EISDIR);
+    pub const EINVAL: Self = Self(libc::EINVAL);
+    pub const ENFILE: Self = Self(libc::ENFILE);
+    pub const EMFILE: Self = Self(libc::EMFILE);
+    pub const ENOTTY: Self = Self(libc::ENOTTY);
+    pub const ETXTBSY: Self = Self(libc::ETXTBSY);
+    pub const EFBIG: Self = Self(libc::EFBIG);
+    pub const ENOSPC: Self = Self(libc::ENOSPC);
+    pub const ESPIPE: Self = Self(libc::ESPIPE);
+    pub const EROFS: Self = Self(libc::EROFS);
+    pub const EMLINK: Self = Self(libc::EMLINK);
+    pub const EPIPE: Self = Self(libc::EPIPE);
+    pub const EDOM: Self = Self(libc::EDOM);
+    pub const ERANGE: Self = Self(libc::ERANGE);
+    pub const EWOULDBLOCK: Self = Self::EAGAIN;
 }
 
 impl fmt::Debug for Errno {
