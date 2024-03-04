@@ -12,6 +12,8 @@ use std::time::Duration;
 use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 use tokio::sync::Semaphore;
 
+const MAX_INFLIGHT: usize = 1000;
+
 pub struct FuseHandle {
     fuser_session: fuser::BackgroundSession,
     receiver: tokio::task::JoinHandle<Result<()>>,
@@ -31,7 +33,7 @@ pub async fn fuse_mount(
 ) -> Result<FuseHandle> {
     let mount_point = mount_point.to_owned();
     let name = name.into();
-    let (send, recv) = channel(1000);
+    let (send, recv) = channel(MAX_INFLIGHT / 2);
 
     let fuser_session = fuse_mount_sender(send, mount_point, name)?;
     let receiver = tokio::task::spawn(async move { fuse_mount_receiver(handler, recv).await });
@@ -139,11 +141,10 @@ async fn fuse_mount_receiver(
     mut recv: Receiver<FsMessage>,
 ) -> Result<()> {
     let handler = Arc::new(handler);
-    let sem = Arc::new(Semaphore::new(0));
-    let mut outstanding_tasks = 0;
+    let sem = Arc::new(Semaphore::new(MAX_INFLIGHT / 2));
     while let Some(msg) = recv.recv().await {
         let handler = handler.clone();
-        let sem = sem.clone();
+        let permit = sem.clone().acquire_owned().await.unwrap();
         match msg {
             FsMessage::LookUp {
                 request,
@@ -152,7 +153,7 @@ async fn fuse_mount_receiver(
                 reply,
             } => tokio::task::spawn(async move {
                 handle_resp(handler.look_up(request, parent, &name).await, reply).await;
-                sem.add_permits(1);
+                drop(permit);
             }),
             FsMessage::GetAttr {
                 request,
@@ -160,7 +161,7 @@ async fn fuse_mount_receiver(
                 reply,
             } => tokio::task::spawn(async move {
                 handle_resp(handler.get_attr(request, ino).await, reply).await;
-                sem.add_permits(1);
+                drop(permit);
             }),
             FsMessage::Read {
                 request,
@@ -179,7 +180,7 @@ async fn fuse_mount_receiver(
                     reply,
                 )
                 .await;
-                sem.add_permits(1);
+                drop(permit);
             }),
             FsMessage::ReadDir {
                 request,
@@ -189,12 +190,11 @@ async fn fuse_mount_receiver(
                 reply,
             } => tokio::task::spawn(async move {
                 handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await;
-                sem.add_permits(1);
+                drop(permit);
             }),
         };
-        outstanding_tasks += 1;
     }
-    sem.acquire_many(outstanding_tasks).await?.forget();
+    sem.acquire_many(MAX_INFLIGHT as u32 / 2).await?.forget();
     Ok(())
 }
 
