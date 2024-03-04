@@ -7,11 +7,13 @@ use maelstrom_linux::Errno;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
+use tokio::sync::Semaphore;
 
 pub async fn fuse_mount(
-    handler: impl FuseFileSystem + Send + 'static,
+    handler: impl FuseFileSystem + Send + Sync + 'static,
     mount_point: &Path,
     name: &str,
 ) -> Result<()> {
@@ -62,58 +64,90 @@ trait Response {
     fn send(self, reply: Self::Reply);
 }
 
-async fn handle_resp<RespT: Response>(res: ErrnoResult<RespT>, reply: RespT::Reply) {
-    tokio::task::block_in_place(move || match res {
+async fn handle_resp<RespT: Response>(res: ErrnoResult<RespT>, reply: RespT::Reply)
+where
+    RespT: Send + 'static,
+    RespT::Reply: Send + 'static,
+{
+    tokio::task::spawn_blocking(move || match res {
         Ok(resp) => resp.send(reply),
         Err(e) => reply.error(e.as_i32()),
     })
+    .await
+    .unwrap()
 }
 
 async fn handle_read_dir_resp(
     res: ErrnoResult<impl Stream<Item = ErrnoResult<DirEntry>>>,
     mut reply: ReplyDirectory,
 ) {
+    let (send, mut recv) = channel::<ErrnoResult<DirEntry>>(100);
+    let blocking_handle = tokio::task::spawn_blocking(move || loop {
+        match recv.blocking_recv() {
+            Some(Ok(entry)) => {
+                if entry.add(&mut reply) {
+                    return;
+                }
+            }
+            Some(Err(e)) => {
+                reply.error(e.as_i32());
+                return;
+            }
+            None => {
+                reply.ok();
+                return;
+            }
+        }
+    });
     match res {
         Ok(stream) => {
             let mut pinned_stream = pin!(stream);
             while let Some(entry) = pinned_stream.next().await {
-                match entry {
-                    Ok(entry) => {
-                        if tokio::task::block_in_place(|| entry.add(&mut reply)) {
-                            return;
-                        }
-                    }
-                    Err(e) => {
-                        tokio::task::block_in_place(move || reply.error(e.as_i32()));
-                        return;
-                    }
+                let is_err = entry.is_err();
+                if send.send(entry).await.is_err() {
+                    break;
+                }
+                if is_err {
+                    break;
                 }
             }
-            tokio::task::block_in_place(move || reply.ok());
         }
         Err(e) => {
-            tokio::task::block_in_place(move || reply.error(e.as_i32()));
+            send.send(Err(e)).await.unwrap();
         }
     }
+    drop(send);
+    blocking_handle.await.unwrap();
 }
 
 async fn fuse_mount_receiver(
-    mut handler: impl FuseFileSystem + Send,
+    handler: impl FuseFileSystem + Send + Sync + 'static,
     mut recv: Receiver<FsMessage>,
 ) -> Result<()> {
+    let handler = Arc::new(handler);
+    let sem = Arc::new(Semaphore::new(0));
+    let mut outstanding_tasks = 0;
     while let Some(msg) = recv.recv().await {
+        let handler = handler.clone();
+        let sem = sem.clone();
         match msg {
             FsMessage::LookUp {
                 request,
                 parent,
                 name,
                 reply,
-            } => handle_resp(handler.look_up(request, parent, &name).await, reply).await,
+            } => tokio::task::spawn(async move {
+                handle_resp(handler.look_up(request, parent, &name).await, reply).await;
+                sem.add_permits(1);
+            }),
             FsMessage::GetAttr {
                 request,
                 ino,
                 reply,
-            } => handle_resp(handler.get_attr(request, ino).await, reply).await,
+            } => tokio::task::spawn(async move {
+                handle_resp(handler.get_attr(request, ino).await, reply).await;
+                sem.add_permits(1);
+            }),
             FsMessage::Read {
                 request,
                 ino,
@@ -123,26 +157,30 @@ async fn fuse_mount_receiver(
                 flags,
                 lock_owner,
                 reply,
-            } => {
+            } => tokio::task::spawn(async move {
                 handle_resp(
                     handler
                         .read(request, ino, fh, offset, size, flags, lock_owner)
                         .await,
                     reply,
                 )
-                .await
-            }
+                .await;
+                sem.add_permits(1);
+            }),
             FsMessage::ReadDir {
                 request,
                 ino,
                 fh,
                 offset,
                 reply,
-            } => {
-                handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await
-            }
-        }
+            } => tokio::task::spawn(async move {
+                handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await;
+                sem.add_permits(1);
+            }),
+        };
+        outstanding_tasks += 1;
     }
+    sem.acquire_many(outstanding_tasks).await?.forget();
     Ok(())
 }
 
@@ -305,7 +343,7 @@ impl DirEntry {
 #[async_trait]
 pub trait FuseFileSystem {
     async fn look_up(
-        &mut self,
+        &self,
         _req: Request,
         _parent: u64,
         _name: &OsStr,
@@ -313,7 +351,7 @@ pub trait FuseFileSystem {
         Err(Errno::ENOSYS)
     }
 
-    async fn get_attr(&mut self, _req: Request, _ino: u64) -> ErrnoResult<AttrResponse> {
+    async fn get_attr(&self, _req: Request, _ino: u64) -> ErrnoResult<AttrResponse> {
         Err(Errno::ENOSYS)
     }
 
@@ -330,7 +368,7 @@ pub trait FuseFileSystem {
 
     #[allow(clippy::too_many_arguments)]
     async fn read(
-        &mut self,
+        &self,
         _req: Request,
         _ino: u64,
         _fh: u64,
@@ -366,7 +404,7 @@ pub trait FuseFileSystem {
         Self: 'a;
 
     async fn read_dir<'a>(
-        &'a mut self,
+        &'a self,
         _req: Request,
         _ino: u64,
         _fh: u64,

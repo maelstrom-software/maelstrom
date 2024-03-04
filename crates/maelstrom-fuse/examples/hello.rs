@@ -56,7 +56,7 @@ struct HelloFs;
 #[async_trait]
 impl FuseFileSystem for HelloFs {
     async fn look_up(
-        &mut self,
+        &self,
         _req: Request,
         parent: u64,
         name: &OsStr,
@@ -72,7 +72,7 @@ impl FuseFileSystem for HelloFs {
         }
     }
 
-    async fn get_attr(&mut self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
+    async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
         match ino {
             1 => Ok(AttrResponse {
                 ttl: TTL,
@@ -87,7 +87,7 @@ impl FuseFileSystem for HelloFs {
     }
 
     async fn read(
-        &mut self,
+        &self,
         _req: Request,
         ino: u64,
         _fh: u64,
@@ -108,7 +108,7 @@ impl FuseFileSystem for HelloFs {
     type ReadDirStream<'a> = futures::stream::Iter<std::vec::IntoIter<ErrnoResult<DirEntry>>>;
 
     async fn read_dir<'a>(
-        &'a mut self,
+        &'a self,
         _req: Request,
         ino: u64,
         _fh: u64,
