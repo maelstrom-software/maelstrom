@@ -10,6 +10,7 @@ use maelstrom_linux::Errno;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
+use tokio::io::AsyncBufReadExt as _;
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
@@ -146,5 +147,14 @@ struct CliOptions {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = CliOptions::parse();
-    maelstrom_fuse::fuse_mount(HelloFs, &args.mount_path, "hello").await
+    let handle = maelstrom_fuse::fuse_mount(HelloFs, &args.mount_path, "hello").await?;
+
+    // wait for newline on stdin
+    println!("press enter to exit");
+    let _ = tokio::io::BufReader::new(tokio::io::stdin())
+        .lines()
+        .next_line()
+        .await;
+
+    handle.join().await
 }

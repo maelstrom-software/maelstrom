@@ -12,29 +12,43 @@ use std::time::Duration;
 use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 use tokio::sync::Semaphore;
 
+pub struct FuseHandle {
+    fuser_session: fuser::BackgroundSession,
+    receiver: tokio::task::JoinHandle<Result<()>>,
+}
+
+impl FuseHandle {
+    pub async fn join(self) -> Result<()> {
+        drop(self.fuser_session);
+        self.receiver.await?
+    }
+}
+
 pub async fn fuse_mount(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     mount_point: &Path,
     name: &str,
-) -> Result<()> {
+) -> Result<FuseHandle> {
     let mount_point = mount_point.to_owned();
     let name = name.into();
     let (send, recv) = channel(1000);
 
-    let sender_thread =
-        tokio::task::spawn_blocking(move || fuse_mount_sender(send, mount_point, name));
-    let receiver_task = tokio::task::spawn(async move { fuse_mount_receiver(handler, recv).await });
+    let fuser_session = fuse_mount_sender(send, mount_point, name)?;
+    let receiver = tokio::task::spawn(async move { fuse_mount_receiver(handler, recv).await });
 
-    let receiver_result = receiver_task.await;
-    let sender_result = sender_thread.await;
-    receiver_result??;
-    sender_result??;
-    Ok(())
+    Ok(FuseHandle {
+        fuser_session,
+        receiver,
+    })
 }
 
-fn fuse_mount_sender(send: Sender<FsMessage>, mount_point: PathBuf, name: String) -> Result<()> {
+fn fuse_mount_sender(
+    send: Sender<FsMessage>,
+    mount_point: PathBuf,
+    name: String,
+) -> Result<fuser::BackgroundSession> {
     let options = vec![MountOption::RO, MountOption::FSName(name)];
-    Ok(fuser::mount2(SendingFs(send), mount_point, &options)?)
+    Ok(fuser::spawn_mount2(SendingFs(send), mount_point, &options)?)
 }
 
 trait ErrorResponse {
