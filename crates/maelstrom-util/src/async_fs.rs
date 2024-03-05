@@ -65,6 +65,21 @@ impl ReadDir {
             .with_context(|| format!("read_dir(\"{}\")", self.path.display()))?;
         Ok(entry.map(|inner| DirEntry { inner }))
     }
+
+    pub fn poll_next_entry(&mut self, cx: &mut Context<'_>) -> Poll<Result<Option<DirEntry>>> {
+        self.inner.poll_next_entry(cx).map(|res| {
+            res.with_context(|| format!("read_dir(\"{}\")", self.path.display()))
+                .map(|inner_option| inner_option.map(|inner| DirEntry { inner }))
+        })
+    }
+}
+
+impl futures::Stream for ReadDir {
+    type Item = Result<DirEntry>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.poll_next_entry(cx).map(Result::transpose)
+    }
 }
 
 pub struct DirEntry {
