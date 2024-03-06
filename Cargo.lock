@@ -1868,6 +1868,7 @@ dependencies = [
  "log",
  "memchr",
  "page_size",
+ "serde",
  "smallvec",
  "zerocopy",
 ]
@@ -2841,9 +2842,15 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "derive_more",
  "fuser",
  "futures",
+ "maelstrom-base",
  "maelstrom-linux",
+ "maelstrom-util",
+ "serde",
+ "serde_repr",
+ "tempfile",
  "tokio",
 ]
 

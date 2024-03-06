@@ -12,10 +12,16 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+derive_more.workspace = true
 fuser.workspace = true
 futures.workspace = true
+maelstrom-base.workspace = true
 maelstrom-linux.workspace = true
-tokio = { workspace = true, features = [ "sync" ] }
+maelstrom-util.workspace = true
+serde_repr.workspace = true
+serde.workspace = true
+tokio = { workspace = true, features = [ "io-std", "sync" ] }
 
 [dev-dependencies]
 clap.workspace = true
+tempfile.workspace = true

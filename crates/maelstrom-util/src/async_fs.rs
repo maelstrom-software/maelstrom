@@ -2,6 +2,7 @@ pub use crate::fs::Metadata;
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
 use futures_lite::stream::StreamExt;
+use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
@@ -89,6 +90,10 @@ pub struct DirEntry {
 impl DirEntry {
     pub fn path(&self) -> PathBuf {
         self.inner.path()
+    }
+
+    pub fn file_name(&self) -> OsString {
+        self.inner.file_name()
     }
 
     pub async fn metadata(&self) -> Result<Metadata> {
