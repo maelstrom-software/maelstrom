@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Progress bars for uploads being done to the broker
 - `canonicalize` layer option added to glob and paths layer
 - `follow-symlinks` option added to glob and paths layer
+- `fuse` device option for `/dev/fuse`
 
 ### Changed
 - Tweaked spinner text to provide more information

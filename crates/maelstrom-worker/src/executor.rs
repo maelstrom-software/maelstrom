@@ -560,6 +560,7 @@ impl Executor {
         for device in spec.devices.iter() {
             let (source, target, device_name) = match device {
                 JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
+                JobDevice::Fuse => (c_str!("/dev/fuse"), c_str!("./dev/fuse"), "/dev/fuse"),
                 JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null"), "/dev/null"),
                 JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random"), "/dev/random"),
                 JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty"), "/dev/tty"),

@@ -64,6 +64,7 @@ pub struct JobId {
 #[enumset(serialize_deny_unknown)]
 pub enum JobDevice {
     Full,
+    Fuse,
     Null,
     Random,
     Tty,
@@ -76,6 +77,7 @@ pub enum JobDevice {
 #[enumset(serialize_repr = "list")]
 pub enum JobDeviceListDeserialize {
     Full,
+    Fuse,
     Null,
     Random,
     Tty,
@@ -87,6 +89,7 @@ impl From<JobDeviceListDeserialize> for JobDevice {
     fn from(value: JobDeviceListDeserialize) -> JobDevice {
         match value {
             JobDeviceListDeserialize::Full => JobDevice::Full,
+            JobDeviceListDeserialize::Fuse => JobDevice::Fuse,
             JobDeviceListDeserialize::Null => JobDevice::Null,
             JobDeviceListDeserialize::Random => JobDevice::Random,
             JobDeviceListDeserialize::Tty => JobDevice::Tty,

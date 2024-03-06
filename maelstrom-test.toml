@@ -44,6 +44,11 @@ layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
+filter = "package.equals(maelstrom-fuse)"
+added_layers = [{ stubs = [ "dev/fuse" ] }]
+added_devices = ["fuse"]
+
+[[directives]]
 filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
 image.name = "alpine"
 image.use = ["layers", "environment"]

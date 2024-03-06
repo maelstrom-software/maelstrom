@@ -83,7 +83,8 @@ path. The path for the device must have some (usually empty) file in the layers
 that the device can be mounted on.
 
 The supported devices are
-- `"full"`: All supported devices
+- `"full"`: `/dev/full`
+- `"fuse"`: `/dev/fuse`
 - `"null"`: `/dev/null`
 - `"random"`: `/dev/random`
 - `"tty"`: `/dev/tty`

@@ -81,11 +81,12 @@ message LayerSpec {
 
 enum JobDevice {
     Full = 0;
-    Null = 1;
-    Random = 2;
-    Tty = 3;
-    Urandom = 4;
-    Zero = 5;
+    Fuse = 1;
+    Null = 2;
+    Random = 3;
+    Tty = 4;
+    Urandom = 5;
+    Zero = 6;
 }
 
 enum JobMountFsType {
