@@ -48,7 +48,7 @@ impl<'fs> DirectoryDataReader<'fs> {
         let entry: DirectoryEntry = decode(&mut self.stream).await?;
         let offset = i64::try_from(self.stream.stream_position().await?).unwrap();
         Ok(Some(fuse::DirEntry {
-            ino: entry.value.file_id.into(),
+            ino: entry.value.file_id.as_u64(),
             offset: offset - i64::try_from(self.entry_begin).unwrap(),
             kind: entry.value.kind,
             name: entry.key,

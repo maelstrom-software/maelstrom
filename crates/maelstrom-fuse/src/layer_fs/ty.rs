@@ -1,20 +1,30 @@
 use crate::fuse::{ErrnoResult, FileType};
 use anyhow::Result;
-use derive_more::{From, Into};
+use derive_more::Into;
 use maelstrom_linux::Errno;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::fmt;
+use std::num::NonZeroU64;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[derive(Copy, Clone, Debug, From, Into, Deserialize, Serialize)]
-pub struct FileId(u64);
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct FileId(NonZeroU64);
 
 impl FileId {
-    pub const ROOT: Self = Self(1);
+    #[allow(dead_code)]
+    pub const ROOT: Self = Self(NonZeroU64::MIN);
 
     pub fn as_u64(&self) -> u64 {
-        self.0
+        self.0.get()
+    }
+}
+
+impl TryFrom<u64> for FileId {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(v: u64) -> std::result::Result<Self, Self::Error> {
+        Ok(Self(NonZeroU64::try_from(v)?))
     }
 }
 

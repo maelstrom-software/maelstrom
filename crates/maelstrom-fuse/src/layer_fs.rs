@@ -74,7 +74,8 @@ impl LayerFs {
 impl FuseFileSystem for LayerFs {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
         let name = name.to_str().ok_or(Errno::EINVAL)?;
-        let mut reader = to_eio(DirectoryDataReader::new(self, FileId::from(parent)).await)?;
+        let parent = FileId::try_from(parent).map_err(|_| Errno::EINVAL)?;
+        let mut reader = to_eio(DirectoryDataReader::new(self, parent).await)?;
         let child_id = to_eio(reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
         let attrs = self.get_attr(req, child_id.as_u64()).await?;
         Ok(EntryResponse {
@@ -113,7 +114,8 @@ impl FuseFileSystem for LayerFs {
         _fh: u64,
         offset: i64,
     ) -> ErrnoResult<Self::ReadDirStream<'a>> {
-        let reader = to_eio(DirectoryDataReader::new(self, FileId::from(ino)).await)?;
+        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let reader = to_eio(DirectoryDataReader::new(self, file).await)?;
         Ok(to_eio(reader.into_stream(offset.try_into()?).await)?)
     }
 }
@@ -139,7 +141,7 @@ async fn read_dir_and_look_up() {
             .insert_entry(
                 name,
                 ty::DirectoryEntryData {
-                    file_id: 2.into(),
+                    file_id: 2.try_into().unwrap(),
                     kind: FileType::RegularFile,
                 },
             )
