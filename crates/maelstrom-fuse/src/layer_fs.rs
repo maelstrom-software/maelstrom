@@ -1,3 +1,5 @@
+#[allow(dead_code)]
+mod avl;
 mod dir;
 mod ty;
 
