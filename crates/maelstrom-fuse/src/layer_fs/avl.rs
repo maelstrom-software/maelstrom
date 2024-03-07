@@ -41,13 +41,26 @@ impl<KeyT, ValueT> AvlNode<KeyT, ValueT> {
 pub trait AvlStorage {
     type Key;
     type Value;
+
+    /// Get the stored root pointer
     async fn root(&self) -> Result<Option<AvlPtr>>;
+
+    /// Set the stored root pointer
     async fn set_root(&mut self, root: AvlPtr) -> Result<()>;
+
+    /// Get a node at the given pointer
     async fn lookup(&self, ptr: AvlPtr) -> Result<AvlNode<Self::Key, Self::Value>>;
+
+    /// Replace a node at the given pointer. N.B. It is important that a node is never replaced
+    /// with a different key or value, this is just for updating the AVL properties
     async fn update(&mut self, ptr: AvlPtr, value: AvlNode<Self::Key, Self::Value>) -> Result<()>;
+
+    /// Add a new node and return its pointer
     async fn insert(&mut self, node: AvlNode<Self::Key, Self::Value>) -> Result<AvlPtr>;
 }
 
+/// An async error capable AVL tree backed something implementing AvlStorage trait. It is intended
+/// that the storage trait store entries on disk somehow.
 pub struct AvlTree<StorageT> {
     storage: StorageT,
 }
@@ -60,6 +73,9 @@ where
         Self { storage }
     }
 
+    /// Insert a key-value pair in the AVL tree. If there already exists an entry with the given
+    /// key, nothing is inserted, and `false` is returned. Otherwise it is inserted and `true` is
+    /// returned.
     pub async fn insert_if_not_exists(
         &mut self,
         key: StorageT::Key,
@@ -79,6 +95,7 @@ where
         }
     }
 
+    /// Get the value for the given key if it exists in the tree, otherwise `None`
     pub async fn get(&self, key: &StorageT::Key) -> Result<Option<StorageT::Value>> {
         let Some((candidate_path, ordering)) = self.binary_search(key).await? else {
             return Ok(None);
@@ -150,6 +167,7 @@ where
         Ok(())
     }
 
+    /// An sorted iterator over all the entries in the tree
     pub async fn entries(
         &self,
     ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>> + '_> {
