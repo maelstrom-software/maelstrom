@@ -43,13 +43,13 @@ pub trait AvlStorage {
     type Value;
 
     /// Get the stored root pointer
-    async fn root(&self) -> Result<Option<AvlPtr>>;
+    async fn root(&mut self) -> Result<Option<AvlPtr>>;
 
     /// Set the stored root pointer
     async fn set_root(&mut self, root: AvlPtr) -> Result<()>;
 
     /// Get a node at the given pointer
-    async fn lookup(&self, ptr: AvlPtr) -> Result<AvlNode<Self::Key, Self::Value>>;
+    async fn look_up(&mut self, ptr: AvlPtr) -> Result<AvlNode<Self::Key, Self::Value>>;
 
     /// Replace a node at the given pointer. N.B. It is important that a node is never replaced
     /// with a different key or value, this is just for updating the AVL properties
@@ -96,7 +96,7 @@ where
     }
 
     /// Get the value for the given key if it exists in the tree, otherwise `None`
-    pub async fn get(&self, key: &StorageT::Key) -> Result<Option<StorageT::Value>> {
+    pub async fn get(&mut self, key: &StorageT::Key) -> Result<Option<StorageT::Value>> {
         let Some((candidate_path, ordering)) = self.binary_search(key).await? else {
             return Ok(None);
         };
@@ -104,18 +104,21 @@ where
             return Ok(None);
         }
         let candidate = *candidate_path.last().unwrap();
-        let node = self.storage.lookup(candidate).await?;
+        let node = self.storage.look_up(candidate).await?;
         Ok(Some(node.value))
     }
 
-    async fn binary_search(&self, key: &StorageT::Key) -> Result<Option<(Vec<AvlPtr>, Ordering)>> {
+    async fn binary_search(
+        &mut self,
+        key: &StorageT::Key,
+    ) -> Result<Option<(Vec<AvlPtr>, Ordering)>> {
         let Some(mut current_ptr) = self.storage.root().await? else {
             return Ok(None);
         };
         let mut path = vec![];
         loop {
             path.push(current_ptr);
-            let current = self.storage.lookup(current_ptr).await?;
+            let current = self.storage.look_up(current_ptr).await?;
             let ordering = key.cmp(&current.key);
             match ordering {
                 Ordering::Less => {
@@ -148,7 +151,7 @@ where
     ) -> Result<()> {
         let parent = *parent_path.last().unwrap();
         let ptr = self.storage.insert(AvlNode::new(key, value)).await?;
-        let mut parent_node = self.storage.lookup(parent).await?;
+        let mut parent_node = self.storage.look_up(parent).await?;
         match ordering {
             Ordering::Less => {
                 assert!(parent_node.left.is_none());
@@ -169,7 +172,7 @@ where
 
     /// An sorted iterator over all the entries in the tree
     pub async fn entries(
-        &self,
+        &mut self,
     ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>> + '_> {
         let walker = AvlTreeWalker::new(self).await?;
         Ok(futures::stream::unfold(walker, |mut walker| async move {
@@ -188,7 +191,7 @@ where
     }
 
     async fn retrace_one(&mut self, c_ptr: AvlPtr) -> Result<Option<(AvlPtr, AvlPtr)>> {
-        let mut c = self.storage.lookup(c_ptr).await?;
+        let mut c = self.storage.look_up(c_ptr).await?;
         let balance_factor = self.balance_factor(&c).await?;
         if !(-1..=1).contains(&balance_factor) {
             Ok(Some((c_ptr, self.rebalance(c_ptr, balance_factor).await?)))
@@ -205,7 +208,7 @@ where
         old_child: AvlPtr,
         new_child: AvlPtr,
     ) -> Result<()> {
-        let mut parent = self.storage.lookup(parent_ptr).await?;
+        let mut parent = self.storage.look_up(parent_ptr).await?;
         if parent.left == Some(old_child) {
             parent.left = Some(new_child);
         } else {
@@ -229,19 +232,22 @@ where
         Ok(())
     }
 
-    async fn balance_factor_ptr(&self, node: AvlPtr) -> Result<i32> {
-        let node = self.storage.lookup(node).await?;
+    async fn balance_factor_ptr(&mut self, node: AvlPtr) -> Result<i32> {
+        let node = self.storage.look_up(node).await?;
         self.balance_factor(&node).await
     }
 
-    async fn balance_factor(&self, node: &AvlNode<StorageT::Key, StorageT::Value>) -> Result<i32> {
+    async fn balance_factor(
+        &mut self,
+        node: &AvlNode<StorageT::Key, StorageT::Value>,
+    ) -> Result<i32> {
         let right_height = self.get_height(node.right).await?;
         let left_height = self.get_height(node.left).await?;
         Ok(right_height as i32 - left_height as i32)
     }
 
     async fn rebalance(&mut self, node_ptr: AvlPtr, balance_factor: i32) -> Result<AvlPtr> {
-        let node = self.storage.lookup(node_ptr).await?;
+        let node = self.storage.look_up(node_ptr).await?;
         if balance_factor > 0 {
             if self.balance_factor_ptr(node.right.unwrap()).await? < 0 {
                 Ok(self.do_right_left_rotation(node_ptr).await?)
@@ -255,18 +261,18 @@ where
         }
     }
 
-    async fn get_height(&self, node: Option<AvlPtr>) -> Result<u32> {
+    async fn get_height(&mut self, node: Option<AvlPtr>) -> Result<u32> {
         if let Some(node) = node {
-            Ok(self.storage.lookup(node).await?.height)
+            Ok(self.storage.look_up(node).await?.height)
         } else {
             Ok(0)
         }
     }
 
     async fn do_left_rotation(&mut self, old_root_ptr: AvlPtr) -> Result<AvlPtr> {
-        let mut old_root = self.storage.lookup(old_root_ptr).await?;
+        let mut old_root = self.storage.look_up(old_root_ptr).await?;
         let new_root_ptr = old_root.right.take().unwrap();
-        let mut new_root = self.storage.lookup(new_root_ptr).await?;
+        let mut new_root = self.storage.look_up(new_root_ptr).await?;
         let old_left = new_root.left.replace(old_root_ptr);
         old_root.right = old_left;
 
@@ -278,10 +284,10 @@ where
     }
 
     async fn do_right_left_rotation(&mut self, old_root_ptr: AvlPtr) -> Result<AvlPtr> {
-        let mut old_root = self.storage.lookup(old_root_ptr).await?;
+        let mut old_root = self.storage.look_up(old_root_ptr).await?;
         let mut new_root_ptr = old_root.right.take().unwrap();
         new_root_ptr = self.do_right_rotation(new_root_ptr).await?;
-        let mut new_root = self.storage.lookup(new_root_ptr).await?;
+        let mut new_root = self.storage.look_up(new_root_ptr).await?;
         let old_left = new_root.left.replace(old_root_ptr);
         old_root.right = old_left;
 
@@ -293,9 +299,9 @@ where
     }
 
     async fn do_right_rotation(&mut self, old_root_ptr: AvlPtr) -> Result<AvlPtr> {
-        let mut old_root = self.storage.lookup(old_root_ptr).await?;
+        let mut old_root = self.storage.look_up(old_root_ptr).await?;
         let new_root_ptr = old_root.left.take().unwrap();
-        let mut new_root = self.storage.lookup(new_root_ptr).await?;
+        let mut new_root = self.storage.look_up(new_root_ptr).await?;
         let old_right = new_root.right.replace(old_root_ptr);
         old_root.left = old_right;
 
@@ -307,10 +313,10 @@ where
     }
 
     async fn do_left_right_rotation(&mut self, old_root_ptr: AvlPtr) -> Result<AvlPtr> {
-        let mut old_root = self.storage.lookup(old_root_ptr).await?;
+        let mut old_root = self.storage.look_up(old_root_ptr).await?;
         let mut new_root_ptr = old_root.left.take().unwrap();
         new_root_ptr = self.do_left_rotation(new_root_ptr).await?;
-        let mut new_root = self.storage.lookup(new_root_ptr).await?;
+        let mut new_root = self.storage.look_up(new_root_ptr).await?;
         let old_right = new_root.right.replace(old_root_ptr);
         old_root.left = old_right;
 
@@ -322,17 +328,17 @@ where
     }
 
     #[cfg(test)]
-    async fn height_of(&self, node_ptr: Option<AvlPtr>) -> Result<usize> {
+    async fn height_of(&mut self, node_ptr: Option<AvlPtr>) -> Result<usize> {
         let Some(node_ptr) = node_ptr else {
             return Ok(0);
         };
-        let node = self.storage.lookup(node_ptr).await?;
+        let node = self.storage.look_up(node_ptr).await?;
         let mut layer: Vec<_> = [node.left, node.right].into_iter().flatten().collect();
         let mut next_layer = vec![];
         let mut height = 1;
         while !layer.is_empty() {
             for entry in layer {
-                let node = self.storage.lookup(entry).await?;
+                let node = self.storage.look_up(entry).await?;
                 next_layer.extend([node.left, node.right].into_iter().flatten());
             }
             layer = next_layer;
@@ -343,10 +349,10 @@ where
     }
 
     #[cfg(test)]
-    async fn assert_invariants(&self) -> Result<()> {
+    async fn assert_invariants(&mut self) -> Result<()> {
         let mut next: Vec<_> = self.storage.root().await?.into_iter().collect();
         while let Some(current) = next.pop() {
-            let node = self.storage.lookup(current).await?;
+            let node = self.storage.look_up(current).await?;
             let left_height = self.height_of(node.left).await? as isize;
             let right_height = self.height_of(node.right).await? as isize;
             let balance_factor = left_height - right_height;
@@ -369,20 +375,20 @@ impl<StorageT: AvlStorage> AvlTree<StorageT>
 where
     StorageT::Key: PartialEq + Eq + PartialOrd + Ord + std::fmt::Debug,
 {
-    async fn print(&self) -> Result<()> {
+    async fn print(&mut self) -> Result<()> {
         println!("tree:");
         let Some(node_ptr) = self.storage.root().await? else {
             println!("<empty>");
             return Ok(());
         };
-        let node = self.storage.lookup(node_ptr).await?;
+        let node = self.storage.look_up(node_ptr).await?;
         println!("{:?}(h={}) ", node.key, node.height);
         let mut layer = vec![node.left, node.right];
         let mut next_layer = vec![];
         while !layer.is_empty() {
             for entry in layer {
                 if let Some(entry) = entry {
-                    let node = self.storage.lookup(entry).await?;
+                    let node = self.storage.look_up(entry).await?;
                     print!("{:?}(h={}) ", node.key, node.height);
                     next_layer.extend([node.left, node.right]);
                 } else {
@@ -406,12 +412,12 @@ enum Visited {
 }
 
 struct AvlTreeWalker<'tree, StorageT> {
-    tree: &'tree AvlTree<StorageT>,
+    tree: &'tree mut AvlTree<StorageT>,
     stack: Vec<(AvlPtr, Visited)>,
 }
 
 impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
-    async fn new(tree: &'tree AvlTree<StorageT>) -> Result<Self> {
+    async fn new(tree: &'tree mut AvlTree<StorageT>) -> Result<Self> {
         let mut stack = vec![];
         if let Some(current) = tree.storage.root().await? {
             stack.push((current, Visited::None));
@@ -421,7 +427,7 @@ impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
 
     async fn advance(&mut self) -> Result<()> {
         let (ptr, state) = self.stack.pop().unwrap();
-        let node = self.tree.storage.lookup(ptr).await?;
+        let node = self.tree.storage.look_up(ptr).await?;
         match state {
             Visited::None => {
                 self.stack.push((ptr, Visited::Left));
@@ -455,7 +461,7 @@ impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
 
         let (top, _) = self.stack.pop().unwrap();
         self.stack.push((top, Visited::Own));
-        let top = self.tree.storage.lookup(top).await?;
+        let top = self.tree.storage.look_up(top).await?;
         Ok(Some((top.key, top.value)))
     }
 }
@@ -477,7 +483,7 @@ mod tests {
         type Key = u32;
         type Value = u32;
 
-        async fn root(&self) -> Result<Option<AvlPtr>> {
+        async fn root(&mut self) -> Result<Option<AvlPtr>> {
             Ok(self.root)
         }
 
@@ -486,7 +492,7 @@ mod tests {
             Ok(())
         }
 
-        async fn lookup(&self, key: AvlPtr) -> Result<AvlNode<u32, u32>> {
+        async fn look_up(&mut self, key: AvlPtr) -> Result<AvlNode<u32, u32>> {
             Ok(self.values[key.as_u64() as usize - 1].clone())
         }
 
