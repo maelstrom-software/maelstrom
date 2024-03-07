@@ -216,6 +216,21 @@ impl Fs {
         })
     }
 
+    pub async fn create_file_read_write<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+        let path = path.as_ref();
+        Ok(File {
+            inner: tokio::fs::File::options()
+                .create(true)
+                .read(true)
+                .write(true)
+                .open(path)
+                .await
+                .with_context(|| format!("create(\"{}\")", path.display()))?,
+            path: path.into(),
+            fs: self,
+        })
+    }
+
     pub async fn canonicalize<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
         fs_trampoline!(tokio::fs::canonicalize, path)
     }

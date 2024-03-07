@@ -132,6 +132,7 @@ where
     }
 
     /// Get the value for the given key if it exists in the tree, otherwise `None`
+    #[allow(dead_code)]
     pub async fn get(&mut self, key: &StorageT::Key) -> Result<Option<StorageT::Value>> {
         let Some((candidate_path, ordering)) = self.binary_search(key).await? else {
             return Ok(None);
@@ -207,6 +208,7 @@ where
     }
 
     /// An sorted iterator over all the entries in the tree
+    #[allow(dead_code)]
     pub async fn entries(
         &mut self,
     ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>> + '_> {

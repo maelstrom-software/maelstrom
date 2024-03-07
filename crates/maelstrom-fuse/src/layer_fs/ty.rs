@@ -10,6 +10,14 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[derive(Copy, Clone, Debug, From, Into, Deserialize, Serialize)]
 pub struct FileId(u64);
 
+impl FileId {
+    pub const ROOT: Self = Self(1);
+
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
 impl fmt::Display for FileId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -28,8 +36,7 @@ impl TryFrom<i64> for DirectoryOffset {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DirectoryEntry {
-    pub name: String,
+pub struct DirectoryEntryData {
     pub file_id: FileId,
     pub kind: FileType,
 }
@@ -39,12 +46,6 @@ pub struct DirectoryEntry {
 pub enum LayerFsVersion {
     #[default]
     V0 = 0,
-}
-
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-pub struct DirectoryDataHeader {
-    pub version: LayerFsVersion,
-    pub root: DirectoryOffset,
 }
 
 pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> Result<T> {

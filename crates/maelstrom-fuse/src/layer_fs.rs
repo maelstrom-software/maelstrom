@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 mod avl;
 mod dir;
 mod ty;
@@ -73,13 +72,16 @@ impl LayerFs {
 
 #[async_trait]
 impl FuseFileSystem for LayerFs {
-    async fn look_up(
-        &self,
-        _req: Request,
-        _parent: u64,
-        _name: &OsStr,
-    ) -> ErrnoResult<EntryResponse> {
-        Err(Errno::ENOENT)
+    async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
+        let name = name.to_str().ok_or(Errno::EINVAL)?;
+        let mut reader = to_eio(DirectoryDataReader::new(self, FileId::from(parent)).await)?;
+        let child_id = to_eio(reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
+        let attrs = self.get_attr(req, child_id.as_u64()).await?;
+        Ok(EntryResponse {
+            attr: attrs.attr,
+            ttl: TTL,
+            generation: 0,
+        })
     }
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
@@ -117,7 +119,7 @@ impl FuseFileSystem for LayerFs {
 }
 
 #[tokio::test]
-async fn read_dir() {
+async fn read_dir_and_look_up() {
     use futures::StreamExt as _;
 
     let temp = tempfile::tempdir().unwrap();
@@ -128,23 +130,40 @@ async fn read_dir() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let mut stream = fs.create_file(data_dir.join("1.dir_data")).await.unwrap();
-    let entries = vec![ty::DirectoryEntry {
-        name: "Foo".into(),
-        file_id: 2.into(),
-        kind: FileType::RegularFile,
-    }];
-    for entry in &entries {
-        ty::encode(&mut stream, entry).await.unwrap();
+    let layer_fs = LayerFs::new(&data_dir);
+    let mut writer = dir::DirectoryDataWriter::new(&layer_fs, FileId::ROOT)
+        .await
+        .unwrap();
+    for name in ["Foo", "Bar", "Baz"] {
+        writer
+            .insert_entry(
+                name,
+                ty::DirectoryEntryData {
+                    file_id: 2.into(),
+                    kind: FileType::RegularFile,
+                },
+            )
+            .await
+            .unwrap();
     }
 
-    let layer_fs = LayerFs::new(&data_dir);
     layer_fs
         .mount(&mount_point, async {
             let entry_stream = fs.read_dir(&mount_point).await.unwrap();
             let mut entries: Vec<_> = entry_stream.map(|e| e.unwrap().file_name()).collect().await;
             entries.sort();
-            assert_eq!(entries, vec![std::ffi::OsString::from("Foo")]);
+            assert_eq!(
+                entries,
+                vec![
+                    std::ffi::OsString::from("Bar"),
+                    std::ffi::OsString::from("Baz"),
+                    std::ffi::OsString::from("Foo"),
+                ]
+            );
+
+            fs.metadata(mount_point.join("Bar")).await.unwrap();
+            fs.metadata(mount_point.join("Baz")).await.unwrap();
+            fs.metadata(mount_point.join("Foo")).await.unwrap();
         })
         .await
         .unwrap()
