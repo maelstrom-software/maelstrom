@@ -488,7 +488,7 @@ mod tests {
         }
     }
 
-    async fn insert_iter_get_test(mut expected: Vec<u32>) {
+    async fn test_it(mut expected: Vec<u32>) {
         let mut tree = AvlTree::new(MemoryStorage::default());
         for v in &expected {
             tree.insert(*v, *v).await.unwrap().assert_is_none();
@@ -509,13 +509,53 @@ mod tests {
 
     #[tokio::test]
     async fn insert_iter_get() {
-        insert_iter_get_test(vec![11, 7]).await;
-        insert_iter_get_test(vec![11, 7, 5, 9, 2, 1]).await;
-        insert_iter_get_test(vec![7, 2, 5, 88, 1]).await;
-        insert_iter_get_test(vec![100, 7, 200, 1, 222, 3]).await;
-        insert_iter_get_test(vec![]).await;
-        insert_iter_get_test((0..100).collect()).await;
-        insert_iter_get_test((0..100).rev().collect()).await;
+        test_it(vec![11, 7]).await;
+        test_it(vec![11, 7, 5, 9, 2, 1]).await;
+        test_it(vec![7, 2, 5, 88, 1]).await;
+        test_it(vec![100, 7, 200, 1, 222, 3]).await;
+        test_it(vec![
+            67, 77, 23, 43, 65, 3, 61, 60, 34, 56, 68, 85, 2, 99, 45, 93, 74, 54, 92, 90,
+        ])
+        .await;
+        test_it(vec![
+            4, 50, 83, 29, 13, 88, 51, 89, 6, 99, 30, 19, 44, 18, 96, 43, 59, 57, 65, 78,
+        ])
+        .await;
+        test_it(vec![
+            67, 71, 96, 8, 89, 62, 12, 76, 55, 13, 74, 36, 85, 24, 69, 27, 37, 81, 19, 73,
+        ])
+        .await;
+        test_it(vec![
+            99, 1, 59, 87, 86, 34, 36, 50, 78, 66, 28, 81, 56, 69, 71, 7, 62, 16, 74, 48,
+        ])
+        .await;
+        test_it(vec![
+            13, 21, 90, 81, 54, 32, 52, 25, 29, 5, 19, 75, 33, 68, 49, 41, 55, 42, 37, 6,
+        ])
+        .await;
+        test_it(vec![
+            68, 2, 59, 4, 0, 56, 47, 70, 58, 19, 8, 61, 28, 35, 1, 13, 63, 29, 46, 69,
+        ])
+        .await;
+        test_it(vec![
+            70, 62, 17, 75, 93, 4, 6, 56, 11, 30, 32, 47, 9, 96, 33, 18, 58, 82, 85, 60,
+        ])
+        .await;
+        test_it(vec![
+            20, 13, 60, 57, 21, 73, 63, 0, 9, 5, 82, 48, 39, 2, 23, 88, 40, 83, 42, 94,
+        ])
+        .await;
+        test_it(vec![
+            53, 26, 83, 51, 27, 9, 23, 99, 39, 34, 3, 10, 32, 77, 40, 72, 93, 12, 66, 96,
+        ])
+        .await;
+        test_it(vec![
+            23, 83, 80, 49, 5, 96, 15, 28, 74, 90, 64, 0, 67, 76, 9, 87, 55, 75, 99, 60,
+        ])
+        .await;
+        test_it(vec![]).await;
+        test_it((0..100).collect()).await;
+        test_it((0..100).rev().collect()).await;
     }
 
     #[tokio::test]
