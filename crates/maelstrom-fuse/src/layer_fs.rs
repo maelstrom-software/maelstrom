@@ -1,20 +1,21 @@
 mod avl;
 mod dir;
+mod file;
 mod ty;
 
 use crate::{
-    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadResponse,
-    Request,
+    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadResponse, Request,
 };
 use anyhow::Result;
 use async_trait::async_trait;
 use dir::{DirectoryDataReader, DirectoryStream};
+use file::FileMetadataReader;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 use ty::FileId;
 
 fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
@@ -22,24 +23,6 @@ fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
-
-const TEST_ATTR: FileAttr = FileAttr {
-    ino: 1,
-    size: 0,
-    blocks: 0,
-    atime: UNIX_EPOCH, // 1970-01-01 00:00:00
-    mtime: UNIX_EPOCH,
-    ctime: UNIX_EPOCH,
-    crtime: UNIX_EPOCH,
-    kind: FileType::Directory,
-    perm: 0o755,
-    nlink: 2,
-    uid: 501,
-    gid: 20,
-    rdev: 0,
-    flags: 0,
-    blksize: 512,
-};
 
 pub struct LayerFs {
     data_fs: Fs,
@@ -55,7 +38,15 @@ impl LayerFs {
     }
 
     fn dir_data_path(&self, file_id: FileId) -> PathBuf {
-        self.data_dir.join(format!("{file_id}.dir_data"))
+        self.data_dir.join(format!("{file_id}.dir_data.bin"))
+    }
+
+    fn file_table_path(&self) -> PathBuf {
+        self.data_dir.join("file_table.bin")
+    }
+
+    fn attributes_table_path(&self) -> PathBuf {
+        self.data_dir.join("attributes_table.bin")
     }
 
     pub async fn mount<RetT>(
@@ -86,9 +77,28 @@ impl FuseFileSystem for LayerFs {
     }
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
+        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let mut reader = to_eio(FileMetadataReader::new(self).await)?;
+        let (kind, attrs) = to_eio(reader.get_attr(file).await)?;
         Ok(AttrResponse {
             ttl: TTL,
-            attr: FileAttr { ino, ..TEST_ATTR },
+            attr: FileAttr {
+                ino,
+                size: attrs.size,
+                blocks: 0,
+                atime: attrs.mtime.into(),
+                mtime: attrs.mtime.into(),
+                ctime: attrs.mtime.into(),
+                crtime: attrs.mtime.into(),
+                kind,
+                perm: u32::from(attrs.mode) as u16,
+                nlink: 1,
+                uid: 1000,
+                gid: 1000,
+                rdev: 0,
+                flags: 0,
+                blksize: 512,
+            },
         })
     }
 
@@ -120,6 +130,57 @@ impl FuseFileSystem for LayerFs {
     }
 }
 
+#[cfg(test)]
+const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
+    maelstrom_base::manifest::UnixTimestamp(1705000271);
+
+#[cfg(test)]
+async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
+    use maelstrom_base::manifest::Mode;
+
+    let mut dir_writer = dir::DirectoryDataWriter::new(layer_fs, FileId::ROOT)
+        .await
+        .unwrap();
+    let mut file_writer = file::FileMetadataWriter::new(layer_fs).await.unwrap();
+    let root = file_writer
+        .insert_file(
+            crate::FileType::Directory,
+            ty::FileAttributes {
+                size: 0,
+                mode: Mode(0o777),
+                mtime: ARBITRARY_TIME,
+            },
+            ty::FileData::Empty,
+        )
+        .await
+        .unwrap();
+    assert_eq!(root, FileId::ROOT);
+    for name in file_names {
+        let file_id = file_writer
+            .insert_file(
+                crate::FileType::RegularFile,
+                ty::FileAttributes {
+                    size: 0,
+                    mode: Mode(0o555),
+                    mtime: ARBITRARY_TIME,
+                },
+                ty::FileData::Empty,
+            )
+            .await
+            .unwrap();
+        dir_writer
+            .insert_entry(
+                name,
+                ty::DirectoryEntryData {
+                    file_id,
+                    kind: crate::FileType::RegularFile,
+                },
+            )
+            .await
+            .unwrap();
+    }
+}
+
 #[tokio::test]
 async fn read_dir_and_look_up() {
     use futures::StreamExt as _;
@@ -133,21 +194,7 @@ async fn read_dir_and_look_up() {
     fs.create_dir(&data_dir).await.unwrap();
 
     let layer_fs = LayerFs::new(&data_dir);
-    let mut writer = dir::DirectoryDataWriter::new(&layer_fs, FileId::ROOT)
-        .await
-        .unwrap();
-    for name in ["Foo", "Bar", "Baz"] {
-        writer
-            .insert_entry(
-                name,
-                ty::DirectoryEntryData {
-                    file_id: 2.try_into().unwrap(),
-                    kind: FileType::RegularFile,
-                },
-            )
-            .await
-            .unwrap();
-    }
+    build_fs(&layer_fs, vec!["Foo", "Bar", "Baz"]).await;
 
     layer_fs
         .mount(&mount_point, async {
@@ -166,6 +213,35 @@ async fn read_dir_and_look_up() {
             fs.metadata(mount_point.join("Bar")).await.unwrap();
             fs.metadata(mount_point.join("Baz")).await.unwrap();
             fs.metadata(mount_point.join("Foo")).await.unwrap();
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn get_attr() {
+    use maelstrom_base::manifest::Mode;
+    use std::os::unix::fs::MetadataExt as _;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+
+    let layer_fs = LayerFs::new(&data_dir);
+    build_fs(&layer_fs, vec!["Foo", "Bar", "Baz"]).await;
+
+    layer_fs
+        .mount(&mount_point, async {
+            for name in ["Foo", "Bar", "Baz"] {
+                let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+                assert_eq!(attrs.len(), 0);
+                assert_eq!(Mode(attrs.mode()), Mode(0o100555));
+                assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
+            }
         })
         .await
         .unwrap()

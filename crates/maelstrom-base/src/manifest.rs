@@ -43,6 +43,16 @@ impl From<UnixTimestamp> for i64 {
     }
 }
 
+impl From<UnixTimestamp> for std::time::SystemTime {
+    fn from(t: UnixTimestamp) -> Self {
+        if t.0 < 0 {
+            std::time::UNIX_EPOCH - std::time::Duration::from_secs(u64::try_from(-t.0).unwrap())
+        } else {
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(t.0).unwrap())
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct ManifestEntryMetadata {
     pub size: u64,

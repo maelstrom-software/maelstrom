@@ -1,6 +1,7 @@
 use crate::fuse::{ErrnoResult, FileType};
 use anyhow::Result;
 use derive_more::Into;
+use maelstrom_base::manifest::{Mode, UnixTimestamp};
 use maelstrom_linux::Errno;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -8,7 +9,7 @@ use std::fmt;
 use std::num::NonZeroU64;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FileId(NonZeroU64);
 
 impl FileId {
@@ -56,6 +57,43 @@ pub struct DirectoryEntryData {
 pub enum LayerFsVersion {
     #[default]
     V0 = 0,
+}
+
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct AttributesId(NonZeroU64);
+
+impl AttributesId {
+    pub fn as_u64(&self) -> u64 {
+        self.0.get()
+    }
+}
+
+impl TryFrom<u64> for AttributesId {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(v: u64) -> std::result::Result<Self, Self::Error> {
+        Ok(Self(NonZeroU64::try_from(v)?))
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FileAttributes {
+    pub size: u64,
+    pub mode: Mode,
+    pub mtime: UnixTimestamp,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum FileData {
+    Empty,
+    Inline(Vec<u8>),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct FileTableEntry {
+    pub kind: FileType,
+    pub data: FileData,
+    pub attr_id: AttributesId,
 }
 
 pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> Result<T> {
