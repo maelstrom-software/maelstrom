@@ -1,7 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use std::cmp::{self, Ordering};
-use std::mem;
 use std::num::NonZeroU64;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -61,26 +60,22 @@ where
         Self { storage }
     }
 
-    pub async fn insert(
+    pub async fn insert_if_not_exists(
         &mut self,
         key: StorageT::Key,
         value: StorageT::Value,
-    ) -> Result<Option<StorageT::Value>> {
+    ) -> Result<bool> {
         if let Some((found, ordering)) = self.binary_search(&key).await? {
             if ordering == Ordering::Equal {
-                let found = *found.last().unwrap();
-                let mut existing = self.storage.lookup(found).await?;
-                let old_value = mem::replace(&mut existing.value, value);
-                self.storage.update(found, existing).await?;
-                Ok(Some(old_value))
+                Ok(false)
             } else {
                 self.add_child(found, ordering, key, value).await?;
-                Ok(None)
+                Ok(true)
             }
         } else {
             let ptr = self.storage.insert(AvlNode::new(key, value)).await?;
             self.storage.set_root(ptr).await?;
-            Ok(None)
+            Ok(true)
         }
     }
 
@@ -451,7 +446,7 @@ impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
 mod tests {
     use super::*;
     use futures::StreamExt as _;
-    use maelstrom_util::ext::OptionExt as _;
+    use maelstrom_util::ext::BoolExt as _;
 
     #[derive(Default)]
     struct MemoryStorage {
@@ -491,7 +486,10 @@ mod tests {
     async fn test_it(mut expected: Vec<u32>) {
         let mut tree = AvlTree::new(MemoryStorage::default());
         for v in &expected {
-            tree.insert(*v, *v).await.unwrap().assert_is_none();
+            tree.insert_if_not_exists(*v, *v)
+                .await
+                .unwrap()
+                .assert_is_true();
             tree.print().await.unwrap();
             tree.assert_invariants().await.unwrap();
         }
@@ -561,9 +559,18 @@ mod tests {
     #[tokio::test]
     async fn get_not_found() {
         let mut tree = AvlTree::new(MemoryStorage::default());
-        tree.insert(1, 4).await.unwrap().assert_is_none();
-        tree.insert(2, 5).await.unwrap().assert_is_none();
-        tree.insert(3, 6).await.unwrap().assert_is_none();
+        tree.insert_if_not_exists(1, 4)
+            .await
+            .unwrap()
+            .assert_is_true();
+        tree.insert_if_not_exists(2, 5)
+            .await
+            .unwrap()
+            .assert_is_true();
+        tree.insert_if_not_exists(3, 6)
+            .await
+            .unwrap()
+            .assert_is_true();
         assert_eq!(tree.get(&7).await.unwrap(), None);
     }
 }
