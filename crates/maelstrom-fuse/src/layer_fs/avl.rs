@@ -1,9 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, FromInto};
 use std::cmp::{self, Ordering};
 use std::num::NonZeroU64;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AvlPtr(NonZeroU64);
 
 impl AvlPtr {
@@ -16,12 +18,33 @@ impl AvlPtr {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct FlatAvlPtrOption(u64);
+
+impl From<Option<AvlPtr>> for FlatAvlPtrOption {
+    fn from(o: Option<AvlPtr>) -> Self {
+        Self(o.map(|v| v.as_u64()).unwrap_or(0))
+    }
+}
+
+impl From<FlatAvlPtrOption> for Option<AvlPtr> {
+    fn from(p: FlatAvlPtrOption) -> Self {
+        AvlPtr::new(p.0)
+    }
+}
+
+#[serde_as]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AvlNode<KeyT, ValueT> {
     pub key: KeyT,
     pub value: ValueT,
     height: u32,
+
+    #[serde_as(as = "FromInto<FlatAvlPtrOption>")]
     left: Option<AvlPtr>,
+
+    #[serde_as(as = "FromInto<FlatAvlPtrOption>")]
     right: Option<AvlPtr>,
 }
 
@@ -35,6 +58,19 @@ impl<KeyT, ValueT> AvlNode<KeyT, ValueT> {
             right: None,
         }
     }
+}
+
+#[test]
+fn avl_node_encoding_size_remains_same() {
+    use maelstrom_base::proto;
+
+    let mut n = AvlNode::new(12, 13);
+    let start_size = proto::serialized_size(&n).unwrap();
+    n.left = Some(AvlPtr::new(77).unwrap());
+    n.right = Some(AvlPtr::new(88).unwrap());
+    n.height = 100;
+    let end_size = proto::serialized_size(&n).unwrap();
+    assert_eq!(start_size, end_size);
 }
 
 #[async_trait]

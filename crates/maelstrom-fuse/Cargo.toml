@@ -18,8 +18,9 @@ futures.workspace = true
 maelstrom-base.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
-serde_repr.workspace = true
 serde.workspace = true
+serde_repr.workspace = true
+serde_with.workspace = true
 tokio = { workspace = true, features = [ "io-std", "sync" ] }
 
 [dev-dependencies]
