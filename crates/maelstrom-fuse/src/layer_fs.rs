@@ -4,7 +4,8 @@ mod file;
 mod ty;
 
 use crate::{
-    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadResponse, Request,
+    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadResponse,
+    Request,
 };
 use anyhow::Result;
 use async_trait::async_trait;
@@ -16,7 +17,7 @@ use std::ffi::OsStr;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use ty::FileId;
+use ty::{FileData, FileId};
 
 fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
     res.map_err(|_| Errno::EIO)
@@ -105,14 +106,33 @@ impl FuseFileSystem for LayerFs {
     async fn read(
         &self,
         _req: Request,
-        _ino: u64,
+        ino: u64,
         _fh: u64,
-        _offset: i64,
-        _size: u32,
+        offset: i64,
+        size: u32,
         _flags: i32,
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
-        unimplemented!()
+        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let mut reader = to_eio(FileMetadataReader::new(self).await)?;
+        let (kind, data) = to_eio(reader.get_data(file).await)?;
+        if kind != FileType::RegularFile {
+            return Err(Errno::EINVAL);
+        }
+        match data {
+            FileData::Empty => Ok(ReadResponse { data: vec![] }),
+            FileData::Inline(inline) => {
+                let offset = usize::try_from(offset).map_err(|_| Errno::EINVAL)?;
+                if offset >= inline.len() {
+                    return Err(Errno::EINVAL);
+                }
+                let size = std::cmp::min(size as usize, inline.len() - offset);
+
+                Ok(ReadResponse {
+                    data: inline[offset..(offset + size)].to_vec(),
+                })
+            }
+        }
     }
 
     type ReadDirStream<'a> = DirectoryStream<'a>;
@@ -135,7 +155,7 @@ const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
     maelstrom_base::manifest::UnixTimestamp(1705000271);
 
 #[cfg(test)]
-async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
+async fn build_fs(layer_fs: &LayerFs, files: Vec<(&str, FileData)>) {
     use maelstrom_base::manifest::Mode;
 
     let mut dir_writer = dir::DirectoryDataWriter::new(layer_fs, FileId::ROOT)
@@ -144,7 +164,7 @@ async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
     let mut file_writer = file::FileMetadataWriter::new(layer_fs).await.unwrap();
     let root = file_writer
         .insert_file(
-            crate::FileType::Directory,
+            FileType::Directory,
             ty::FileAttributes {
                 size: 0,
                 mode: Mode(0o777),
@@ -155,16 +175,20 @@ async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
         .await
         .unwrap();
     assert_eq!(root, FileId::ROOT);
-    for name in file_names {
+    for (name, data) in files {
+        let size = match &data {
+            ty::FileData::Empty => 0,
+            ty::FileData::Inline(d) => d.len() as u64,
+        };
         let file_id = file_writer
             .insert_file(
-                crate::FileType::RegularFile,
+                FileType::RegularFile,
                 ty::FileAttributes {
-                    size: 0,
+                    size,
                     mode: Mode(0o555),
                     mtime: ARBITRARY_TIME,
                 },
-                ty::FileData::Empty,
+                data,
             )
             .await
             .unwrap();
@@ -173,7 +197,7 @@ async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
                 name,
                 ty::DirectoryEntryData {
                     file_id,
-                    kind: crate::FileType::RegularFile,
+                    kind: FileType::RegularFile,
                 },
             )
             .await
@@ -184,6 +208,7 @@ async fn build_fs(layer_fs: &LayerFs, file_names: Vec<&str>) {
 #[tokio::test]
 async fn read_dir_and_look_up() {
     use futures::StreamExt as _;
+    use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -194,7 +219,11 @@ async fn read_dir_and_look_up() {
     fs.create_dir(&data_dir).await.unwrap();
 
     let layer_fs = LayerFs::new(&data_dir);
-    build_fs(&layer_fs, vec!["Foo", "Bar", "Baz"]).await;
+    build_fs(
+        &layer_fs,
+        vec![("Foo", Empty), ("Bar", Empty), ("Baz", Empty)],
+    )
+    .await;
 
     layer_fs
         .mount(&mount_point, async {
@@ -222,6 +251,7 @@ async fn read_dir_and_look_up() {
 async fn get_attr() {
     use maelstrom_base::manifest::Mode;
     use std::os::unix::fs::MetadataExt as _;
+    use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -232,7 +262,11 @@ async fn get_attr() {
     fs.create_dir(&data_dir).await.unwrap();
 
     let layer_fs = LayerFs::new(&data_dir);
-    build_fs(&layer_fs, vec!["Foo", "Bar", "Baz"]).await;
+    build_fs(
+        &layer_fs,
+        vec![("Foo", Empty), ("Bar", Empty), ("Baz", Empty)],
+    )
+    .await;
 
     layer_fs
         .mount(&mount_point, async {
@@ -242,6 +276,41 @@ async fn get_attr() {
                 assert_eq!(Mode(attrs.mode()), Mode(0o100555));
                 assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
             }
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn read_inline() {
+    use ty::FileData::*;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+
+    let layer_fs = LayerFs::new(&data_dir);
+    build_fs(
+        &layer_fs,
+        vec![
+            ("Foo", Inline(b"hello world".into())),
+            ("Bar", Empty),
+            ("Baz", Empty),
+        ],
+    )
+    .await;
+
+    layer_fs
+        .mount(&mount_point, async {
+            let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+            assert_eq!(contents, "hello world");
+
+            let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+            assert_eq!(contents, "");
         })
         .await
         .unwrap()

@@ -54,6 +54,15 @@ impl<'fs> FileMetadataReader<'fs> {
 
         Ok((entry.kind, attrs))
     }
+
+    pub async fn get_data(&mut self, id: FileId) -> Result<(FileType, FileData)> {
+        self.file_table
+            .seek(SeekFrom::Start(self.file_table_start + id.as_u64() - 1))
+            .await?;
+        let entry: FileTableEntry = decode(&mut self.file_table).await?;
+
+        Ok((entry.kind, entry.data))
+    }
 }
 
 #[derive(Copy, Clone, Default, Debug, Deserialize, Serialize)]
