@@ -14,7 +14,6 @@ use file::FileMetadataReader;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
-use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use ty::{FileData, FileId};
@@ -50,15 +49,8 @@ impl LayerFs {
         self.data_dir.join("attributes_table.bin")
     }
 
-    pub async fn mount<RetT>(
-        self,
-        mount_path: &Path,
-        body: impl Future<Output = RetT>,
-    ) -> Result<RetT> {
-        let handle = crate::fuse_mount(self, mount_path, "Maelstrom LayerFS").await?;
-        let ret = body.await;
-        handle.join().await?;
-        Ok(ret)
+    pub async fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
+        crate::fuse_mount(self, mount_path, "Maelstrom LayerFS").await
     }
 }
 
@@ -225,26 +217,25 @@ async fn read_dir_and_look_up() {
     )
     .await;
 
-    layer_fs
-        .mount(&mount_point, async {
-            let entry_stream = fs.read_dir(&mount_point).await.unwrap();
-            let mut entries: Vec<_> = entry_stream.map(|e| e.unwrap().file_name()).collect().await;
-            entries.sort();
-            assert_eq!(
-                entries,
-                vec![
-                    std::ffi::OsString::from("Bar"),
-                    std::ffi::OsString::from("Baz"),
-                    std::ffi::OsString::from("Foo"),
-                ]
-            );
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
 
-            fs.metadata(mount_point.join("Bar")).await.unwrap();
-            fs.metadata(mount_point.join("Baz")).await.unwrap();
-            fs.metadata(mount_point.join("Foo")).await.unwrap();
-        })
-        .await
-        .unwrap()
+    let entry_stream = fs.read_dir(&mount_point).await.unwrap();
+    let mut entries: Vec<_> = entry_stream.map(|e| e.unwrap().file_name()).collect().await;
+    entries.sort();
+    assert_eq!(
+        entries,
+        vec![
+            std::ffi::OsString::from("Bar"),
+            std::ffi::OsString::from("Baz"),
+            std::ffi::OsString::from("Foo"),
+        ]
+    );
+
+    fs.metadata(mount_point.join("Bar")).await.unwrap();
+    fs.metadata(mount_point.join("Baz")).await.unwrap();
+    fs.metadata(mount_point.join("Foo")).await.unwrap();
+
+    mount_handle.umount_and_join().await.unwrap();
 }
 
 #[tokio::test]
@@ -268,17 +259,16 @@ async fn get_attr() {
     )
     .await;
 
-    layer_fs
-        .mount(&mount_point, async {
-            for name in ["Foo", "Bar", "Baz"] {
-                let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
-                assert_eq!(attrs.len(), 0);
-                assert_eq!(Mode(attrs.mode()), Mode(0o100555));
-                assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
-            }
-        })
-        .await
-        .unwrap()
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+
+    for name in ["Foo", "Bar", "Baz"] {
+        let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+        assert_eq!(attrs.len(), 0);
+        assert_eq!(Mode(attrs.mode()), Mode(0o100555));
+        assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
+    }
+
+    mount_handle.umount_and_join().await.unwrap();
 }
 
 #[tokio::test]
@@ -304,14 +294,13 @@ async fn read_inline() {
     )
     .await;
 
-    layer_fs
-        .mount(&mount_point, async {
-            let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
-            assert_eq!(contents, "hello world");
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
 
-            let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
-            assert_eq!(contents, "");
-        })
-        .await
-        .unwrap()
+    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
+    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+    assert_eq!(contents, "");
+
+    mount_handle.umount_and_join().await.unwrap();
 }

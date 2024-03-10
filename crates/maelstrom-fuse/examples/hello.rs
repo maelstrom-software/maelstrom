@@ -156,5 +156,5 @@ async fn main() -> Result<()> {
         .next_line()
         .await;
 
-    handle.join().await
+    handle.umount_and_join().await
 }

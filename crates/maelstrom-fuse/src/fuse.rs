@@ -20,7 +20,7 @@ pub struct FuseHandle {
 }
 
 impl FuseHandle {
-    pub async fn join(self) -> Result<()> {
+    pub async fn umount_and_join(self) -> Result<()> {
         drop(self.fuser_session);
         self.receiver.await?
     }
