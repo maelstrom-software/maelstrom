@@ -3,11 +3,47 @@ use anyhow::Result;
 use derive_more::Into;
 use maelstrom_base::manifest::{Mode, UnixTimestamp};
 use maelstrom_linux::Errno;
+use maelstrom_util::async_fs::Fs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::collections::HashMap;
 use std::fmt;
 use std::num::NonZeroU64;
+use std::path::Path;
+use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
+#[derive(Copy, Clone, Debug, Hash, Deserialize, Serialize, PartialEq, Eq)]
+pub struct LayerId(u64);
+
+impl LayerId {
+    pub const ZERO: Self = Self(0);
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LayerSuper {
+    layer_id: LayerId,
+    lower_layers: HashMap<LayerId, PathBuf>,
+}
+
+impl Default for LayerSuper {
+    fn default() -> Self {
+        Self {
+            layer_id: LayerId::ZERO,
+            lower_layers: Default::default(),
+        }
+    }
+}
+
+impl LayerSuper {
+    pub async fn read_from_path(fs: &Fs, path: &Path) -> Result<Self> {
+        decode(fs.open_file(path).await?).await
+    }
+
+    pub async fn write_to_path(&self, fs: &Fs, path: &Path) -> Result<()> {
+        encode(fs.create_file(path).await?, self).await
+    }
+}
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FileId(NonZeroU64);

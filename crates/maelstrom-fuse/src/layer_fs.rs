@@ -16,7 +16,7 @@ use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use ty::{FileData, FileId};
+use ty::{FileData, FileId, LayerSuper};
 
 fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
     res.map_err(|_| Errno::EIO)
@@ -27,14 +27,38 @@ const TTL: Duration = Duration::from_secs(1); // 1 second
 pub struct LayerFs {
     data_fs: Fs,
     data_dir: PathBuf,
+    #[allow(dead_code)]
+    layer_super: LayerSuper,
 }
 
 impl LayerFs {
-    pub fn new(data_dir: &Path) -> Self {
-        Self {
-            data_fs: Fs::new(),
-            data_dir: data_dir.to_owned(),
-        }
+    pub async fn from_path(data_dir: &Path) -> Result<Self> {
+        let data_fs = Fs::new();
+        let data_dir = data_dir.to_owned();
+
+        let layer_super = LayerSuper::read_from_path(&data_fs, &data_dir.join("super.bin")).await?;
+
+        Ok(Self {
+            data_fs,
+            data_dir,
+            layer_super,
+        })
+    }
+
+    pub async fn new(data_dir: &Path) -> Result<Self> {
+        let data_fs = Fs::new();
+        let data_dir = data_dir.to_owned();
+
+        let layer_super = LayerSuper::default();
+        layer_super
+            .write_to_path(&data_fs, &data_dir.join("super.bin"))
+            .await?;
+
+        Ok(Self {
+            data_fs,
+            data_dir,
+            layer_super,
+        })
     }
 
     fn dir_data_path(&self, file_id: FileId) -> PathBuf {
@@ -210,7 +234,7 @@ async fn read_dir_and_look_up() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir);
+    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
     build_fs(
         &layer_fs,
         vec![("Foo", Empty), ("Bar", Empty), ("Baz", Empty)],
@@ -252,7 +276,7 @@ async fn get_attr() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir);
+    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
     build_fs(
         &layer_fs,
         vec![("Foo", Empty), ("Bar", Empty), ("Baz", Empty)],
@@ -283,7 +307,7 @@ async fn read_inline() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir);
+    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
     build_fs(
         &layer_fs,
         vec![
