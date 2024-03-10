@@ -24,7 +24,7 @@ impl<'fs> DirectoryDataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
         let mut stream = layer_fs
             .data_fs
-            .open_file(layer_fs.dir_data_path(file_id))
+            .open_file(layer_fs.dir_data_path(file_id)?)
             .await?;
         let length = stream.metadata().await?.len();
         let _header: DirectoryEntryStorageHeader = decode(&mut stream).await?;
@@ -160,7 +160,7 @@ impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
         let mut stream = layer_fs
             .data_fs
-            .create_file_read_write(layer_fs.dir_data_path(file_id))
+            .create_file_read_write(layer_fs.dir_data_path(file_id)?)
             .await?;
         encode(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
         Ok(Self {

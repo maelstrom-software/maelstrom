@@ -7,7 +7,7 @@ use crate::{
     AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadResponse,
     Request,
 };
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use dir::{DirectoryDataReader, DirectoryStream};
 use file::FileMetadataReader;
@@ -16,7 +16,7 @@ use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use ty::{FileData, FileId, LayerSuper};
+use ty::{FileData, FileId, LayerId, LayerSuper};
 
 fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
     res.map_err(|_| Errno::EIO)
@@ -26,8 +26,7 @@ const TTL: Duration = Duration::from_secs(1); // 1 second
 
 pub struct LayerFs {
     data_fs: Fs,
-    data_dir: PathBuf,
-    #[allow(dead_code)]
+    top_layer_path: PathBuf,
     layer_super: LayerSuper,
 }
 
@@ -40,7 +39,7 @@ impl LayerFs {
 
         Ok(Self {
             data_fs,
-            data_dir,
+            top_layer_path: data_dir,
             layer_super,
         })
     }
@@ -56,21 +55,34 @@ impl LayerFs {
 
         Ok(Self {
             data_fs,
-            data_dir,
+            top_layer_path: data_dir,
             layer_super,
         })
     }
 
-    fn dir_data_path(&self, file_id: FileId) -> PathBuf {
-        self.data_dir.join(format!("{file_id}.dir_data.bin"))
+    fn data_path(&self, layer_id: LayerId) -> Result<&PathBuf> {
+        if layer_id == self.layer_super.layer_id {
+            Ok(&self.top_layer_path)
+        } else {
+            self.layer_super
+                .lower_layers
+                .get(&layer_id)
+                .ok_or(anyhow!("unknown layer {layer_id:?}"))
+        }
     }
 
-    fn file_table_path(&self) -> PathBuf {
-        self.data_dir.join("file_table.bin")
+    fn dir_data_path(&self, file_id: FileId) -> Result<PathBuf> {
+        Ok(self
+            .data_path(file_id.layer())?
+            .join(format!("{}.dir_data.bin", file_id.offset())))
     }
 
-    fn attributes_table_path(&self) -> PathBuf {
-        self.data_dir.join("attributes_table.bin")
+    fn file_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        Ok(self.data_path(layer_id)?.join("file_table.bin"))
+    }
+
+    fn attributes_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        Ok(self.data_path(layer_id)?.join("attributes_table.bin"))
     }
 
     pub async fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
@@ -95,7 +107,7 @@ impl FuseFileSystem for LayerFs {
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(FileMetadataReader::new(self).await)?;
+        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
         let (kind, attrs) = to_eio(reader.get_attr(file).await)?;
         Ok(AttrResponse {
             ttl: TTL,
@@ -130,7 +142,7 @@ impl FuseFileSystem for LayerFs {
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(FileMetadataReader::new(self).await)?;
+        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
         let (kind, data) = to_eio(reader.get_data(file).await)?;
         if kind != FileType::RegularFile {
             return Err(Errno::EINVAL);
@@ -174,10 +186,12 @@ const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
 async fn build_fs(layer_fs: &LayerFs, files: Vec<(&str, FileData)>) {
     use maelstrom_base::manifest::Mode;
 
-    let mut dir_writer = dir::DirectoryDataWriter::new(layer_fs, FileId::ROOT)
+    let mut dir_writer = dir::DirectoryDataWriter::new(layer_fs, FileId::root(LayerId::ZERO))
         .await
         .unwrap();
-    let mut file_writer = file::FileMetadataWriter::new(layer_fs).await.unwrap();
+    let mut file_writer = file::FileMetadataWriter::new(layer_fs, LayerId::ZERO)
+        .await
+        .unwrap();
     let root = file_writer
         .insert_file(
             FileType::Directory,
@@ -190,7 +204,7 @@ async fn build_fs(layer_fs: &LayerFs, files: Vec<(&str, FileData)>) {
         )
         .await
         .unwrap();
-    assert_eq!(root, FileId::ROOT);
+    assert_eq!(root, FileId::root(LayerId::ZERO));
     for (name, data) in files {
         let size = match &data {
             ty::FileData::Empty => 0,

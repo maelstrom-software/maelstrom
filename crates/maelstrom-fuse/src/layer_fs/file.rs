@@ -1,5 +1,6 @@
 use crate::layer_fs::ty::{
     decode, encode, AttributesId, FileAttributes, FileData, FileId, FileTableEntry, LayerFsVersion,
+    LayerId,
 };
 use crate::layer_fs::LayerFs;
 use crate::FileType;
@@ -14,20 +15,21 @@ pub struct FileMetadataReader<'fs> {
     file_table_start: u64,
     attr_table: File<'fs>,
     attr_table_start: u64,
+    layer_id: LayerId,
 }
 
 impl<'fs> FileMetadataReader<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs) -> Result<Self> {
+    pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
         let mut file_table = layer_fs
             .data_fs
-            .open_file(layer_fs.file_table_path())
+            .open_file(layer_fs.file_table_path(layer_id)?)
             .await?;
         let _header: FileTableHeader = decode(&mut file_table).await?;
         let file_table_start = file_table.stream_position().await?;
 
         let mut attr_table = layer_fs
             .data_fs
-            .open_file(layer_fs.attributes_table_path())
+            .open_file(layer_fs.attributes_table_path(layer_id)?)
             .await?;
         let _header: AttributesTableHeader = decode(&mut attr_table).await?;
         let attr_table_start = attr_table.stream_position().await?;
@@ -36,18 +38,21 @@ impl<'fs> FileMetadataReader<'fs> {
             file_table_start,
             attr_table,
             attr_table_start,
+            layer_id,
         })
     }
 
     pub async fn get_attr(&mut self, id: FileId) -> Result<(FileType, FileAttributes)> {
+        assert_eq!(id.layer(), self.layer_id);
+
         self.file_table
-            .seek(SeekFrom::Start(self.file_table_start + id.as_u64() - 1))
+            .seek(SeekFrom::Start(self.file_table_start + id.offset() - 1))
             .await?;
         let entry: FileTableEntry = decode(&mut self.file_table).await?;
 
         self.attr_table
             .seek(SeekFrom::Start(
-                self.attr_table_start + entry.attr_id.as_u64() - 1,
+                self.attr_table_start + entry.attr_id.offset() - 1,
             ))
             .await?;
         let attrs: FileAttributes = decode(&mut self.attr_table).await?;
@@ -56,8 +61,10 @@ impl<'fs> FileMetadataReader<'fs> {
     }
 
     pub async fn get_data(&mut self, id: FileId) -> Result<(FileType, FileData)> {
+        assert_eq!(id.layer(), self.layer_id);
+
         self.file_table
-            .seek(SeekFrom::Start(self.file_table_start + id.as_u64() - 1))
+            .seek(SeekFrom::Start(self.file_table_start + id.offset() - 1))
             .await?;
         let entry: FileTableEntry = decode(&mut self.file_table).await?;
 
@@ -85,17 +92,17 @@ pub struct FileMetadataWriter<'fs> {
 
 #[allow(dead_code)]
 impl<'fs> FileMetadataWriter<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs) -> Result<Self> {
+    pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
         let mut file_table = layer_fs
             .data_fs
-            .create_file_read_write(layer_fs.file_table_path())
+            .create_file_read_write(layer_fs.file_table_path(layer_id)?)
             .await?;
         encode(&mut file_table, &FileTableHeader::default()).await?;
         let file_table_start = file_table.stream_position().await?;
 
         let mut attr_table = layer_fs
             .data_fs
-            .create_file_read_write(layer_fs.attributes_table_path())
+            .create_file_read_write(layer_fs.attributes_table_path(layer_id)?)
             .await?;
         encode(&mut attr_table, &AttributesTableHeader::default()).await?;
         let attr_table_start = file_table.stream_position().await?;
