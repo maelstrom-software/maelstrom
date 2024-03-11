@@ -1,4 +1,5 @@
-use crate::fuse::{ErrnoResult, FileType};
+use crate::fuse::ErrnoResult;
+pub use crate::fuse::FileType;
 use anyhow::Result;
 use derive_more::{From, Into};
 use maelstrom_base::manifest::{Mode, UnixTimestamp};
@@ -16,7 +17,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 pub struct LayerId(u32);
 
 impl LayerId {
-    pub const ZERO: Self = Self(0);
+    pub const BOTTOM: Self = Self(0);
 
     pub fn as_u32(&self) -> u32 {
         self.0
@@ -32,7 +33,7 @@ pub struct LayerSuper {
 impl Default for LayerSuper {
     fn default() -> Self {
         Self {
-            layer_id: LayerId::ZERO,
+            layer_id: LayerId::BOTTOM,
             lower_layers: Default::default(),
         }
     }

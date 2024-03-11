@@ -6,7 +6,7 @@ pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
 
-pub use camino::{Utf8Path, Utf8PathBuf};
+pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use derive_more::{Constructor, Display, From};
 use enumset::EnumSetType;
 pub use enumset::{enum_set, EnumSet};

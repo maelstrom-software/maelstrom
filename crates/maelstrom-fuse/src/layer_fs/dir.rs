@@ -4,7 +4,6 @@ use crate::layer_fs::ty::{
     decode, encode, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
 };
 use crate::layer_fs::{to_eio, LayerFs};
-use anyhow::anyhow;
 use anyhow::Result;
 use async_trait::async_trait;
 use maelstrom_util::async_fs::File;
@@ -158,11 +157,12 @@ pub struct DirectoryDataWriter<'fs> {
 #[allow(dead_code)]
 impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
-        let mut stream = layer_fs
-            .data_fs
-            .create_file_read_write(layer_fs.dir_data_path(file_id)?)
-            .await?;
-        encode(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
+        let path = layer_fs.dir_data_path(file_id)?;
+        let existing = layer_fs.data_fs.exists(&path).await;
+        let mut stream = layer_fs.data_fs.open_or_create_file(path).await?;
+        if !existing {
+            encode(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
+        }
         Ok(Self {
             tree: AvlTree::new(DirectoryEntryStorage::new(stream)),
         })
@@ -172,14 +172,9 @@ impl<'fs> DirectoryDataWriter<'fs> {
         &mut self,
         entry_name: &str,
         entry_data: DirectoryEntryData,
-    ) -> Result<()> {
-        let inserted = self
-            .tree
+    ) -> Result<bool> {
+        self.tree
             .insert_if_not_exists(entry_name.into(), entry_data)
-            .await?;
-        if !inserted {
-            return Err(anyhow!("entry already exists for {entry_name:?}"));
-        }
-        Ok(())
+            .await
     }
 }
