@@ -168,6 +168,11 @@ impl<'fs> DirectoryDataWriter<'fs> {
         })
     }
 
+    pub async fn write_empty(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<()> {
+        Self::new(layer_fs, file_id).await?;
+        Ok(())
+    }
+
     pub async fn insert_entry(
         &mut self,
         entry_name: &str,

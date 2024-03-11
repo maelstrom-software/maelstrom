@@ -37,7 +37,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             )
             .await?;
         assert_eq!(root, FileId::root(LayerId::BOTTOM));
-        DirectoryDataWriter::new(layer_fs, root).await?;
+        DirectoryDataWriter::write_empty(layer_fs, root).await?;
 
         Ok(Self {
             layer_fs,
@@ -83,7 +83,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         self.add_link(parent, name, file_id, FileType::Directory)
             .await?
             .assert_is_true();
-        DirectoryDataWriter::new(self.layer_fs, file_id).await?;
+        DirectoryDataWriter::write_empty(self.layer_fs, file_id).await?;
 
         Ok(file_id)
     }
