@@ -19,7 +19,12 @@ pub struct BottomLayerBuilder<'fs> {
 
 impl<'fs> BottomLayerBuilder<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, time: UnixTimestamp) -> Result<Self> {
-        let mut file_writer = FileMetadataWriter::new(layer_fs, LayerId::BOTTOM).await?;
+        let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM)?;
+        let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM)?;
+
+        let mut file_writer =
+            FileMetadataWriter::new(&layer_fs.data_fs, &file_table_path, &attribute_table_path)
+                .await?;
         let root = file_writer
             .insert_file(
                 FileType::Directory,

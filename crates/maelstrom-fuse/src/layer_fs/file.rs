@@ -6,8 +6,10 @@ use crate::layer_fs::LayerFs;
 use crate::FileType;
 use anyhow::Result;
 use maelstrom_util::async_fs::File;
+use maelstrom_util::async_fs::Fs;
 use serde::{Deserialize, Serialize};
 use std::io::SeekFrom;
+use std::path::Path;
 use tokio::io::AsyncSeekExt as _;
 
 pub struct FileMetadataReader<'fs> {
@@ -92,17 +94,16 @@ pub struct FileMetadataWriter<'fs> {
 
 #[allow(dead_code)]
 impl<'fs> FileMetadataWriter<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
-        let mut file_table = layer_fs
-            .data_fs
-            .create_file_read_write(layer_fs.file_table_path(layer_id)?)
-            .await?;
+    pub async fn new(
+        data_fs: &'fs Fs,
+        file_table_path: &Path,
+        attributes_table_path: &Path,
+    ) -> Result<Self> {
+        let mut file_table = data_fs.create_file_read_write(file_table_path).await?;
         encode(&mut file_table, &FileTableHeader::default()).await?;
         let file_table_start = file_table.stream_position().await?;
-
-        let mut attr_table = layer_fs
-            .data_fs
-            .create_file_read_write(layer_fs.attributes_table_path(layer_id)?)
+        let mut attr_table = data_fs
+            .create_file_read_write(attributes_table_path)
             .await?;
         encode(&mut attr_table, &AttributesTableHeader::default()).await?;
         let attr_table_start = file_table.stream_position().await?;
