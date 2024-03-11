@@ -186,10 +186,10 @@ const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
     maelstrom_base::manifest::UnixTimestamp(1705000271);
 
 #[cfg(test)]
-async fn build_fs(layer_fs: &LayerFs, files: Vec<(&str, FileData)>) {
+async fn build_fs(fs: &Fs, data_dir: &Path, files: Vec<(&str, FileData)>) -> LayerFs {
     use maelstrom_base::manifest::Mode;
 
-    let mut builder = BottomLayerBuilder::new(layer_fs, ARBITRARY_TIME)
+    let mut builder = BottomLayerBuilder::new(fs, data_dir, ARBITRARY_TIME)
         .await
         .unwrap();
 
@@ -211,6 +211,8 @@ async fn build_fs(layer_fs: &LayerFs, files: Vec<(&str, FileData)>) {
             .await
             .unwrap();
     }
+
+    builder.finish()
 }
 
 #[cfg(test)]
@@ -238,9 +240,9 @@ async fn read_dir_and_look_up() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
-    build_fs(
-        &layer_fs,
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
         vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
     )
     .await;
@@ -268,9 +270,9 @@ async fn read_dir_multi_level() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
-    build_fs(
-        &layer_fs,
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
         vec![
             ("/Foo/Bar/Baz", Empty),
             ("/Foo/Bin", Empty),
@@ -302,9 +304,9 @@ async fn get_attr() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
-    build_fs(
-        &layer_fs,
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
         vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
     )
     .await;
@@ -333,9 +335,9 @@ async fn read_inline() {
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
 
-    let layer_fs = LayerFs::new(&data_dir).await.unwrap();
-    build_fs(
-        &layer_fs,
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
         vec![
             ("/Foo", Inline(b"hello world".into())),
             ("/Bar", Empty),

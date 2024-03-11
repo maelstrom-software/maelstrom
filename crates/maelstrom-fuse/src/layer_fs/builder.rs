@@ -9,22 +9,24 @@ use maelstrom_base::{
     manifest::{Mode, UnixTimestamp},
     Utf8Component, Utf8Path,
 };
+use maelstrom_util::async_fs::Fs;
 use maelstrom_util::ext::BoolExt as _;
+use std::path::Path;
 
 pub struct BottomLayerBuilder<'fs> {
-    layer_fs: &'fs LayerFs,
+    layer_fs: LayerFs,
     file_writer: FileMetadataWriter<'fs>,
     time: UnixTimestamp,
 }
 
 impl<'fs> BottomLayerBuilder<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs, time: UnixTimestamp) -> Result<Self> {
+    pub async fn new(data_fs: &'fs Fs, data_dir: &Path, time: UnixTimestamp) -> Result<Self> {
+        let layer_fs = LayerFs::new(data_dir).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM)?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM)?;
 
         let mut file_writer =
-            FileMetadataWriter::new(&layer_fs.data_fs, &file_table_path, &attribute_table_path)
-                .await?;
+            FileMetadataWriter::new(data_fs, &file_table_path, &attribute_table_path).await?;
         let root = file_writer
             .insert_file(
                 FileType::Directory,
@@ -37,7 +39,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             )
             .await?;
         assert_eq!(root, FileId::root(LayerId::BOTTOM));
-        DirectoryDataWriter::write_empty(layer_fs, root).await?;
+        DirectoryDataWriter::write_empty(&layer_fs, root).await?;
 
         Ok(Self {
             layer_fs,
@@ -47,7 +49,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
     }
 
     async fn look_up(&mut self, dir_id: FileId, name: &str) -> Result<Option<FileId>> {
-        let mut dir_reader = DirectoryDataReader::new(self.layer_fs, dir_id).await?;
+        let mut dir_reader = DirectoryDataReader::new(&self.layer_fs, dir_id).await?;
         dir_reader.look_up(name).await
     }
 
@@ -83,7 +85,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         self.add_link(parent, name, file_id, FileType::Directory)
             .await?
             .assert_is_true();
-        DirectoryDataWriter::write_empty(self.layer_fs, file_id).await?;
+        DirectoryDataWriter::write_empty(&self.layer_fs, file_id).await?;
 
         Ok(file_id)
     }
@@ -95,7 +97,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         file_id: FileId,
         kind: FileType,
     ) -> Result<bool> {
-        let mut dir_writer = DirectoryDataWriter::new(self.layer_fs, parent).await?;
+        let mut dir_writer = DirectoryDataWriter::new(&self.layer_fs, parent).await?;
         dir_writer
             .insert_entry(name, DirectoryEntryData { file_id, kind })
             .await
@@ -126,5 +128,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         }
 
         Ok(file_id)
+    }
+
+    pub fn finish(self) -> LayerFs {
+        self.layer_fs
     }
 }
