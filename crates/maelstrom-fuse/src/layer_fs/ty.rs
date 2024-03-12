@@ -22,6 +22,10 @@ impl LayerId {
     pub fn as_u32(&self) -> u32 {
         self.0
     }
+
+    pub fn inc(&self) -> Self {
+        Self(self.0 + 1)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -56,6 +60,10 @@ pub struct FileId {
 }
 
 impl FileId {
+    pub fn new(layer_id: LayerId, offset: NonZeroU32) -> Self {
+        Self { layer_id, offset }
+    }
+
     #[allow(dead_code)]
     pub fn root(layer_id: LayerId) -> Self {
         Self {
@@ -72,8 +80,16 @@ impl FileId {
         self.layer_id
     }
 
-    pub fn offset(&self) -> u64 {
+    pub fn offset(&self) -> NonZeroU32 {
+        self.offset
+    }
+
+    pub fn offset_u64(&self) -> u64 {
         self.offset.get() as u64
+    }
+
+    pub fn is_root(&self) -> bool {
+        self.offset.get() == 1
     }
 }
 

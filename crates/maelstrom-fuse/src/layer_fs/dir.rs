@@ -40,11 +40,18 @@ impl<'fs> DirectoryDataReader<'fs> {
         Ok(tree.get(&entry_name.into()).await?.map(|e| e.file_id))
     }
 
-    async fn next_entry(&mut self) -> Result<Option<fuse::DirEntry>> {
+    async fn next_entry(&mut self) -> Result<Option<DirectoryEntry>> {
         if self.stream.stream_position().await? == self.length {
             return Ok(None);
         }
         let entry: DirectoryEntry = decode(&mut self.stream).await?;
+        Ok(Some(entry))
+    }
+
+    async fn next_fuse_entry(&mut self) -> Result<Option<fuse::DirEntry>> {
+        let Some(entry) = self.next_entry().await? else {
+            return Ok(None);
+        };
         let offset = i64::try_from(self.stream.stream_position().await?).unwrap();
         Ok(Some(fuse::DirEntry {
             ino: entry.value.file_id.as_u64(),
@@ -59,10 +66,18 @@ impl<'fs> DirectoryDataReader<'fs> {
             .seek(SeekFrom::Start(self.entry_begin + u64::from(offset)))
             .await?;
         Ok(Box::pin(futures::stream::unfold(self, |mut self_| async {
-            to_eio(self_.next_entry().await)
+            to_eio(self_.next_fuse_entry().await)
                 .transpose()
                 .map(|v| (v, self_))
         })))
+    }
+
+    pub async fn into_ordered_stream(self) -> Result<OrderedDirectoryStream<'fs>> {
+        Ok(Box::pin(
+            AvlTree::new(DirectoryEntryStorage::new(self.stream))
+                .into_stream()
+                .await?,
+        ))
     }
 }
 
@@ -148,6 +163,9 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin + Send> AvlStorage
 
 pub type DirectoryStream<'fs> =
     Pin<Box<dyn futures::Stream<Item = fuse::ErrnoResult<fuse::DirEntry>> + Send + 'fs>>;
+
+pub type OrderedDirectoryStream<'fs> =
+    Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send + 'fs>>;
 
 #[allow(dead_code)]
 pub struct DirectoryDataWriter<'fs> {

@@ -9,6 +9,7 @@ use maelstrom_util::async_fs::File;
 use maelstrom_util::async_fs::Fs;
 use serde::{Deserialize, Serialize};
 use std::io::SeekFrom;
+use std::num::NonZeroU32;
 use std::path::Path;
 use tokio::io::AsyncSeekExt as _;
 
@@ -48,7 +49,7 @@ impl<'fs> FileMetadataReader<'fs> {
         assert_eq!(id.layer(), self.layer_id);
 
         self.file_table
-            .seek(SeekFrom::Start(self.file_table_start + id.offset() - 1))
+            .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
         let entry: FileTableEntry = decode(&mut self.file_table).await?;
 
@@ -66,7 +67,7 @@ impl<'fs> FileMetadataReader<'fs> {
         assert_eq!(id.layer(), self.layer_id);
 
         self.file_table
-            .seek(SeekFrom::Start(self.file_table_start + id.offset() - 1))
+            .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
         let entry: FileTableEntry = decode(&mut self.file_table).await?;
 
@@ -86,6 +87,7 @@ pub struct AttributesTableHeader {
 
 #[allow(dead_code)]
 pub struct FileMetadataWriter<'fs> {
+    layer_id: LayerId,
     file_table: File<'fs>,
     file_table_start: u64,
     attr_table: File<'fs>,
@@ -96,6 +98,7 @@ pub struct FileMetadataWriter<'fs> {
 impl<'fs> FileMetadataWriter<'fs> {
     pub async fn new(
         data_fs: &'fs Fs,
+        layer_id: LayerId,
         file_table_path: &Path,
         attributes_table_path: &Path,
     ) -> Result<Self> {
@@ -109,6 +112,7 @@ impl<'fs> FileMetadataWriter<'fs> {
         let attr_table_start = file_table.stream_position().await?;
 
         Ok(Self {
+            layer_id,
             file_table,
             file_table_start,
             attr_table,
@@ -134,9 +138,10 @@ impl<'fs> FileMetadataWriter<'fs> {
             attr_id,
         };
 
-        let file_id =
-            FileId::try_from(self.file_table.stream_position().await? - self.file_table_start + 1)
+        let offset =
+            u32::try_from(self.file_table.stream_position().await? - self.file_table_start + 1)
                 .unwrap();
+        let file_id = FileId::new(self.layer_id, NonZeroU32::new(offset).unwrap());
         encode(&mut self.file_table, &entry).await?;
 
         Ok(file_id)

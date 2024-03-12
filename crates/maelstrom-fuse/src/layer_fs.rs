@@ -47,11 +47,10 @@ impl LayerFs {
         })
     }
 
-    pub async fn new(data_dir: &Path) -> Result<Self> {
+    pub async fn new(data_dir: &Path, layer_super: LayerSuper) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
-        let layer_super = LayerSuper::default();
         layer_super
             .write_to_path(&data_fs, &data_dir.join("super.bin"))
             .await?;
@@ -61,6 +60,10 @@ impl LayerFs {
             top_layer_path: data_dir,
             layer_super,
         })
+    }
+
+    fn root(&self) -> FileId {
+        FileId::root(self.layer_super.layer_id)
     }
 
     fn data_path(&self, layer_id: LayerId) -> Result<&PathBuf> {
@@ -74,7 +77,10 @@ impl LayerFs {
         }
     }
 
-    fn dir_data_path(&self, file_id: FileId) -> Result<PathBuf> {
+    fn dir_data_path(&self, mut file_id: FileId) -> Result<PathBuf> {
+        if file_id.is_root() {
+            file_id = self.root();
+        }
         Ok(self
             .data_path(file_id.layer())?
             .join(format!("{}.dir_data.bin", file_id.offset())))
@@ -219,8 +225,16 @@ async fn build_fs(fs: &Fs, data_dir: &Path, files: Vec<(&str, FileData)>) -> Lay
 async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
     use futures::StreamExt as _;
 
-    let entry_stream = fs.read_dir(path).await.unwrap();
-    let mut entries: Vec<_> = entry_stream.map(|e| e.unwrap().file_name()).collect().await;
+    let mut entry_stream = fs.read_dir(path).await.unwrap();
+    let mut entries = vec![];
+    while let Some(e) = entry_stream.next().await {
+        let e = e.unwrap();
+        let mut name = e.file_name();
+        if e.file_type().await.unwrap().is_dir() {
+            name.push("/");
+        }
+        entries.push(name);
+    }
     entries.sort();
     assert_eq!(
         entries,
@@ -283,8 +297,8 @@ async fn read_dir_multi_level() {
 
     let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
 
-    assert_entries(&fs, &mount_point, vec!["Foo"]).await;
-    assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar", "Bin"]).await;
+    assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
+    assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
     assert_entries(&fs, &mount_point.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
 
     mount_handle.umount_and_join().await.unwrap();
@@ -355,4 +369,139 @@ async fn read_inline() {
     assert_eq!(contents, "");
 
     mount_handle.umount_and_join().await.unwrap();
+}
+
+#[cfg(test)]
+async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
+    use ty::FileData::*;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir1 = temp.path().join("data1");
+    let data_dir2 = temp.path().join("data2");
+    let data_dir3 = temp.path().join("data3");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir1).await.unwrap();
+    fs.create_dir(&data_dir2).await.unwrap();
+    fs.create_dir(&data_dir3).await.unwrap();
+
+    let layer_fs1 = build_fs(
+        &fs,
+        &data_dir1,
+        lower.into_iter().map(|e| (e, Empty)).collect(),
+    )
+    .await;
+
+    let layer_fs2 = build_fs(
+        &fs,
+        &data_dir2,
+        upper.into_iter().map(|e| (e, Empty)).collect(),
+    )
+    .await;
+
+    let mut builder = UpperLayerBuilder::new(&data_dir3, &layer_fs1)
+        .await
+        .unwrap();
+    builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
+    let layer_fs = builder.build().unwrap();
+
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+
+    for (d, entries) in expected {
+        assert_entries(&fs, &mount_point.join(d), entries).await;
+    }
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
+#[tokio::test]
+async fn two_layer_empty_bottom() {
+    two_layer_test(
+        vec![],
+        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+        vec![
+            ("", vec!["Cake/", "Cookies/", "Pie/"]),
+            ("Cake", vec!["Birthday"]),
+            ("Pie", vec!["KeyLime"]),
+            ("Cookies", vec!["Snickerdoodle"]),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_empty_top() {
+    two_layer_test(
+        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+        vec![],
+        vec![
+            ("", vec!["Cake/", "Cookies/", "Pie/"]),
+            ("Cake", vec!["Birthday"]),
+            ("Pie", vec!["KeyLime"]),
+            ("Cookies", vec!["Snickerdoodle"]),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_large_bottom_dir() {
+    two_layer_test(
+        vec!["/a/b/c/d/e/f"],
+        vec!["/a/g"],
+        vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_large_upper_dir() {
+    two_layer_test(
+        vec!["/a/g"],
+        vec!["/a/b/c/d/e/f"],
+        vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_complicated() {
+    two_layer_test(
+        vec!["/Pie/Apple", "/Cake/Chocolate", "/Cake/Cupcakes/Sprinkle"],
+        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+        vec![
+            ("", vec!["Cake/", "Cookies/", "Pie/"]),
+            ("Cake", vec!["Birthday", "Chocolate", "Cupcakes/"]),
+            ("Cake/Cupcakes", vec!["Sprinkle"]),
+            ("Pie", vec!["Apple", "KeyLime"]),
+            ("Cookies", vec!["Snickerdoodle"]),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_replace_dir_with_file() {
+    two_layer_test(
+        vec!["/Cake/Cupcakes/Sprinkle"],
+        vec!["/Cake/Cupcakes"],
+        vec![("", vec!["Cake/"]), ("Cake", vec!["Cupcakes"])],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn two_layer_replace_file_with_dir() {
+    two_layer_test(
+        vec!["/Cake/Cupcakes"],
+        vec!["/Cake/Cupcakes/Sprinkle"],
+        vec![
+            ("", vec!["Cake/"]),
+            ("Cake", vec!["Cupcakes/"]),
+            ("Cake/Cupcakes", vec!["Sprinkle"]),
+        ],
+    )
+    .await;
 }

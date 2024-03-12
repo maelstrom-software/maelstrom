@@ -106,6 +106,13 @@ impl DirEntry {
             })
             .with_context(|| format!("metadata(\"{}\")", self.path().display()))
     }
+
+    pub async fn file_type(&self) -> Result<std::fs::FileType> {
+        self.inner
+            .file_type()
+            .await
+            .with_context(|| format!("file_type(\"{}\")", self.path().display()))
+    }
 }
 
 fn is_not_found_err(err: &anyhow::Error) -> bool {
@@ -176,6 +183,14 @@ impl Fs {
 
     pub async fn read_link<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
         fs_trampoline!(tokio::fs::read_link, path)
+    }
+
+    pub async fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(
+        &self,
+        original: P,
+        link: Q,
+    ) -> Result<()> {
+        fs_trampoline!(tokio::fs::hard_link, original, link)
     }
 
     pub async fn open_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {

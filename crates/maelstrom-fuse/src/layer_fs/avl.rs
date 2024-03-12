@@ -2,7 +2,9 @@ use anyhow::Result;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
+use std::borrow::BorrowMut;
 use std::cmp::{self, Ordering};
+use std::marker::PhantomData;
 use std::num::NonZeroU64;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,11 +209,20 @@ where
         Ok(())
     }
 
-    /// An sorted iterator over all the entries in the tree
+    /// A sorted iterator over all the entries in the tree
     #[allow(dead_code)]
     pub async fn entries(
         &mut self,
     ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>> + '_> {
+        let walker = AvlTreeWalker::new(self).await?;
+        Ok(futures::stream::unfold(walker, |mut walker| async move {
+            walker.next().await.transpose().map(|v| (v, walker))
+        }))
+    }
+
+    pub async fn into_stream(
+        self,
+    ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>>> {
         let walker = AvlTreeWalker::new(self).await?;
         Ok(futures::stream::unfold(walker, |mut walker| async move {
             walker.next().await.transpose().map(|v| (v, walker))
@@ -449,23 +460,28 @@ enum Visited {
     Right,
 }
 
-struct AvlTreeWalker<'tree, StorageT> {
-    tree: &'tree mut AvlTree<StorageT>,
+struct AvlTreeWalker<TreeT, StorageT> {
+    tree: TreeT,
     stack: Vec<(AvlPtr, Visited)>,
+    storage: PhantomData<StorageT>,
 }
 
-impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
-    async fn new(tree: &'tree mut AvlTree<StorageT>) -> Result<Self> {
+impl<TreeT: BorrowMut<AvlTree<StorageT>>, StorageT: AvlStorage> AvlTreeWalker<TreeT, StorageT> {
+    async fn new(mut tree: TreeT) -> Result<Self> {
         let mut stack = vec![];
-        if let Some(current) = tree.storage.root().await? {
+        if let Some(current) = tree.borrow_mut().storage.root().await? {
             stack.push((current, Visited::None));
         }
-        Ok(Self { tree, stack })
+        Ok(Self {
+            tree,
+            stack,
+            storage: PhantomData,
+        })
     }
 
     async fn advance(&mut self) -> Result<()> {
         let (ptr, state) = self.stack.pop().unwrap();
-        let node = self.tree.storage.look_up(ptr).await?;
+        let node = self.tree.borrow_mut().storage.look_up(ptr).await?;
         match state {
             Visited::None => {
                 self.stack.push((ptr, Visited::Left));
@@ -499,7 +515,7 @@ impl<'tree, StorageT: AvlStorage> AvlTreeWalker<'tree, StorageT> {
 
         let (top, _) = self.stack.pop().unwrap();
         self.stack.push((top, Visited::Own));
-        let top = self.tree.storage.look_up(top).await?;
+        let top = self.tree.borrow_mut().storage.look_up(top).await?;
         Ok(Some((top.key, top.value)))
     }
 }
