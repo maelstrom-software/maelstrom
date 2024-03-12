@@ -6,6 +6,7 @@ use crate::layer_fs::ty::{
 use crate::layer_fs::LayerFs;
 use anyhow::{anyhow, Result};
 use futures::stream::{Peekable, StreamExt as _};
+use maelstrom_base::Sha256Digest;
 use maelstrom_base::{
     manifest::{Mode, UnixTimestamp},
     Utf8Component, Utf8Path,
@@ -15,6 +16,8 @@ use maelstrom_util::ext::BoolExt as _;
 use std::cmp::Ordering;
 use std::path::Path;
 use std::pin::Pin;
+use tokio::io::AsyncRead;
+use tokio_tar::Archive;
 
 pub struct BottomLayerBuilder<'fs> {
     layer_fs: LayerFs,
@@ -23,8 +26,13 @@ pub struct BottomLayerBuilder<'fs> {
 }
 
 impl<'fs> BottomLayerBuilder<'fs> {
-    pub async fn new(data_fs: &'fs Fs, data_dir: &Path, time: UnixTimestamp) -> Result<Self> {
-        let layer_fs = LayerFs::new(data_dir, LayerSuper::default()).await?;
+    pub async fn new(
+        data_fs: &'fs Fs,
+        data_dir: &Path,
+        cache_path: &Path,
+        time: UnixTimestamp,
+    ) -> Result<Self> {
+        let layer_fs = LayerFs::new(data_dir, cache_path, LayerSuper::default()).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM)?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM)?;
 
@@ -136,6 +144,39 @@ impl<'fs> BottomLayerBuilder<'fs> {
         }
 
         Ok(file_id)
+    }
+
+    pub async fn add_from_tar(
+        &mut self,
+        digest: Sha256Digest,
+        tar_stream: impl AsyncRead + Unpin,
+    ) -> Result<()> {
+        let mut ar = Archive::new(tar_stream);
+        let mut entries = ar.entries()?;
+        while let Some(entry) = entries.next().await {
+            let entry = entry?;
+            let header = entry.header();
+            let entry_path = entry.path()?;
+            let utf8_path: &Utf8Path = entry_path
+                .to_str()
+                .ok_or(anyhow!("non-UTF8 path in tar"))?
+                .as_ref();
+            self.add_file_path(
+                &Utf8Path::new("/").join(utf8_path),
+                FileAttributes {
+                    size: header.size()?,
+                    mode: Mode(header.mode()?),
+                    mtime: UnixTimestamp(header.mtime()?.try_into()?),
+                },
+                FileData::Digest {
+                    digest: digest.clone(),
+                    offset: entry.raw_file_position(),
+                    length: header.entry_size()?,
+                },
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     pub fn finish(self) -> LayerFs {
@@ -286,7 +327,7 @@ pub struct UpperLayerBuilder<'fs> {
 
 #[allow(dead_code)]
 impl<'fs> UpperLayerBuilder<'fs> {
-    pub async fn new(data_dir: &Path, lower: &'fs LayerFs) -> Result<Self> {
+    pub async fn new(data_dir: &Path, cache_dir: &Path, lower: &'fs LayerFs) -> Result<Self> {
         let lower_id = lower.layer_super.layer_id;
         let upper_id = lower_id.inc();
         let mut upper_super = lower.layer_super.clone();
@@ -295,7 +336,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
             .lower_layers
             .insert(lower_id, lower.top_layer_path.clone());
 
-        let upper = LayerFs::new(data_dir, upper_super).await?;
+        let upper = LayerFs::new(data_dir, cache_dir, upper_super).await?;
 
         Ok(Self { upper, lower })
     }

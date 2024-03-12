@@ -2,7 +2,10 @@ use crate::fuse::ErrnoResult;
 pub use crate::fuse::FileType;
 use anyhow::Result;
 use derive_more::{From, Into};
-use maelstrom_base::manifest::{Mode, UnixTimestamp};
+use maelstrom_base::{
+    manifest::{Mode, UnixTimestamp},
+    Sha256Digest,
+};
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -156,6 +159,11 @@ pub struct FileAttributes {
 pub enum FileData {
     Empty,
     Inline(Vec<u8>),
+    Digest {
+        digest: Sha256Digest,
+        offset: u64,
+        length: u64,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

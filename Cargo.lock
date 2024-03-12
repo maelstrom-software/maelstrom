@@ -2853,6 +2853,7 @@ dependencies = [
  "serde_with",
  "tempfile",
  "tokio",
+ "tokio-tar",
 ]
 
 [[package]]
@@ -4727,6 +4728,21 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+]
+
+[[package]]
+name = "tokio-tar"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d5714c010ca3e5c27114c1cdeb9d14641ace49874aa5626d7149e47aedace75"
+dependencies = [
+ "filetime",
+ "futures-core",
+ "libc",
+ "redox_syscall 0.3.5",
+ "tokio",
+ "tokio-stream",
+ "xattr",
 ]
 
 [[package]]

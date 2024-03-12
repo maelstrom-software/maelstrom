@@ -13,16 +13,23 @@ use async_trait::async_trait;
 pub use builder::*;
 use dir::{DirectoryDataReader, DirectoryStream};
 use file::FileMetadataReader;
+use maelstrom_base::Sha256Digest;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 pub use ty::{FileAttributes, FileData, FileId};
 use ty::{LayerId, LayerSuper};
 
-fn to_eio<T>(res: Result<T>) -> ErrnoResult<T> {
+fn to_eio<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoResult<ValueT> {
     res.map_err(|_| Errno::EIO)
+}
+
+fn to_einval<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoResult<ValueT> {
+    res.map_err(|_| Errno::EINVAL)
 }
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
@@ -31,10 +38,11 @@ pub struct LayerFs {
     data_fs: Fs,
     top_layer_path: PathBuf,
     layer_super: LayerSuper,
+    cache_path: PathBuf,
 }
 
 impl LayerFs {
-    pub async fn from_path(data_dir: &Path) -> Result<Self> {
+    pub async fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -44,10 +52,11 @@ impl LayerFs {
             data_fs,
             top_layer_path: data_dir,
             layer_super,
+            cache_path: cache_path.to_owned(),
         })
     }
 
-    pub async fn new(data_dir: &Path, layer_super: LayerSuper) -> Result<Self> {
+    async fn new(data_dir: &Path, cache_path: &Path, layer_super: LayerSuper) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -59,6 +68,7 @@ impl LayerFs {
             data_fs,
             top_layer_path: data_dir,
             layer_super,
+            cache_path: cache_path.to_owned(),
         })
     }
 
@@ -92,6 +102,10 @@ impl LayerFs {
 
     fn attributes_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
         Ok(self.data_path(layer_id)?.join("attributes_table.bin"))
+    }
+
+    fn cache_entry(&self, digest: Sha256Digest) -> PathBuf {
+        self.cache_path.join(digest.to_string())
     }
 
     pub async fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
@@ -169,6 +183,26 @@ impl FuseFileSystem for LayerFs {
                     data: inline[offset..(offset + size)].to_vec(),
                 })
             }
+            FileData::Digest {
+                digest,
+                offset: file_start,
+                length: file_length,
+            } => {
+                let read_start = file_start + to_einval::<u64, _>(offset.try_into())?;
+                let file_end = file_start + file_length;
+                if read_start > file_end {
+                    return Err(Errno::EINVAL);
+                }
+
+                let read_end = std::cmp::min(read_start + size as u64, file_end);
+                let read_length = read_end - read_start;
+
+                let mut file = to_eio(self.data_fs.open_file(self.cache_entry(digest)).await)?;
+                to_eio(file.seek(SeekFrom::Start(read_start)).await)?;
+                let mut buffer = vec![0; read_length as usize];
+                to_eio(file.read_exact(&mut buffer).await)?;
+                Ok(ReadResponse { data: buffer })
+            }
         }
     }
 
@@ -192,10 +226,15 @@ const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
     maelstrom_base::manifest::UnixTimestamp(1705000271);
 
 #[cfg(test)]
-async fn build_fs(fs: &Fs, data_dir: &Path, files: Vec<(&str, FileData)>) -> LayerFs {
+async fn build_fs(
+    fs: &Fs,
+    data_dir: &Path,
+    cache_path: &Path,
+    files: Vec<(&str, FileData)>,
+) -> LayerFs {
     use maelstrom_base::manifest::Mode;
 
-    let mut builder = BottomLayerBuilder::new(fs, data_dir, ARBITRARY_TIME)
+    let mut builder = BottomLayerBuilder::new(fs, data_dir, cache_path, ARBITRARY_TIME)
         .await
         .unwrap();
 
@@ -203,6 +242,7 @@ async fn build_fs(fs: &Fs, data_dir: &Path, files: Vec<(&str, FileData)>) -> Lay
         let size = match &data {
             ty::FileData::Empty => 0,
             ty::FileData::Inline(d) => d.len() as u64,
+            ty::FileData::Digest { length, .. } => *length,
         };
         builder
             .add_file_path(
@@ -249,14 +289,17 @@ async fn read_dir_and_look_up() {
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
 
     let fs = Fs::new();
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
 
     let layer_fs = build_fs(
         &fs,
         &data_dir,
+        &cache_dir,
         vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
     )
     .await;
@@ -279,14 +322,17 @@ async fn read_dir_multi_level() {
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
 
     let fs = Fs::new();
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
 
     let layer_fs = build_fs(
         &fs,
         &data_dir,
+        &cache_dir,
         vec![
             ("/Foo/Bar/Baz", Empty),
             ("/Foo/Bin", Empty),
@@ -313,14 +359,17 @@ async fn get_attr() {
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
 
     let fs = Fs::new();
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
 
     let layer_fs = build_fs(
         &fs,
         &data_dir,
+        &cache_dir,
         vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
     )
     .await;
@@ -344,14 +393,17 @@ async fn read_inline() {
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
 
     let fs = Fs::new();
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
 
     let layer_fs = build_fs(
         &fs,
         &data_dir,
+        &cache_dir,
         vec![
             ("/Foo", Inline(b"hello world".into())),
             ("/Bar", Empty),
@@ -371,6 +423,152 @@ async fn read_inline() {
     mount_handle.umount_and_join().await.unwrap();
 }
 
+#[tokio::test]
+async fn read_digest() {
+    use tokio::io::AsyncWriteExt as _;
+    use ty::FileData::*;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let temp_path = cache_dir.join("temp");
+    let mut f = fs.create_file(&temp_path).await.unwrap();
+    f.write_all(b"hello world").await.unwrap();
+    drop(f);
+    let digest = calc_digest(&fs, &temp_path).await;
+    fs.rename(temp_path, cache_dir.join(digest.to_string()))
+        .await
+        .unwrap();
+
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
+        &cache_dir,
+        vec![
+            (
+                "/Foo",
+                Digest {
+                    digest: digest.clone(),
+                    offset: 0,
+                    length: 5,
+                },
+            ),
+            (
+                "/Bar",
+                Digest {
+                    digest,
+                    offset: 6,
+                    length: 5,
+                },
+            ),
+        ],
+    )
+    .await;
+
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+
+    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+    assert_eq!(contents, "hello");
+
+    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+    assert_eq!(contents, "world");
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
+#[cfg(test)]
+async fn calc_digest(fs: &Fs, path: &Path) -> Sha256Digest {
+    let mut f = fs.open_file(path).await.unwrap();
+    let mut hasher = maelstrom_util::io::Sha256Stream::new(tokio::io::sink());
+    tokio::io::copy(&mut f, &mut hasher).await.unwrap();
+    hasher.finalize().1
+}
+
+#[cfg(test)]
+async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData)>) -> Sha256Digest {
+    let tar_path = cache_path.join("temp.tar");
+    let f = fs.create_file(&tar_path).await.unwrap();
+    let mut ar = tokio_tar::Builder::new(f.into_inner());
+    let mut header = tokio_tar::Header::new_gnu();
+    for (p, d) in files {
+        let data = match d {
+            ty::FileData::Empty => vec![],
+            ty::FileData::Inline(d) => d,
+            _ => panic!(),
+        };
+        header.set_size(data.len() as u64);
+        header.set_mode(0o555);
+        ar.append_data(&mut header, p, &data[..]).await.unwrap();
+    }
+    ar.finish().await.unwrap();
+
+    let digest = calc_digest(fs, &tar_path).await;
+
+    fs.rename(tar_path, cache_path.join(digest.to_string()))
+        .await
+        .unwrap();
+
+    digest
+}
+
+#[tokio::test]
+async fn layer_from_tar() {
+    use ty::FileData::*;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let tar_digest = build_tar(
+        &fs,
+        &cache_dir,
+        vec![
+            ("Foo", Inline(b"hello world".into())),
+            ("Bar/Baz", Empty),
+            ("Bar/Bin", Empty),
+        ],
+    )
+    .await;
+    let tar_path = cache_dir.join(tar_digest.to_string());
+
+    let mut builder = BottomLayerBuilder::new(&fs, &data_dir, &cache_dir, ARBITRARY_TIME)
+        .await
+        .unwrap();
+    builder
+        .add_from_tar(tar_digest, fs.open_file(tar_path).await.unwrap())
+        .await
+        .unwrap();
+    let layer_fs = builder.finish();
+
+    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+
+    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
+    let contents = fs
+        .read_to_string(mount_point.join("Bar/Baz"))
+        .await
+        .unwrap();
+    assert_eq!(contents, "");
+
+    assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
 #[cfg(test)]
 async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
     use ty::FileData::*;
@@ -380,16 +578,19 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
     let data_dir1 = temp.path().join("data1");
     let data_dir2 = temp.path().join("data2");
     let data_dir3 = temp.path().join("data3");
+    let cache_dir = temp.path().join("cache");
 
     let fs = Fs::new();
     fs.create_dir(&mount_point).await.unwrap();
     fs.create_dir(&data_dir1).await.unwrap();
     fs.create_dir(&data_dir2).await.unwrap();
     fs.create_dir(&data_dir3).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
 
     let layer_fs1 = build_fs(
         &fs,
         &data_dir1,
+        &cache_dir,
         lower.into_iter().map(|e| (e, Empty)).collect(),
     )
     .await;
@@ -397,11 +598,12 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
     let layer_fs2 = build_fs(
         &fs,
         &data_dir2,
+        &cache_dir,
         upper.into_iter().map(|e| (e, Empty)).collect(),
     )
     .await;
 
-    let mut builder = UpperLayerBuilder::new(&data_dir3, &layer_fs1)
+    let mut builder = UpperLayerBuilder::new(&data_dir3, &cache_dir, &layer_fs1)
         .await
         .unwrap();
     builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();

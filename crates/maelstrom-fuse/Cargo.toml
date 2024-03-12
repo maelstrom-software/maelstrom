@@ -22,6 +22,7 @@ serde.workspace = true
 serde_repr.workspace = true
 serde_with.workspace = true
 tokio = { workspace = true, features = [ "io-std", "sync" ] }
+tokio-tar = { workspace = true }
 
 [dev-dependencies]
 clap.workspace = true

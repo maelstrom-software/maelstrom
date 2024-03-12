@@ -112,8 +112,9 @@ syn = { version = "2", features = ["full"] }
 tar = "0.4.38"
 tempfile = "3.5.0"
 tokio = { version = "1.28", features = [ "rt", "rt-multi-thread", "macros", "fs", "io-util" ] }
-tokio-util = { version = "0.7.10", features = [ "compat" ] }
 tokio-stream = "0.1"
+tokio-tar = "0.3"
+tokio-util = { version = "0.7.10", features = [ "compat" ] }
 toml = "0.8.8"
 tonic = "0.11"
 tonic-build = "0.11"
