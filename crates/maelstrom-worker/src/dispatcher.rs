@@ -4,7 +4,7 @@
 mod tracker;
 
 use crate::{
-    cache::{Cache, CacheFs, GetArtifact},
+    cache::{Cache, CacheEntryKind, CacheFs, GetArtifact},
     config::Slots,
 };
 use anyhow::{Error, Result};
@@ -74,36 +74,48 @@ pub trait DispatcherDeps {
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
 /// public interface. We have this so we can isolate [`Dispatcher`] when testing.
 pub trait DispatcherCache {
-    fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact;
-    fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId>;
+    fn get_artifact(
+        &mut self,
+        kind: CacheEntryKind,
+        artifact: Sha256Digest,
+        jid: JobId,
+    ) -> GetArtifact;
+    fn got_artifact_failure(&mut self, kind: CacheEntryKind, digest: &Sha256Digest) -> Vec<JobId>;
     fn got_artifact_success(
         &mut self,
+        kind: CacheEntryKind,
         digest: &Sha256Digest,
         bytes_used: u64,
     ) -> (PathBuf, Vec<JobId>);
-    fn decrement_ref_count(&mut self, digest: &Sha256Digest);
+    fn decrement_ref_count(&mut self, kind: CacheEntryKind, digest: &Sha256Digest);
 }
 
 /// The standard implementation of [`DispatcherCache`] that just calls into [`Cache`].
 impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
-    fn get_artifact(&mut self, artifact: Sha256Digest, jid: JobId) -> GetArtifact {
-        self.get_artifact(artifact, jid)
+    fn get_artifact(
+        &mut self,
+        kind: CacheEntryKind,
+        artifact: Sha256Digest,
+        jid: JobId,
+    ) -> GetArtifact {
+        self.get_artifact(kind, artifact, jid)
     }
 
-    fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId> {
-        self.got_artifact_failure(digest)
+    fn got_artifact_failure(&mut self, kind: CacheEntryKind, digest: &Sha256Digest) -> Vec<JobId> {
+        self.got_artifact_failure(kind, digest)
     }
 
     fn got_artifact_success(
         &mut self,
+        kind: CacheEntryKind,
         digest: &Sha256Digest,
         bytes_used: u64,
     ) -> (PathBuf, Vec<JobId>) {
-        self.got_artifact_success(digest, bytes_used)
+        self.got_artifact_success(kind, digest, bytes_used)
     }
 
-    fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
-        self.decrement_ref_count(digest)
+    fn decrement_ref_count(&mut self, kind: CacheEntryKind, digest: &Sha256Digest) {
+        self.decrement_ref_count(kind, digest)
     }
 }
 
@@ -247,7 +259,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 }
                 Err(e) => {
                     for digest in digests {
-                        self.cache.decrement_ref_count(&digest);
+                        self.cache
+                            .decrement_ref_count(CacheEntryKind::Blob, &digest);
                     }
                     self.deps
                         .send_message_to_broker(WorkerToBroker(jid, Err(e)));
@@ -269,7 +282,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
     fn receive_enqueue_job(&mut self, jid: JobId, spec: JobSpec) {
         let tracker = LayerTracker::new(&spec.layers, |digest, type_| -> FetcherResult {
-            match self.cache.get_artifact(digest.clone(), jid) {
+            match self
+                .cache
+                .get_artifact(CacheEntryKind::Blob, digest.clone(), jid)
+            {
                 GetArtifact::Success(path) => FetcherResult::Got(path),
                 GetArtifact::Wait => FetcherResult::Pending,
                 GetArtifact::Get(path) => {
@@ -291,7 +307,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
             for digest in entry.tracker.into_digests() {
-                self.cache.decrement_ref_count(&digest);
+                self.cache
+                    .decrement_ref_count(CacheEntryKind::Blob, &digest);
             }
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
             // The job was executing. We kill the job and cancel a timer if there is one, but we
@@ -313,7 +330,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     true
                 } else {
                     for digest in &entry.digests {
-                        self.cache.decrement_ref_count(digest);
+                        self.cache.decrement_ref_count(CacheEntryKind::Blob, digest);
                     }
                     false
                 }
@@ -366,7 +383,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 }
             }
             for digest in digests {
-                self.cache.decrement_ref_count(&digest);
+                self.cache
+                    .decrement_ref_count(CacheEntryKind::Blob, &digest);
             }
             self.possibly_start_job();
         }
@@ -415,7 +433,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
-        for jid in self.cache.got_artifact_failure(&digest) {
+        for jid in self
+            .cache
+            .got_artifact_failure(CacheEntryKind::Blob, &digest)
+        {
             if let Some(entry) = self.awaiting_layers.remove(&jid) {
                 // If this was the first layer error for this request, then we'll find something in the
                 // hash table, and we'll need to clean up.
@@ -429,20 +450,24 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                     ))),
                 ));
                 for digest in entry.tracker.into_digests() {
-                    self.cache.decrement_ref_count(&digest);
+                    self.cache
+                        .decrement_ref_count(CacheEntryKind::Blob, &digest);
                 }
             }
         }
     }
 
     fn receive_artifact_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
-        let (path, jobs) = self.cache.got_artifact_success(&digest, bytes_used);
+        let (path, jobs) =
+            self.cache
+                .got_artifact_success(CacheEntryKind::Blob, &digest, bytes_used);
         for jid in jobs {
             match self.awaiting_layers.entry(jid) {
                 Entry::Vacant(_) => {
                     // If there were previous errors for this job, or the job was canceled, then
                     // we'll find nothing in the hash table, and we'll need to release this layer.
-                    self.cache.decrement_ref_count(&digest);
+                    self.cache
+                        .decrement_ref_count(CacheEntryKind::Blob, &digest);
                 }
                 Entry::Occupied(mut entry) => {
                     // So far all is good. We then need to check if we've gotten all layers. If we
@@ -469,6 +494,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
+    use crate::cache::CacheEntryKind::*;
     use anyhow::anyhow;
     use itertools::Itertools;
     use maelstrom_test::*;
@@ -480,10 +506,10 @@ mod tests {
         StartJob(JobId, JobSpec, Vec<PathBuf>),
         SendMessageToBroker(WorkerToBroker),
         StartArtifactFetch(Sha256Digest, ArtifactType, PathBuf),
-        CacheGetArtifact(Sha256Digest, JobId),
-        CacheGotArtifactSuccess(Sha256Digest, u64),
-        CacheGotArtifactFailure(Sha256Digest),
-        CacheDecrementRefCount(Sha256Digest),
+        CacheGetArtifact(CacheEntryKind, Sha256Digest, JobId),
+        CacheGotArtifactSuccess(CacheEntryKind, Sha256Digest, u64),
+        CacheGotArtifactFailure(CacheEntryKind, Sha256Digest),
+        CacheDecrementRefCount(CacheEntryKind, Sha256Digest),
         Kill(Pid),
         StartTimer(JobId, Duration),
         CancelTimer(JobId),
@@ -547,20 +573,29 @@ mod tests {
     }
 
     impl DispatcherCache for Rc<RefCell<TestState>> {
-        fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
+        fn get_artifact(
+            &mut self,
+            kind: CacheEntryKind,
+            digest: Sha256Digest,
+            jid: JobId,
+        ) -> GetArtifact {
             self.borrow_mut()
                 .messages
-                .push(CacheGetArtifact(digest.clone(), jid));
+                .push(CacheGetArtifact(kind, digest.clone(), jid));
             self.borrow_mut()
                 .get_artifact_returns
                 .remove(&digest)
                 .unwrap()
         }
 
-        fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId> {
+        fn got_artifact_failure(
+            &mut self,
+            kind: CacheEntryKind,
+            digest: &Sha256Digest,
+        ) -> Vec<JobId> {
             self.borrow_mut()
                 .messages
-                .push(CacheGotArtifactFailure(digest.clone()));
+                .push(CacheGotArtifactFailure(kind, digest.clone()));
             self.borrow_mut()
                 .got_artifact_failure_returns
                 .remove(digest)
@@ -569,22 +604,25 @@ mod tests {
 
         fn got_artifact_success(
             &mut self,
+            kind: CacheEntryKind,
             digest: &Sha256Digest,
             bytes_used: u64,
         ) -> (PathBuf, Vec<JobId>) {
-            self.borrow_mut()
-                .messages
-                .push(CacheGotArtifactSuccess(digest.clone(), bytes_used));
+            self.borrow_mut().messages.push(CacheGotArtifactSuccess(
+                kind,
+                digest.clone(),
+                bytes_used,
+            ));
             self.borrow_mut()
                 .got_artifact_success_returns
                 .remove(digest)
                 .unwrap()
         }
 
-        fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
+        fn decrement_ref_count(&mut self, kind: CacheEntryKind, digest: &Sha256Digest) {
             self.borrow_mut()
                 .messages
-                .push(CacheDecrementRefCount(digest.clone()))
+                .push(CacheDecrementRefCount(kind, digest.clone()))
         }
     }
 
@@ -667,7 +705,7 @@ mod tests {
             (digest!(1), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(CancelJob(jid!(1))) => {
@@ -682,8 +720,8 @@ mod tests {
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf_vec!["/a", "/b"])
         };
         Broker(CancelJob(jid!(1))) => {
@@ -701,13 +739,13 @@ mod tests {
             (digest!(43), GetArtifact::Wait),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (43, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartArtifactFetch(digest!(42), ArtifactType::Tar, path_buf!("/b")),
-            CacheGetArtifact(digest!(43), jid!(1)),
+            CacheGetArtifact(Blob, digest!(43), jid!(1)),
         };
         Broker(CancelJob(jid!(1))) => {
-            CacheDecrementRefCount(digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(41)),
         };
     }
 
@@ -720,12 +758,12 @@ mod tests {
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]), path_buf_vec!["/a", "/b", "/a"]),
             SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(string!("se"))))),
-            CacheDecrementRefCount(digest!(41)),
-            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(Blob, digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(42)),
         };
         Broker(CancelJob(jid!(1))) => {};
     }
@@ -739,12 +777,12 @@ mod tests {
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf_vec!["/a", "/b"]),
             SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::Execution(string!("ee"))))),
-            CacheDecrementRefCount(digest!(41)),
-            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(Blob, digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(42)),
         };
         Broker(CancelJob(jid!(1))) => {};
     }
@@ -765,23 +803,23 @@ mod tests {
             (digest!(5), GetArtifact::Success(path_buf!("/e"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
         Broker(EnqueueJob(jid!(3), spec!(3, Tar))) => {
-            CacheGetArtifact(digest!(3), jid!(3)),
+            CacheGetArtifact(Blob, digest!(3), jid!(3)),
             StartJob(jid!(3), spec!(3, Tar), path_buf_vec!["/c"]),
         };
         Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
-            CacheGetArtifact(digest!(4), jid!(4)),
+            CacheGetArtifact(Blob, digest!(4), jid!(4)),
             StartJob(jid!(4), spec!(4, Tar), path_buf_vec!["/d"]),
         };
         Broker(EnqueueJob(jid!(5), spec!(5, Tar))) => {
-            CacheGetArtifact(digest!(5), jid!(5)),
+            CacheGetArtifact(Blob, digest!(5), jid!(5)),
         };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
@@ -789,7 +827,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(5), spec!(5, Tar), path_buf_vec!["/e"]),
         }
     }
@@ -808,29 +846,29 @@ mod tests {
             (digest!(4), GetArtifact::Success(path_buf!("/d"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         Broker(EnqueueJob(jid!(3), spec!(3, Tar))) => {
-            CacheGetArtifact(digest!(3), jid!(3)),
+            CacheGetArtifact(Blob, digest!(3), jid!(3)),
         };
         Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
-            CacheGetArtifact(digest!(4), jid!(4)),
+            CacheGetArtifact(Blob, digest!(4), jid!(4)),
         };
         PidStatus(pid!(1), JobStatus::Exited(0)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
             SendMessageToBroker(WorkerToBroker(jid!(2), Err(JobError::Execution(string!("ee"))))),
-            CacheDecrementRefCount(digest!(2)),
+            CacheDecrementRefCount(Blob, digest!(2)),
             StartJob(jid!(3), spec!(3, Tar), path_buf_vec!["/c"]),
             SendMessageToBroker(WorkerToBroker(jid!(3), Err(JobError::System(string!("se"))))),
-            CacheDecrementRefCount(digest!(3)),
+            CacheDecrementRefCount(Blob, digest!(3)),
             StartJob(jid!(4), spec!(4, Tar), path_buf_vec!["/d"]),
         };
     }
@@ -842,11 +880,11 @@ mod tests {
             (digest!(42), GetArtifact::Wait),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
         };
         Broker(CancelJob(jid!(1))) => {
-            CacheDecrementRefCount(digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(41)),
         };
     }
 
@@ -861,12 +899,12 @@ mod tests {
             (digest!(43), GetArtifact::Success(path_buf!("/c"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf_vec!["/a", "/b"])
         };
         Broker(EnqueueJob(jid!(2), spec!(2, [(43, Tar)]))) => {
-            CacheGetArtifact(digest!(43), jid!(2)),
+            CacheGetArtifact(Blob, digest!(43), jid!(2)),
         };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
@@ -874,8 +912,8 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(41)),
-            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(Blob, digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(42)),
             StartJob(jid!(2), spec!(2, [(43, Tar)]), path_buf_vec!["/c"]),
         };
     }
@@ -894,29 +932,29 @@ mod tests {
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/1"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
         };
         Broker(EnqueueJob(jid!(3), spec!(3, [(41, Tar), (42, Tar), (41, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(3)),
-            CacheGetArtifact(digest!(42), jid!(3)),
+            CacheGetArtifact(Blob, digest!(41), jid!(3)),
+            CacheGetArtifact(Blob, digest!(42), jid!(3)),
         };
         Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
-            CacheGetArtifact(digest!(4), jid!(4)),
+            CacheGetArtifact(Blob, digest!(4), jid!(4)),
         };
         Broker(CancelJob(jid!(3))) => {
-            CacheDecrementRefCount(digest!(41)),
-            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(Blob, digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(42)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(4), spec!(4, Tar), path_buf_vec!["/4"]),
         };
     }
@@ -933,7 +971,7 @@ mod tests {
             (digest!(1), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(CancelJob(jid!(1))) => { Kill(pid!(1)) };
@@ -951,12 +989,12 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobTimer(jid!(1)) => {
             Kill(pid!(1))
@@ -965,7 +1003,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
         };
     }
@@ -986,17 +1024,17 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1010,8 +1048,8 @@ mod tests {
             (digest!(42), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf_vec!["/a", "/b"]),
         };
         Broker(CancelJob(jid!(1))) => {
@@ -1020,8 +1058,8 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {
-            CacheDecrementRefCount(digest!(41)),
-            CacheDecrementRefCount(digest!(42)),
+            CacheDecrementRefCount(Blob, digest!(41)),
+            CacheDecrementRefCount(Blob, digest!(42)),
         };
     }
 
@@ -1053,11 +1091,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
@@ -1075,7 +1113,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1090,11 +1128,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
@@ -1112,7 +1150,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1127,11 +1165,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
@@ -1149,7 +1187,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1164,11 +1202,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
             first: boxed_u8!(b"stderr"),
@@ -1186,7 +1224,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1201,11 +1239,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
@@ -1223,7 +1261,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1238,11 +1276,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         PidStatus(pid!(1), JobStatus::Signaled(9)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
@@ -1260,7 +1298,7 @@ mod tests {
                     },
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1275,11 +1313,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Err(string!("stdout error"))) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Truncated {
@@ -1290,7 +1328,7 @@ mod tests {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), Err(JobError::System(string!("stdout error"))))
             ),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1305,11 +1343,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Err(string!("stderr error"))) => {};
@@ -1317,7 +1355,7 @@ mod tests {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), Err(JobError::System(string!("stderr error"))))
             ),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1332,11 +1370,11 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/b"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf_vec!["/a"]),
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Err(string!("stdout error"))) => {};
         JobStderr(jid!(1), Err(string!("stderr error"))) => {};
@@ -1344,7 +1382,7 @@ mod tests {
             SendMessageToBroker(
                 WorkerToBroker(jid!(1), Err(JobError::System(string!("stdout error"))))
             ),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/b"]),
         };
     }
@@ -1357,7 +1395,7 @@ mod tests {
             (digest!(1), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)), path_buf_vec!["/a"]),
             StartTimer(jid!(1), Duration::from_secs(33)),
         };
@@ -1371,7 +1409,7 @@ mod tests {
                     stderr: JobOutputResult::None,
                 }
             }))),
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             CancelTimer(jid!(1)),
         };
     }
@@ -1384,7 +1422,7 @@ mod tests {
             (digest!(1), GetArtifact::Success(path_buf!("/a"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)), path_buf_vec!["/a"]),
             StartTimer(jid!(1), Duration::from_secs(33)),
         };
@@ -1404,12 +1442,12 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobTimer(jid!(1)) => {
             Kill(pid!(1)),
@@ -1417,7 +1455,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
@@ -1436,12 +1474,12 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
@@ -1449,7 +1487,7 @@ mod tests {
             Kill(pid!(1)),
         };
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
@@ -1468,18 +1506,18 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         PidStatus(pid!(1), JobStatus::Exited(0)) => {};
         JobTimer(jid!(1)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stdout")))) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::Inline(boxed_u8!(b"stderr")))) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),
@@ -1498,17 +1536,17 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         PidStatus(pid!(1), JobStatus::Exited(0)) => {};
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             CancelTimer(jid!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Exited(0),
@@ -1532,12 +1570,12 @@ mod tests {
             (digest!(2), GetArtifact::Success(path_buf!("/2"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(1)), path_buf_vec!["/1"]),
             StartTimer(jid!(1), Duration::from_secs(1))
         };
         Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(digest!(2), jid!(2)),
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
         };
         Broker(CancelJob(jid!(1))) => {
             Kill(pid!(1)),
@@ -1547,7 +1585,7 @@ mod tests {
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf_vec!["/2"]),
         };
     }
@@ -1567,26 +1605,26 @@ mod tests {
             (digest!(44), vec![jid!(1)]),
         ]),
         Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (43, Tar), (44, Tar)]))) => {
-            CacheGetArtifact(digest!(41), jid!(1)),
-            CacheGetArtifact(digest!(42), jid!(1)),
-            CacheGetArtifact(digest!(43), jid!(1)),
-            CacheGetArtifact(digest!(44), jid!(1)),
+            CacheGetArtifact(Blob, digest!(41), jid!(1)),
+            CacheGetArtifact(Blob, digest!(42), jid!(1)),
+            CacheGetArtifact(Blob, digest!(43), jid!(1)),
+            CacheGetArtifact(Blob, digest!(44), jid!(1)),
         };
         ArtifactFetcher(digest!(41), Ok(101)) => {
-            CacheGotArtifactSuccess(digest!(41), 101),
+            CacheGotArtifactSuccess(Blob, digest!(41), 101),
         };
         ArtifactFetcher(digest!(42), Err(anyhow!("foo"))) => {
-            CacheGotArtifactFailure(digest!(42)),
+            CacheGotArtifactFailure(Blob, digest!(42)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(
                 string!("Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo"))))),
-            CacheDecrementRefCount(digest!(41))
+            CacheDecrementRefCount(Blob, digest!(41))
         };
         ArtifactFetcher(digest!(43), Ok(103)) => {
-            CacheGotArtifactSuccess(digest!(43), 103),
-            CacheDecrementRefCount(digest!(43))
+            CacheGotArtifactSuccess(Blob, digest!(43), 103),
+            CacheDecrementRefCount(Blob, digest!(43))
         };
         ArtifactFetcher(digest!(44), Err(anyhow!("foo"))) => {
-            CacheGotArtifactFailure(digest!(44)),
+            CacheGotArtifactFailure(Blob, digest!(44)),
         };
     }
 
@@ -1619,13 +1657,13 @@ mod tests {
             (digest!(1), GetArtifact::Success(path_buf!("/1"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, [(1, Tar), (1, Tar)]))) => {
-            CacheGetArtifact(digest!(1), jid!(1)),
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, [(1, Tar), (1, Tar)]), path_buf_vec!["/1", "/1"]),
         };
         JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
         JobStderr(jid!(1), Ok(JobOutputResult::None)) => {};
         PidStatus(pid!(1), JobStatus::Exited(0)) => {
-            CacheDecrementRefCount(digest!(1)),
+            CacheDecrementRefCount(Blob, digest!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed {
                 status: JobStatus::Exited(0),
                 effects: JobEffects {

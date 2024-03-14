@@ -96,7 +96,7 @@ pub enum GetArtifact {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
-enum CacheEntryKind {
+pub enum CacheEntryKind {
     Blob,
 }
 
@@ -256,8 +256,13 @@ impl<FsT: CacheFs> Cache<FsT> {
 
     /// Attempt to fetch `artifact` from the cache. See [GetArtifact] for the meaning of the return
     /// values.
-    pub fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId) -> GetArtifact {
-        let key = CacheKey::new(CacheEntryKind::Blob, digest);
+    pub fn get_artifact(
+        &mut self,
+        kind: CacheEntryKind,
+        digest: Sha256Digest,
+        jid: JobId,
+    ) -> GetArtifact {
+        let key = CacheKey::new(kind, digest);
         let cache_path = Self::cache_path(&self.root, &key);
         match self.entries.entry(key) {
             Entry::Vacant(entry) => {
@@ -295,8 +300,12 @@ impl<FsT: CacheFs> Cache<FsT> {
 
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
-    pub fn got_artifact_failure(&mut self, digest: &Sha256Digest) -> Vec<JobId> {
-        let key = CacheKey::new(CacheEntryKind::Blob, digest.clone());
+    pub fn got_artifact_failure(
+        &mut self,
+        kind: CacheEntryKind,
+        digest: &Sha256Digest,
+    ) -> Vec<JobId> {
+        let key = CacheKey::new(kind, digest.clone());
         let Some(CacheEntry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
             panic!("Got got_artifact in unexpected state");
         };
@@ -311,10 +320,11 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// lists the jobs that are affected, and the path they can use to access the artifact.
     pub fn got_artifact_success(
         &mut self,
+        kind: CacheEntryKind,
         digest: &Sha256Digest,
         bytes_used: u64,
     ) -> (PathBuf, Vec<JobId>) {
-        let key = CacheKey::new(CacheEntryKind::Blob, digest.clone());
+        let key = CacheKey::new(kind, digest.clone());
         let entry = self
             .entries
             .get_mut(&key)
@@ -342,8 +352,8 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Notify the cache that a reference to an artifact is no longer needed.
-    pub fn decrement_ref_count(&mut self, digest: &Sha256Digest) {
-        let key = CacheKey::new(CacheEntryKind::Blob, digest.clone());
+    pub fn decrement_ref_count(&mut self, kind: CacheEntryKind, digest: &Sha256Digest) {
+        let key = CacheKey::new(kind, digest.clone());
         let entry = self
             .entries
             .get_mut(&key)
@@ -562,13 +572,13 @@ mod tests {
         }
 
         fn get_artifact(&mut self, digest: Sha256Digest, jid: JobId, expected: GetArtifact) {
-            let result = self.cache.get_artifact(digest, jid);
+            let result = self.cache.get_artifact(CacheEntryKind::Blob, digest, jid);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(vec![]);
         }
 
         fn get_artifact_ign(&mut self, digest: Sha256Digest, jid: JobId) {
-            self.cache.get_artifact(digest, jid);
+            self.cache.get_artifact(CacheEntryKind::Blob, digest, jid);
             self.expect_messages_in_any_order(vec![]);
         }
 
@@ -579,7 +589,9 @@ mod tests {
             expected: (PathBuf, Vec<JobId>),
             expected_fs_operations: Vec<TestMessage>,
         ) {
-            let result = self.cache.got_artifact_success(&digest, bytes_used);
+            let result = self
+                .cache
+                .got_artifact_success(CacheEntryKind::Blob, &digest, bytes_used);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(expected_fs_operations);
         }
@@ -590,23 +602,28 @@ mod tests {
             expected: Vec<JobId>,
             expected_fs_operations: Vec<TestMessage>,
         ) {
-            let result = self.cache.got_artifact_failure(&digest);
+            let result = self
+                .cache
+                .got_artifact_failure(CacheEntryKind::Blob, &digest);
             assert_eq!(result, expected);
             self.expect_messages_in_any_order(expected_fs_operations);
         }
 
         fn got_artifact_success_ign(&mut self, digest: Sha256Digest, bytes_used: u64) {
-            self.cache.got_artifact_success(&digest, bytes_used);
+            self.cache
+                .got_artifact_success(CacheEntryKind::Blob, &digest, bytes_used);
             self.clear_messages();
         }
 
         fn decrement_ref_count(&mut self, digest: Sha256Digest, expected: Vec<TestMessage>) {
-            self.cache.decrement_ref_count(&digest);
+            self.cache
+                .decrement_ref_count(CacheEntryKind::Blob, &digest);
             self.expect_messages_in_any_order(expected);
         }
 
         fn decrement_ref_count_ign(&mut self, digest: Sha256Digest) {
-            self.cache.decrement_ref_count(&digest);
+            self.cache
+                .decrement_ref_count(CacheEntryKind::Blob, &digest);
             self.clear_messages();
         }
     }
