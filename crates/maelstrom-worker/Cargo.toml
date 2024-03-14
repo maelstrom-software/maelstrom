@@ -35,6 +35,7 @@ sha2.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
+strum.workspace = true
 tar.workspace = true
 tokio = { workspace = true, features = ["io-util", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
 tuple.workspace = true

@@ -3005,6 +3005,7 @@ dependencies = [
  "slog",
  "slog-async",
  "slog-term",
+ "strum",
  "tar",
  "tempfile",
  "tokio",
