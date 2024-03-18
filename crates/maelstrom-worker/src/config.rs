@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
-use maelstrom_config::{AsCommandLineOptions, ConfigBuilder, FromConfig};
+use maelstrom_config::{AsCommandLineOptions, ConfigBuilder};
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
@@ -181,7 +181,7 @@ impl AsCommandLineOptions for Config {
     }
 }
 
-impl FromConfig for Config {
+impl maelstrom_config::Config for Config {
     fn from_config(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,

@@ -225,7 +225,7 @@ impl ConfigBag {
     }
 }
 
-pub trait FromConfig: Sized {
+pub trait Config: Sized {
     fn from_config(config: &mut ConfigBag) -> Result<Self>;
 }
 
@@ -360,7 +360,7 @@ impl ConfigBuilder {
     }
 }
 
-pub fn new_config<T: FromConfig + AsCommandLineOptions + Debug>(
+pub fn new_config<T: Config + AsCommandLineOptions + Debug>(
     command: Command,
     base_directories: &BaseDirectories,
     env_var_prefix: &'static str,
