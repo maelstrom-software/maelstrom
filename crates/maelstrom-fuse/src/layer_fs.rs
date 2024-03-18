@@ -619,6 +619,51 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
 }
 
 #[tokio::test]
+async fn two_mounts_test() {
+    use ty::FileData::*;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point1 = temp.path().join("mount1");
+    let mount_point2 = temp.path().join("mount2");
+
+    let data_dir1 = temp.path().join("data1");
+    let data_dir2 = temp.path().join("data2");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point1).await.unwrap();
+    fs.create_dir(&mount_point2).await.unwrap();
+    fs.create_dir(&data_dir1).await.unwrap();
+    fs.create_dir(&data_dir2).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let layer_fs1 = build_fs(
+        &fs,
+        &data_dir1,
+        &cache_dir,
+        ["/Apple"].into_iter().map(|e| (e, Empty)).collect(),
+    )
+    .await;
+
+    let layer_fs2 = build_fs(
+        &fs,
+        &data_dir2,
+        &cache_dir,
+        ["/Birthday"].into_iter().map(|e| (e, Empty)).collect(),
+    )
+    .await;
+
+    let mount_handle1 = layer_fs1.mount(&mount_point1).await.unwrap();
+    let mount_handle2 = layer_fs2.mount(&mount_point2).await.unwrap();
+
+    assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
+    assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;
+
+    mount_handle1.umount_and_join().await.unwrap();
+    mount_handle2.umount_and_join().await.unwrap();
+}
+
+#[tokio::test]
 async fn two_layer_empty_bottom() {
     two_layer_test(
         vec![],
