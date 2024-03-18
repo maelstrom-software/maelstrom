@@ -8,7 +8,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
-use maelstrom_config::{AsCommandLineOptions, ConfigBuilder};
+use maelstrom_config::ConfigBuilder;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
@@ -30,7 +30,7 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-impl AsCommandLineOptions for Config {
+impl maelstrom_config::Config for Config {
     fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
         builder
             .value(
@@ -48,9 +48,7 @@ impl AsCommandLineOptions for Config {
                 "Minimum log level to output.",
             )
     }
-}
 
-impl maelstrom_config::Config for Config {
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,

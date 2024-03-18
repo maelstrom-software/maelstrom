@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
-use maelstrom_config::{AsCommandLineOptions, ConfigBuilder};
+use maelstrom_config::ConfigBuilder;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
@@ -132,7 +132,7 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-impl AsCommandLineOptions for Config {
+impl maelstrom_config::Config for Config {
     fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
         builder
             .value(
@@ -179,9 +179,7 @@ impl AsCommandLineOptions for Config {
                 "Minimum log level to output.",
             )
     }
-}
 
-impl maelstrom_config::Config for Config {
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
