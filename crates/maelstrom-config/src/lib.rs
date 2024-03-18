@@ -230,7 +230,7 @@ pub trait Config: Sized {
 }
 
 pub trait AsCommandLineOptions {
-    fn as_command_line_options(builder: ConfigBuilder) -> ConfigBuilder;
+    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder;
 }
 
 pub struct ConfigBuilder {
@@ -366,7 +366,7 @@ pub fn new_config<T: Config + AsCommandLineOptions + Debug>(
     env_var_prefix: &'static str,
 ) -> Result<T> {
     let builder = ConfigBuilder::new(command, base_directories, env_var_prefix);
-    let builder = T::as_command_line_options(builder);
+    let builder = T::add_command_line_options(builder);
     let mut args = builder.build().get_matches();
     let env_var_prefix = env_var_prefix.to_string() + "_";
     let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));

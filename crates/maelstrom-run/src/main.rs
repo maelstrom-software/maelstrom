@@ -31,7 +31,7 @@ pub struct Config {
 }
 
 impl AsCommandLineOptions for Config {
-    fn as_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
         builder
             .value(
                 "broker",
