@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use clap::command;
 use maelstrom_broker::config::Config;
 use slog::{info, o, Drain, LevelFilter, Logger};
 use slog_async::Async;
@@ -14,8 +15,8 @@ fn main() -> Result<()> {
     let base_directories =
         BaseDirectories::with_prefix("maelstrom/broker").context("searching for config files")?;
     let env_var_prefix = "MAELSTROM_BROKER";
-    let args = Config::add_command_line_options(&base_directories, env_var_prefix).get_matches();
-    let config = maelstrom_config::new_config::<Config>(&base_directories, env_var_prefix, args)?;
+    let config =
+        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();

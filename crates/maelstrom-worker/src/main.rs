@@ -1,4 +1,5 @@
 use anyhow::{Context as _, Result};
+use clap::command;
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
 };
@@ -82,8 +83,8 @@ fn main() -> Result<()> {
     let base_directories =
         BaseDirectories::with_prefix("maelstrom/worker").context("searching for config files")?;
     let env_var_prefix = "MAELSTROM_WORKER";
-    let args = Config::add_command_line_options(&base_directories, env_var_prefix).get_matches();
-    let config = maelstrom_config::new_config::<Config>(&base_directories, env_var_prefix, args)?;
+    let config =
+        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
     clone_into_pid_and_user_namespace()?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();

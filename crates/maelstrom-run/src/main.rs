@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result};
-use clap::{command, Command};
+use clap::command;
 use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
@@ -8,7 +8,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
-use maelstrom_config::{ConfigBuilder, FromConfig};
+use maelstrom_config::{AsCommandLineOptions, ConfigBuilder, FromConfig};
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
@@ -16,7 +16,6 @@ use maelstrom_util::{
 };
 use slog::Drain as _;
 use std::{
-    env,
     io::{self, Read, Write as _},
     path::PathBuf,
     sync::Arc,
@@ -31,12 +30,9 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-impl Config {
-    pub fn add_command_line_options(
-        base_directories: &BaseDirectories,
-        env_var_prefix: &'static str,
-    ) -> Command {
-        ConfigBuilder::new(command!(), base_directories, env_var_prefix)
+impl AsCommandLineOptions for Config {
+    fn as_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+        builder
             .value(
                 "broker",
                 'b',
@@ -51,7 +47,6 @@ impl Config {
                 Some("info".to_string()),
                 "Minimum log level to output.",
             )
-            .build()
     }
 }
 
@@ -134,8 +129,8 @@ fn main() -> Result<ExitCode> {
     let base_directories =
         BaseDirectories::with_prefix("maelstrom/run").context("searching for config files")?;
     let env_var_prefix = "MAELSTROM_RUN";
-    let args = Config::add_command_line_options(&base_directories, env_var_prefix).get_matches();
-    let config = maelstrom_config::new_config::<Config>(&base_directories, env_var_prefix, args)?;
+    let config =
+        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 

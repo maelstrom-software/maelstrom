@@ -1,17 +1,14 @@
 use anyhow::Result;
-use clap::{command, Command};
 use derive_more::From;
-use maelstrom_config::{ConfigBuilder, FromConfig};
+use maelstrom_config::{AsCommandLineOptions, ConfigBuilder, FromConfig};
 use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
-    env,
     fmt::{self, Debug, Formatter},
     path::PathBuf,
     result,
     str::FromStr,
 };
-use xdg::BaseDirectories;
 
 #[derive(Deserialize, From)]
 #[serde(from = "u16")]
@@ -86,12 +83,9 @@ pub struct Config {
     pub log_level: LogLevel,
 }
 
-impl Config {
-    pub fn add_command_line_options(
-        base_directories: &BaseDirectories,
-        env_var_prefix: &'static str,
-    ) -> Command {
-        ConfigBuilder::new(command!(), base_directories, env_var_prefix)
+impl AsCommandLineOptions for Config {
+    fn as_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+        builder
             .value(
                 "port",
                 'p',
@@ -128,7 +122,6 @@ impl Config {
                 Some("info".to_string()),
                 "Minimum log level to output.",
             )
-            .build()
     }
 }
 
