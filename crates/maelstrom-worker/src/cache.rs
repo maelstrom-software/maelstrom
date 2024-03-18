@@ -63,7 +63,13 @@ impl CacheFs for StdCacheFs {
     }
 
     fn remove_recursively_on_thread(&mut self, path: PathBuf) {
-        thread::spawn(move || fs::remove_dir_all(path).unwrap());
+        thread::spawn(move || {
+            if path.is_dir() {
+                fs::remove_dir_all(path).unwrap()
+            } else {
+                fs::remove_file(path).unwrap();
+            }
+        });
     }
 
     fn mkdir_recursively(&mut self, path: &Path) {
@@ -95,7 +101,7 @@ pub enum GetArtifact {
     Get(PathBuf),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, strum::EnumIter)]
 pub enum CacheEntryKind {
     Blob,
     BottomFsLayer,
@@ -345,6 +351,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         };
         self.bytes_used = self.bytes_used.checked_add(bytes_used).unwrap();
         debug!(self.log, "cache added artifact";
+            "kind" => ?kind,
             "digest" => %digest,
             "artifact_bytes_used" => %ByteSize::b(bytes_used),
             "entries" => %self.entries.len(),

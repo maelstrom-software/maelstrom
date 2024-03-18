@@ -73,7 +73,6 @@ pub struct LayerTracker {
     cache_keys: HashSet<CacheKey>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum FetcherResult {
     Got(PathBuf),
@@ -96,7 +95,6 @@ pub trait Fetcher {
     ) -> FetcherResult;
 }
 
-#[allow(dead_code)]
 impl LayerTracker {
     pub fn new(
         layers: &NonEmpty<(Sha256Digest, ArtifactType)>,

@@ -29,6 +29,12 @@ use std::{
 )]
 pub struct ClientId(u32);
 
+impl ClientId {
+    pub fn as_u32(&self) -> u32 {
+        self.0
+    }
+}
+
 /// A client-relative job ID. Clients can assign these however they like.
 #[derive(
     Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
@@ -45,7 +51,7 @@ impl ClientJobId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum ArtifactType {
     /// A .tar file
     Tar,
@@ -99,7 +105,7 @@ impl From<JobDeviceListDeserialize> for JobDevice {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum JobMountFsType {
     Proc,
@@ -107,7 +113,7 @@ pub enum JobMountFsType {
     Sys,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct JobMount {
     pub fs_type: JobMountFsType,
@@ -167,7 +173,7 @@ impl From<Timeout> for Duration {
 }
 
 /// All necessary information for the worker to execute a job.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
@@ -265,14 +271,14 @@ impl JobSpec {
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
 /// signal.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobStatus {
     Exited(u8),
     Signaled(u8),
 }
 
 /// The result for stdout or stderr for a job.
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutputResult {
     /// There was no output.
     None,
@@ -313,14 +319,14 @@ impl Debug for JobOutputResult {
 /// The output of a job that ran for some amount of time. This is generated regardless of how the
 /// job terminated. From our point of view, it doesn't matter. We ran the job until it was
 /// terminated, and gathered its output.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobEffects {
     pub stdout: JobOutputResult,
     pub stderr: JobOutputResult,
 }
 
 /// The outcome of a job. This doesn't include error outcomes, which are handled with JobError.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutcome {
     Completed {
         status: JobStatus,
@@ -331,7 +337,7 @@ pub enum JobOutcome {
 
 /// A job failed to execute for some reason. We separate the universe of errors into "execution"
 /// errors and "system" errors.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobError<T> {
     /// There was something wrong with the job that made it unable to be executed. This error
     /// indicates that there was something wrong with the job itself, and thus is obstensibly the

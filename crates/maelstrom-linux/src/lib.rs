@@ -335,7 +335,7 @@ impl Drop for OwnedFd {
     }
 }
 
-#[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Display, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct Pid(pid_t);
 
 impl Pid {

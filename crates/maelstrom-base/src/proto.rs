@@ -28,7 +28,7 @@ pub enum BrokerToWorker {
 /// Message sent from a worker to the broker. These are responses to previous
 /// [`BrokerToWorker::EnqueueJob`] messages. After sending the initial [`Hello`], a worker will
 /// send a stream of these messages.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct WorkerToBroker(pub JobId, pub JobOutcomeResult);
 
 /// Message sent from the broker to a client. The broker won't send a message until it has recevied

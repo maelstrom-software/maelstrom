@@ -15,10 +15,11 @@ use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobId, JobResult, JobSpec, JobStatus, NonEmpty, Sha256Digest,
+    ArtifactType, JobError, JobId, JobResult, JobSpec, JobStatus, Sha256Digest,
 };
 use maelstrom_linux::{self as linux, Errno, Pid, Signal};
 use maelstrom_util::{
+    async_fs,
     config::{BrokerAddr, CacheRoot},
     fs::Fs,
     net, sync,
@@ -47,9 +48,11 @@ struct DispatcherAdapter {
     log: Logger,
     executor: Executor,
     cache_dir: PathBuf,
+    tmpfs_dir: PathBuf,
 }
 
 impl DispatcherAdapter {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
@@ -69,19 +72,35 @@ impl DispatcherAdapter {
             broker_addr,
             inline_limit,
             log,
-            executor: Executor::new(mount_dir, tmpfs_dir)?,
+            executor: Executor::new(mount_dir, tmpfs_dir.clone())?,
             cache_dir,
+            tmpfs_dir,
         })
     }
 }
 
+struct DispatcherAdapterFuseHandle {
+    inner: maelstrom_fuse::FuseHandle,
+    mount_path: PathBuf,
+}
+
+impl DispatcherAdapterFuseHandle {
+    async fn clean_up(self) -> Result<()> {
+        self.inner.umount_and_join().await?;
+        let fs = async_fs::Fs::new();
+        fs.remove_dir(self.mount_path).await
+    }
+}
+
 impl DispatcherDeps for DispatcherAdapter {
+    type FuseHandle = DispatcherAdapterFuseHandle;
+
     fn start_job(
         &mut self,
         jid: JobId,
         spec: JobSpec,
-        layers: NonEmpty<PathBuf>,
-    ) -> JobResult<Pid, String> {
+        layer_fs_path: PathBuf,
+    ) -> JobResult<(Pid, Self::FuseHandle), String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
         let log = self
@@ -89,9 +108,31 @@ impl DispatcherDeps for DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
-        let spec = executor::JobSpec::from_spec_and_layers(spec, layers);
-        self.executor
-            .start(
+
+        let mount_path = self.tmpfs_dir.join(format!(
+            "fuse_mount.{}.{}",
+            jid.cid.as_u32(),
+            jid.cjid.as_u32()
+        ));
+        let fs = Fs::new();
+        fs.create_dir_all(&mount_path)
+            .map_err(|e| JobError::System(e.to_string()))?;
+        let spec = executor::JobSpec::from_spec_and_path(spec, mount_path.clone());
+
+        let cache_dir = self.cache_dir.join("blob/sha256");
+        let mount_path2 = mount_path.clone();
+        let layer_fs = maelstrom_fuse::LayerFs::from_path(&layer_fs_path, &cache_dir)
+            .map_err(|e| JobError::System(e.to_string()))?;
+        let fuse_handle = layer_fs
+            .mount(&mount_path2)
+            .map_err(|e| JobError::System(e.to_string()))?;
+        let fuse_handle = DispatcherAdapterFuseHandle {
+            inner: fuse_handle,
+            mount_path,
+        };
+
+        let pid = tokio::task::block_in_place(|| {
+            self.executor.start(
                 &spec,
                 self.inline_limit,
                 move |result| {
@@ -107,11 +148,22 @@ impl DispatcherDeps for DispatcherAdapter {
                         .ok();
                 },
             )
-            .map_err(|e| e.map(|inner| inner.to_string()))
+        })
+        .map_err(|e| e.map(|inner| inner.to_string()))?;
+        Ok((pid, fuse_handle))
     }
 
     fn kill_job(&mut self, pid: Pid) {
         linux::kill(pid, Signal::KILL).ok();
+    }
+
+    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle) {
+        let log = self.log.clone();
+        task::spawn(async move {
+            if let Err(e) = handle.clean_up().await {
+                error!(log, "error unmounting fuse: {e}")
+            }
+        });
     }
 
     type TimerHandle = JoinHandle<()>;
@@ -152,8 +204,9 @@ impl DispatcherDeps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let cache_path = self.cache_dir.clone();
+        let cache_path = self.cache_dir.join("blob/sha256");
         task::spawn(async move {
+            debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
                 layer_path.clone(),
                 cache_path,
@@ -178,8 +231,9 @@ impl DispatcherDeps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let cache_path = self.cache_dir.clone();
+        let cache_path = self.cache_dir.join("blob/sha256");
         task::spawn(async move {
+            debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
                 layer_path.clone(),
                 cache_path,

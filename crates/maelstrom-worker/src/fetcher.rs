@@ -3,14 +3,13 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     ArtifactType, Sha256Digest,
 };
-use maelstrom_util::{config::BrokerAddr, io::ChunkedReader, net};
+use maelstrom_util::{config::BrokerAddr, fs::Fs, io::ChunkedReader, net};
 use slog::{debug, Logger};
 use std::{
     io::{self, BufReader},
     net::TcpStream,
     path::PathBuf,
 };
-use tar::Archive;
 
 pub fn main(
     digest: &Sha256Digest,
@@ -33,10 +32,10 @@ pub fn main(
         .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
 
     let mut reader = countio::Counter::new(ChunkedReader::new(reader));
-    Archive::new(&mut reader).unpack(path)?;
 
-    // N.B. Make sure archive wasn't truncated by reading ending chunk.
-    io::copy(&mut reader, &mut io::sink())?;
+    let fs = Fs::new();
+    let mut file = fs.create_file(path)?;
+    io::copy(&mut reader, &mut file)?;
 
     Ok(reader.reader_bytes() as u64)
 }

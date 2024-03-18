@@ -19,11 +19,13 @@ pub struct LayerTracker {
     gotten: HashSet<Sha256Digest>,
 }
 
+#[allow(dead_code)]
 pub enum FetcherResult {
     Got(PathBuf),
     Pending,
 }
 
+#[allow(dead_code)]
 impl LayerTracker {
     pub fn new(
         layers: &NonEmpty<(Sha256Digest, ArtifactType)>,

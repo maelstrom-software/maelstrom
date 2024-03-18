@@ -23,6 +23,7 @@ pub async fn build_bottom_layer(
     artifact_path: PathBuf,
 ) -> Result<u64> {
     let fs = Fs::new();
+    fs.create_dir_all(&layer_path).await?;
     let mut builder =
         BottomLayerBuilder::new(&fs, &layer_path, &cache_path, UnixTimestamp::EPOCH).await?;
     builder
@@ -40,9 +41,11 @@ pub async fn build_upper_layer(
     upper_layer_path: PathBuf,
 ) -> Result<u64> {
     let fs = Fs::new();
-    let lower = LayerFs::from_path(&lower_layer_path, &cache_path).await?;
-    let upper = LayerFs::from_path(&upper_layer_path, &cache_path).await?;
+    fs.create_dir_all(&layer_path).await?;
+    let lower = LayerFs::from_path(&lower_layer_path, &cache_path)?;
+    let upper = LayerFs::from_path(&upper_layer_path, &cache_path)?;
     let mut builder = UpperLayerBuilder::new(&layer_path, &cache_path, &lower).await?;
+    builder.fill_from_bottom_layer(&upper).await?;
     builder.fill_from_bottom_layer(&upper).await?;
     builder.finish();
 
