@@ -51,7 +51,7 @@ impl AsCommandLineOptions for Config {
 }
 
 impl FromConfig for Config {
-    fn from_config(config: &mut maelstrom_config::Config) -> Result<Self> {
+    fn from_config(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
             log_level: config.get_or("log-level", LogLevel::Info)?,

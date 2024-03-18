@@ -10,7 +10,7 @@ use std::{
 use toml::Table;
 use xdg::BaseDirectories;
 
-pub struct Config {
+pub struct ConfigBag {
     args: ArgMatches,
     env_prefix: String,
     env: HashMap<String, String>,
@@ -23,7 +23,7 @@ struct KeyNames {
     toml_key: String,
 }
 
-impl Config {
+impl ConfigBag {
     pub fn new(
         args: ArgMatches,
         env_prefix: impl Into<String>,
@@ -226,7 +226,7 @@ impl Config {
 }
 
 pub trait FromConfig: Sized {
-    fn from_config(config: &mut Config) -> Result<Self>;
+    fn from_config(config: &mut ConfigBag) -> Result<Self>;
 }
 
 pub trait AsCommandLineOptions {
@@ -388,7 +388,7 @@ pub fn new_config<T: FromConfig + AsCommandLineOptions + Debug>(
 
     let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-    let mut config = Config::new(args, &env_var_prefix, env, files)
+    let mut config = ConfigBag::new(args, &env_var_prefix, env, files)
         .context("loading configuration from environment variables and config files")?;
 
     let config = T::from_config(&mut config)?;
@@ -407,7 +407,7 @@ mod tests {
     use clap::{Arg, ArgAction, Command};
     use indoc::indoc;
 
-    fn get_config() -> Config {
+    fn get_config() -> ConfigBag {
         let args = Command::new("command")
             .arg(Arg::new("key-1").long("key-1").action(ArgAction::Set))
             .arg(
@@ -441,7 +441,7 @@ mod tests {
                 "--int-key-1=1",
                 "--bool-key-1",
             ]);
-        Config::new(
+        ConfigBag::new(
             args,
             "prefix_",
             [

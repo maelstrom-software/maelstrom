@@ -182,7 +182,7 @@ impl AsCommandLineOptions for Config {
 }
 
 impl FromConfig for Config {
-    fn from_config(config: &mut maelstrom_config::Config) -> Result<Self> {
+    fn from_config(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
             slots: config.get_or_else("slots", || {

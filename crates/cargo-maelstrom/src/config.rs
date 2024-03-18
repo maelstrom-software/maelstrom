@@ -197,7 +197,7 @@ impl Config {
 
         let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-        let config = maelstrom_config::Config::new(args, "CARGO_MAELSTROM_", env, files)
+        let config = maelstrom_config::ConfigBag::new(args, "CARGO_MAELSTROM_", env, files)
             .context("loading configuration from environment variables and config files")?;
 
         let config = Self {
