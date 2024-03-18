@@ -1,14 +1,14 @@
-use anyhow::{Context as _, Result};
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use anyhow::Result;
+use clap::{command, Command};
 use derive_more::From;
+use maelstrom_config::{ConfigBuilder, FromConfig};
 use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
     env,
     fmt::{self, Debug, Formatter},
-    fs,
     path::PathBuf,
-    process, result,
+    result,
     str::FromStr,
 };
 use xdg::BaseDirectories;
@@ -87,106 +87,54 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn add_command_line_options(command: Command) -> Command {
-        command
-        .styles(maelstrom_util::clap::styles())
-        .after_help(
-            "Configuration values can be specified in three ways: fields in a config file, \
-            environment variables, or command-line options. Command-line options have the \
-            highest precendence, followed by environment variables.\n\
-            \n\
-            The configuration value 'config_value' would be set via the '--config-value' \
-            command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
-            and the 'config_value' key in a configuration file.")
-        .arg(
-            Arg::new("config-file")
-                .long("config-file")
-                .short('c')
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help(
-                    "Configuration file. Values set in the configuration file will be overridden by \
-                    values set through environment variables and values set on the command line"
-                )
-        )
-        .arg(
-            Arg::new("print-config")
-                .long("print-config")
-                .short('P')
-                .action(ArgAction::SetTrue)
-                .help("Print configuration and exit"),
-        )
-        .arg(
-            Arg::new("port")
-                .long("port")
-                .short('p')
-                .value_name("PORT")
-                .action(ArgAction::Set)
-                .help("The port the broker listens on for connections from workers and clients")
-        )
-        .arg(
-            Arg::new("http-port")
-                .long("http-port")
-                .short('H')
-                .value_name("PORT")
-                .action(ArgAction::Set)
-                .help("The port the HTTP UI is served on")
-        )
-        .arg(
-            Arg::new("cache-root")
-                .long("cache-root")
-                .short('r')
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help("The directory to use for the cache")
-        )
-        .arg(
-            Arg::new("cache-bytes-used-target")
-                .long("cache-bytes-used-target")
-                .short('B')
-                .value_name("BYTES")
-                .action(ArgAction::Set)
-                .help(
-                    "The target amount of disk space to use for the cache. \
-                    This bound won't be followed strictly, so it's best to be conservative"
-                )
-        )
-        .arg(
-            Arg::new("log-level")
-                .long("log-level")
-                .short('l')
-                .value_name("LEVEL")
-                .action(ArgAction::Set)
-                .help("Minimum log level to output")
-        )
+    pub fn add_command_line_options(
+        base_directories: &BaseDirectories,
+        env_var_prefix: &'static str,
+    ) -> Command {
+        ConfigBuilder::new(command!(), base_directories, env_var_prefix)
+            .value(
+                "port",
+                'p',
+                "PORT",
+                Some(0.to_string()),
+                "The port the broker listens on for connections from workers and clients.",
+            )
+            .value(
+                "http-port",
+                'H',
+                "PORT",
+                Some(0.to_string()),
+                "The port the HTTP UI is served on.",
+            )
+            .value(
+                "cache_root",
+                'r',
+                "PATH",
+                Some(".cache/maelstrom-broker".to_string()),
+                "The directory to use for the cache.",
+            )
+            .value(
+                "cache_bytes_used_target",
+                'B',
+                "BYTES",
+                Some(1_000_000_000.to_string()),
+                "The target amount of disk space to use for the cache. \
+                This bound won't be followed strictly, so it's best to be conservative.",
+            )
+            .value(
+                "log_level",
+                'l',
+                "LEVEL",
+                Some("info".to_string()),
+                "Minimum log level to output.",
+            )
+            .build()
     }
+}
 
-    pub fn new(mut args: ArgMatches) -> Result<Self> {
-        let env = env::vars().filter(|(key, _)| key.starts_with("MAELSTROM_BROKER_"));
-
-        let config_files = match args.remove_one::<String>("config-file").as_deref() {
-            Some("-") => vec![],
-            Some(config_file) => vec![PathBuf::from(config_file)],
-            None => BaseDirectories::with_prefix("maelstrom/broker")
-                .context("searching for config files")?
-                .find_config_files("config.toml")
-                .rev()
-                .collect(),
-        };
-        let mut files = vec![];
-        for config_file in config_files {
-            let contents = fs::read_to_string(&config_file).with_context(|| {
-                format!("reading config file `{}`", config_file.to_string_lossy())
-            })?;
-            files.push((config_file.clone(), contents));
-        }
-
-        let print_config = args.remove_one::<bool>("print-config").unwrap();
-
-        let config = maelstrom_config::Config::new(args, "MAELSTROM_BROKER_", env, files)
-            .context("loading configuration from environment variables and config files")?;
-
-        let config = Self {
+impl FromConfig for Config {
+    fn from_config(config: &mut maelstrom_config::Config) -> Result<Self> {
+        Ok(Self {
             port: config.get_or_else("port", || BrokerPort::from(0))?,
             http_port: config.get_or_else("http-port", || HttpPort::from(0))?,
             cache_root: config.get_or_else("cache-root", || {
@@ -196,13 +144,6 @@ impl Config {
                 CacheBytesUsedTarget::from(1_000_000_000)
             })?,
             log_level: config.get_or("log-level", LogLevel::Info)?,
-        };
-
-        if print_config {
-            println!("{config:#?}");
-            process::exit(0);
-        }
-
-        Ok(config)
+        })
     }
 }
