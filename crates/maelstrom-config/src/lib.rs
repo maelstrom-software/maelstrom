@@ -4,14 +4,15 @@ use clap::{
     Arg, ArgAction, ArgMatches, Command,
 };
 use serde::Deserialize;
-use std::result;
-use std::{collections::HashMap, iter, path::PathBuf, str::FromStr};
+use std::{
+    collections::HashMap, env, fmt::Debug, fs, iter, path::PathBuf, process, result, str::FromStr,
+};
 use toml::Table;
 use xdg::BaseDirectories;
 
 pub struct Config {
     args: ArgMatches,
-    env_prefix: &'static str,
+    env_prefix: String,
     env: HashMap<String, String>,
     files: Vec<(PathBuf, Table)>,
 }
@@ -25,7 +26,7 @@ struct KeyNames {
 impl Config {
     pub fn new(
         args: ArgMatches,
-        env_prefix: &'static str,
+        env_prefix: impl Into<String>,
         env: impl IntoIterator<Item = (impl Into<String>, impl Into<String>)>,
         files: impl IntoIterator<Item = (impl Into<PathBuf>, impl Into<String>)>,
     ) -> Result<Self> {
@@ -41,7 +42,7 @@ impl Config {
             .collect::<std::result::Result<_, _>>()?;
         Ok(Self {
             args,
-            env_prefix,
+            env_prefix: env_prefix.into(),
             env,
             files,
         })
@@ -236,7 +237,7 @@ pub struct ConfigBuilder {
 impl ConfigBuilder {
     pub fn new(
         command: clap::Command,
-        base_directories: BaseDirectories,
+        base_directories: &BaseDirectories,
         env_var_prefix: &'static str,
     ) -> Self {
         let config_files = iter::once(base_directories.get_config_home())
@@ -353,6 +354,44 @@ impl ConfigBuilder {
     pub fn build(self) -> Command {
         self.command
     }
+}
+
+pub fn new_config<T: FromConfig + Debug>(
+    base_directories: &BaseDirectories,
+    env_var_prefix: &'static str,
+    mut args: ArgMatches,
+) -> Result<T> {
+    let env_var_prefix = env_var_prefix.to_string() + "_";
+    let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));
+
+    let config_files = match args.remove_one::<String>("config-file").as_deref() {
+        Some("-") => vec![],
+        Some(config_file) => vec![PathBuf::from(config_file)],
+        None => base_directories
+            .find_config_files("config.toml")
+            .rev()
+            .collect(),
+    };
+    let mut files = vec![];
+    for config_file in config_files {
+        let contents = fs::read_to_string(&config_file)
+            .with_context(|| format!("reading config file `{}`", config_file.to_string_lossy()))?;
+        files.push((config_file.clone(), contents));
+    }
+
+    let print_config = args.remove_one::<bool>("print-config").unwrap();
+
+    let mut config = Config::new(args, &env_var_prefix, env, files)
+        .context("loading configuration from environment variables and config files")?;
+
+    let config = T::from_config(&mut config)?;
+
+    if print_config {
+        println!("{config:#?}");
+        process::exit(0);
+    }
+
+    Ok(config)
 }
 
 #[cfg(test)]

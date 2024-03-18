@@ -1,6 +1,6 @@
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use bytesize::ByteSize;
-use clap::{command, ArgMatches, Command};
+use clap::{command, Command};
 use derive_more::From;
 use maelstrom_config::{ConfigBuilder, FromConfig};
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
@@ -8,10 +8,9 @@ use serde::Deserialize;
 use std::{
     env, error,
     fmt::{self, Debug, Display, Formatter},
-    fs,
     num::ParseIntError,
     path::PathBuf,
-    process, result,
+    result,
     str::FromStr,
 };
 use xdg::BaseDirectories;
@@ -136,91 +135,55 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn add_command_line_options() -> Result<Command> {
-        let base_directories = BaseDirectories::with_prefix("maelstrom/worker")
-            .context("searching for config files")?;
-        Ok(
-            ConfigBuilder::new(command!(), base_directories, "MAELSTROM_WORKER")
-                .value(
-                    "broker",
-                    'b',
-                    "SOCKADDR",
-                    None,
-                    r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
-                )
-                .value(
-                    "slots",
-                    's',
-                    "N",
-                    Some(num_cpus::get().to_string()),
-                    "The number of job slots available. Most jobs will take one job slot.",
-                )
-                .value(
-                    "cache_root",
-                    'r',
-                    "PATH",
-                    Some(".cache/maelstrom-worker".to_string()),
-                    "The directory to use for the cache.",
-                )
-                .value(
-                    "cache_bytes_used_target",
-                    'B',
-                    "BYTES",
-                    Some(1_000_000_000.to_string()),
-                    "The target amount of disk space to use for the cache. \
+    pub fn add_command_line_options(
+        base_directories: &BaseDirectories,
+        env_var_prefix: &'static str,
+    ) -> Command {
+        ConfigBuilder::new(command!(), base_directories, env_var_prefix)
+            .value(
+                "broker",
+                'b',
+                "SOCKADDR",
+                None,
+                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
+            )
+            .value(
+                "slots",
+                's',
+                "N",
+                Some(num_cpus::get().to_string()),
+                "The number of job slots available. Most jobs will take one job slot.",
+            )
+            .value(
+                "cache_root",
+                'r',
+                "PATH",
+                Some(".cache/maelstrom-worker".to_string()),
+                "The directory to use for the cache.",
+            )
+            .value(
+                "cache_bytes_used_target",
+                'B',
+                "BYTES",
+                Some(1_000_000_000.to_string()),
+                "The target amount of disk space to use for the cache. \
                 This bound won't be followed strictly, so it's best to be conservative.",
-                )
-                .value(
-                    "inline_limit",
-                    'i',
-                    "BYTES",
-                    Some(1_000_000.to_string()),
-                    "The maximum amount of bytes to return inline for captured stdout and stderr.",
-                )
-                .value(
-                    "log_level",
-                    'l',
-                    "LEVEL",
-                    Some("info".to_string()),
-                    "Minimum log level to output.",
-                )
-                .build(),
-        )
-    }
-
-    pub fn new(mut args: ArgMatches) -> Result<Self> {
-        let env = env::vars().filter(|(key, _)| key.starts_with("MAELSTROM_WORKER_"));
-
-        let config_files = match args.remove_one::<String>("config-file").as_deref() {
-            Some("-") => vec![],
-            Some(config_file) => vec![PathBuf::from(config_file)],
-            None => BaseDirectories::with_prefix("maelstrom/worker")
-                .context("searching for config files")?
-                .find_config_files("config.toml")
-                .rev()
-                .collect(),
-        };
-        let mut files = vec![];
-        for config_file in config_files {
-            let contents = fs::read_to_string(&config_file).with_context(|| {
-                format!("reading config file `{}`", config_file.to_string_lossy())
-            })?;
-            files.push((config_file.clone(), contents));
-        }
-
-        let print_config = args.remove_one::<bool>("print-config").unwrap();
-
-        let mut config = maelstrom_config::Config::new(args, "MAELSTROM_WORKER_", env, files)
-            .context("loading configuration from environment variables and config files")?;
-
-        let config = Self::from_config(&mut config)?;
-
-        if print_config {
-            println!("{config:#?}");
-            process::exit(0);
-        }
-
-        Ok(config)
+            )
+            .value(
+                "inline_limit",
+                'i',
+                "BYTES",
+                Some(1_000_000.to_string()),
+                "The maximum amount of bytes to return inline for captured stdout and stderr.",
+            )
+            .value(
+                "log_level",
+                'l',
+                "LEVEL",
+                Some("info".to_string()),
+                "Minimum log level to output.",
+            )
+            .build()
     }
 }
 
