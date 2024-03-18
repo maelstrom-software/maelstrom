@@ -2993,6 +2993,7 @@ dependencies = [
  "itertools",
  "maelstrom-base",
  "maelstrom-config",
+ "maelstrom-fuse",
  "maelstrom-linux",
  "maelstrom-test",
  "maelstrom-util",

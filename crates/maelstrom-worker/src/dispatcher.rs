@@ -70,6 +70,24 @@ pub trait DispatcherDeps {
 
     /// Start a thread that will download an artifact from the broker and extract it into `path`.
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf);
+
+    /// Start a task that will build a layer-fs bottom layer out of an artifact
+    fn build_bottom_fs_layer(
+        &mut self,
+        digest: Sha256Digest,
+        layer_path: PathBuf,
+        artifact_type: ArtifactType,
+        artifact_path: PathBuf,
+    );
+
+    /// Start a task that will build a layer-fs upper layer by stacking a bottom layer
+    fn build_upper_fs_layer(
+        &mut self,
+        digest: Sha256Digest,
+        layer_path: PathBuf,
+        lower_layer_path: PathBuf,
+        upper_layer_path: PathBuf,
+    );
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -130,6 +148,8 @@ pub enum Message {
     JobStderr(JobId, StdResult<JobOutputResult, String>),
     JobTimer(JobId),
     ArtifactFetcher(Sha256Digest, Result<u64>),
+    BuiltBottomFsLayer(Sha256Digest, Result<u64>),
+    BuiltUpperFsLayer(Sha256Digest, Result<u64>),
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -164,6 +184,18 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
             Message::ArtifactFetcher(digest, Ok(bytes_used)) => {
                 self.receive_artifact_success(digest, bytes_used)
+            }
+            Message::BuiltBottomFsLayer(digest, Ok(bytes_used)) => {
+                self.build_bottom_fs_layer_success(digest, bytes_used)
+            }
+            Message::BuiltBottomFsLayer(digest, Err(err)) => {
+                self.build_bottom_fs_layer_failure(digest, err)
+            }
+            Message::BuiltUpperFsLayer(digest, Ok(bytes_used)) => {
+                self.build_upper_fs_layer_success(digest, bytes_used)
+            }
+            Message::BuiltUpperFsLayer(digest, Err(err)) => {
+                self.build_upper_fs_layer_failure(digest, err)
             }
         }
     }
@@ -482,6 +514,22 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
         }
     }
+
+    fn build_bottom_fs_layer_success(&mut self, _digest: Sha256Digest, _bytes_used: u64) {
+        unimplemented!()
+    }
+
+    fn build_bottom_fs_layer_failure(&mut self, _digest: Sha256Digest, _err: Error) {
+        unimplemented!()
+    }
+
+    fn build_upper_fs_layer_success(&mut self, _digest: Sha256Digest, _bytes_used: u64) {
+        unimplemented!()
+    }
+
+    fn build_upper_fs_layer_failure(&mut self, _digest: Sha256Digest, _err: Error) {
+        unimplemented!()
+    }
 }
 
 /*  _            _
@@ -507,6 +555,8 @@ mod tests {
         StartJob(JobId, JobSpec, Vec<PathBuf>),
         SendMessageToBroker(WorkerToBroker),
         StartArtifactFetch(Sha256Digest, ArtifactType, PathBuf),
+        BuildBottomFsLayer(Sha256Digest, PathBuf, ArtifactType, PathBuf),
+        BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf, PathBuf),
         CacheGetArtifact(CacheEntryKind, Sha256Digest, JobId),
         CacheGotArtifactSuccess(CacheEntryKind, Sha256Digest, u64),
         CacheGotArtifactFailure(CacheEntryKind, Sha256Digest),
@@ -564,6 +614,36 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(StartArtifactFetch(digest, type_, path));
+        }
+
+        fn build_bottom_fs_layer(
+            &mut self,
+            digest: Sha256Digest,
+            layer_path: PathBuf,
+            artifact_type: ArtifactType,
+            artifact_path: PathBuf,
+        ) {
+            self.borrow_mut().messages.push(BuildBottomFsLayer(
+                digest,
+                layer_path,
+                artifact_type,
+                artifact_path,
+            ));
+        }
+
+        fn build_upper_fs_layer(
+            &mut self,
+            digest: Sha256Digest,
+            layer_path: PathBuf,
+            lower_layer_path: PathBuf,
+            upper_layer_path: PathBuf,
+        ) {
+            self.borrow_mut().messages.push(BuildUpperFsLayer(
+                digest,
+                layer_path,
+                lower_layer_path,
+                upper_layer_path,
+            ));
         }
 
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {

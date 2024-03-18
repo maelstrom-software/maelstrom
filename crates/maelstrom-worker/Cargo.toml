@@ -23,6 +23,7 @@ futures.workspace = true
 gethostname.workspace = true
 maelstrom-base.workspace = true
 maelstrom-config.workspace = true
+maelstrom-fuse.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true

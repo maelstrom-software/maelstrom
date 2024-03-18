@@ -5,6 +5,7 @@ pub mod config;
 mod dispatcher;
 mod executor;
 mod fetcher;
+mod layer_fs;
 mod reaper;
 
 use anyhow::Result;
@@ -45,6 +46,7 @@ struct DispatcherAdapter {
     inline_limit: InlineLimit,
     log: Logger,
     executor: Executor,
+    cache_dir: PathBuf,
 }
 
 impl DispatcherAdapter {
@@ -56,6 +58,7 @@ impl DispatcherAdapter {
         log: Logger,
         mount_dir: PathBuf,
         tmpfs_dir: PathBuf,
+        cache_dir: PathBuf,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
@@ -67,6 +70,7 @@ impl DispatcherAdapter {
             inline_limit,
             log,
             executor: Executor::new(mount_dir, tmpfs_dir)?,
+            cache_dir,
         })
     }
 }
@@ -139,6 +143,55 @@ impl DispatcherDeps for DispatcherAdapter {
         });
     }
 
+    fn build_bottom_fs_layer(
+        &mut self,
+        digest: Sha256Digest,
+        layer_path: PathBuf,
+        artifact_type: ArtifactType,
+        artifact_path: PathBuf,
+    ) {
+        let sender = self.dispatcher_sender.clone();
+        let log = self.log.clone();
+        let cache_path = self.cache_dir.clone();
+        task::spawn(async move {
+            let result = layer_fs::build_bottom_layer(
+                layer_path.clone(),
+                cache_path,
+                digest.clone(),
+                artifact_type,
+                artifact_path,
+            )
+            .await;
+            debug!(log, "built bottom FS layer"; "result" => ?result);
+            sender
+                .send(Message::BuiltBottomFsLayer(digest, result))
+                .ok();
+        });
+    }
+
+    fn build_upper_fs_layer(
+        &mut self,
+        digest: Sha256Digest,
+        layer_path: PathBuf,
+        lower_layer_path: PathBuf,
+        upper_layer_path: PathBuf,
+    ) {
+        let sender = self.dispatcher_sender.clone();
+        let log = self.log.clone();
+        let cache_path = self.cache_dir.clone();
+        task::spawn(async move {
+            let result = layer_fs::build_upper_layer(
+                layer_path.clone(),
+                cache_path,
+                lower_layer_path,
+                upper_layer_path,
+            )
+            .await;
+            debug!(log, "built upper FS layer"; "result" => ?result);
+            sender.send(Message::BuiltUpperFsLayer(digest, result)).ok();
+        });
+    }
+
     fn send_message_to_broker(&mut self, message: WorkerToBroker) {
         self.broker_socket_sender.send(message).ok();
     }
@@ -157,7 +210,7 @@ async fn dispatcher_main(
 
     let cache = Cache::new(
         StdCacheFs,
-        CacheRoot::from(cache_root),
+        CacheRoot::from(cache_root.clone()),
         config.cache_bytes_used_target,
         log.clone(),
     );
@@ -169,6 +222,7 @@ async fn dispatcher_main(
         log.clone(),
         mount_dir,
         tmpfs_dir,
+        cache_root,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);

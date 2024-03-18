@@ -37,6 +37,10 @@ fn mode_fmt() {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
 pub struct UnixTimestamp(pub i64);
 
+impl UnixTimestamp {
+    pub const EPOCH: Self = Self(0);
+}
+
 impl From<UnixTimestamp> for i64 {
     fn from(t: UnixTimestamp) -> Self {
         t.0
