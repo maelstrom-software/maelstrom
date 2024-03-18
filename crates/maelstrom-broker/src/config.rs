@@ -126,7 +126,7 @@ impl AsCommandLineOptions for Config {
 }
 
 impl maelstrom_config::Config for Config {
-    fn from_config(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
+    fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             port: config.get_or_else("port", || BrokerPort::from(0))?,
             http_port: config.get_or_else("http-port", || HttpPort::from(0))?,

@@ -226,7 +226,7 @@ impl ConfigBag {
 }
 
 pub trait Config: Sized {
-    fn from_config(config: &mut ConfigBag) -> Result<Self>;
+    fn from_config_bag(config: &mut ConfigBag) -> Result<Self>;
 }
 
 pub trait AsCommandLineOptions {
@@ -391,7 +391,7 @@ pub fn new_config<T: Config + AsCommandLineOptions + Debug>(
     let mut config = ConfigBag::new(args, &env_var_prefix, env, files)
         .context("loading configuration from environment variables and config files")?;
 
-    let config = T::from_config(&mut config)?;
+    let config = T::from_config_bag(&mut config)?;
 
     if print_config {
         println!("{config:#?}");
