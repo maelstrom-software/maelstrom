@@ -45,7 +45,7 @@ impl ClientJobId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
 pub enum ArtifactType {
     /// A .tar file
     Tar,
@@ -394,6 +394,10 @@ impl Sha256Digest {
         } else {
             Ok(())
         }
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 

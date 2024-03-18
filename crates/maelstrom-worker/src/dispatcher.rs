@@ -2,6 +2,7 @@
 //! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
 mod tracker;
+mod tracker2;
 
 use crate::{
     cache::{Cache, CacheEntryKind, CacheFs, GetArtifact},

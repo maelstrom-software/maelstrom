@@ -2995,6 +2995,7 @@ dependencies = [
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",
+ "maplit",
  "netlink-packet-core",
  "netlink-packet-route",
  "num_cpus",
