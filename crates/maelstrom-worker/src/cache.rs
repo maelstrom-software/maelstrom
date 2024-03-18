@@ -98,6 +98,8 @@ pub enum GetArtifact {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, strum::EnumIter)]
 pub enum CacheEntryKind {
     Blob,
+    BottomFsLayer,
+    UpperFsLayer,
 }
 
 impl CacheEntryKind {
@@ -110,18 +112,20 @@ impl fmt::Display for CacheEntryKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Blob => write!(f, "blob"),
+            Self::BottomFsLayer => write!(f, "bottom_fs_layer"),
+            Self::UpperFsLayer => write!(f, "upper_fs_layer"),
         }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-struct CacheKey {
-    kind: CacheEntryKind,
-    digest: Sha256Digest,
+pub struct CacheKey {
+    pub kind: CacheEntryKind,
+    pub digest: Sha256Digest,
 }
 
 impl CacheKey {
-    fn new(kind: CacheEntryKind, digest: Sha256Digest) -> Self {
+    pub fn new(kind: CacheEntryKind, digest: Sha256Digest) -> Self {
         Self { kind, digest }
     }
 }
@@ -1008,6 +1012,10 @@ mod tests {
             ReadDir(path_buf!("/z/removing")),
             FileExists(path_buf!("/z/blob/sha256")),
             MkdirRecursively(path_buf!("/z/blob/sha256")),
+            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
+            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
         ]);
     }
 
@@ -1029,6 +1037,10 @@ mod tests {
             RemoveRecursively(short_path!("/z/removing", 20)),
             FileExists(path_buf!("/z/blob/sha256")),
             MkdirRecursively(path_buf!("/z/blob/sha256")),
+            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
+            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
+            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
         ]);
     }
 
@@ -1038,6 +1050,12 @@ mod tests {
         test_cache_fs
             .existing_files
             .insert(path_buf!("/z/blob/sha256"));
+        test_cache_fs
+            .existing_files
+            .insert(path_buf!("/z/bottom_fs_layer/sha256"));
+        test_cache_fs
+            .existing_files
+            .insert(path_buf!("/z/upper_fs_layer/sha256"));
         let mut fixture = Fixture::new(test_cache_fs, 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
@@ -1047,6 +1065,22 @@ mod tests {
             Rename(path_buf!("/z/blob/sha256"), short_path!("/z/removing", 1)),
             RemoveRecursively(short_path!("/z/removing", 1)),
             MkdirRecursively(path_buf!("/z/blob/sha256")),
+            FileExists(path_buf!("/z/bottom_fs_layer/sha256")),
+            FileExists(short_path!("/z/removing", 2)),
+            Rename(
+                path_buf!("/z/bottom_fs_layer/sha256"),
+                short_path!("/z/removing", 2),
+            ),
+            RemoveRecursively(short_path!("/z/removing", 2)),
+            MkdirRecursively(path_buf!("/z/bottom_fs_layer/sha256")),
+            FileExists(path_buf!("/z/upper_fs_layer/sha256")),
+            FileExists(short_path!("/z/removing", 3)),
+            Rename(
+                path_buf!("/z/upper_fs_layer/sha256"),
+                short_path!("/z/removing", 3),
+            ),
+            RemoveRecursively(short_path!("/z/removing", 3)),
+            MkdirRecursively(path_buf!("/z/upper_fs_layer/sha256")),
         ]);
     }
 }
