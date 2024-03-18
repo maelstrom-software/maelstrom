@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result};
-use clap::{command, Arg, ArgAction, ArgMatches, Command};
+use clap::{command, Command};
 use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
@@ -8,6 +8,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
+use maelstrom_config::{ConfigBuilder, FromConfig};
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
@@ -15,10 +16,9 @@ use maelstrom_util::{
 };
 use slog::Drain as _;
 use std::{
-    env, fs,
+    env,
     io::{self, Read, Write as _},
     path::PathBuf,
-    process,
     sync::Arc,
 };
 use xdg::BaseDirectories;
@@ -32,91 +32,35 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn add_command_line_options(command: Command) -> Command {
-        command
-        .styles(maelstrom_util::clap::styles())
-        .after_help(
-            "Configuration values can be specified in three ways: fields in a config file, \
-            environment variables, or command-line options. Command-line options have the \
-            highest precendence, followed by environment variables.\n\
-            \n\
-            The configuration value 'config_value' would be set via the '--config-value' \
-            command-line option, the MAELSTROM_WORKER_CONFIG_VALUE environment variable, \
-            and the 'config_value' key in a configuration file.\n\
-            \n\
-            All values except for 'broker' have reasonable defaults.")
-        .arg(
-            Arg::new("config-file")
-                .long("config-file")
-                .short('c')
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help(
-                    "Configuration file. Values set in the configuration file will be overridden by \
-                    values set through environment variables and values set on the command line"
-                )
-        )
-        .arg(
-            Arg::new("print-config")
-                .long("print-config")
-                .short('P')
-                .action(ArgAction::SetTrue)
-                .help("Print configuration and exit"),
-        )
-        .arg(
-            Arg::new("broker")
-                .long("broker")
-                .short('b')
-                .value_name("SOCKADDR")
-                .action(ArgAction::Set)
-                .help(r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000""#)
-        )
-        .arg(
-            Arg::new("log-level")
-                .long("log-level")
-                .short('l')
-                .value_name("LEVEL")
-                .action(ArgAction::Set)
-                .help("Minimum log level to output")
-        )
+    pub fn add_command_line_options(
+        base_directories: &BaseDirectories,
+        env_var_prefix: &'static str,
+    ) -> Command {
+        ConfigBuilder::new(command!(), base_directories, env_var_prefix)
+            .value(
+                "broker",
+                'b',
+                "SOCKADDR",
+                None,
+                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
+            )
+            .value(
+                "log_level",
+                'l',
+                "LEVEL",
+                Some("info".to_string()),
+                "Minimum log level to output.",
+            )
+            .build()
     }
+}
 
-    pub fn new(mut args: ArgMatches) -> Result<Self> {
-        let env = env::vars().filter(|(key, _)| key.starts_with("MAELSTROM_RUN_"));
-
-        let config_files = match args.remove_one::<String>("config-file").as_deref() {
-            Some("-") => vec![],
-            Some(config_file) => vec![PathBuf::from(config_file)],
-            None => BaseDirectories::with_prefix("maelstrom/run")
-                .context("searching for config files")?
-                .find_config_files("config.toml")
-                .rev()
-                .collect(),
-        };
-        let mut files = vec![];
-        for config_file in config_files {
-            let contents = fs::read_to_string(&config_file).with_context(|| {
-                format!("reading config file `{}`", config_file.to_string_lossy())
-            })?;
-            files.push((config_file.clone(), contents));
-        }
-
-        let print_config = args.remove_one::<bool>("print-config").unwrap();
-
-        let config = maelstrom_config::Config::new(args, "MAELSTROM_RUN_", env, files)
-            .context("loading configuration from environment variables and config files")?;
-
-        let config = Self {
+impl FromConfig for Config {
+    fn from_config(config: &mut maelstrom_config::Config) -> Result<Self> {
+        Ok(Self {
             broker: config.get("broker")?,
             log_level: config.get_or("log-level", LogLevel::Info)?,
-        };
-
-        if print_config {
-            println!("{config:#?}");
-            process::exit(0);
-        }
-
-        Ok(config)
+        })
     }
 }
 
@@ -187,8 +131,11 @@ fn cache_dir() -> PathBuf {
 }
 
 fn main() -> Result<ExitCode> {
-    let args = Config::add_command_line_options(command!()).get_matches();
-    let config = Config::new(args)?;
+    let base_directories =
+        BaseDirectories::with_prefix("maelstrom/run").context("searching for config files")?;
+    let env_var_prefix = "MAELSTROM_RUN";
+    let args = Config::add_command_line_options(&base_directories, env_var_prefix).get_matches();
+    let config = maelstrom_config::new_config::<Config>(&base_directories, env_var_prefix, args)?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 
