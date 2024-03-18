@@ -607,7 +607,7 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
         .await
         .unwrap();
     builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
-    let layer_fs = builder.build().unwrap();
+    let layer_fs = builder.finish();
 
     let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
 

@@ -385,7 +385,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
         Ok(())
     }
 
-    pub fn build(self) -> Result<LayerFs> {
-        Ok(self.upper)
+    pub fn finish(self) -> LayerFs {
+        self.upper
     }
 }
