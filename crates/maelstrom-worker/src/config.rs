@@ -137,28 +137,28 @@ impl maelstrom_config::Config for Config {
         builder
             .value(
                 "broker",
-                'b',
+                Some('b'),
                 "SOCKADDR",
                 None,
                 r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
             )
             .value(
                 "slots",
-                's',
+                Some('s'),
                 "N",
                 Some(num_cpus::get().to_string()),
                 "The number of job slots available. Most jobs will take one job slot.",
             )
             .value(
                 "cache_root",
-                'r',
+                Some('r'),
                 "PATH",
                 Some(".cache/maelstrom-worker".to_string()),
                 "The directory to use for the cache.",
             )
             .value(
                 "cache_bytes_used_target",
-                'B',
+                Some('B'),
                 "BYTES",
                 Some(1_000_000_000.to_string()),
                 "The target amount of disk space to use for the cache. \
@@ -166,14 +166,14 @@ impl maelstrom_config::Config for Config {
             )
             .value(
                 "inline_limit",
-                'i',
+                Some('i'),
                 "BYTES",
                 Some(1_000_000.to_string()),
                 "The maximum amount of bytes to return inline for captured stdout and stderr.",
             )
             .value(
                 "log_level",
-                'l',
+                Some('l'),
                 "LEVEL",
                 Some("info".to_string()),
                 "Minimum log level to output.",

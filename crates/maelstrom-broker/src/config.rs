@@ -88,28 +88,28 @@ impl maelstrom_config::Config for Config {
         builder
             .value(
                 "port",
-                'p',
+                Some('p'),
                 "PORT",
                 Some(0.to_string()),
                 "The port the broker listens on for connections from workers and clients.",
             )
             .value(
                 "http-port",
-                'H',
+                Some('H'),
                 "PORT",
                 Some(0.to_string()),
                 "The port the HTTP UI is served on.",
             )
             .value(
                 "cache_root",
-                'r',
+                Some('r'),
                 "PATH",
                 Some(".cache/maelstrom-broker".to_string()),
                 "The directory to use for the cache.",
             )
             .value(
                 "cache_bytes_used_target",
-                'B',
+                Some('B'),
                 "BYTES",
                 Some(1_000_000_000.to_string()),
                 "The target amount of disk space to use for the cache. \
@@ -117,7 +117,7 @@ impl maelstrom_config::Config for Config {
             )
             .value(
                 "log_level",
-                'l',
+                Some('l'),
                 "LEVEL",
                 Some("info".to_string()),
                 "Minimum log level to output.",

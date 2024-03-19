@@ -331,7 +331,7 @@ impl CommandBuilder {
     pub fn value(
         mut self,
         field: &'static str,
-        short: char,
+        short: Option<char>,
         value_name: &'static str,
         default: Option<String>,
         help: &'static str,
@@ -346,14 +346,15 @@ impl CommandBuilder {
         let name = name_from_field(field);
         let env_var = self.env_var_from_field(field);
         let default = default.unwrap_or("no default, must be specified".to_string());
-        self.command = self.command.arg(
-            Arg::new(name.clone())
-                .long(name)
-                .short(short)
-                .value_name(value_name)
-                .action(ArgAction::Set)
-                .help(format!("{help} [default: {default}] [env: {env_var}]")),
-        );
+        let mut arg = Arg::new(name.clone())
+            .long(name)
+            .value_name(value_name)
+            .action(ArgAction::Set)
+            .help(format!("{help} [default: {default}] [env: {env_var}]"));
+        if let Some(short) = short {
+            arg = arg.short(short)
+        }
+        self.command = self.command.arg(arg);
         self
     }
 

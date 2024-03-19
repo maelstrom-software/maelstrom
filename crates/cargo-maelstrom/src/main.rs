@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
-    main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps, config::Config,
+    config::Config, main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Arg, ArgAction, ArgGroup, Command};

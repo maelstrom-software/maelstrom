@@ -41,14 +41,14 @@ impl maelstrom_config::Config for Config {
         builder
             .value(
                 "broker",
-                'b',
+                Some('b'),
                 "SOCKADDR",
                 None,
                 r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
             )
             .value(
                 "log_level",
-                'l',
+                Some('l'),
                 "LEVEL",
                 Some("info".to_string()),
                 "Minimum log level to output.",
@@ -64,7 +64,7 @@ impl maelstrom_config::Config for Config {
             */
             .value(
                 "timeout",
-                't',
+                Some('t'),
                 "SECONDS",
                 None,
                 "Override timeout value for all tests specified (O indicates no timeout)",
@@ -72,7 +72,7 @@ impl maelstrom_config::Config for Config {
             //        .next_help_heading("Feature Selection")
             .value(
                 "features",
-                'F',
+                Some('F'),
                 "FEATURES",
                 None,
                 "Comma separated list of features to activate",
@@ -91,35 +91,37 @@ impl maelstrom_config::Config for Config {
                 .help("Do not activate the `default` feature")
         )
         .next_help_heading("Compilation Options")
-        .arg(
-            Arg::new("profile")
-                .long("profile")
-                .value_name("PROFILE-NAME")
-                .action(ArgAction::Set)
-                .help("Build artifacts with the specified profile")
-        )
-        .arg(
-            Arg::new("target")
-                .long("target")
-                .value_name("TRIPLE")
-                .action(ArgAction::Set)
-                .help("Build for the target triple")
-        )
-        .arg(
-            Arg::new("target-dir")
-                .long("target-dir")
-                .value_name("DIRECTORY")
-                .action(ArgAction::Set)
-                .help("Directory for all generated artifacts")
-        )
-        .next_help_heading("Manifest Options")
-        .arg(
-            Arg::new("manifest-path")
-                .long("manifest-path")
-                .value_name("PATH")
-                .action(ArgAction::Set)
-                .help("Path to Cargo.toml")
-        )
+        */
+            .value(
+                "profile",
+                None,
+                "PROFILE-NAME",
+                None,
+                "Build artifacts with the specified profile",
+            )
+            .value(
+                "target",
+                None,
+                "TRIPLE",
+                None,
+                "Build for the target triple",
+            )
+            .value(
+                "target-dir",
+                None,
+                "DIRECTORY",
+                None,
+                "Directory for all generated artifacts"
+            )
+//        .next_help_heading("Manifest Options")
+            .value(
+                "manifest-path",
+                None,
+                "PATH",
+                None,
+                "Path to Cargo.toml",
+            )
+            /*
         .arg(
             Arg::new("frozen")
                 .long("frozen")

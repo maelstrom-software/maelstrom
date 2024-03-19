@@ -35,14 +35,14 @@ impl maelstrom_config::Config for Config {
         builder
             .value(
                 "broker",
-                'b',
+                Some('b'),
                 "SOCKADDR",
                 None,
                 r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
             )
             .value(
                 "log_level",
-                'l',
+                Some('l'),
                 "LEVEL",
                 Some("info".to_string()),
                 "Minimum log level to output.",
