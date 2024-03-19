@@ -4,6 +4,7 @@ use crate::layer_fs::ty::{
     DirectoryEntryData, FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper,
 };
 use crate::layer_fs::LayerFs;
+use anyhow::bail;
 use anyhow::{anyhow, Result};
 use futures::stream::{Peekable, StreamExt as _};
 use maelstrom_base::Sha256Digest;
@@ -17,7 +18,7 @@ use std::cmp::Ordering;
 use std::path::Path;
 use std::pin::Pin;
 use tokio::io::AsyncRead;
-use tokio_tar::Archive;
+use tokio_tar::{Archive, EntryType};
 
 pub struct BottomLayerBuilder<'fs> {
     layer_fs: LayerFs,
@@ -82,18 +83,27 @@ impl<'fs> BottomLayerBuilder<'fs> {
             };
             match self.look_up(dir_id, comp).await? {
                 Some(new_dir_id) => dir_id = new_dir_id,
-                None => dir_id = self.add_dir(dir_id, comp).await?,
+                None => {
+                    dir_id = {
+                        let attrs = FileAttributes {
+                            size: 0,
+                            mode: Mode(0o777),
+                            mtime: self.time,
+                        };
+                        self.add_dir(dir_id, comp, attrs).await?
+                    }
+                }
             }
         }
         Ok(dir_id)
     }
 
-    async fn add_dir(&mut self, parent: FileId, name: &str) -> Result<FileId> {
-        let attrs = FileAttributes {
-            size: 0,
-            mode: Mode(0o777),
-            mtime: self.time,
-        };
+    async fn add_dir(
+        &mut self,
+        parent: FileId,
+        name: &str,
+        attrs: FileAttributes,
+    ) -> Result<FileId> {
         let file_id = self
             .file_writer
             .insert_file(FileType::Directory, attrs, FileData::Empty)
@@ -146,6 +156,25 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(file_id)
     }
 
+    pub async fn set_attr(&mut self, id: FileId, attrs: FileAttributes) -> Result<()> {
+        self.file_writer.update_attributes(id, attrs).await
+    }
+
+    pub async fn add_dir_path(&mut self, path: &Utf8Path, attrs: FileAttributes) -> Result<FileId> {
+        let parent_id = if let Some(parent) = path.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        if let Some(existing) = self.look_up(parent_id, &name).await? {
+            self.set_attr(existing, attrs).await?;
+            Ok(existing)
+        } else {
+            self.add_dir(parent_id, name, attrs).await
+        }
+    }
+
     pub async fn add_from_tar(
         &mut self,
         digest: Sha256Digest,
@@ -161,20 +190,38 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 .to_str()
                 .ok_or(anyhow!("non-UTF8 path in tar"))?
                 .as_ref();
-            self.add_file_path(
-                &Utf8Path::new("/").join(utf8_path),
-                FileAttributes {
-                    size: header.size()?,
-                    mode: Mode(header.mode()?),
-                    mtime: UnixTimestamp(header.mtime()?.try_into()?),
-                },
-                FileData::Digest {
-                    digest: digest.clone(),
-                    offset: entry.raw_file_position(),
-                    length: header.entry_size()?,
-                },
-            )
-            .await?;
+            match header.entry_type() {
+                EntryType::Regular => {
+                    self.add_file_path(
+                        &Utf8Path::new("/").join(utf8_path),
+                        FileAttributes {
+                            size: header.size()?,
+                            mode: Mode(header.mode()?),
+                            mtime: UnixTimestamp(header.mtime()?.try_into()?),
+                        },
+                        FileData::Digest {
+                            digest: digest.clone(),
+                            offset: entry.raw_file_position(),
+                            length: header.entry_size()?,
+                        },
+                    )
+                    .await?;
+                }
+                EntryType::Directory => {
+                    self.add_dir_path(
+                        &Utf8Path::new("/").join(utf8_path),
+                        FileAttributes {
+                            size: header.size()?,
+                            mode: Mode(header.mode()?),
+                            mtime: UnixTimestamp(header.mtime()?.try_into()?),
+                        },
+                    )
+                    .await?;
+                }
+                other => {
+                    bail!("unsupported tar entry type {other:?}")
+                }
+            }
         }
         Ok(())
     }

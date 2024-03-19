@@ -530,19 +530,24 @@ async fn calc_digest(fs: &Fs, path: &Path) -> Sha256Digest {
 }
 
 #[cfg(test)]
-async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData)>) -> Sha256Digest {
+async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData, u32)>) -> Sha256Digest {
     let tar_path = cache_path.join("temp.tar");
     let f = fs.create_file(&tar_path).await.unwrap();
     let mut ar = tokio_tar::Builder::new(f.into_inner());
     let mut header = tokio_tar::Header::new_gnu();
-    for (p, d) in files {
+    for (p, d, mode) in files {
         let data = match d {
             ty::FileData::Empty => vec![],
             ty::FileData::Inline(d) => d,
             _ => panic!(),
         };
         header.set_size(data.len() as u64);
-        header.set_mode(0o555);
+        header.set_mode(mode);
+        if p.ends_with("/") {
+            header.set_entry_type(tokio_tar::EntryType::Directory);
+        } else {
+            header.set_entry_type(tokio_tar::EntryType::Regular);
+        }
         ar.append_data(&mut header, p, &data[..]).await.unwrap();
     }
     ar.finish().await.unwrap();
@@ -558,6 +563,8 @@ async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData)>) -> 
 
 #[tokio::test]
 async fn layer_from_tar() {
+    use maelstrom_base::manifest::Mode;
+    use std::os::unix::fs::MetadataExt as _;
     use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
@@ -574,9 +581,12 @@ async fn layer_from_tar() {
         &fs,
         &cache_dir,
         vec![
-            ("Foo", Inline(b"hello world".into())),
-            ("Bar/Baz", Empty),
-            ("Bar/Bin", Empty),
+            ("Foo", Inline(b"hello world".into()), 0o555),
+            ("Qux/", Empty, 0o555),
+            ("Bar/Baz", Empty, 0o555),
+            ("Bar/Bin", Empty, 0o555),
+            ("Qux/Fred", Empty, 0o555),
+            ("Bar/", Empty, 0o666),
         ],
     )
     .await;
@@ -602,7 +612,17 @@ async fn layer_from_tar() {
         .unwrap();
     assert_eq!(contents, "");
 
+    assert_entries(&fs, &mount_point, vec!["Bar/", "Foo", "Qux/"]).await;
     assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
+    assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
+
+    for p in ["Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred"] {
+        let mode = fs.metadata(mount_point.join(p)).await.unwrap().mode();
+        assert_eq!(Mode(mode & 0o777), Mode(0o555));
+    }
+
+    let mode = fs.metadata(mount_point.join("Bar")).await.unwrap().mode();
+    assert_eq!(Mode(mode & 0o777), Mode(0o666));
 
     mount_handle.umount_and_join().await.unwrap();
 }

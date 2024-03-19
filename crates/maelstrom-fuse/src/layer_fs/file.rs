@@ -146,4 +146,29 @@ impl<'fs> FileMetadataWriter<'fs> {
 
         Ok(file_id)
     }
+
+    pub async fn update_attributes(&mut self, id: FileId, attrs: FileAttributes) -> Result<()> {
+        let old_file_table_pos = self.file_table.stream_position().await?;
+        let old_attr_table_pos = self.attr_table.stream_position().await?;
+
+        assert_eq!(id.layer(), self.layer_id);
+        self.file_table
+            .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
+            .await?;
+        let entry: FileTableEntry = decode(&mut self.file_table).await?;
+        self.attr_table
+            .seek(SeekFrom::Start(
+                self.attr_table_start + entry.attr_id.offset() - 1,
+            ))
+            .await?;
+        encode(&mut self.attr_table, &attrs).await?;
+
+        self.file_table
+            .seek(SeekFrom::Start(old_file_table_pos))
+            .await?;
+        self.attr_table
+            .seek(SeekFrom::Start(old_attr_table_pos))
+            .await?;
+        Ok(())
+    }
 }
