@@ -75,12 +75,12 @@ impl maelstrom_config::Config for Config {
                 "Comma separated list of features to activate.",
             )
             .flag_value(
-                "all-features",
+                "all_features",
                 None,
                 "Activate all available features.",
             )
             .flag_value(
-                "no-default-features",
+                "no_default_features",
                 None,
                 "Do not activate the `default` feature.",
             )
@@ -100,7 +100,7 @@ impl maelstrom_config::Config for Config {
                 "Build for the target triple.",
             )
             .value(
-                "target-dir",
+                "target_dir",
                 None,
                 "DIRECTORY",
                 Some("cargo's default".to_string()),
@@ -108,7 +108,7 @@ impl maelstrom_config::Config for Config {
             )
             .next_help_heading("Manifest Config Options")
             .value(
-                "manifest-path",
+                "manifest_path",
                 None,
                 "PATH",
                 Some("cargo's default".to_string()),
@@ -134,21 +134,21 @@ impl maelstrom_config::Config for Config {
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
-            log_level: config.get_or("log-level", LogLevel::Info)?,
+            log_level: config.get_or("log_level", LogLevel::Info)?,
             quiet: config.get_flag("quiet")?.unwrap_or(Quiet::from(false)),
             timeout: config.get_option("timeout")?,
             cargo_feature_selection_options: FeatureSelectionOptions {
                 features: config.get_option("features")?,
-                all_features: config.get_flag("all-features")?.unwrap_or(false),
-                no_default_features: config.get_flag("no-default-features")?.unwrap_or(false),
+                all_features: config.get_flag("all_features")?.unwrap_or(false),
+                no_default_features: config.get_flag("no_default_features")?.unwrap_or(false),
             },
             cargo_compilation_options: CompilationOptions {
                 profile: config.get_option("profile")?,
                 target: config.get_option("target")?,
-                target_dir: config.get_option("target-dir")?,
+                target_dir: config.get_option("target_dir")?,
             },
             cargo_manifest_options: ManifestOptions {
-                manifest_path: config.get_option("manifest-path")?,
+                manifest_path: config.get_option("manifest_path")?,
                 frozen: config.get_flag("frozen")?.unwrap_or(false),
                 locked: config.get_flag("locked")?.unwrap_or(false),
                 offline: config.get_flag("offline")?.unwrap_or(false),
