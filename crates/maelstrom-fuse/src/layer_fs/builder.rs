@@ -175,6 +175,37 @@ impl<'fs> BottomLayerBuilder<'fs> {
         }
     }
 
+    pub async fn add_symlink_path(
+        &mut self,
+        path: &Utf8Path,
+        target: impl Into<Vec<u8>>,
+    ) -> Result<FileId> {
+        let attrs = FileAttributes {
+            size: 0,
+            mode: Mode(0o777),
+            mtime: self.time,
+        };
+        let file_id = self
+            .file_writer
+            .insert_file(FileType::Symlink, attrs, FileData::Inline(target.into()))
+            .await?;
+
+        let parent_id = if let Some(parent) = path.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let inserted = self
+            .add_link(parent_id, name, file_id, FileType::RegularFile)
+            .await?;
+        if !inserted {
+            return Err(anyhow!("file already exists at {path}"));
+        }
+
+        Ok(file_id)
+    }
+
     pub async fn add_from_tar(
         &mut self,
         digest: Sha256Digest,
@@ -215,6 +246,13 @@ impl<'fs> BottomLayerBuilder<'fs> {
                             mode: Mode(header.mode()?),
                             mtime: UnixTimestamp(header.mtime()?.try_into()?),
                         },
+                    )
+                    .await?;
+                }
+                EntryType::Symlink => {
+                    self.add_symlink_path(
+                        &Utf8Path::new("/").join(utf8_path),
+                        header.link_name_bytes().expect("empty symlink in tar"),
                     )
                     .await?;
                 }

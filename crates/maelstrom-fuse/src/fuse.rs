@@ -192,6 +192,14 @@ async fn fuse_mount_receiver(
                 handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await;
                 drop(permit);
             }),
+            FsMessage::ReadLink {
+                request,
+                ino,
+                reply,
+            } => tokio::task::spawn(async move {
+                handle_resp(handler.read_link(request, ino).await, reply).await;
+                drop(permit);
+            }),
         };
     }
     sem.acquire_many(MAX_INFLIGHT as u32 / 2).await?.forget();
@@ -226,6 +234,11 @@ enum FsMessage {
         fh: u64,
         offset: i64,
         reply: ReplyDirectory,
+    },
+    ReadLink {
+        request: Request,
+        ino: u64,
+        reply: ReplyData,
     },
 }
 
@@ -280,6 +293,13 @@ impl fuser::Filesystem for SendingFs {
             fh: u64,
             offset: i64,
             reply: ReplyDirectory
+        }
+    );
+    op!(
+        readlink,
+        ReadLink {
+            ino: u64,
+            reply: ReplyData
         }
     );
 }
@@ -341,6 +361,18 @@ impl Response for ReadResponse {
     }
 }
 
+pub struct ReadLinkResponse {
+    pub data: Vec<u8>,
+}
+
+impl Response for ReadLinkResponse {
+    type Reply = ReplyData;
+
+    fn send(self, reply: ReplyData) {
+        reply.data(&self.data)
+    }
+}
+
 pub struct DirEntry {
     pub ino: u64,
     pub offset: i64,
@@ -369,12 +401,11 @@ pub trait FuseFileSystem {
         Err(Errno::ENOSYS)
     }
 
-    /*
-    fn readlink(&mut self, _req: Request, ino: u64, reply: ReplyData) {
-        debug!("[Not Implemented] readlink(ino: {:#x?})", ino);
-        reply.error(ENOSYS);
+    async fn read_link(&self, _req: Request, _ino: u64) -> ErrnoResult<ReadLinkResponse> {
+        Err(Errno::ENOSYS)
     }
 
+    /*
     fn open(&mut self, _req: Request, _ino: u64, _flags: i32, reply: ReplyOpen) {
         reply.opened(0, 0);
     }

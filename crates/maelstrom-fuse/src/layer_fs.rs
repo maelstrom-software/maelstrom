@@ -5,8 +5,8 @@ mod file;
 mod ty;
 
 use crate::{
-    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadResponse,
-    Request,
+    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadLinkResponse,
+    ReadResponse, Request,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -257,6 +257,22 @@ impl FuseFileSystem for LayerFs {
         let reader = to_eio(DirectoryDataReader::new(self, file).await)?;
         Ok(to_eio(reader.into_stream(offset.try_into()?).await)?)
     }
+
+    async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {
+        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
+        let (kind, data) = to_eio(reader.get_data(file).await)?;
+        if kind != FileType::Symlink {
+            return Err(Errno::EINVAL);
+        }
+        match data {
+            FileData::Empty => Ok(ReadLinkResponse { data: vec![] }),
+            FileData::Inline(inline) => Ok(ReadLinkResponse {
+                data: inline.to_vec(),
+            }),
+            FileData::Digest { .. } => Err(Errno::EIO),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -264,36 +280,140 @@ const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
     maelstrom_base::manifest::UnixTimestamp(1705000271);
 
 #[cfg(test)]
-async fn build_fs(
-    fs: &Fs,
-    data_dir: &Path,
-    cache_path: &Path,
-    files: Vec<(&str, FileData)>,
-) -> LayerFs {
+struct BuildEntry {
+    path: String,
+    type_: FileType,
+    data: FileData,
+    mode: u32,
+}
+
+#[cfg(test)]
+impl BuildEntry {
+    fn reg(path: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
+        Self::reg_mode(path, FileData::Inline(data.into()), 0o555)
+    }
+
+    fn reg_digest(path: impl Into<String>, digest: Sha256Digest, offset: u64, length: u64) -> Self {
+        Self::reg_mode(
+            path,
+            FileData::Digest {
+                digest,
+                offset,
+                length,
+            },
+            0o555,
+        )
+    }
+
+    fn reg_empty(path: impl Into<String>) -> Self {
+        Self::reg_empty_mode(path, 0o555)
+    }
+
+    fn reg_empty_mode(path: impl Into<String>, mode: u32) -> Self {
+        Self {
+            path: path.into(),
+            type_: FileType::RegularFile,
+            data: FileData::Empty,
+            mode,
+        }
+    }
+
+    fn reg_mode(path: impl Into<String>, data: FileData, mode: u32) -> Self {
+        Self {
+            path: path.into(),
+            type_: FileType::RegularFile,
+            data,
+            mode,
+        }
+    }
+
+    fn dir(path: impl Into<String>) -> Self {
+        Self::dir_mode(path, 0o555)
+    }
+
+    fn dir_mode(path: impl Into<String>, mode: u32) -> Self {
+        Self {
+            path: path.into(),
+            type_: FileType::Directory,
+            data: FileData::Empty,
+            mode,
+        }
+    }
+
+    fn sym(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+        Self {
+            path: path.into(),
+            type_: FileType::Symlink,
+            data: FileData::Inline(target.into()),
+            mode: 0o777,
+        }
+    }
+
+    fn from_str(s: &str) -> Self {
+        if s.ends_with("/") {
+            Self::dir(s)
+        } else {
+            Self::reg_empty(s)
+        }
+    }
+}
+
+#[cfg(test)]
+async fn build_fs(fs: &Fs, data_dir: &Path, cache_path: &Path, files: Vec<BuildEntry>) -> LayerFs {
     use maelstrom_base::manifest::Mode;
 
     let mut builder = BottomLayerBuilder::new(fs, data_dir, cache_path, ARBITRARY_TIME)
         .await
         .unwrap();
 
-    for (path, data) in files {
+    for BuildEntry {
+        path,
+        type_,
+        data,
+        mode,
+    } in files
+    {
         let size = match &data {
             ty::FileData::Empty => 0,
             ty::FileData::Inline(d) => d.len() as u64,
             ty::FileData::Digest { length, .. } => *length,
         };
-        builder
-            .add_file_path(
-                path.as_ref(),
-                ty::FileAttributes {
-                    size,
-                    mode: Mode(0o555),
-                    mtime: ARBITRARY_TIME,
-                },
-                data,
-            )
-            .await
-            .unwrap();
+        match type_ {
+            FileType::RegularFile => {
+                builder
+                    .add_file_path(
+                        path.as_ref(),
+                        ty::FileAttributes {
+                            size,
+                            mode: Mode(mode),
+                            mtime: ARBITRARY_TIME,
+                        },
+                        data,
+                    )
+                    .await
+                    .unwrap();
+            }
+            FileType::Directory => {
+                builder
+                    .add_dir_path(
+                        path.as_ref(),
+                        ty::FileAttributes {
+                            size,
+                            mode: Mode(mode),
+                            mtime: ARBITRARY_TIME,
+                        },
+                    )
+                    .await
+                    .unwrap();
+            }
+            FileType::Symlink => {
+                let FileData::Inline(data) = data else {
+                    unreachable!()
+                };
+                builder.add_symlink_path(path.as_ref(), data).await.unwrap();
+            }
+            other => panic!("unsupported file type {other:?}"),
+        }
     }
 
     builder.finish()
@@ -322,8 +442,6 @@ async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
 
 #[tokio::test]
 async fn read_dir_and_look_up() {
-    use ty::FileData::*;
-
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
@@ -338,7 +456,11 @@ async fn read_dir_and_look_up() {
         &fs,
         &data_dir,
         &cache_dir,
-        vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
+        vec![
+            BuildEntry::reg_empty("/Foo"),
+            BuildEntry::reg_empty("/Bar"),
+            BuildEntry::reg_empty("/Baz"),
+        ],
     )
     .await;
 
@@ -355,8 +477,6 @@ async fn read_dir_and_look_up() {
 
 #[tokio::test]
 async fn read_dir_multi_level() {
-    use ty::FileData::*;
-
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
@@ -372,9 +492,9 @@ async fn read_dir_multi_level() {
         &data_dir,
         &cache_dir,
         vec![
-            ("/Foo/Bar/Baz", Empty),
-            ("/Foo/Bin", Empty),
-            ("/Foo/Bar/Qux", Empty),
+            BuildEntry::reg_empty("/Foo/Bar/Baz"),
+            BuildEntry::reg_empty("/Foo/Bin"),
+            BuildEntry::reg_empty("/Foo/Bar/Qux"),
         ],
     )
     .await;
@@ -392,7 +512,6 @@ async fn read_dir_multi_level() {
 async fn get_attr() {
     use maelstrom_base::manifest::Mode;
     use std::os::unix::fs::MetadataExt as _;
-    use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -408,7 +527,11 @@ async fn get_attr() {
         &fs,
         &data_dir,
         &cache_dir,
-        vec![("/Foo", Empty), ("/Bar", Empty), ("/Baz", Empty)],
+        vec![
+            BuildEntry::reg_empty("/Foo"),
+            BuildEntry::reg_empty("/Bar"),
+            BuildEntry::reg_empty("/Baz"),
+        ],
     )
     .await;
 
@@ -426,8 +549,6 @@ async fn get_attr() {
 
 #[tokio::test]
 async fn read_inline() {
-    use ty::FileData::*;
-
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir = temp.path().join("data");
@@ -443,9 +564,9 @@ async fn read_inline() {
         &data_dir,
         &cache_dir,
         vec![
-            ("/Foo", Inline(b"hello world".into())),
-            ("/Bar", Empty),
-            ("/Baz", Empty),
+            BuildEntry::reg("/Foo", b"hello world"),
+            BuildEntry::reg_empty("/Bar"),
+            BuildEntry::reg_empty("/Baz"),
         ],
     )
     .await;
@@ -462,9 +583,47 @@ async fn read_inline() {
 }
 
 #[tokio::test]
+async fn read_link() {
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
+        &cache_dir,
+        vec![
+            BuildEntry::reg("/Foo", b"hello world"),
+            BuildEntry::sym("/Bar", "./Foo"),
+        ],
+    )
+    .await;
+
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
+    assert!(fs
+        .symlink_metadata(mount_point.join("Bar"))
+        .await
+        .unwrap()
+        .is_symlink());
+    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
+#[tokio::test]
 async fn read_digest() {
     use tokio::io::AsyncWriteExt as _;
-    use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -490,22 +649,8 @@ async fn read_digest() {
         &data_dir,
         &cache_dir,
         vec![
-            (
-                "/Foo",
-                Digest {
-                    digest: digest.clone(),
-                    offset: 0,
-                    length: 5,
-                },
-            ),
-            (
-                "/Bar",
-                Digest {
-                    digest,
-                    offset: 6,
-                    length: 5,
-                },
-            ),
+            BuildEntry::reg_digest("/Foo", digest.clone(), 0, 5),
+            BuildEntry::reg_digest("/Bar", digest.clone(), 6, 5),
         ],
     )
     .await;
@@ -530,25 +675,43 @@ async fn calc_digest(fs: &Fs, path: &Path) -> Sha256Digest {
 }
 
 #[cfg(test)]
-async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData, u32)>) -> Sha256Digest {
+async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256Digest {
+    use std::os::unix::ffi::OsStrExt as _;
+
     let tar_path = cache_path.join("temp.tar");
     let f = fs.create_file(&tar_path).await.unwrap();
     let mut ar = tokio_tar::Builder::new(f.into_inner());
     let mut header = tokio_tar::Header::new_gnu();
-    for (p, d, mode) in files {
-        let data = match d {
+    for BuildEntry {
+        path,
+        type_,
+        data,
+        mode,
+    } in files
+    {
+        let data = match data {
             ty::FileData::Empty => vec![],
             ty::FileData::Inline(d) => d,
             _ => panic!(),
         };
         header.set_size(data.len() as u64);
         header.set_mode(mode);
-        if p.ends_with("/") {
-            header.set_entry_type(tokio_tar::EntryType::Directory);
+        header.set_entry_type(match type_ {
+            FileType::RegularFile => tokio_tar::EntryType::Regular,
+            FileType::Directory => tokio_tar::EntryType::Directory,
+            FileType::Symlink => tokio_tar::EntryType::Symlink,
+            other => panic!("unsupported entry type {other:?}"),
+        });
+        if type_ == FileType::Symlink {
+            header
+                .set_link_name(std::ffi::OsStr::from_bytes(&data))
+                .unwrap();
+            ar.append_data(&mut header, path, tokio::io::empty())
+                .await
+                .unwrap();
         } else {
-            header.set_entry_type(tokio_tar::EntryType::Regular);
+            ar.append_data(&mut header, path, &data[..]).await.unwrap();
         }
-        ar.append_data(&mut header, p, &data[..]).await.unwrap();
     }
     ar.finish().await.unwrap();
 
@@ -565,7 +728,6 @@ async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<(&str, FileData, u32)>
 async fn layer_from_tar() {
     use maelstrom_base::manifest::Mode;
     use std::os::unix::fs::MetadataExt as _;
-    use ty::FileData::*;
 
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -581,12 +743,13 @@ async fn layer_from_tar() {
         &fs,
         &cache_dir,
         vec![
-            ("Foo", Inline(b"hello world".into()), 0o555),
-            ("Qux/", Empty, 0o555),
-            ("Bar/Baz", Empty, 0o555),
-            ("Bar/Bin", Empty, 0o555),
-            ("Qux/Fred", Empty, 0o555),
-            ("Bar/", Empty, 0o666),
+            BuildEntry::reg("Foo", b"hello world"),
+            BuildEntry::dir("Qux"),
+            BuildEntry::reg_empty("Bar/Baz"),
+            BuildEntry::reg_empty("Bar/Bin"),
+            BuildEntry::reg_empty("Qux/Fred"),
+            BuildEntry::dir_mode("Bar", 0o666),
+            BuildEntry::sym("Waldo", b"Foo"),
         ],
     )
     .await;
@@ -606,13 +769,21 @@ async fn layer_from_tar() {
     let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
     assert_eq!(contents, "hello world");
 
+    assert!(fs
+        .symlink_metadata(mount_point.join("Waldo"))
+        .await
+        .unwrap()
+        .is_symlink());
+    let contents = fs.read_to_string(mount_point.join("Waldo")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
     let contents = fs
         .read_to_string(mount_point.join("Bar/Baz"))
         .await
         .unwrap();
     assert_eq!(contents, "");
 
-    assert_entries(&fs, &mount_point, vec!["Bar/", "Foo", "Qux/"]).await;
+    assert_entries(&fs, &mount_point, vec!["Bar/", "Foo", "Qux/", "Waldo"]).await;
     assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
     assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
 
@@ -629,8 +800,6 @@ async fn layer_from_tar() {
 
 #[cfg(test)]
 async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
-    use ty::FileData::*;
-
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
     let data_dir1 = temp.path().join("data1");
@@ -649,7 +818,7 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
         &fs,
         &data_dir1,
         &cache_dir,
-        lower.into_iter().map(|e| (e, Empty)).collect(),
+        lower.into_iter().map(BuildEntry::from_str).collect(),
     )
     .await;
 
@@ -657,7 +826,7 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
         &fs,
         &data_dir2,
         &cache_dir,
-        upper.into_iter().map(|e| (e, Empty)).collect(),
+        upper.into_iter().map(BuildEntry::from_str).collect(),
     )
     .await;
 
@@ -678,8 +847,6 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
 
 #[tokio::test]
 async fn two_mounts_test() {
-    use ty::FileData::*;
-
     let temp = tempfile::tempdir().unwrap();
     let mount_point1 = temp.path().join("mount1");
     let mount_point2 = temp.path().join("mount2");
@@ -699,7 +866,7 @@ async fn two_mounts_test() {
         &fs,
         &data_dir1,
         &cache_dir,
-        ["/Apple"].into_iter().map(|e| (e, Empty)).collect(),
+        ["/Apple"].into_iter().map(BuildEntry::from_str).collect(),
     )
     .await;
 
@@ -707,7 +874,10 @@ async fn two_mounts_test() {
         &fs,
         &data_dir2,
         &cache_dir,
-        ["/Birthday"].into_iter().map(|e| (e, Empty)).collect(),
+        ["/Birthday"]
+            .into_iter()
+            .map(BuildEntry::from_str)
+            .collect(),
     )
     .await;
 
