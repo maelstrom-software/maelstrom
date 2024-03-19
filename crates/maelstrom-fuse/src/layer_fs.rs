@@ -21,6 +21,7 @@ use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 pub use ty::{FileAttributes, FileData, FileId};
 use ty::{LayerId, LayerSuper};
 
@@ -34,24 +35,54 @@ fn to_einval<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoR
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
 
+enum LazyLayerSuperInner {
+    NotCached(PathBuf),
+    Cached(LayerSuper),
+}
+
+struct LazyLayerSuper(Mutex<LazyLayerSuperInner>);
+
+impl LazyLayerSuper {
+    fn not_cached(path: PathBuf) -> Self {
+        Self(Mutex::new(LazyLayerSuperInner::NotCached(path)))
+    }
+
+    fn cached(layer_super: LayerSuper) -> Self {
+        Self(Mutex::new(LazyLayerSuperInner::Cached(layer_super)))
+    }
+
+    async fn read(&self, data_fs: &Fs) -> Result<MappedMutexGuard<'_, LayerSuper>> {
+        let mut inner = self.0.lock().await;
+        if let LazyLayerSuperInner::NotCached(path) = &*inner {
+            let new_state =
+                LazyLayerSuperInner::Cached(LayerSuper::read_from_path(&data_fs, path).await?);
+            *inner = new_state;
+        }
+        Ok(MutexGuard::map(inner, |r| {
+            let LazyLayerSuperInner::Cached(s) = r else {
+                unreachable!()
+            };
+            s
+        }))
+    }
+}
+
 pub struct LayerFs {
     data_fs: Fs,
     top_layer_path: PathBuf,
-    layer_super: LayerSuper,
+    layer_super: LazyLayerSuper,
     cache_path: PathBuf,
 }
 
 impl LayerFs {
-    pub async fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
+    pub fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
-        let layer_super = LayerSuper::read_from_path(&data_fs, &data_dir.join("super.bin")).await?;
-
         Ok(Self {
             data_fs,
+            layer_super: LazyLayerSuper::not_cached(data_dir.join("super.bin")),
             top_layer_path: data_dir,
-            layer_super,
             cache_path: cache_path.to_owned(),
         })
     }
@@ -67,49 +98,56 @@ impl LayerFs {
         Ok(Self {
             data_fs,
             top_layer_path: data_dir,
-            layer_super,
+            layer_super: LazyLayerSuper::cached(layer_super),
             cache_path: cache_path.to_owned(),
         })
     }
 
-    fn root(&self) -> FileId {
-        FileId::root(self.layer_super.layer_id)
+    async fn root(&self) -> Result<FileId> {
+        Ok(FileId::root(self.layer_super().await?.layer_id))
     }
 
-    fn data_path(&self, layer_id: LayerId) -> Result<&PathBuf> {
-        if layer_id == self.layer_super.layer_id {
-            Ok(&self.top_layer_path)
+    async fn data_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        if layer_id == self.layer_super().await?.layer_id {
+            Ok(self.top_layer_path.clone())
         } else {
-            self.layer_super
+            self.layer_super()
+                .await?
                 .lower_layers
                 .get(&layer_id)
                 .ok_or(anyhow!("unknown layer {layer_id:?}"))
+                .cloned()
         }
     }
 
-    fn dir_data_path(&self, mut file_id: FileId) -> Result<PathBuf> {
+    async fn dir_data_path(&self, mut file_id: FileId) -> Result<PathBuf> {
         if file_id.is_root() {
-            file_id = self.root();
+            file_id = self.root().await?;
         }
         Ok(self
-            .data_path(file_id.layer())?
+            .data_path(file_id.layer())
+            .await?
             .join(format!("{}.dir_data.bin", file_id.offset())))
     }
 
-    fn file_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
-        Ok(self.data_path(layer_id)?.join("file_table.bin"))
+    async fn file_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        Ok(self.data_path(layer_id).await?.join("file_table.bin"))
     }
 
-    fn attributes_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
-        Ok(self.data_path(layer_id)?.join("attributes_table.bin"))
+    async fn attributes_table_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        Ok(self.data_path(layer_id).await?.join("attributes_table.bin"))
+    }
+
+    async fn layer_super(&self) -> Result<LayerSuper> {
+        Ok(self.layer_super.read(&self.data_fs).await?.clone())
     }
 
     fn cache_entry(&self, digest: Sha256Digest) -> PathBuf {
         self.cache_path.join(digest.to_string())
     }
 
-    pub async fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
-        crate::fuse_mount(self, mount_path, "Maelstrom LayerFS").await
+    pub fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
+        crate::fuse_mount(self, mount_path, "Maelstrom LayerFS")
     }
 }
 
@@ -304,7 +342,7 @@ async fn read_dir_and_look_up() {
     )
     .await;
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
 
@@ -341,7 +379,7 @@ async fn read_dir_multi_level() {
     )
     .await;
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
     assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
@@ -374,7 +412,7 @@ async fn get_attr() {
     )
     .await;
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     for name in ["Foo", "Bar", "Baz"] {
         let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
@@ -412,7 +450,7 @@ async fn read_inline() {
     )
     .await;
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
     assert_eq!(contents, "hello world");
@@ -472,7 +510,7 @@ async fn read_digest() {
     )
     .await;
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
     assert_eq!(contents, "hello");
@@ -553,7 +591,7 @@ async fn layer_from_tar() {
         .unwrap();
     let layer_fs = builder.finish();
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
     assert_eq!(contents, "hello world");
@@ -609,7 +647,7 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
     builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
     let layer_fs = builder.finish();
 
-    let mount_handle = layer_fs.mount(&mount_point).await.unwrap();
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
     for (d, entries) in expected {
         assert_entries(&fs, &mount_point.join(d), entries).await;
@@ -653,8 +691,8 @@ async fn two_mounts_test() {
     )
     .await;
 
-    let mount_handle1 = layer_fs1.mount(&mount_point1).await.unwrap();
-    let mount_handle2 = layer_fs2.mount(&mount_point2).await.unwrap();
+    let mount_handle1 = layer_fs1.mount(&mount_point1).unwrap();
+    let mount_handle2 = layer_fs2.mount(&mount_point2).unwrap();
 
     assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
     assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;

@@ -23,7 +23,7 @@ impl<'fs> DirectoryDataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
         let mut stream = layer_fs
             .data_fs
-            .open_file(layer_fs.dir_data_path(file_id)?)
+            .open_file(layer_fs.dir_data_path(file_id).await?)
             .await?;
         let length = stream.metadata().await?.len();
         let _header: DirectoryEntryStorageHeader = decode(&mut stream).await?;
@@ -175,7 +175,7 @@ pub struct DirectoryDataWriter<'fs> {
 #[allow(dead_code)]
 impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
-        let path = layer_fs.dir_data_path(file_id)?;
+        let path = layer_fs.dir_data_path(file_id).await?;
         let existing = layer_fs.data_fs.exists(&path).await;
         let mut stream = layer_fs.data_fs.open_or_create_file(path).await?;
         if !existing {

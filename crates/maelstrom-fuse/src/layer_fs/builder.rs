@@ -33,8 +33,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         time: UnixTimestamp,
     ) -> Result<Self> {
         let layer_fs = LayerFs::new(data_dir, cache_path, LayerSuper::default()).await?;
-        let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM)?;
-        let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM)?;
+        let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM).await?;
+        let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM).await?;
 
         let mut file_writer = FileMetadataWriter::new(
             data_fs,
@@ -240,8 +240,8 @@ struct WalkEntry {
 impl<'fs> DoubleFsWalk<'fs> {
     async fn new(left_fs: &'fs LayerFs, right_fs: &'fs LayerFs) -> Result<Self> {
         let streams = vec![(
-            Some(WalkStream::new(left_fs, left_fs.root(), right_fs.root()).await?),
-            WalkStream::new(right_fs, right_fs.root(), right_fs.root()).await?,
+            Some(WalkStream::new(left_fs, left_fs.root().await?, right_fs.root().await?).await?),
+            WalkStream::new(right_fs, right_fs.root().await?, right_fs.root().await?).await?,
         )];
         Ok(Self {
             streams,
@@ -328,9 +328,9 @@ pub struct UpperLayerBuilder<'fs> {
 #[allow(dead_code)]
 impl<'fs> UpperLayerBuilder<'fs> {
     pub async fn new(data_dir: &Path, cache_dir: &Path, lower: &'fs LayerFs) -> Result<Self> {
-        let lower_id = lower.layer_super.layer_id;
+        let lower_id = lower.layer_super().await?.layer_id;
         let upper_id = lower_id.inc();
-        let mut upper_super = lower.layer_super.clone();
+        let mut upper_super = lower.layer_super().await?;
         upper_super.layer_id = upper_id;
         upper_super
             .lower_layers
@@ -342,19 +342,34 @@ impl<'fs> UpperLayerBuilder<'fs> {
     }
 
     async fn hard_link_files(&mut self, other: &LayerFs) -> Result<()> {
-        let other_file_table = other.file_table_path(other.layer_super.layer_id)?;
+        let other_file_table = other
+            .file_table_path(other.layer_super().await?.layer_id)
+            .await?;
         let upper_file_table = self
             .upper
-            .file_table_path(self.upper.layer_super.layer_id)?;
+            .file_table_path(self.upper.layer_super().await?.layer_id)
+            .await?;
+        if self.upper.data_fs.exists(&upper_file_table).await {
+            self.upper.data_fs.remove_file(&upper_file_table).await?;
+        }
         self.upper
             .data_fs
             .hard_link(other_file_table, upper_file_table)
             .await?;
 
-        let other_attribute_table = other.attributes_table_path(other.layer_super.layer_id)?;
+        let other_attribute_table = other
+            .attributes_table_path(other.layer_super().await?.layer_id)
+            .await?;
         let upper_attribute_table = self
             .upper
-            .attributes_table_path(self.upper.layer_super.layer_id)?;
+            .attributes_table_path(self.upper.layer_super().await?.layer_id)
+            .await?;
+        if self.upper.data_fs.exists(&upper_attribute_table).await {
+            self.upper
+                .data_fs
+                .remove_file(&upper_attribute_table)
+                .await?;
+        }
         self.upper
             .data_fs
             .hard_link(other_attribute_table, upper_attribute_table)
@@ -365,7 +380,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
 
     pub async fn fill_from_bottom_layer(&mut self, other: &LayerFs) -> Result<()> {
         self.hard_link_files(other).await?;
-        let upper_id = self.upper.layer_super.layer_id;
+        let upper_id = self.upper.layer_super().await?.layer_id;
         let mut walker = DoubleFsWalk::new(self.lower, other).await?;
         while let Some(res) = walker.next().await? {
             match res {

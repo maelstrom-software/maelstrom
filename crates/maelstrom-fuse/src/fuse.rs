@@ -26,7 +26,7 @@ impl FuseHandle {
     }
 }
 
-pub async fn fuse_mount(
+pub fn fuse_mount(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     mount_point: &Path,
     name: &str,

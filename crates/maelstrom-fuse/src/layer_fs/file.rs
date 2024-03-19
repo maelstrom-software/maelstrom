@@ -25,14 +25,14 @@ impl<'fs> FileMetadataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
         let mut file_table = layer_fs
             .data_fs
-            .open_file(layer_fs.file_table_path(layer_id)?)
+            .open_file(layer_fs.file_table_path(layer_id).await?)
             .await?;
         let _header: FileTableHeader = decode(&mut file_table).await?;
         let file_table_start = file_table.stream_position().await?;
 
         let mut attr_table = layer_fs
             .data_fs
-            .open_file(layer_fs.attributes_table_path(layer_id)?)
+            .open_file(layer_fs.attributes_table_path(layer_id).await?)
             .await?;
         let _header: AttributesTableHeader = decode(&mut attr_table).await?;
         let attr_table_start = attr_table.stream_position().await?;

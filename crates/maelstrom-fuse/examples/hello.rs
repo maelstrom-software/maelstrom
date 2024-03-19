@@ -147,7 +147,7 @@ struct CliOptions {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = CliOptions::parse();
-    let handle = maelstrom_fuse::fuse_mount(HelloFs, &args.mount_path, "hello").await?;
+    let handle = maelstrom_fuse::fuse_mount(HelloFs, &args.mount_path, "hello")?;
 
     // wait for newline on stdin
     println!("press enter to exit");
