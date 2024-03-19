@@ -80,13 +80,13 @@ impl<'fs> BottomLayerBuilder<'fs> {
     }
 
     async fn ensure_path(&mut self, path: &Utf8Path) -> Result<FileId> {
-        let mut comp_iter = path.components();
-        if comp_iter.next() != Some(Utf8Component::RootDir) {
-            return Err(anyhow!("relative path {path}"));
-        }
+        let comp_iter = path.components();
 
         let mut dir_id = FileId::root(LayerId::BOTTOM);
         for comp in comp_iter {
+            if let Utf8Component::RootDir = comp {
+                continue;
+            };
             let Utf8Component::Normal(comp) = comp else {
                 return Err(anyhow!("unsupported path {path}"));
             };
