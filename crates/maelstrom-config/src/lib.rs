@@ -281,7 +281,7 @@ impl ConfigBuilder {
                     .action(ArgAction::SetTrue)
                     .help("Print all configuration values and exit."),
             )
-            .next_help_heading("Config File Option")
+            .next_help_heading("Config File Options")
             .arg(
                 Arg::new("config-file")
                     .long("config-file")
