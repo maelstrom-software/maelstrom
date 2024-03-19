@@ -328,13 +328,14 @@ impl CommandBuilder {
             .collect()
     }
 
-    pub fn value(
+    fn _value(
         mut self,
         field: &'static str,
         short: Option<char>,
         value_name: &'static str,
         default: Option<String>,
         help: &'static str,
+        action: ArgAction,
     ) -> Self {
         fn name_from_field(field: &'static str) -> String {
             field
@@ -349,13 +350,33 @@ impl CommandBuilder {
         let mut arg = Arg::new(name.clone())
             .long(name)
             .value_name(value_name)
-            .action(ArgAction::Set)
+            .action(action)
             .help(format!("{help} [default: {default}] [env: {env_var}]"));
         if let Some(short) = short {
             arg = arg.short(short)
         }
         self.command = self.command.arg(arg);
         self
+    }
+
+    pub fn value(
+        self,
+        field: &'static str,
+        short: Option<char>,
+        value_name: &'static str,
+        default: Option<String>,
+        help: &'static str,
+    ) -> Self {
+        self._value(field, short, value_name, default, help, ArgAction::Set)
+    }
+
+    pub fn flag_value(
+        self,
+        field: &'static str,
+        short: Option<char>,
+        help: &'static str,
+    ) -> Self {
+        self._value(field, short, "", Some("false".to_string()), help, ArgAction::SetTrue)
     }
 
     pub fn next_help_heading(mut self, heading: &'static str) -> Self {

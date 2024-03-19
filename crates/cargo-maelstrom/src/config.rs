@@ -53,15 +53,11 @@ impl maelstrom_config::Config for Config {
                 Some("info".to_string()),
                 "Minimum log level to output.",
             )
-            /*
-            .arg(
-                Arg::new("quiet")
-                    .long("quiet")
-                    .short('q')
-                    .action(ArgAction::SetTrue)
-                    .help("Don't output information about the tests being run")
+            .flag_value(
+                "quiet",
+                Some('q'),
+                "Don't output information about the tests being run.",
             )
-            */
             .next_help_heading("Test Override Config Options")
             .value(
                 "timeout",
@@ -78,20 +74,16 @@ impl maelstrom_config::Config for Config {
                 Some("cargo's default".to_string()),
                 "Comma separated list of features to activate.",
             )
-        /*
-        .arg(
-            Arg::new("all-features")
-                .long("all-features")
-                .action(ArgAction::SetTrue)
-                .help("Activate all available features")
-        )
-        .arg(
-            Arg::new("no-default-features")
-                .long("no-default-features")
-                .action(ArgAction::SetTrue)
-                .help("Do not activate the `default` feature")
-        )
-        */
+            .flag_value(
+                "all-features",
+                None,
+                "Activate all available features.",
+            )
+            .flag_value(
+                "no-default-features",
+                None,
+                "Do not activate the `default` feature.",
+            )
             .next_help_heading("Compilation Config Options")
             .value(
                 "profile",
@@ -122,26 +114,21 @@ impl maelstrom_config::Config for Config {
                 Some("cargo's default".to_string()),
                 "Path to Cargo.toml.",
             )
-            /*
-        .arg(
-            Arg::new("frozen")
-                .long("frozen")
-                .action(ArgAction::SetTrue)
-                .help("Require that Cargo.lock and cache are both up to date")
-        )
-        .arg(
-            Arg::new("locked")
-                .long("locked")
-                .action(ArgAction::SetTrue)
-                .help("Require that Cargo.lock is up to date")
-        )
-        .arg(
-            Arg::new("offline")
-                .long("offline")
-                .action(ArgAction::SetTrue)
-                .help("Run without cargo accessing the network")
-        )
-        */
+            .flag_value(
+                "frozen",
+                None,
+                "Require that Cargo.lock and cache are both up to date.",
+            )
+            .flag_value(
+                "locked",
+                None,
+                "Require that Cargo.lock is up to date.",
+            )
+            .flag_value(
+                "offline",
+                None,
+                "Run without cargo accessing the network.",
+            )
     }
 
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
