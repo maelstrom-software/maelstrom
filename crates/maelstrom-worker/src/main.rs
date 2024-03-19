@@ -10,7 +10,6 @@ use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};
 use std::{process, slice, time::Duration};
 use tokio::runtime::Runtime;
-use xdg::BaseDirectories;
 
 /// Clone a child process and continue executing in the child. The child process will be in a new
 /// pid namespace, meaning when it terminates all of its descendant processes will also terminate.
@@ -80,11 +79,8 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let base_directories =
-        BaseDirectories::with_prefix("maelstrom/worker").context("searching for config files")?;
-    let env_var_prefix = "MAELSTROM_WORKER";
     let config =
-        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
+        maelstrom_config::new_config::<Config>(command!(), "maelstrom/worker", "MAELSTROM_WORKER")?;
     clone_into_pid_and_user_namespace()?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();

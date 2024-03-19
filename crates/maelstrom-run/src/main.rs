@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use anyhow::Result;
 use clap::command;
 use indicatif::ProgressBar;
 use maelstrom_base::{
@@ -124,11 +124,8 @@ fn cache_dir() -> PathBuf {
 }
 
 fn main() -> Result<ExitCode> {
-    let base_directories =
-        BaseDirectories::with_prefix("maelstrom/run").context("searching for config files")?;
-    let env_var_prefix = "MAELSTROM_RUN";
     let config =
-        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
+        maelstrom_config::new_config::<Config>(command!(), "maelstrom/run", "MAELSTROM_RUN")?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 

@@ -359,10 +359,12 @@ impl CommandBuilder {
 
 pub fn new_config<T: Config + Debug>(
     command: Command,
-    base_directories: &BaseDirectories,
+    base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
 ) -> Result<T> {
-    let builder = CommandBuilder::new(command, base_directories, env_var_prefix);
+    let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
+        .context("searching for config files")?;
+    let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
     let builder = T::add_command_line_options(builder);
     let mut args = builder.build().get_matches();
     let env_var_prefix = env_var_prefix.to_string() + "_";

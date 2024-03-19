@@ -9,14 +9,10 @@ use std::{
     process,
 };
 use tokio::{net::TcpListener, runtime::Runtime};
-use xdg::BaseDirectories;
 
 fn main() -> Result<()> {
-    let base_directories =
-        BaseDirectories::with_prefix("maelstrom/broker").context("searching for config files")?;
-    let env_var_prefix = "MAELSTROM_BROKER";
     let config =
-        maelstrom_config::new_config::<Config>(command!(), &base_directories, env_var_prefix)?;
+        maelstrom_config::new_config::<Config>(command!(), "maelstrom/broker", "MAELSTROM_BROKER")?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
