@@ -8,7 +8,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
-use maelstrom_config::ConfigBuilder;
+use maelstrom_config::CommandBuilder;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
@@ -31,7 +31,7 @@ pub struct Config {
 }
 
 impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
         builder
             .value(
                 "broker",

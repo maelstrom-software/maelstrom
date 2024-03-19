@@ -1,6 +1,6 @@
 use anyhow::Result;
 use derive_more::From;
-use maelstrom_config::ConfigBuilder;
+use maelstrom_config::CommandBuilder;
 use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
@@ -84,7 +84,7 @@ pub struct Config {
 }
 
 impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
         builder
             .value(
                 "port",

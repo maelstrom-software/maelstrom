@@ -1,7 +1,7 @@
 use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
-use maelstrom_config::ConfigBuilder;
+use maelstrom_config::CommandBuilder;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
@@ -133,7 +133,7 @@ pub struct Config {
 }
 
 impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder {
+    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
         builder
             .value(
                 "broker",

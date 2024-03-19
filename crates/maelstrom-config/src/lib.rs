@@ -226,16 +226,16 @@ impl ConfigBag {
 }
 
 pub trait Config: Sized {
-    fn add_command_line_options(builder: ConfigBuilder) -> ConfigBuilder;
+    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder;
     fn from_config_bag(config: &mut ConfigBag) -> Result<Self>;
 }
 
-pub struct ConfigBuilder {
+pub struct CommandBuilder {
     command: Command,
     env_var_prefix: &'static str,
 }
 
-impl ConfigBuilder {
+impl CommandBuilder {
     pub fn new(
         command: clap::Command,
         base_directories: &BaseDirectories,
@@ -362,7 +362,7 @@ pub fn new_config<T: Config + Debug>(
     base_directories: &BaseDirectories,
     env_var_prefix: &'static str,
 ) -> Result<T> {
-    let builder = ConfigBuilder::new(command, base_directories, env_var_prefix);
+    let builder = CommandBuilder::new(command, base_directories, env_var_prefix);
     let builder = T::add_command_line_options(builder);
     let mut args = builder.build().get_matches();
     let env_var_prefix = env_var_prefix.to_string() + "_";
