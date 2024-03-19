@@ -70,6 +70,15 @@ impl<'fs> BottomLayerBuilder<'fs> {
         dir_reader.look_up(name).await
     }
 
+    async fn look_up_entry(
+        &mut self,
+        dir_id: FileId,
+        name: &str,
+    ) -> Result<Option<DirectoryEntryData>> {
+        let mut dir_reader = DirectoryDataReader::new(&self.layer_fs, dir_id).await?;
+        dir_reader.look_up_entry(name).await
+    }
+
     async fn ensure_path(&mut self, path: &Utf8Path) -> Result<FileId> {
         let mut comp_iter = path.components();
         if comp_iter.next() != Some(Utf8Component::RootDir) {
@@ -206,6 +215,36 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(file_id)
     }
 
+    pub async fn add_link_path(&mut self, path: &Utf8Path, target: &Utf8Path) -> Result<FileId> {
+        let parent_id = if let Some(parent) = path.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+
+        let target_parent_id = if let Some(parent) = target.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let target_name = target.file_name().ok_or(anyhow!("missing file name"))?;
+
+        let existing = self
+            .look_up_entry(target_parent_id, &target_name)
+            .await?
+            .ok_or(anyhow!("link target not found {target:?}"))?;
+
+        if existing.kind == FileType::Directory {
+            bail!("hardlink to directory not allowed {target:?}")
+        }
+
+        self.add_link(parent_id, name, existing.file_id, existing.kind)
+            .await?;
+
+        Ok(existing.file_id)
+    }
+
     pub async fn add_from_tar(
         &mut self,
         digest: Sha256Digest,
@@ -253,6 +292,16 @@ impl<'fs> BottomLayerBuilder<'fs> {
                     self.add_symlink_path(
                         &Utf8Path::new("/").join(utf8_path),
                         header.link_name_bytes().expect("empty symlink in tar"),
+                    )
+                    .await?;
+                }
+                EntryType::Link => {
+                    self.add_link_path(
+                        &Utf8Path::new("/").join(utf8_path),
+                        std::str::from_utf8(
+                            &header.link_name_bytes().expect("empty symlink in tar"),
+                        )?
+                        .into(),
                     )
                     .await?;
                 }

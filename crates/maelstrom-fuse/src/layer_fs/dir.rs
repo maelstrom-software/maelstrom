@@ -36,8 +36,12 @@ impl<'fs> DirectoryDataReader<'fs> {
     }
 
     pub async fn look_up(&mut self, entry_name: &str) -> Result<Option<FileId>> {
+        Ok(self.look_up_entry(entry_name).await?.map(|e| e.file_id))
+    }
+
+    pub async fn look_up_entry(&mut self, entry_name: &str) -> Result<Option<DirectoryEntryData>> {
         let mut tree = AvlTree::new(DirectoryEntryStorage::new(&mut self.stream));
-        Ok(tree.get(&entry_name.into()).await?.map(|e| e.file_id))
+        tree.get(&entry_name.into()).await
     }
 
     async fn next_entry(&mut self) -> Result<Option<DirectoryEntry>> {

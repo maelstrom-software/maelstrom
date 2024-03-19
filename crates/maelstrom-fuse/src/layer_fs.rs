@@ -285,6 +285,7 @@ struct BuildEntry {
     type_: FileType,
     data: FileData,
     mode: u32,
+    is_hard_link: bool,
 }
 
 #[cfg(test)]
@@ -315,6 +316,7 @@ impl BuildEntry {
             type_: FileType::RegularFile,
             data: FileData::Empty,
             mode,
+            is_hard_link: false,
         }
     }
 
@@ -324,6 +326,7 @@ impl BuildEntry {
             type_: FileType::RegularFile,
             data,
             mode,
+            is_hard_link: false,
         }
     }
 
@@ -337,6 +340,7 @@ impl BuildEntry {
             type_: FileType::Directory,
             data: FileData::Empty,
             mode,
+            is_hard_link: false,
         }
     }
 
@@ -346,6 +350,17 @@ impl BuildEntry {
             type_: FileType::Symlink,
             data: FileData::Inline(target.into()),
             mode: 0o777,
+            is_hard_link: false,
+        }
+    }
+
+    fn link(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+        Self {
+            path: path.into(),
+            type_: FileType::RegularFile,
+            data: FileData::Inline(target.into()),
+            mode: 0o777,
+            is_hard_link: true,
         }
     }
 
@@ -371,6 +386,7 @@ async fn build_fs(fs: &Fs, data_dir: &Path, cache_path: &Path, files: Vec<BuildE
         type_,
         data,
         mode,
+        is_hard_link,
     } in files
     {
         let size = match &data {
@@ -378,6 +394,18 @@ async fn build_fs(fs: &Fs, data_dir: &Path, cache_path: &Path, files: Vec<BuildE
             ty::FileData::Inline(d) => d.len() as u64,
             ty::FileData::Digest { length, .. } => *length,
         };
+        if is_hard_link {
+            let FileData::Inline(data) = data else {
+                unreachable!()
+            };
+
+            builder
+                .add_link_path(path.as_ref(), std::str::from_utf8(&data).unwrap().as_ref())
+                .await
+                .unwrap();
+            continue;
+        }
+
         match type_ {
             FileType::RegularFile => {
                 builder
@@ -548,6 +576,48 @@ async fn get_attr() {
 }
 
 #[tokio::test]
+async fn hard_link() {
+    use maelstrom_base::manifest::Mode;
+    use std::os::unix::fs::MetadataExt as _;
+
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir = temp.path().join("data");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let layer_fs = build_fs(
+        &fs,
+        &data_dir,
+        &cache_dir,
+        vec![
+            BuildEntry::reg_empty("/Foo"),
+            BuildEntry::link("/Bar", "/Foo"),
+            BuildEntry::link("/Baz", "/Bar"),
+        ],
+    )
+    .await;
+
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+    let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
+
+    for name in ["Foo", "Bar", "Baz"] {
+        let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+        assert_eq!(attrs.len(), 0);
+        assert_eq!(Mode(attrs.mode()), Mode(0o100555));
+        assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
+        assert_eq!(attrs.ino(), foo_attrs.ino());
+    }
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
+#[tokio::test]
 async fn read_inline() {
     let temp = tempfile::tempdir().unwrap();
     let mount_point = temp.path().join("mount");
@@ -681,28 +751,29 @@ async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256
     let tar_path = cache_path.join("temp.tar");
     let f = fs.create_file(&tar_path).await.unwrap();
     let mut ar = tokio_tar::Builder::new(f.into_inner());
-    let mut header = tokio_tar::Header::new_gnu();
     for BuildEntry {
         path,
         type_,
         data,
         mode,
+        is_hard_link,
     } in files
     {
+        let mut header = tokio_tar::Header::new_gnu();
         let data = match data {
             ty::FileData::Empty => vec![],
             ty::FileData::Inline(d) => d,
             _ => panic!(),
         };
-        header.set_size(data.len() as u64);
-        header.set_mode(mode);
-        header.set_entry_type(match type_ {
-            FileType::RegularFile => tokio_tar::EntryType::Regular,
-            FileType::Directory => tokio_tar::EntryType::Directory,
-            FileType::Symlink => tokio_tar::EntryType::Symlink,
-            other => panic!("unsupported entry type {other:?}"),
+        header.set_entry_type(match (is_hard_link, type_) {
+            (true, _) => tokio_tar::EntryType::Link,
+            (_, FileType::RegularFile) => tokio_tar::EntryType::Regular,
+            (_, FileType::Directory) => tokio_tar::EntryType::Directory,
+            (_, FileType::Symlink) => tokio_tar::EntryType::Symlink,
+            (_, other) => panic!("unsupported entry type {other:?}"),
         });
-        if type_ == FileType::Symlink {
+        if type_ == FileType::Symlink || is_hard_link {
+            header.set_size(0);
             header
                 .set_link_name(std::ffi::OsStr::from_bytes(&data))
                 .unwrap();
@@ -710,6 +781,8 @@ async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256
                 .await
                 .unwrap();
         } else {
+            header.set_size(data.len() as u64);
+            header.set_mode(mode);
             ar.append_data(&mut header, path, &data[..]).await.unwrap();
         }
     }
@@ -750,6 +823,7 @@ async fn layer_from_tar() {
             BuildEntry::reg_empty("Qux/Fred"),
             BuildEntry::dir_mode("Bar", 0o666),
             BuildEntry::sym("Waldo", b"Foo"),
+            BuildEntry::link("Thud", "/Foo"),
         ],
     )
     .await;
@@ -769,6 +843,9 @@ async fn layer_from_tar() {
     let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
     assert_eq!(contents, "hello world");
 
+    let contents = fs.read_to_string(mount_point.join("Thud")).await.unwrap();
+    assert_eq!(contents, "hello world");
+
     assert!(fs
         .symlink_metadata(mount_point.join("Waldo"))
         .await
@@ -783,11 +860,18 @@ async fn layer_from_tar() {
         .unwrap();
     assert_eq!(contents, "");
 
-    assert_entries(&fs, &mount_point, vec!["Bar/", "Foo", "Qux/", "Waldo"]).await;
+    assert_entries(
+        &fs,
+        &mount_point,
+        vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
+    )
+    .await;
     assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
     assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
 
-    for p in ["Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred"] {
+    for p in [
+        "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
+    ] {
         let mode = fs.metadata(mount_point.join(p)).await.unwrap().mode();
         assert_eq!(Mode(mode & 0o777), Mode(0o555));
     }
