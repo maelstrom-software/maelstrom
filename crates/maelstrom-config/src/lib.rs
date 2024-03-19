@@ -358,6 +358,11 @@ impl CommandBuilder {
         self
     }
 
+    pub fn next_help_heading(mut self, heading: &'static str) -> Self {
+        self.command = self.command.next_help_heading(heading);
+        self
+    }
+
     pub fn build(self) -> Command {
         self.command
     }

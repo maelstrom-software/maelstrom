@@ -69,7 +69,7 @@ impl maelstrom_config::Config for Config {
                 Some("whatever individual tests specify".to_string()),
                 "Override timeout value for all tests specified (O indicates no timeout).",
             )
-            //        .next_help_heading("Feature Selection")
+            .next_help_heading("Feature Selection")
             .value(
                 "features",
                 Some('F'),
@@ -90,8 +90,8 @@ impl maelstrom_config::Config for Config {
                 .action(ArgAction::SetTrue)
                 .help("Do not activate the `default` feature")
         )
-        .next_help_heading("Compilation Options")
         */
+            .next_help_heading("Compilation Options")
             .value(
                 "profile",
                 None,
@@ -113,7 +113,7 @@ impl maelstrom_config::Config for Config {
                 Some("cargo's default".to_string()),
                 "Directory for all generated artifacts."
             )
-//        .next_help_heading("Manifest Options")
+            .next_help_heading("Manifest Options")
             .value(
                 "manifest-path",
                 None,
