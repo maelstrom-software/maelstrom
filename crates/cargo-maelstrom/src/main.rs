@@ -1,9 +1,9 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
-    config::Config, main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps,
+    main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps, config::Config,
 };
 use cargo_metadata::Metadata as CargoMetadata;
-use clap::{command, Arg, ArgAction, ArgGroup};
+use clap::{command, Arg, ArgAction, ArgGroup, Command};
 use console::Term;
 use maelstrom_base::Timeout;
 use maelstrom_client::ClientBgProcess;
@@ -13,63 +13,71 @@ use std::{env, io::IsTerminal as _, process};
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
-    let command = command!()
-        .next_help_heading("Test Selection Options")
-        .arg(
-            Arg::new("include")
-                .long("include")
-                .short('i')
-                .value_name("FILTER-EXPRESSION")
-                .action(ArgAction::Append)
-                .help("Only include tests which match the given filter. Can be specified multiple times")
-        )
-        .arg(
-            Arg::new("exclude")
-                .long("exclude")
-                .short('x')
-                .value_name("FILTER-EXPRESSION")
-                .action(ArgAction::Append)
-                .help("Only include tests which don't match the given filter. Can be specified multiple times")
-        )
-        .next_help_heading("List Options")
-        .arg(
-            Arg::new("list-tests")
-                .long("list-tests")
-                .visible_alias("list")
-                .action(ArgAction::SetTrue)
-                .help(
-                    "Instead of running tests, print the tests that would have been run. \
-                    May require building test binaries"
-                )
-        )
-        .arg(
-            Arg::new("list-binaries")
-                .long("list-binaries")
-                .action(ArgAction::SetTrue)
-                .help(
-                    "Instead of running tests, print the test binaries of those tests \
-                    that would have been run"
-                )
-        )
-        .arg(
-            Arg::new("list-packages")
-                .long("list-packages")
-                .action(ArgAction::SetTrue)
-                .help(
-                    "Instead of running tests, print the packages of those tests \
-                    that would have been run"
-                )
-        )
-        .group(
-            ArgGroup::new("list").args(["list-tests", "list-binaries", "list-packages"]));
-    let command = Config::add_command_line_options(command);
+    let add_more_command_line_options = |command: Command| {
+        command
+            .next_help_heading("Test Selection Options")
+            .arg(
+                Arg::new("include")
+                    .long("include")
+                    .short('i')
+                    .value_name("FILTER-EXPRESSION")
+                    .action(ArgAction::Append)
+                    .help("Only include tests which match the given filter. Can be specified multiple times")
+            )
+            .arg(
+                Arg::new("exclude")
+                    .long("exclude")
+                    .short('x')
+                    .value_name("FILTER-EXPRESSION")
+                    .action(ArgAction::Append)
+                    .help("Only include tests which don't match the given filter. Can be specified multiple times")
+            )
+            .next_help_heading("List Options")
+            .arg(
+                Arg::new("list-tests")
+                    .long("list-tests")
+                    .visible_alias("list")
+                    .action(ArgAction::SetTrue)
+                    .help(
+                        "Instead of running tests, print the tests that would have been run. \
+                        May require building test binaries"
+                    )
+            )
+            .arg(
+                Arg::new("list-binaries")
+                    .long("list-binaries")
+                    .action(ArgAction::SetTrue)
+                    .help(
+                        "Instead of running tests, print the test binaries of those tests \
+                        that would have been run"
+                    )
+            )
+            .arg(
+                Arg::new("list-packages")
+                    .long("list-packages")
+                    .action(ArgAction::SetTrue)
+                    .help(
+                        "Instead of running tests, print the packages of those tests \
+                        that would have been run"
+                    )
+            )
+            .group(
+                ArgGroup::new("list").args(["list-tests", "list-binaries", "list-packages"]))
+    };
 
     let mut args = Vec::from_iter(env::args());
     if args.len() > 1 && args[0].ends_with(format!("cargo-{}", args[1]).as_str()) {
         args.remove(1);
     }
 
-    let mut args = command.get_matches_from(args);
+    let (config, mut args): (Config, _) = maelstrom_config::new_config2(
+        command!(),
+        "maelstrom/worker",
+        "MAELSTROM_WORKER",
+        add_more_command_line_options,
+        args,
+    )?;
+
     let include = if let Some(values) = args.remove_many::<String>("include") {
         Vec::from_iter(values)
     } else {
@@ -90,7 +98,6 @@ pub fn main() -> Result<ExitCode> {
         (_, _, true) => Some(ListAction::ListPackages),
         (_, _, _) => None,
     };
-    let config = Config::new(args)?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 

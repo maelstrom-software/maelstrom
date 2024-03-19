@@ -5,7 +5,8 @@ use clap::{
 };
 use serde::Deserialize;
 use std::{
-    collections::HashMap, env, fmt::Debug, fs, iter, path::PathBuf, process, result, str::FromStr,
+    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
+    str::FromStr,
 };
 use toml::Table;
 use xdg::BaseDirectories;
@@ -46,6 +47,10 @@ impl ConfigBag {
             env,
             files,
         })
+    }
+
+    pub fn into_args(self) -> ArgMatches {
+        self.args
     }
 
     fn get_internal<T>(&self, key: &str) -> Result<result::Result<T, KeyNames>>
@@ -357,16 +362,24 @@ impl CommandBuilder {
     }
 }
 
-pub fn new_config<T: Config + Debug>(
+pub fn new_config2<T, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
-) -> Result<T> {
+    add_more_command_line_options: impl FnOnce(Command) -> Command,
+    args: AI,
+) -> Result<(T, ArgMatches)>
+where
+    T: Config + Debug,
+    AI: IntoIterator<Item = AT>,
+    AT: Into<OsString> + Clone,
+{
     let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
         .context("searching for config files")?;
     let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
     let builder = T::add_command_line_options(builder);
-    let mut args = builder.build().get_matches();
+    let command = add_more_command_line_options(builder.build());
+    let mut args = command.get_matches_from(args);
     let env_var_prefix = env_var_prefix.to_string() + "_";
     let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));
 
@@ -387,17 +400,32 @@ pub fn new_config<T: Config + Debug>(
 
     let print_config = args.remove_one::<bool>("print-config").unwrap();
 
-    let mut config = ConfigBag::new(args, &env_var_prefix, env, files)
+    let mut config_bag = ConfigBag::new(args, &env_var_prefix, env, files)
         .context("loading configuration from environment variables and config files")?;
 
-    let config = T::from_config_bag(&mut config)?;
+    let config = T::from_config_bag(&mut config_bag)?;
 
     if print_config {
         println!("{config:#?}");
         process::exit(0);
     }
 
-    Ok(config)
+    Ok((config, config_bag.into_args()))
+}
+
+pub fn new_config<T: Config + Debug>(
+    command: Command,
+    base_directories_prefix: &'static str,
+    env_var_prefix: &'static str,
+) -> Result<T> {
+    Ok(new_config2(
+        command,
+        base_directories_prefix,
+        env_var_prefix,
+        |command| command,
+        env::args_os(),
+    )?
+    .0)
 }
 
 #[cfg(test)]
