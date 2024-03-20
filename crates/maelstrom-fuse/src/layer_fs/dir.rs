@@ -44,7 +44,7 @@ impl<'fs> DirectoryDataReader<'fs> {
         tree.get(&entry_name.into()).await
     }
 
-    async fn next_entry(&mut self) -> Result<Option<DirectoryEntry>> {
+    pub async fn next_entry(&mut self) -> Result<Option<DirectoryEntry>> {
         if self.stream.stream_position().await? == self.length {
             return Ok(None);
         }

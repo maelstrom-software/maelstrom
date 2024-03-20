@@ -4,15 +4,16 @@ mod dir;
 mod file;
 mod ty;
 
+pub use crate::FileType;
 use crate::{
-    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem, ReadLinkResponse,
+    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadLinkResponse,
     ReadResponse, Request,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 pub use builder::*;
-use dir::{DirectoryDataReader, DirectoryStream};
-use file::FileMetadataReader;
+pub use dir::{DirectoryDataReader, DirectoryStream};
+pub use file::FileMetadataReader;
 use maelstrom_base::Sha256Digest;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
@@ -23,7 +24,7 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 pub use ty::{FileAttributes, FileData, FileId};
-use ty::{LayerId, LayerSuper};
+pub use ty::{LayerId, LayerSuper};
 
 fn to_eio<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoResult<ValueT> {
     res.map_err(|_| Errno::EIO)
@@ -140,6 +141,10 @@ impl LayerFs {
 
     async fn layer_super(&self) -> Result<LayerSuper> {
         Ok(self.layer_super.read(&self.data_fs).await?.clone())
+    }
+
+    pub async fn layer_id(&self) -> Result<LayerId> {
+        Ok(self.layer_super().await?.layer_id)
     }
 
     fn cache_entry(&self, digest: Sha256Digest) -> PathBuf {

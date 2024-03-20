@@ -27,3 +27,7 @@ tokio-tar = { workspace = true }
 [dev-dependencies]
 clap.workspace = true
 tempfile.workspace = true
+
+[[bin]]
+name = "layer-fs-cli"
+path = "src/layer_fs_cli.rs"
