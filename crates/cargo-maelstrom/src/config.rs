@@ -66,16 +66,16 @@ impl maelstrom_config::Config for Config {
                 "timeout",
                 Some('t'),
                 "SECONDS",
-                None,
-                "Override timeout value for all tests specified (O indicates no timeout)",
+                Some("whatever individual tests specify".to_string()),
+                "Override timeout value for all tests specified (O indicates no timeout).",
             )
             //        .next_help_heading("Feature Selection")
             .value(
                 "features",
                 Some('F'),
                 "FEATURES",
-                None,
-                "Comma separated list of features to activate",
+                Some("cargo's default".to_string()),
+                "Comma separated list of features to activate.",
             )
         /*
         .arg(
@@ -96,30 +96,30 @@ impl maelstrom_config::Config for Config {
                 "profile",
                 None,
                 "PROFILE-NAME",
-                None,
-                "Build artifacts with the specified profile",
+                Some("cargo's default".to_string()),
+                "Build artifacts with the specified profile.",
             )
             .value(
                 "target",
                 None,
                 "TRIPLE",
-                None,
-                "Build for the target triple",
+                Some("cargo's default".to_string()),
+                "Build for the target triple.",
             )
             .value(
                 "target-dir",
                 None,
                 "DIRECTORY",
-                None,
-                "Directory for all generated artifacts"
+                Some("cargo's default".to_string()),
+                "Directory for all generated artifacts."
             )
 //        .next_help_heading("Manifest Options")
             .value(
                 "manifest-path",
                 None,
                 "PATH",
-                None,
-                "Path to Cargo.toml",
+                Some("cargo's default".to_string()),
+                "Path to Cargo.toml.",
             )
             /*
         .arg(

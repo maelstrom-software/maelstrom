@@ -22,7 +22,7 @@ pub fn main() -> Result<ExitCode> {
                     .short('i')
                     .value_name("FILTER-EXPRESSION")
                     .action(ArgAction::Append)
-                    .help("Only include tests which match the given filter. Can be specified multiple times")
+                    .help("Only include tests which match the given filter. Can be specified multiple times.")
             )
             .arg(
                 Arg::new("exclude")
@@ -30,7 +30,7 @@ pub fn main() -> Result<ExitCode> {
                     .short('x')
                     .value_name("FILTER-EXPRESSION")
                     .action(ArgAction::Append)
-                    .help("Only include tests which don't match the given filter. Can be specified multiple times")
+                    .help("Only include tests which don't match the given filter. Can be specified multiple times.")
             )
             .next_help_heading("List Options")
             .arg(
@@ -40,7 +40,7 @@ pub fn main() -> Result<ExitCode> {
                     .action(ArgAction::SetTrue)
                     .help(
                         "Instead of running tests, print the tests that would have been run. \
-                        May require building test binaries"
+                        May require building test binaries."
                     )
             )
             .arg(
@@ -49,7 +49,7 @@ pub fn main() -> Result<ExitCode> {
                     .action(ArgAction::SetTrue)
                     .help(
                         "Instead of running tests, print the test binaries of those tests \
-                        that would have been run"
+                        that would have been run."
                     )
             )
             .arg(
@@ -58,7 +58,7 @@ pub fn main() -> Result<ExitCode> {
                     .action(ArgAction::SetTrue)
                     .help(
                         "Instead of running tests, print the packages of those tests \
-                        that would have been run"
+                        that would have been run."
                     )
             )
             .group(
