@@ -526,8 +526,13 @@ impl<'fs> UpperLayerBuilder<'fs> {
                 LeftRight::Right(mut entry) | LeftRight::Both(_, mut entry) => {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
                     let mut writer = DirectoryDataWriter::new(&self.upper, dir_id).await?;
-                    entry.data.file_id = FileId::new(upper_id, entry.data.file_id.offset());
+                    let file_id = FileId::new(upper_id, entry.data.file_id.offset());
+                    entry.data.file_id = file_id;
+                    let kind = entry.data.kind;
                     writer.insert_entry(&entry.key, entry.data).await?;
+                    if kind == FileType::Directory {
+                        DirectoryDataWriter::write_empty(&self.upper, file_id).await?;
+                    }
                 }
             }
         }

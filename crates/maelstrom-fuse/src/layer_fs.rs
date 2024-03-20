@@ -934,6 +934,76 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
     mount_handle.umount_and_join().await.unwrap();
 }
 
+#[cfg(test)]
+async fn three_layer_test(
+    lowest: Vec<&str>,
+    lower: Vec<&str>,
+    upper: Vec<&str>,
+    expected: Vec<(&str, Vec<&str>)>,
+) {
+    let temp = tempfile::tempdir().unwrap();
+    let mount_point = temp.path().join("mount");
+    let data_dir1 = temp.path().join("data1");
+    let data_dir2 = temp.path().join("data2");
+    let data_dir3 = temp.path().join("data3");
+    let data_dir4 = temp.path().join("data4");
+    let data_dir5 = temp.path().join("data5");
+    let cache_dir = temp.path().join("cache");
+
+    let fs = Fs::new();
+    fs.create_dir(&mount_point).await.unwrap();
+    fs.create_dir(&data_dir1).await.unwrap();
+    fs.create_dir(&data_dir2).await.unwrap();
+    fs.create_dir(&data_dir3).await.unwrap();
+    fs.create_dir(&data_dir4).await.unwrap();
+    fs.create_dir(&data_dir5).await.unwrap();
+    fs.create_dir(&cache_dir).await.unwrap();
+
+    let layer_fs1 = build_fs(
+        &fs,
+        &data_dir1,
+        &cache_dir,
+        lowest.into_iter().map(BuildEntry::from_str).collect(),
+    )
+    .await;
+
+    let layer_fs2 = build_fs(
+        &fs,
+        &data_dir2,
+        &cache_dir,
+        lower.into_iter().map(BuildEntry::from_str).collect(),
+    )
+    .await;
+
+    let layer_fs3 = build_fs(
+        &fs,
+        &data_dir3,
+        &cache_dir,
+        upper.into_iter().map(BuildEntry::from_str).collect(),
+    )
+    .await;
+
+    let mut builder = UpperLayerBuilder::new(&data_dir4, &cache_dir, &layer_fs1)
+        .await
+        .unwrap();
+    builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
+    let upper_layer_fs = builder.finish();
+
+    let mut builder = UpperLayerBuilder::new(&data_dir5, &cache_dir, &upper_layer_fs)
+        .await
+        .unwrap();
+    builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
+    let layer_fs = builder.finish();
+
+    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+    for (d, entries) in expected {
+        assert_entries(&fs, &mount_point.join(d), entries).await;
+    }
+
+    mount_handle.umount_and_join().await.unwrap();
+}
+
 #[tokio::test]
 async fn two_mounts_test() {
     let temp = tempfile::tempdir().unwrap();
@@ -1065,6 +1135,20 @@ async fn two_layer_replace_file_with_dir() {
             ("", vec!["Cake/"]),
             ("Cake", vec!["Cupcakes/"]),
             ("Cake/Cupcakes", vec!["Sprinkle"]),
+        ],
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn three_layer() {
+    three_layer_test(
+        vec!["/Cake/Cupcakes/"],
+        vec!["/Cake/Chocolate/"],
+        vec!["/Cake/Chocolate/"],
+        vec![
+            ("", vec!["Cake/"]),
+            ("Cake", vec!["Chocolate/", "Cupcakes/"]),
         ],
     )
     .await;
