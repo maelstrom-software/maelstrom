@@ -329,889 +329,880 @@ impl FuseFileSystem for LayerFs {
 }
 
 #[cfg(test)]
-const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
-    maelstrom_base::manifest::UnixTimestamp(1705000271);
-
-#[cfg(test)]
-struct BuildEntry {
-    path: String,
-    type_: FileType,
-    data: FileData,
-    mode: u32,
-    is_hard_link: bool,
-}
-
-#[cfg(test)]
-impl BuildEntry {
-    fn reg(path: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
-        Self::reg_mode(path, FileData::Inline(data.into()), 0o555)
-    }
-
-    fn reg_digest(path: impl Into<String>, digest: Sha256Digest, offset: u64, length: u64) -> Self {
-        Self::reg_mode(
-            path,
-            FileData::Digest {
-                digest,
-                offset,
-                length,
-            },
-            0o555,
-        )
-    }
-
-    fn reg_empty(path: impl Into<String>) -> Self {
-        Self::reg_empty_mode(path, 0o555)
-    }
-
-    fn reg_empty_mode(path: impl Into<String>, mode: u32) -> Self {
-        Self {
-            path: path.into(),
-            type_: FileType::RegularFile,
-            data: FileData::Empty,
-            mode,
-            is_hard_link: false,
-        }
-    }
-
-    fn reg_mode(path: impl Into<String>, data: FileData, mode: u32) -> Self {
-        Self {
-            path: path.into(),
-            type_: FileType::RegularFile,
-            data,
-            mode,
-            is_hard_link: false,
-        }
-    }
-
-    fn dir(path: impl Into<String>) -> Self {
-        Self::dir_mode(path, 0o555)
-    }
-
-    fn dir_mode(path: impl Into<String>, mode: u32) -> Self {
-        Self {
-            path: path.into(),
-            type_: FileType::Directory,
-            data: FileData::Empty,
-            mode,
-            is_hard_link: false,
-        }
-    }
-
-    fn sym(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
-        Self {
-            path: path.into(),
-            type_: FileType::Symlink,
-            data: FileData::Inline(target.into()),
-            mode: 0o777,
-            is_hard_link: false,
-        }
-    }
-
-    fn link(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
-        Self {
-            path: path.into(),
-            type_: FileType::RegularFile,
-            data: FileData::Inline(target.into()),
-            mode: 0o777,
-            is_hard_link: true,
-        }
-    }
-
-    fn from_str(s: &str) -> Self {
-        if s.ends_with("/") {
-            Self::dir(s)
-        } else {
-            Self::reg_empty(s)
-        }
-    }
-}
-
-#[cfg(test)]
-fn test_logger() -> slog::Logger {
-    use slog::Drain as _;
-
-    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, slog::o!())
-}
-
-#[cfg(test)]
-async fn build_fs(fs: &Fs, data_dir: &Path, cache_path: &Path, files: Vec<BuildEntry>) -> LayerFs {
+mod tests {
+    use super::*;
+    use futures::StreamExt as _;
     use maelstrom_base::manifest::Mode;
+    use slog::Drain as _;
+    use std::os::unix::{ffi::OsStrExt as _, fs::MetadataExt as _};
+    use tokio::io::AsyncWriteExt as _;
 
-    let mut builder =
-        BottomLayerBuilder::new(test_logger(), fs, data_dir, cache_path, ARBITRARY_TIME)
-            .await
-            .unwrap();
+    const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
+        maelstrom_base::manifest::UnixTimestamp(1705000271);
 
-    for BuildEntry {
-        path,
-        type_,
-        data,
-        mode,
-        is_hard_link,
-    } in files
-    {
-        let size = match &data {
-            ty::FileData::Empty => 0,
-            ty::FileData::Inline(d) => d.len() as u64,
-            ty::FileData::Digest { length, .. } => *length,
-        };
-        if is_hard_link {
-            let FileData::Inline(data) = data else {
-                unreachable!()
-            };
+    struct BuildEntry {
+        path: String,
+        type_: FileType,
+        data: FileData,
+        mode: u32,
+        is_hard_link: bool,
+    }
 
-            builder
-                .add_link_path(path.as_ref(), std::str::from_utf8(&data).unwrap().as_ref())
+    impl BuildEntry {
+        fn reg(path: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
+            Self::reg_mode(path, FileData::Inline(data.into()), 0o555)
+        }
+
+        fn reg_digest(
+            path: impl Into<String>,
+            digest: Sha256Digest,
+            offset: u64,
+            length: u64,
+        ) -> Self {
+            Self::reg_mode(
+                path,
+                FileData::Digest {
+                    digest,
+                    offset,
+                    length,
+                },
+                0o555,
+            )
+        }
+
+        fn reg_empty(path: impl Into<String>) -> Self {
+            Self::reg_empty_mode(path, 0o555)
+        }
+
+        fn reg_empty_mode(path: impl Into<String>, mode: u32) -> Self {
+            Self {
+                path: path.into(),
+                type_: FileType::RegularFile,
+                data: FileData::Empty,
+                mode,
+                is_hard_link: false,
+            }
+        }
+
+        fn reg_mode(path: impl Into<String>, data: FileData, mode: u32) -> Self {
+            Self {
+                path: path.into(),
+                type_: FileType::RegularFile,
+                data,
+                mode,
+                is_hard_link: false,
+            }
+        }
+
+        fn dir(path: impl Into<String>) -> Self {
+            Self::dir_mode(path, 0o555)
+        }
+
+        fn dir_mode(path: impl Into<String>, mode: u32) -> Self {
+            Self {
+                path: path.into(),
+                type_: FileType::Directory,
+                data: FileData::Empty,
+                mode,
+                is_hard_link: false,
+            }
+        }
+
+        fn sym(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+            Self {
+                path: path.into(),
+                type_: FileType::Symlink,
+                data: FileData::Inline(target.into()),
+                mode: 0o777,
+                is_hard_link: false,
+            }
+        }
+
+        fn link(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+            Self {
+                path: path.into(),
+                type_: FileType::RegularFile,
+                data: FileData::Inline(target.into()),
+                mode: 0o777,
+                is_hard_link: true,
+            }
+        }
+
+        fn from_str(s: &str) -> Self {
+            if s.ends_with("/") {
+                Self::dir(s)
+            } else {
+                Self::reg_empty(s)
+            }
+        }
+    }
+
+    fn test_logger() -> slog::Logger {
+        let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, slog::o!())
+    }
+
+    async fn build_fs(
+        fs: &Fs,
+        data_dir: &Path,
+        cache_path: &Path,
+        files: Vec<BuildEntry>,
+    ) -> LayerFs {
+        let mut builder =
+            BottomLayerBuilder::new(test_logger(), fs, data_dir, cache_path, ARBITRARY_TIME)
                 .await
                 .unwrap();
-            continue;
-        }
 
-        match type_ {
-            FileType::RegularFile => {
-                builder
-                    .add_file_path(
-                        path.as_ref(),
-                        ty::FileAttributes {
-                            size,
-                            mode: Mode(mode),
-                            mtime: ARBITRARY_TIME,
-                        },
-                        data,
-                    )
-                    .await
-                    .unwrap();
-            }
-            FileType::Directory => {
-                builder
-                    .add_dir_path(
-                        path.as_ref(),
-                        ty::FileAttributes {
-                            size,
-                            mode: Mode(mode),
-                            mtime: ARBITRARY_TIME,
-                        },
-                    )
-                    .await
-                    .unwrap();
-            }
-            FileType::Symlink => {
+        for BuildEntry {
+            path,
+            type_,
+            data,
+            mode,
+            is_hard_link,
+        } in files
+        {
+            let size = match &data {
+                ty::FileData::Empty => 0,
+                ty::FileData::Inline(d) => d.len() as u64,
+                ty::FileData::Digest { length, .. } => *length,
+            };
+            if is_hard_link {
                 let FileData::Inline(data) = data else {
                     unreachable!()
                 };
-                builder.add_symlink_path(path.as_ref(), data).await.unwrap();
+
+                builder
+                    .add_link_path(path.as_ref(), std::str::from_utf8(&data).unwrap().as_ref())
+                    .await
+                    .unwrap();
+                continue;
             }
-            other => panic!("unsupported file type {other:?}"),
+
+            match type_ {
+                FileType::RegularFile => {
+                    builder
+                        .add_file_path(
+                            path.as_ref(),
+                            ty::FileAttributes {
+                                size,
+                                mode: Mode(mode),
+                                mtime: ARBITRARY_TIME,
+                            },
+                            data,
+                        )
+                        .await
+                        .unwrap();
+                }
+                FileType::Directory => {
+                    builder
+                        .add_dir_path(
+                            path.as_ref(),
+                            ty::FileAttributes {
+                                size,
+                                mode: Mode(mode),
+                                mtime: ARBITRARY_TIME,
+                            },
+                        )
+                        .await
+                        .unwrap();
+                }
+                FileType::Symlink => {
+                    let FileData::Inline(data) = data else {
+                        unreachable!()
+                    };
+                    builder.add_symlink_path(path.as_ref(), data).await.unwrap();
+                }
+                other => panic!("unsupported file type {other:?}"),
+            }
         }
+
+        builder.finish()
     }
 
-    builder.finish()
-}
-
-#[cfg(test)]
-async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
-    use futures::StreamExt as _;
-
-    let mut entry_stream = fs.read_dir(path).await.unwrap();
-    let mut entries = vec![];
-    while let Some(e) = entry_stream.next().await {
-        let e = e.unwrap();
-        let mut name = e.file_name();
-        if e.file_type().await.unwrap().is_dir() {
-            name.push("/");
+    async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
+        let mut entry_stream = fs.read_dir(path).await.unwrap();
+        let mut entries = vec![];
+        while let Some(e) = entry_stream.next().await {
+            let e = e.unwrap();
+            let mut name = e.file_name();
+            if e.file_type().await.unwrap().is_dir() {
+                name.push("/");
+            }
+            entries.push(name);
         }
-        entries.push(name);
-    }
-    entries.sort();
-    assert_eq!(
-        entries,
-        Vec::from_iter(expected.into_iter().map(|e| std::ffi::OsString::from(e)))
-    );
-}
-
-#[tokio::test]
-async fn read_dir_and_look_up() {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
-
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
-
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg_empty("/Foo"),
-            BuildEntry::reg_empty("/Bar"),
-            BuildEntry::reg_empty("/Baz"),
-        ],
-    )
-    .await;
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
-
-    fs.metadata(mount_point.join("Bar")).await.unwrap();
-    fs.metadata(mount_point.join("Baz")).await.unwrap();
-    fs.metadata(mount_point.join("Foo")).await.unwrap();
-
-    mount_handle.umount_and_join().await.unwrap();
-}
-
-#[tokio::test]
-async fn read_dir_multi_level() {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
-
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
-
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg_empty("/Foo/Bar/Baz"),
-            BuildEntry::reg_empty("/Foo/Bin"),
-            BuildEntry::reg_empty("/Foo/Bar/Qux"),
-        ],
-    )
-    .await;
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
-    assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
-    assert_entries(&fs, &mount_point.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
-
-    mount_handle.umount_and_join().await.unwrap();
-}
-
-#[tokio::test]
-async fn get_attr() {
-    use maelstrom_base::manifest::Mode;
-    use std::os::unix::fs::MetadataExt as _;
-
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
-
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
-
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg_empty("/Foo"),
-            BuildEntry::reg_empty("/Bar"),
-            BuildEntry::reg_empty("/Baz"),
-        ],
-    )
-    .await;
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    for name in ["Foo", "Bar", "Baz"] {
-        let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
-        assert_eq!(attrs.len(), 0);
-        assert_eq!(Mode(attrs.mode()), Mode(0o100555));
-        assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
+        entries.sort();
+        assert_eq!(
+            entries,
+            Vec::from_iter(expected.into_iter().map(|e| std::ffi::OsString::from(e)))
+        );
     }
 
-    mount_handle.umount_and_join().await.unwrap();
-}
+    #[tokio::test]
+    async fn read_dir_and_look_up() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-#[tokio::test]
-async fn hard_link() {
-    use maelstrom_base::manifest::Mode;
-    use std::os::unix::fs::MetadataExt as _;
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg_empty("/Foo"),
+                BuildEntry::reg_empty("/Bar"),
+                BuildEntry::reg_empty("/Baz"),
+            ],
+        )
+        .await;
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg_empty("/Foo"),
-            BuildEntry::link("/Bar", "/Foo"),
-            BuildEntry::link("/Baz", "/Bar"),
-        ],
-    )
-    .await;
+        assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
 
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        fs.metadata(mount_point.join("Bar")).await.unwrap();
+        fs.metadata(mount_point.join("Baz")).await.unwrap();
+        fs.metadata(mount_point.join("Foo")).await.unwrap();
 
-    let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
-
-    for name in ["Foo", "Bar", "Baz"] {
-        let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
-        assert_eq!(attrs.len(), 0);
-        assert_eq!(Mode(attrs.mode()), Mode(0o100555));
-        assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
-        assert_eq!(attrs.ino(), foo_attrs.ino());
+        mount_handle.umount_and_join().await.unwrap();
     }
 
-    mount_handle.umount_and_join().await.unwrap();
-}
+    #[tokio::test]
+    async fn read_dir_multi_level() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-#[tokio::test]
-async fn read_inline() {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg_empty("/Foo/Bar/Baz"),
+                BuildEntry::reg_empty("/Foo/Bin"),
+                BuildEntry::reg_empty("/Foo/Bar/Qux"),
+            ],
+        )
+        .await;
 
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg("/Foo", b"hello world"),
-            BuildEntry::reg_empty("/Bar"),
-            BuildEntry::reg_empty("/Baz"),
-        ],
-    )
-    .await;
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
+        assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
+        assert_entries(&fs, &mount_point.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
 
-    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
-    assert_eq!(contents, "hello world");
+        mount_handle.umount_and_join().await.unwrap();
+    }
 
-    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
-    assert_eq!(contents, "");
+    #[tokio::test]
+    async fn get_attr() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-    mount_handle.umount_and_join().await.unwrap();
-}
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-#[tokio::test]
-async fn read_link() {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg_empty("/Foo"),
+                BuildEntry::reg_empty("/Bar"),
+                BuildEntry::reg_empty("/Baz"),
+            ],
+        )
+        .await;
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg("/Foo", b"hello world"),
-            BuildEntry::sym("/Bar", "./Foo"),
-        ],
-    )
-    .await;
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
-    assert_eq!(contents, "hello world");
-
-    assert!(fs
-        .symlink_metadata(mount_point.join("Bar"))
-        .await
-        .unwrap()
-        .is_symlink());
-    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
-    assert_eq!(contents, "hello world");
-
-    mount_handle.umount_and_join().await.unwrap();
-}
-
-#[tokio::test]
-async fn read_digest() {
-    use tokio::io::AsyncWriteExt as _;
-
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
-
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
-
-    let temp_path = cache_dir.join("temp");
-    let mut f = fs.create_file(&temp_path).await.unwrap();
-    f.write_all(b"hello world").await.unwrap();
-    drop(f);
-    let digest = calc_digest(&fs, &temp_path).await;
-    fs.rename(temp_path, cache_dir.join(digest.to_string()))
-        .await
-        .unwrap();
-
-    let layer_fs = build_fs(
-        &fs,
-        &data_dir,
-        &cache_dir,
-        vec![
-            BuildEntry::reg_digest("/Foo", digest.clone(), 0, 5),
-            BuildEntry::reg_digest("/Bar", digest.clone(), 6, 5),
-        ],
-    )
-    .await;
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
-    assert_eq!(contents, "hello");
-
-    let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
-    assert_eq!(contents, "world");
-
-    mount_handle.umount_and_join().await.unwrap();
-}
-
-#[cfg(test)]
-async fn calc_digest(fs: &Fs, path: &Path) -> Sha256Digest {
-    let mut f = fs.open_file(path).await.unwrap();
-    let mut hasher = maelstrom_util::io::Sha256Stream::new(tokio::io::sink());
-    tokio::io::copy(&mut f, &mut hasher).await.unwrap();
-    hasher.finalize().1
-}
-
-#[cfg(test)]
-async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256Digest {
-    use std::os::unix::ffi::OsStrExt as _;
-
-    let tar_path = cache_path.join("temp.tar");
-    let f = fs.create_file(&tar_path).await.unwrap();
-    let mut ar = tokio_tar::Builder::new(f.into_inner());
-    for BuildEntry {
-        path,
-        type_,
-        data,
-        mode,
-        is_hard_link,
-    } in files
-    {
-        let mut header = tokio_tar::Header::new_gnu();
-        let data = match data {
-            ty::FileData::Empty => vec![],
-            ty::FileData::Inline(d) => d,
-            _ => panic!(),
-        };
-        header.set_entry_type(match (is_hard_link, type_) {
-            (true, _) => tokio_tar::EntryType::Link,
-            (_, FileType::RegularFile) => tokio_tar::EntryType::Regular,
-            (_, FileType::Directory) => tokio_tar::EntryType::Directory,
-            (_, FileType::Symlink) => tokio_tar::EntryType::Symlink,
-            (_, other) => panic!("unsupported entry type {other:?}"),
-        });
-        if type_ == FileType::Symlink || is_hard_link {
-            header.set_size(0);
-            header
-                .set_link_name(std::ffi::OsStr::from_bytes(&data))
-                .unwrap();
-            ar.append_data(&mut header, path, tokio::io::empty())
-                .await
-                .unwrap();
-        } else {
-            header.set_size(data.len() as u64);
-            header.set_mode(mode);
-            ar.append_data(&mut header, path, &data[..]).await.unwrap();
+        for name in ["Foo", "Bar", "Baz"] {
+            let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+            assert_eq!(attrs.len(), 0);
+            assert_eq!(Mode(attrs.mode()), Mode(0o100555));
+            assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
         }
+
+        mount_handle.umount_and_join().await.unwrap();
     }
-    ar.finish().await.unwrap();
 
-    let digest = calc_digest(fs, &tar_path).await;
+    #[tokio::test]
+    async fn hard_link() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-    fs.rename(tar_path, cache_path.join(digest.to_string()))
-        .await
-        .unwrap();
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-    digest
-}
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg_empty("/Foo"),
+                BuildEntry::link("/Bar", "/Foo"),
+                BuildEntry::link("/Baz", "/Bar"),
+            ],
+        )
+        .await;
 
-#[tokio::test]
-async fn layer_from_tar() {
-    use maelstrom_base::manifest::Mode;
-    use std::os::unix::fs::MetadataExt as _;
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir = temp.path().join("data");
-    let cache_dir = temp.path().join("cache");
+        let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        for name in ["Foo", "Bar", "Baz"] {
+            let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+            assert_eq!(attrs.len(), 0);
+            assert_eq!(Mode(attrs.mode()), Mode(0o100555));
+            assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
+            assert_eq!(attrs.ino(), foo_attrs.ino());
+        }
 
-    let tar_digest = build_tar(
-        &fs,
-        &cache_dir,
-        vec![
-            BuildEntry::reg("Foo", b"hello world"),
-            BuildEntry::dir("Qux"),
-            BuildEntry::reg_empty("Bar/Baz"),
-            BuildEntry::reg_empty("Bar/Bin"),
-            BuildEntry::reg_empty("Qux/Fred"),
-            BuildEntry::dir_mode("Bar", 0o666),
-            BuildEntry::sym("Waldo", b"Foo"),
-            BuildEntry::link("Thud", "/Foo"),
-        ],
-    )
-    .await;
-    let tar_path = cache_dir.join(tar_digest.to_string());
+        mount_handle.umount_and_join().await.unwrap();
+    }
 
-    let mut builder =
-        BottomLayerBuilder::new(test_logger(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
+    #[tokio::test]
+    async fn read_inline() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
+
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
+
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg("/Foo", b"hello world"),
+                BuildEntry::reg_empty("/Bar"),
+                BuildEntry::reg_empty("/Baz"),
+            ],
+        )
+        .await;
+
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        assert_eq!(contents, "hello world");
+
+        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        assert_eq!(contents, "");
+
+        mount_handle.umount_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_link() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
+
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
+
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg("/Foo", b"hello world"),
+                BuildEntry::sym("/Bar", "./Foo"),
+            ],
+        )
+        .await;
+
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        assert_eq!(contents, "hello world");
+
+        assert!(fs
+            .symlink_metadata(mount_point.join("Bar"))
+            .await
+            .unwrap()
+            .is_symlink());
+        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        assert_eq!(contents, "hello world");
+
+        mount_handle.umount_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_digest() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
+
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
+
+        let temp_path = cache_dir.join("temp");
+        let mut f = fs.create_file(&temp_path).await.unwrap();
+        f.write_all(b"hello world").await.unwrap();
+        drop(f);
+        let digest = calc_digest(&fs, &temp_path).await;
+        fs.rename(temp_path, cache_dir.join(digest.to_string()))
             .await
             .unwrap();
-    builder
-        .add_from_tar(tar_digest, fs.open_file(tar_path).await.unwrap())
-        .await
-        .unwrap();
-    let layer_fs = builder.finish();
 
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let layer_fs = build_fs(
+            &fs,
+            &data_dir,
+            &cache_dir,
+            vec![
+                BuildEntry::reg_digest("/Foo", digest.clone(), 0, 5),
+                BuildEntry::reg_digest("/Bar", digest.clone(), 6, 5),
+            ],
+        )
+        .await;
 
-    let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
-    assert_eq!(contents, "hello world");
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let contents = fs.read_to_string(mount_point.join("Thud")).await.unwrap();
-    assert_eq!(contents, "hello world");
+        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        assert_eq!(contents, "hello");
 
-    assert!(fs
-        .symlink_metadata(mount_point.join("Waldo"))
-        .await
-        .unwrap()
-        .is_symlink());
-    let contents = fs.read_to_string(mount_point.join("Waldo")).await.unwrap();
-    assert_eq!(contents, "hello world");
+        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        assert_eq!(contents, "world");
 
-    let contents = fs
-        .read_to_string(mount_point.join("Bar/Baz"))
-        .await
-        .unwrap();
-    assert_eq!(contents, "");
-
-    assert_entries(
-        &fs,
-        &mount_point,
-        vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
-    )
-    .await;
-    assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
-    assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
-
-    for p in [
-        "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
-    ] {
-        let mode = fs.metadata(mount_point.join(p)).await.unwrap().mode();
-        assert_eq!(Mode(mode & 0o777), Mode(0o555));
+        mount_handle.umount_and_join().await.unwrap();
     }
 
-    let mode = fs.metadata(mount_point.join("Bar")).await.unwrap().mode();
-    assert_eq!(Mode(mode & 0o777), Mode(0o666));
-
-    mount_handle.umount_and_join().await.unwrap();
-}
-
-#[cfg(test)]
-async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir1 = temp.path().join("data1");
-    let data_dir2 = temp.path().join("data2");
-    let data_dir3 = temp.path().join("data3");
-    let cache_dir = temp.path().join("cache");
-
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir1).await.unwrap();
-    fs.create_dir(&data_dir2).await.unwrap();
-    fs.create_dir(&data_dir3).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
-
-    let layer_fs1 = build_fs(
-        &fs,
-        &data_dir1,
-        &cache_dir,
-        lower.into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
-
-    let layer_fs2 = build_fs(
-        &fs,
-        &data_dir2,
-        &cache_dir,
-        upper.into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
-
-    let mut builder = UpperLayerBuilder::new(test_logger(), &data_dir3, &cache_dir, &layer_fs1)
-        .await
-        .unwrap();
-    builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
-    let layer_fs = builder.finish();
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    for (d, entries) in expected {
-        assert_entries(&fs, &mount_point.join(d), entries).await;
+    async fn calc_digest(fs: &Fs, path: &Path) -> Sha256Digest {
+        let mut f = fs.open_file(path).await.unwrap();
+        let mut hasher = maelstrom_util::io::Sha256Stream::new(tokio::io::sink());
+        tokio::io::copy(&mut f, &mut hasher).await.unwrap();
+        hasher.finalize().1
     }
 
-    mount_handle.umount_and_join().await.unwrap();
-}
+    async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256Digest {
+        let tar_path = cache_path.join("temp.tar");
+        let f = fs.create_file(&tar_path).await.unwrap();
+        let mut ar = tokio_tar::Builder::new(f.into_inner());
+        for BuildEntry {
+            path,
+            type_,
+            data,
+            mode,
+            is_hard_link,
+        } in files
+        {
+            let mut header = tokio_tar::Header::new_gnu();
+            let data = match data {
+                ty::FileData::Empty => vec![],
+                ty::FileData::Inline(d) => d,
+                _ => panic!(),
+            };
+            header.set_entry_type(match (is_hard_link, type_) {
+                (true, _) => tokio_tar::EntryType::Link,
+                (_, FileType::RegularFile) => tokio_tar::EntryType::Regular,
+                (_, FileType::Directory) => tokio_tar::EntryType::Directory,
+                (_, FileType::Symlink) => tokio_tar::EntryType::Symlink,
+                (_, other) => panic!("unsupported entry type {other:?}"),
+            });
+            if type_ == FileType::Symlink || is_hard_link {
+                header.set_size(0);
+                header
+                    .set_link_name(std::ffi::OsStr::from_bytes(&data))
+                    .unwrap();
+                ar.append_data(&mut header, path, tokio::io::empty())
+                    .await
+                    .unwrap();
+            } else {
+                header.set_size(data.len() as u64);
+                header.set_mode(mode);
+                ar.append_data(&mut header, path, &data[..]).await.unwrap();
+            }
+        }
+        ar.finish().await.unwrap();
 
-#[cfg(test)]
-async fn three_layer_test(
-    lowest: Vec<&str>,
-    lower: Vec<&str>,
-    upper: Vec<&str>,
-    expected: Vec<(&str, Vec<&str>)>,
-) {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point = temp.path().join("mount");
-    let data_dir1 = temp.path().join("data1");
-    let data_dir2 = temp.path().join("data2");
-    let data_dir3 = temp.path().join("data3");
-    let data_dir4 = temp.path().join("data4");
-    let data_dir5 = temp.path().join("data5");
-    let cache_dir = temp.path().join("cache");
+        let digest = calc_digest(fs, &tar_path).await;
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point).await.unwrap();
-    fs.create_dir(&data_dir1).await.unwrap();
-    fs.create_dir(&data_dir2).await.unwrap();
-    fs.create_dir(&data_dir3).await.unwrap();
-    fs.create_dir(&data_dir4).await.unwrap();
-    fs.create_dir(&data_dir5).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        fs.rename(tar_path, cache_path.join(digest.to_string()))
+            .await
+            .unwrap();
 
-    let layer_fs1 = build_fs(
-        &fs,
-        &data_dir1,
-        &cache_dir,
-        lowest.into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
-
-    let layer_fs2 = build_fs(
-        &fs,
-        &data_dir2,
-        &cache_dir,
-        lower.into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
-
-    let layer_fs3 = build_fs(
-        &fs,
-        &data_dir3,
-        &cache_dir,
-        upper.into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
-
-    let log = test_logger();
-
-    let mut builder = UpperLayerBuilder::new(log.clone(), &data_dir4, &cache_dir, &layer_fs1)
-        .await
-        .unwrap();
-    builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
-    let upper_layer_fs = builder.finish();
-
-    let mut builder = UpperLayerBuilder::new(log, &data_dir5, &cache_dir, &upper_layer_fs)
-        .await
-        .unwrap();
-    builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
-    let layer_fs = builder.finish();
-
-    let mount_handle = layer_fs.mount(&mount_point).unwrap();
-
-    for (d, entries) in expected {
-        assert_entries(&fs, &mount_point.join(d), entries).await;
+        digest
     }
 
-    mount_handle.umount_and_join().await.unwrap();
-}
+    #[tokio::test]
+    async fn layer_from_tar() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir = temp.path().join("data");
+        let cache_dir = temp.path().join("cache");
 
-#[tokio::test]
-async fn two_mounts_test() {
-    let temp = tempfile::tempdir().unwrap();
-    let mount_point1 = temp.path().join("mount1");
-    let mount_point2 = temp.path().join("mount2");
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-    let data_dir1 = temp.path().join("data1");
-    let data_dir2 = temp.path().join("data2");
-    let cache_dir = temp.path().join("cache");
+        let tar_digest = build_tar(
+            &fs,
+            &cache_dir,
+            vec![
+                BuildEntry::reg("Foo", b"hello world"),
+                BuildEntry::dir("Qux"),
+                BuildEntry::reg_empty("Bar/Baz"),
+                BuildEntry::reg_empty("Bar/Bin"),
+                BuildEntry::reg_empty("Qux/Fred"),
+                BuildEntry::dir_mode("Bar", 0o666),
+                BuildEntry::sym("Waldo", b"Foo"),
+                BuildEntry::link("Thud", "/Foo"),
+            ],
+        )
+        .await;
+        let tar_path = cache_dir.join(tar_digest.to_string());
 
-    let fs = Fs::new();
-    fs.create_dir(&mount_point1).await.unwrap();
-    fs.create_dir(&mount_point2).await.unwrap();
-    fs.create_dir(&data_dir1).await.unwrap();
-    fs.create_dir(&data_dir2).await.unwrap();
-    fs.create_dir(&cache_dir).await.unwrap();
+        let mut builder =
+            BottomLayerBuilder::new(test_logger(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
+                .await
+                .unwrap();
+        builder
+            .add_from_tar(tar_digest, fs.open_file(tar_path).await.unwrap())
+            .await
+            .unwrap();
+        let layer_fs = builder.finish();
 
-    let layer_fs1 = build_fs(
-        &fs,
-        &data_dir1,
-        &cache_dir,
-        ["/Apple"].into_iter().map(BuildEntry::from_str).collect(),
-    )
-    .await;
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
-    let layer_fs2 = build_fs(
-        &fs,
-        &data_dir2,
-        &cache_dir,
-        ["/Birthday"]
-            .into_iter()
-            .map(BuildEntry::from_str)
-            .collect(),
-    )
-    .await;
+        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        assert_eq!(contents, "hello world");
 
-    let mount_handle1 = layer_fs1.mount(&mount_point1).unwrap();
-    let mount_handle2 = layer_fs2.mount(&mount_point2).unwrap();
+        let contents = fs.read_to_string(mount_point.join("Thud")).await.unwrap();
+        assert_eq!(contents, "hello world");
 
-    assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
-    assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;
+        assert!(fs
+            .symlink_metadata(mount_point.join("Waldo"))
+            .await
+            .unwrap()
+            .is_symlink());
+        let contents = fs.read_to_string(mount_point.join("Waldo")).await.unwrap();
+        assert_eq!(contents, "hello world");
 
-    mount_handle1.umount_and_join().await.unwrap();
-    mount_handle2.umount_and_join().await.unwrap();
-}
+        let contents = fs
+            .read_to_string(mount_point.join("Bar/Baz"))
+            .await
+            .unwrap();
+        assert_eq!(contents, "");
 
-#[tokio::test]
-async fn two_layer_empty_bottom() {
-    two_layer_test(
-        vec![],
-        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
-        vec![
-            ("", vec!["Cake/", "Cookies/", "Pie/"]),
-            ("Cake", vec!["Birthday"]),
-            ("Pie", vec!["KeyLime"]),
-            ("Cookies", vec!["Snickerdoodle"]),
-        ],
-    )
-    .await;
-}
+        assert_entries(
+            &fs,
+            &mount_point,
+            vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
+        )
+        .await;
+        assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
+        assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
 
-#[tokio::test]
-async fn two_layer_empty_top() {
-    two_layer_test(
-        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
-        vec![],
-        vec![
-            ("", vec!["Cake/", "Cookies/", "Pie/"]),
-            ("Cake", vec!["Birthday"]),
-            ("Pie", vec!["KeyLime"]),
-            ("Cookies", vec!["Snickerdoodle"]),
-        ],
-    )
-    .await;
-}
+        for p in [
+            "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
+        ] {
+            let mode = fs.metadata(mount_point.join(p)).await.unwrap().mode();
+            assert_eq!(Mode(mode & 0o777), Mode(0o555));
+        }
 
-#[tokio::test]
-async fn two_layer_large_bottom_dir() {
-    two_layer_test(
-        vec!["/a/b/c/d/e/f"],
-        vec!["/a/g"],
-        vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
-    )
-    .await;
-}
+        let mode = fs.metadata(mount_point.join("Bar")).await.unwrap().mode();
+        assert_eq!(Mode(mode & 0o777), Mode(0o666));
 
-#[tokio::test]
-async fn two_layer_large_upper_dir() {
-    two_layer_test(
-        vec!["/a/g"],
-        vec!["/a/b/c/d/e/f"],
-        vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
-    )
-    .await;
-}
+        mount_handle.umount_and_join().await.unwrap();
+    }
 
-#[tokio::test]
-async fn two_layer_complicated() {
-    two_layer_test(
-        vec!["/Pie/Apple", "/Cake/Chocolate", "/Cake/Cupcakes/Sprinkle"],
-        vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
-        vec![
-            ("", vec!["Cake/", "Cookies/", "Pie/"]),
-            ("Cake", vec!["Birthday", "Chocolate", "Cupcakes/"]),
-            ("Cake/Cupcakes", vec!["Sprinkle"]),
-            ("Pie", vec!["Apple", "KeyLime"]),
-            ("Cookies", vec!["Snickerdoodle"]),
-        ],
-    )
-    .await;
-}
+    async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir1 = temp.path().join("data1");
+        let data_dir2 = temp.path().join("data2");
+        let data_dir3 = temp.path().join("data3");
+        let cache_dir = temp.path().join("cache");
 
-#[tokio::test]
-async fn two_layer_replace_dir_with_file() {
-    two_layer_test(
-        vec!["/Cake/Cupcakes/Sprinkle"],
-        vec!["/Cake/Cupcakes"],
-        vec![("", vec!["Cake/"]), ("Cake", vec!["Cupcakes"])],
-    )
-    .await;
-}
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir1).await.unwrap();
+        fs.create_dir(&data_dir2).await.unwrap();
+        fs.create_dir(&data_dir3).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
 
-#[tokio::test]
-async fn two_layer_replace_file_with_dir() {
-    two_layer_test(
-        vec!["/Cake/Cupcakes"],
-        vec!["/Cake/Cupcakes/Sprinkle"],
-        vec![
-            ("", vec!["Cake/"]),
-            ("Cake", vec!["Cupcakes/"]),
-            ("Cake/Cupcakes", vec!["Sprinkle"]),
-        ],
-    )
-    .await;
-}
+        let layer_fs1 = build_fs(
+            &fs,
+            &data_dir1,
+            &cache_dir,
+            lower.into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
 
-#[tokio::test]
-async fn three_layer() {
-    three_layer_test(
-        vec!["/Cake/Cupcakes/"],
-        vec!["/Cake/Chocolate/"],
-        vec!["/Cake/Chocolate/"],
-        vec![
-            ("", vec!["Cake/"]),
-            ("Cake", vec!["Chocolate/", "Cupcakes/"]),
-        ],
-    )
-    .await;
+        let layer_fs2 = build_fs(
+            &fs,
+            &data_dir2,
+            &cache_dir,
+            upper.into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
+
+        let mut builder = UpperLayerBuilder::new(test_logger(), &data_dir3, &cache_dir, &layer_fs1)
+            .await
+            .unwrap();
+        builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
+        let layer_fs = builder.finish();
+
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+        for (d, entries) in expected {
+            assert_entries(&fs, &mount_point.join(d), entries).await;
+        }
+
+        mount_handle.umount_and_join().await.unwrap();
+    }
+
+    async fn three_layer_test(
+        lowest: Vec<&str>,
+        lower: Vec<&str>,
+        upper: Vec<&str>,
+        expected: Vec<(&str, Vec<&str>)>,
+    ) {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point = temp.path().join("mount");
+        let data_dir1 = temp.path().join("data1");
+        let data_dir2 = temp.path().join("data2");
+        let data_dir3 = temp.path().join("data3");
+        let data_dir4 = temp.path().join("data4");
+        let data_dir5 = temp.path().join("data5");
+        let cache_dir = temp.path().join("cache");
+
+        let fs = Fs::new();
+        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&data_dir1).await.unwrap();
+        fs.create_dir(&data_dir2).await.unwrap();
+        fs.create_dir(&data_dir3).await.unwrap();
+        fs.create_dir(&data_dir4).await.unwrap();
+        fs.create_dir(&data_dir5).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
+
+        let layer_fs1 = build_fs(
+            &fs,
+            &data_dir1,
+            &cache_dir,
+            lowest.into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
+
+        let layer_fs2 = build_fs(
+            &fs,
+            &data_dir2,
+            &cache_dir,
+            lower.into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
+
+        let layer_fs3 = build_fs(
+            &fs,
+            &data_dir3,
+            &cache_dir,
+            upper.into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
+
+        let log = test_logger();
+
+        let mut builder = UpperLayerBuilder::new(log.clone(), &data_dir4, &cache_dir, &layer_fs1)
+            .await
+            .unwrap();
+        builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
+        let upper_layer_fs = builder.finish();
+
+        let mut builder = UpperLayerBuilder::new(log, &data_dir5, &cache_dir, &upper_layer_fs)
+            .await
+            .unwrap();
+        builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
+        let layer_fs = builder.finish();
+
+        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+
+        for (d, entries) in expected {
+            assert_entries(&fs, &mount_point.join(d), entries).await;
+        }
+
+        mount_handle.umount_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn two_mounts_test() {
+        let temp = tempfile::tempdir().unwrap();
+        let mount_point1 = temp.path().join("mount1");
+        let mount_point2 = temp.path().join("mount2");
+
+        let data_dir1 = temp.path().join("data1");
+        let data_dir2 = temp.path().join("data2");
+        let cache_dir = temp.path().join("cache");
+
+        let fs = Fs::new();
+        fs.create_dir(&mount_point1).await.unwrap();
+        fs.create_dir(&mount_point2).await.unwrap();
+        fs.create_dir(&data_dir1).await.unwrap();
+        fs.create_dir(&data_dir2).await.unwrap();
+        fs.create_dir(&cache_dir).await.unwrap();
+
+        let layer_fs1 = build_fs(
+            &fs,
+            &data_dir1,
+            &cache_dir,
+            ["/Apple"].into_iter().map(BuildEntry::from_str).collect(),
+        )
+        .await;
+
+        let layer_fs2 = build_fs(
+            &fs,
+            &data_dir2,
+            &cache_dir,
+            ["/Birthday"]
+                .into_iter()
+                .map(BuildEntry::from_str)
+                .collect(),
+        )
+        .await;
+
+        let mount_handle1 = layer_fs1.mount(&mount_point1).unwrap();
+        let mount_handle2 = layer_fs2.mount(&mount_point2).unwrap();
+
+        assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
+        assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;
+
+        mount_handle1.umount_and_join().await.unwrap();
+        mount_handle2.umount_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn two_layer_empty_bottom() {
+        two_layer_test(
+            vec![],
+            vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+            vec![
+                ("", vec!["Cake/", "Cookies/", "Pie/"]),
+                ("Cake", vec!["Birthday"]),
+                ("Pie", vec!["KeyLime"]),
+                ("Cookies", vec!["Snickerdoodle"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_empty_top() {
+        two_layer_test(
+            vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+            vec![],
+            vec![
+                ("", vec!["Cake/", "Cookies/", "Pie/"]),
+                ("Cake", vec!["Birthday"]),
+                ("Pie", vec!["KeyLime"]),
+                ("Cookies", vec!["Snickerdoodle"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_large_bottom_dir() {
+        two_layer_test(
+            vec!["/a/b/c/d/e/f"],
+            vec!["/a/g"],
+            vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_large_upper_dir() {
+        two_layer_test(
+            vec!["/a/g"],
+            vec!["/a/b/c/d/e/f"],
+            vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_complicated() {
+        two_layer_test(
+            vec!["/Pie/Apple", "/Cake/Chocolate", "/Cake/Cupcakes/Sprinkle"],
+            vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
+            vec![
+                ("", vec!["Cake/", "Cookies/", "Pie/"]),
+                ("Cake", vec!["Birthday", "Chocolate", "Cupcakes/"]),
+                ("Cake/Cupcakes", vec!["Sprinkle"]),
+                ("Pie", vec!["Apple", "KeyLime"]),
+                ("Cookies", vec!["Snickerdoodle"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_replace_dir_with_file() {
+        two_layer_test(
+            vec!["/Cake/Cupcakes/Sprinkle"],
+            vec!["/Cake/Cupcakes"],
+            vec![("", vec!["Cake/"]), ("Cake", vec!["Cupcakes"])],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_replace_file_with_dir() {
+        two_layer_test(
+            vec!["/Cake/Cupcakes"],
+            vec!["/Cake/Cupcakes/Sprinkle"],
+            vec![
+                ("", vec!["Cake/"]),
+                ("Cake", vec!["Cupcakes/"]),
+                ("Cake/Cupcakes", vec!["Sprinkle"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn three_layer() {
+        three_layer_test(
+            vec!["/Cake/Cupcakes/"],
+            vec!["/Cake/Chocolate/"],
+            vec!["/Cake/Chocolate/"],
+            vec![
+                ("", vec!["Cake/"]),
+                ("Cake", vec!["Chocolate/", "Cupcakes/"]),
+            ],
+        )
+        .await;
+    }
 }
