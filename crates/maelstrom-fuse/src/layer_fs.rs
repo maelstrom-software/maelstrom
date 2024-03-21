@@ -56,7 +56,7 @@ impl LazyLayerSuper {
         let mut inner = self.0.lock().await;
         if let LazyLayerSuperInner::NotCached(path) = &*inner {
             let new_state =
-                LazyLayerSuperInner::Cached(LayerSuper::read_from_path(&data_fs, path).await?);
+                LazyLayerSuperInner::Cached(LayerSuper::read_from_path(data_fs, path).await?);
             *inner = new_state;
         }
         Ok(MutexGuard::map(inner, |r| {

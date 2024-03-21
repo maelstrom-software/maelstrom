@@ -176,7 +176,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             FileId::root(LayerId::BOTTOM)
         };
         let name = path.file_name().ok_or(anyhow!("missing file name"))?;
-        if let Some(existing) = self.look_up(parent_id, &name).await? {
+        if let Some(existing) = self.look_up(parent_id, name).await? {
             self.set_attr(existing, attrs).await?;
             Ok(existing)
         } else {
@@ -231,7 +231,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         let target_name = target.file_name().ok_or(anyhow!("missing file name"))?;
 
         let existing = self
-            .look_up_entry(target_parent_id, &target_name)
+            .look_up_entry(target_parent_id, target_name)
             .await?
             .ok_or(anyhow!("link target not found {target:?}"))?;
 
