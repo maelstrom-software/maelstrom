@@ -233,9 +233,9 @@ checksum = "080e9890a082662b09c1ad45f567faeeb47f22b5fb23895fbe1e651e718e25ca"
 
 [[package]]
 name = "anyhow_trace"
-version = "0.1.0"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "947962766289fdde5f960da746da5dc86cb3c6c5522160398e7337a7ea5f245f"
+checksum = "77926521dc14a80c6b1ea34703b5b4f30fb173010ab50c8c05ff3f42b4da2cdf"
 dependencies = [
  "proc-macro2",
  "quote",

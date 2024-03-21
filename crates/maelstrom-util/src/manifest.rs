@@ -22,7 +22,7 @@ pub async fn decode_async<T: DeserializeOwned>(
     let len = stream.read_u64().await?;
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer).await?;
-    Ok(proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?)
+    proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 pub async fn encode_async<T: Serialize>(
@@ -46,7 +46,7 @@ pub fn decode<T: DeserializeOwned>(mut stream: impl io::Read) -> io::Result<T> {
     let len = stream.read_u64::<BigEndian>()?;
     let mut buffer = vec![0; len as usize];
     stream.read_exact(&mut buffer)?;
-    Ok(proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?)
+    proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))
 }
 
 pub fn encode<T: Serialize>(mut stream: impl io::Write, t: &T) -> io::Result<()> {
@@ -84,9 +84,7 @@ impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
         if self.r.stream_position()? == self.stream_end {
             return Ok(None);
         }
-        Ok(Some(
-            decode(&mut self.r).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
-        ))
+        Ok(Some(decode(&mut self.r)?))
     }
 }
 

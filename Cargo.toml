@@ -20,7 +20,7 @@ version = "0.6.0-dev"
 [workspace.dependencies]
 anstyle = "1.0.6"
 anyhow = "1.0.71"
-anyhow_trace = "0.1.0"
+anyhow_trace = "0.1.3"
 assert_matches = "1.5.0"
 async-trait = "0.1"
 async-walkdir = "1"
