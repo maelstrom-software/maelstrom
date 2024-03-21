@@ -260,7 +260,7 @@ impl CommandBuilder {
                 file, environment variables, or command-line options. Command-line options have the \
                 highest precendence, followed by environment variables.\n\
                 \n\
-                The hyptothetical configuration value \"config_value\" would be set via the \
+                The hyptothetical configuration value \"config-value\" would be set via the \
                 --config-value command-line option, the {env_var_prefix}_CONFIG_VALUE \
                 environment variable, and the \"config-value\" key in a configuration file.\n\
                 \n\
