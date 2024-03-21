@@ -8,10 +8,57 @@ use maelstrom_base::{
     },
     proto, Sha256Digest, Utf8PathBuf,
 };
+use serde::{de::DeserializeOwned, Serialize};
 use std::io;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::Path;
-use tokio::io::{AsyncWrite, AsyncWriteExt as _};
+use tokio::io::{
+    AsyncRead, AsyncReadExt as _, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _,
+};
+
+pub async fn decode_async<T: DeserializeOwned>(
+    mut stream: impl AsyncRead + Unpin,
+) -> io::Result<T> {
+    let len = stream.read_u64().await?;
+    let mut buffer = vec![0; len as usize];
+    stream.read_exact(&mut buffer).await?;
+    Ok(proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?)
+}
+
+pub async fn encode_async<T: Serialize>(
+    mut stream: impl AsyncWrite + Unpin,
+    t: &T,
+) -> io::Result<()> {
+    let mut buffer = vec![0; 8];
+    proto::serialize_into(&mut buffer, t).unwrap();
+    let len = buffer.len() as u64 - 8;
+    std::io::Cursor::new(&mut buffer[..8])
+        .write_u64(len)
+        .await
+        .unwrap();
+    stream.write_all(&buffer).await?;
+    Ok(())
+}
+
+pub fn decode<T: DeserializeOwned>(mut stream: impl io::Read) -> io::Result<T> {
+    use byteorder::{BigEndian, ReadBytesExt as _};
+
+    let len = stream.read_u64::<BigEndian>()?;
+    let mut buffer = vec![0; len as usize];
+    stream.read_exact(&mut buffer)?;
+    Ok(proto::deserialize(&buffer).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?)
+}
+
+pub fn encode<T: Serialize>(mut stream: impl io::Write, t: &T) -> io::Result<()> {
+    use byteorder::{BigEndian, WriteBytesExt};
+
+    let mut buffer = vec![0; 8];
+    proto::serialize_into(&mut buffer, t).unwrap();
+    let len = buffer.len() as u64 - 8;
+    WriteBytesExt::write_u64::<BigEndian>(&mut &mut buffer[..8], len).unwrap();
+    stream.write_all(&buffer)?;
+    Ok(())
+}
 
 pub struct ManifestReader<ReadT> {
     r: ReadT,
@@ -25,8 +72,7 @@ impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
         let stream_end = r.stream_position()?;
         r.seek(io::SeekFrom::Start(stream_start))?;
 
-        let version: ManifestVersion =
-            proto::deserialize_from(&mut r).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let version: ManifestVersion = decode(&mut r)?;
         if version != ManifestVersion::default() {
             return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
         }
@@ -39,8 +85,7 @@ impl<ReadT: io::Read + io::Seek> ManifestReader<ReadT> {
             return Ok(None);
         }
         Ok(Some(
-            proto::deserialize_from(&mut self.r)
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
+            decode(&mut self.r).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?,
         ))
     }
 }
@@ -53,20 +98,46 @@ impl<ReadT: io::Read + io::Seek> Iterator for ManifestReader<ReadT> {
     }
 }
 
+pub struct AsyncManifestReader<ReadT> {
+    r: ReadT,
+    stream_end: u64,
+}
+
+impl<ReadT: AsyncRead + AsyncSeek + Unpin> AsyncManifestReader<ReadT> {
+    pub async fn new(mut r: ReadT) -> io::Result<Self> {
+        let stream_start = r.stream_position().await?;
+        r.seek(io::SeekFrom::End(0)).await?;
+        let stream_end = r.stream_position().await?;
+        r.seek(io::SeekFrom::Start(stream_start)).await?;
+
+        let version: ManifestVersion = decode_async(&mut r).await?;
+        if version != ManifestVersion::default() {
+            return Err(io::Error::new(io::ErrorKind::Other, "bad manifest version"));
+        }
+
+        Ok(Self { r, stream_end })
+    }
+
+    pub async fn next(&mut self) -> io::Result<Option<ManifestEntry>> {
+        if self.r.stream_position().await? == self.stream_end {
+            return Ok(None);
+        }
+        Ok(Some(decode_async(&mut self.r).await?))
+    }
+}
+
 pub struct ManifestWriter<WriteT> {
     w: WriteT,
 }
 
 impl<WriteT: io::Write> ManifestWriter<WriteT> {
     pub fn new(mut w: WriteT) -> io::Result<Self> {
-        proto::serialize_into(&mut w, &ManifestVersion::default())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        encode(&mut w, &ManifestVersion::default())?;
         Ok(Self { w })
     }
 
     pub fn write_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
-        proto::serialize_into(&mut self.w, entry)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        encode(&mut self.w, entry)?;
         Ok(())
     }
 
@@ -87,18 +158,12 @@ pub struct AsyncManifestWriter<WriteT> {
 
 impl<WriteT: AsyncWrite + Unpin> AsyncManifestWriter<WriteT> {
     pub async fn new(mut w: WriteT) -> io::Result<Self> {
-        let mut buf = vec![];
-        proto::serialize_into(&mut buf, &ManifestVersion::default())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        w.write_all(&buf).await?;
+        encode_async(&mut w, &ManifestVersion::default()).await?;
         Ok(Self { w })
     }
 
     pub async fn write_entry(&mut self, entry: &ManifestEntry) -> io::Result<()> {
-        let mut buf = vec![];
-        proto::serialize_into(&mut buf, entry)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-        self.w.write_all(&buf).await?;
+        encode_async(&mut self.w, entry).await?;
         Ok(())
     }
 
