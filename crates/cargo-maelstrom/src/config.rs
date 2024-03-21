@@ -74,11 +74,7 @@ impl maelstrom_config::Config for Config {
                 Some("cargo's default".to_string()),
                 "Comma separated list of features to activate.",
             )
-            .flag_value(
-                "all_features",
-                None,
-                "Activate all available features.",
-            )
+            .flag_value("all_features", None, "Activate all available features.")
             .flag_value(
                 "no_default_features",
                 None,
@@ -104,7 +100,7 @@ impl maelstrom_config::Config for Config {
                 None,
                 "DIRECTORY",
                 Some("cargo's default".to_string()),
-                "Directory for all generated artifacts."
+                "Directory for all generated artifacts.",
             )
             .next_help_heading("Manifest Config Options")
             .value(
@@ -119,16 +115,8 @@ impl maelstrom_config::Config for Config {
                 None,
                 "Require that Cargo.lock and cache are both up to date.",
             )
-            .flag_value(
-                "locked",
-                None,
-                "Require that Cargo.lock is up to date.",
-            )
-            .flag_value(
-                "offline",
-                None,
-                "Run without cargo accessing the network.",
-            )
+            .flag_value("locked", None, "Require that Cargo.lock is up to date.")
+            .flag_value("offline", None, "Run without cargo accessing the network.")
     }
 
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {

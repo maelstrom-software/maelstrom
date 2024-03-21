@@ -370,13 +370,15 @@ impl CommandBuilder {
         self._value(field, short, value_name, default, help, ArgAction::Set)
     }
 
-    pub fn flag_value(
-        self,
-        field: &'static str,
-        short: Option<char>,
-        help: &'static str,
-    ) -> Self {
-        self._value(field, short, "", Some("false".to_string()), help, ArgAction::SetTrue)
+    pub fn flag_value(self, field: &'static str, short: Option<char>, help: &'static str) -> Self {
+        self._value(
+            field,
+            short,
+            "",
+            Some("false".to_string()),
+            help,
+            ArgAction::SetTrue,
+        )
     }
 
     pub fn next_help_heading(mut self, heading: &'static str) -> Self {
