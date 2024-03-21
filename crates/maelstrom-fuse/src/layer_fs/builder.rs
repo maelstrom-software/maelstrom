@@ -8,17 +8,15 @@ use anyhow::bail;
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
 use futures::stream::{Peekable, StreamExt as _};
-use maelstrom_base::Sha256Digest;
 use maelstrom_base::{
-    manifest::{Mode, UnixTimestamp},
-    Utf8Component, Utf8Path,
+    manifest::{ManifestEntryData, Mode, UnixTimestamp},
+    Sha256Digest, Utf8Component, Utf8Path,
 };
-use maelstrom_util::async_fs::Fs;
-use maelstrom_util::ext::BoolExt as _;
+use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader};
 use std::cmp::Ordering;
 use std::path::Path;
 use std::pin::Pin;
-use tokio::io::AsyncRead;
+use tokio::io::{AsyncRead, AsyncSeek};
 use tokio_tar::{Archive, EntryType};
 
 pub struct BottomLayerBuilder<'fs> {
@@ -267,10 +265,11 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 .to_str()
                 .ok_or(anyhow!("non-UTF8 path in tar"))?
                 .as_ref();
+            let path = Utf8Path::new("/").join(utf8_path);
             match header.entry_type() {
                 EntryType::Regular => {
                     self.add_file_path(
-                        &Utf8Path::new("/").join(utf8_path),
+                        &path,
                         FileAttributes {
                             size: header.size()?,
                             mode: Mode(header.mode()?),
@@ -286,7 +285,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
                 EntryType::Directory => {
                     self.add_dir_path(
-                        &Utf8Path::new("/").join(utf8_path),
+                        &path,
                         FileAttributes {
                             size: header.size()?,
                             mode: Mode(header.mode()?),
@@ -297,14 +296,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
                 EntryType::Symlink => {
                     self.add_symlink_path(
-                        &Utf8Path::new("/").join(utf8_path),
+                        &path,
                         header.link_name_bytes().expect("empty symlink in tar"),
                     )
                     .await?;
                 }
                 EntryType::Link => {
                     self.add_link_path(
-                        &Utf8Path::new("/").join(utf8_path),
+                        &path,
                         std::str::from_utf8(
                             &header.link_name_bytes().expect("empty symlink in tar"),
                         )?
@@ -314,6 +313,47 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
                 other => {
                     bail!("unsupported tar entry type {other:?}")
+                }
+            }
+        }
+        self.file_writer.flush().await?;
+
+        Ok(())
+    }
+
+    pub async fn add_from_manifest(
+        &mut self,
+        manifest_stream: impl AsyncRead + AsyncSeek + Unpin,
+    ) -> Result<()> {
+        let mut reader = AsyncManifestReader::new(manifest_stream).await?;
+
+        while let Some(entry) = reader.next().await? {
+            let attrs = FileAttributes {
+                size: entry.metadata.size,
+                mode: entry.metadata.mode,
+                mtime: entry.metadata.mtime,
+            };
+            let path = Utf8Path::new("/").join(&entry.path);
+            match entry.data {
+                ManifestEntryData::Directory => {
+                    self.add_dir_path(&path, attrs).await?;
+                }
+                ManifestEntryData::File(data) => {
+                    let data = match data {
+                        Some(digest) => FileData::Digest {
+                            digest,
+                            offset: 0,
+                            length: entry.metadata.size,
+                        },
+                        None => FileData::Empty,
+                    };
+                    self.add_file_path(&path, attrs, data).await?;
+                }
+                ManifestEntryData::Symlink(data) => {
+                    self.add_symlink_path(&path, data).await?;
+                }
+                ManifestEntryData::Hardlink(target) => {
+                    self.add_link_path(&path, &target).await?;
                 }
             }
         }
