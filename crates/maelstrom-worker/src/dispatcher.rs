@@ -2,7 +2,6 @@
 //! artifact fetchers. Start or cancel jobs as appropriate via executors.
 
 mod tracker;
-mod tracker2;
 
 use crate::{
     cache::{Cache, CacheEntryKind, CacheFs, CacheKey, GetArtifact},
@@ -23,7 +22,7 @@ use std::{
     result::Result as StdResult,
     time::Duration,
 };
-use tracker2::{FetcherResult, LayerTracker};
+use tracker::{FetcherResult, LayerTracker};
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -276,7 +275,7 @@ struct Fetcher<'dispatcher, DepsT, CacheT> {
     jid: JobId,
 }
 
-impl<'dispatcher, DepsT, CacheT> tracker2::Fetcher for Fetcher<'dispatcher, DepsT, CacheT>
+impl<'dispatcher, DepsT, CacheT> tracker::Fetcher for Fetcher<'dispatcher, DepsT, CacheT>
 where
     DepsT: DispatcherDeps,
     CacheT: DispatcherCache,
@@ -900,7 +899,7 @@ mod tests {
 
     macro_rules! upper_digest {
         ($n1:expr, $($n:expr),*) => {
-            tracker2::upper_layer_digest(&digest!($n1), &upper_digest!($($n),*))
+            tracker::upper_layer_digest(&digest!($n1), &upper_digest!($($n),*))
         };
         ($n1:expr) => {
             digest!($n1)
