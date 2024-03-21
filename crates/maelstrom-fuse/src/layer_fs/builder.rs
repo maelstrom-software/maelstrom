@@ -28,12 +28,14 @@ pub struct BottomLayerBuilder<'fs> {
 
 impl<'fs> BottomLayerBuilder<'fs> {
     pub async fn new(
+        log: slog::Logger,
         data_fs: &'fs Fs,
         data_dir: &Path,
         cache_path: &Path,
         time: UnixTimestamp,
     ) -> Result<Self> {
-        let layer_fs = LayerFs::new(data_dir, cache_path, LayerSuper::default()).await?;
+        let layer_fs =
+            LayerFs::new(log.clone(), data_dir, cache_path, LayerSuper::default()).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM).await?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM).await?;
 
@@ -462,11 +464,17 @@ impl<'fs> DoubleFsWalk<'fs> {
 pub struct UpperLayerBuilder<'fs> {
     upper: LayerFs,
     lower: &'fs LayerFs,
+    log: slog::Logger,
 }
 
 #[allow(dead_code)]
 impl<'fs> UpperLayerBuilder<'fs> {
-    pub async fn new(data_dir: &Path, cache_dir: &Path, lower: &'fs LayerFs) -> Result<Self> {
+    pub async fn new(
+        log: slog::Logger,
+        data_dir: &Path,
+        cache_dir: &Path,
+        lower: &'fs LayerFs,
+    ) -> Result<Self> {
         let lower_id = lower.layer_super().await?.layer_id;
         let upper_id = lower_id.inc();
         let mut upper_super = lower.layer_super().await?;
@@ -475,9 +483,9 @@ impl<'fs> UpperLayerBuilder<'fs> {
             .lower_layers
             .insert(lower_id, lower.top_layer_path.clone());
 
-        let upper = LayerFs::new(data_dir, cache_dir, upper_super).await?;
+        let upper = LayerFs::new(log.clone(), data_dir, cache_dir, upper_super).await?;
 
-        Ok(Self { upper, lower })
+        Ok(Self { upper, lower, log })
     }
 
     async fn hard_link_files(&mut self, other: &LayerFs) -> Result<()> {

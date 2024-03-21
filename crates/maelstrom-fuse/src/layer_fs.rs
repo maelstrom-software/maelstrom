@@ -26,15 +26,27 @@ use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 pub use ty::{FileAttributes, FileData, FileId};
 pub use ty::{LayerId, LayerSuper};
 
-fn to_eio<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoResult<ValueT> {
-    res.map_err(|_| Errno::EIO)
-}
-
-fn to_einval<ValueT, ErrorT>(res: std::result::Result<ValueT, ErrorT>) -> ErrnoResult<ValueT> {
-    res.map_err(|_| Errno::EINVAL)
-}
-
 const TTL: Duration = Duration::from_secs(1); // 1 second
+                                              //
+fn to_eio<ValueT, ErrorT: std::fmt::Debug>(
+    log: slog::Logger,
+    res: std::result::Result<ValueT, ErrorT>,
+) -> ErrnoResult<ValueT> {
+    res.map_err(|err| {
+        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => ?err);
+        Errno::EIO
+    })
+}
+
+fn to_einval<ValueT, ErrorT: std::fmt::Debug>(
+    log: slog::Logger,
+    res: std::result::Result<ValueT, ErrorT>,
+) -> ErrnoResult<ValueT> {
+    res.map_err(|err| {
+        slog::error!(log, "Got error servicing FUSE request. Returning EIO"; "error" => ?err);
+        Errno::EINVAL
+    })
+}
 
 enum LazyLayerSuperInner {
     NotCached(PathBuf),
@@ -73,10 +85,11 @@ pub struct LayerFs {
     top_layer_path: PathBuf,
     layer_super: LazyLayerSuper,
     cache_path: PathBuf,
+    log: slog::Logger,
 }
 
 impl LayerFs {
-    pub fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
+    pub fn from_path(log: slog::Logger, data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -85,10 +98,16 @@ impl LayerFs {
             layer_super: LazyLayerSuper::not_cached(data_dir.join("super.bin")),
             top_layer_path: data_dir,
             cache_path: cache_path.to_owned(),
+            log,
         })
     }
 
-    async fn new(data_dir: &Path, cache_path: &Path, layer_super: LayerSuper) -> Result<Self> {
+    async fn new(
+        log: slog::Logger,
+        data_dir: &Path,
+        cache_path: &Path,
+        layer_super: LayerSuper,
+    ) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -101,6 +120,7 @@ impl LayerFs {
             top_layer_path: data_dir,
             layer_super: LazyLayerSuper::cached(layer_super),
             cache_path: cache_path.to_owned(),
+            log,
         })
     }
 
@@ -152,6 +172,7 @@ impl LayerFs {
     }
 
     pub fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
+        slog::debug!(self.log, "mounting FUSE file-system"; "path" => ?mount_path);
         crate::fuse_mount(self, mount_path, "Maelstrom LayerFS")
     }
 }
@@ -161,8 +182,12 @@ impl FuseFileSystem for LayerFs {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
         let name = name.to_str().ok_or(Errno::EINVAL)?;
         let parent = FileId::try_from(parent).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(DirectoryDataReader::new(self, parent).await)?;
-        let child_id = to_eio(reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
+        let mut reader = to_eio(
+            self.log.clone(),
+            DirectoryDataReader::new(self, parent).await,
+        )?;
+        let child_id =
+            to_eio(self.log.clone(), reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
         let attrs = self.get_attr(req, child_id.as_u64()).await?;
         Ok(EntryResponse {
             attr: attrs.attr,
@@ -173,8 +198,11 @@ impl FuseFileSystem for LayerFs {
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
-        let (kind, attrs) = to_eio(reader.get_attr(file).await)?;
+        let mut reader = to_eio(
+            self.log.clone(),
+            FileMetadataReader::new(self, file.layer()).await,
+        )?;
+        let (kind, attrs) = to_eio(self.log.clone(), reader.get_attr(file).await)?;
         Ok(AttrResponse {
             ttl: TTL,
             attr: FileAttr {
@@ -208,8 +236,11 @@ impl FuseFileSystem for LayerFs {
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
-        let (kind, data) = to_eio(reader.get_data(file).await)?;
+        let mut reader = to_eio(
+            self.log.clone(),
+            FileMetadataReader::new(self, file.layer()).await,
+        )?;
+        let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
         if kind != FileType::RegularFile {
             return Err(Errno::EINVAL);
         }
@@ -231,7 +262,8 @@ impl FuseFileSystem for LayerFs {
                 offset: file_start,
                 length: file_length,
             } => {
-                let read_start = file_start + to_einval::<u64, _>(offset.try_into())?;
+                let read_start =
+                    file_start + to_einval::<u64, _>(self.log.clone(), offset.try_into())?;
                 let file_end = file_start + file_length;
                 if read_start > file_end {
                     return Err(Errno::EINVAL);
@@ -240,10 +272,16 @@ impl FuseFileSystem for LayerFs {
                 let read_end = std::cmp::min(read_start + size as u64, file_end);
                 let read_length = read_end - read_start;
 
-                let mut file = to_eio(self.data_fs.open_file(self.cache_entry(digest)).await)?;
-                to_eio(file.seek(SeekFrom::Start(read_start)).await)?;
+                let mut file = to_eio(
+                    self.log.clone(),
+                    self.data_fs.open_file(self.cache_entry(digest)).await,
+                )?;
+                to_eio(
+                    self.log.clone(),
+                    file.seek(SeekFrom::Start(read_start)).await,
+                )?;
                 let mut buffer = vec![0; read_length as usize];
-                to_eio(file.read_exact(&mut buffer).await)?;
+                to_eio(self.log.clone(), file.read_exact(&mut buffer).await)?;
                 Ok(ReadResponse { data: buffer })
             }
         }
@@ -259,14 +297,22 @@ impl FuseFileSystem for LayerFs {
         offset: i64,
     ) -> ErrnoResult<Self::ReadDirStream<'a>> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let reader = to_eio(DirectoryDataReader::new(self, file).await)?;
-        Ok(to_eio(reader.into_stream(offset.try_into()?).await)?)
+        let reader = to_eio(self.log.clone(), DirectoryDataReader::new(self, file).await)?;
+        Ok(to_eio(
+            self.log.clone(),
+            reader
+                .into_stream(self.log.clone(), offset.try_into()?)
+                .await,
+        )?)
     }
 
     async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {
         let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
-        let mut reader = to_eio(FileMetadataReader::new(self, file.layer()).await)?;
-        let (kind, data) = to_eio(reader.get_data(file).await)?;
+        let mut reader = to_eio(
+            self.log.clone(),
+            FileMetadataReader::new(self, file.layer()).await,
+        )?;
+        let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
         if kind != FileType::Symlink {
             return Err(Errno::EINVAL);
         }
@@ -379,12 +425,23 @@ impl BuildEntry {
 }
 
 #[cfg(test)]
+fn test_logger() -> slog::Logger {
+    use slog::Drain as _;
+
+    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
+    let drain = slog_term::FullFormat::new(decorator).build().fuse();
+    let drain = slog_async::Async::new(drain).build().fuse();
+    slog::Logger::root(drain, slog::o!())
+}
+
+#[cfg(test)]
 async fn build_fs(fs: &Fs, data_dir: &Path, cache_path: &Path, files: Vec<BuildEntry>) -> LayerFs {
     use maelstrom_base::manifest::Mode;
 
-    let mut builder = BottomLayerBuilder::new(fs, data_dir, cache_path, ARBITRARY_TIME)
-        .await
-        .unwrap();
+    let mut builder =
+        BottomLayerBuilder::new(test_logger(), fs, data_dir, cache_path, ARBITRARY_TIME)
+            .await
+            .unwrap();
 
     for BuildEntry {
         path,
@@ -834,9 +891,10 @@ async fn layer_from_tar() {
     .await;
     let tar_path = cache_dir.join(tar_digest.to_string());
 
-    let mut builder = BottomLayerBuilder::new(&fs, &data_dir, &cache_dir, ARBITRARY_TIME)
-        .await
-        .unwrap();
+    let mut builder =
+        BottomLayerBuilder::new(test_logger(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
+            .await
+            .unwrap();
     builder
         .add_from_tar(tar_digest, fs.open_file(tar_path).await.unwrap())
         .await
@@ -919,7 +977,7 @@ async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str,
     )
     .await;
 
-    let mut builder = UpperLayerBuilder::new(&data_dir3, &cache_dir, &layer_fs1)
+    let mut builder = UpperLayerBuilder::new(test_logger(), &data_dir3, &cache_dir, &layer_fs1)
         .await
         .unwrap();
     builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
@@ -983,13 +1041,15 @@ async fn three_layer_test(
     )
     .await;
 
-    let mut builder = UpperLayerBuilder::new(&data_dir4, &cache_dir, &layer_fs1)
+    let log = test_logger();
+
+    let mut builder = UpperLayerBuilder::new(log.clone(), &data_dir4, &cache_dir, &layer_fs1)
         .await
         .unwrap();
     builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
     let upper_layer_fs = builder.finish();
 
-    let mut builder = UpperLayerBuilder::new(&data_dir5, &cache_dir, &upper_layer_fs)
+    let mut builder = UpperLayerBuilder::new(log, &data_dir5, &cache_dir, &upper_layer_fs)
         .await
         .unwrap();
     builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();

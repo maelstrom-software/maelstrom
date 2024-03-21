@@ -792,6 +792,15 @@ mod tests {
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
 
+    fn test_logger() -> slog::Logger {
+        use slog::Drain as _;
+
+        let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
+        let drain = slog_term::FullFormat::new(decorator).build().fuse();
+        let drain = slog_async::Async::new(drain).build().fuse();
+        slog::Logger::root(drain, slog::o!())
+    }
+
     struct TarMount {
         temp_dir: PathBuf,
         mount_path: PathBuf,
@@ -812,6 +821,7 @@ mod tests {
             let tar_path = cache_path.join(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
             let mut builder = maelstrom_fuse::BottomLayerBuilder::new(
+                test_logger(),
                 &fs,
                 &data_path,
                 &cache_path,

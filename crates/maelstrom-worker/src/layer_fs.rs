@@ -16,6 +16,7 @@ async fn dir_size(fs: &Fs, path: &Path) -> Result<u64> {
 }
 
 pub async fn build_bottom_layer(
+    log: slog::Logger,
     layer_path: PathBuf,
     cache_path: PathBuf,
     artifact_digest: Sha256Digest,
@@ -25,7 +26,7 @@ pub async fn build_bottom_layer(
     let fs = Fs::new();
     fs.create_dir_all(&layer_path).await?;
     let mut builder =
-        BottomLayerBuilder::new(&fs, &layer_path, &cache_path, UnixTimestamp::EPOCH).await?;
+        BottomLayerBuilder::new(log, &fs, &layer_path, &cache_path, UnixTimestamp::EPOCH).await?;
     builder
         .add_from_tar(artifact_digest, fs.open_file(artifact_path).await?)
         .await?;
@@ -35,6 +36,7 @@ pub async fn build_bottom_layer(
 }
 
 pub async fn build_upper_layer(
+    log: slog::Logger,
     layer_path: PathBuf,
     cache_path: PathBuf,
     lower_layer_path: PathBuf,
@@ -42,9 +44,9 @@ pub async fn build_upper_layer(
 ) -> Result<u64> {
     let fs = Fs::new();
     fs.create_dir_all(&layer_path).await?;
-    let lower = LayerFs::from_path(&lower_layer_path, &cache_path)?;
-    let upper = LayerFs::from_path(&upper_layer_path, &cache_path)?;
-    let mut builder = UpperLayerBuilder::new(&layer_path, &cache_path, &lower).await?;
+    let lower = LayerFs::from_path(log.clone(), &lower_layer_path, &cache_path)?;
+    let upper = LayerFs::from_path(log.clone(), &upper_layer_path, &cache_path)?;
+    let mut builder = UpperLayerBuilder::new(log, &layer_path, &cache_path, &lower).await?;
     builder.fill_from_bottom_layer(&upper).await?;
     builder.fill_from_bottom_layer(&upper).await?;
     builder.finish();

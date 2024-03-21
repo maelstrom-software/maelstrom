@@ -66,15 +66,22 @@ impl<'fs> DirectoryDataReader<'fs> {
         }))
     }
 
-    pub async fn into_stream(mut self, offset: DirectoryOffset) -> Result<DirectoryStream<'fs>> {
+    pub async fn into_stream(
+        mut self,
+        log: slog::Logger,
+        offset: DirectoryOffset,
+    ) -> Result<DirectoryStream<'fs>> {
         self.stream
             .seek(SeekFrom::Start(self.entry_begin + u64::from(offset)))
             .await?;
-        Ok(Box::pin(futures::stream::unfold(self, |mut self_| async {
-            to_eio(self_.next_fuse_entry().await)
-                .transpose()
-                .map(|v| (v, self_))
-        })))
+        Ok(Box::pin(futures::stream::unfold(
+            (self, log),
+            |(mut self_, log)| async {
+                to_eio(log.clone(), self_.next_fuse_entry().await)
+                    .transpose()
+                    .map(|v| (v, (self_, log)))
+            },
+        )))
     }
 
     pub async fn into_ordered_stream(self) -> Result<OrderedDirectoryStream<'fs>> {

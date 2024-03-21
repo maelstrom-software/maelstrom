@@ -121,8 +121,9 @@ impl DispatcherDeps for DispatcherAdapter {
 
         let cache_dir = self.cache_dir.join("blob/sha256");
         let mount_path2 = mount_path.clone();
-        let layer_fs = maelstrom_fuse::LayerFs::from_path(&layer_fs_path, &cache_dir)
-            .map_err(|e| JobError::System(e.to_string()))?;
+        let layer_fs =
+            maelstrom_fuse::LayerFs::from_path(self.log.clone(), &layer_fs_path, &cache_dir)
+                .map_err(|e| JobError::System(e.to_string()))?;
         let fuse_handle = layer_fs
             .mount(&mount_path2)
             .map_err(|e| JobError::System(e.to_string()))?;
@@ -208,6 +209,7 @@ impl DispatcherDeps for DispatcherAdapter {
         task::spawn(async move {
             debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
+                log.clone(),
                 layer_path.clone(),
                 cache_path,
                 digest.clone(),
@@ -235,6 +237,7 @@ impl DispatcherDeps for DispatcherAdapter {
         task::spawn(async move {
             debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
+                log.clone(),
                 layer_path.clone(),
                 cache_path,
                 lower_layer_path,
