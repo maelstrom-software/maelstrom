@@ -1,13 +1,13 @@
 use crate::fuse::ErrnoResult;
 pub use crate::fuse::FileType;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use derive_more::{From, Into};
 use maelstrom_base::{
     manifest::{Mode, UnixTimestamp},
     Sha256Digest,
 };
 use maelstrom_linux::Errno;
-use maelstrom_util::async_fs::Fs;
+use maelstrom_util::async_fs::{File, Fs};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::collections::HashMap;
@@ -180,7 +180,17 @@ pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> 
     Ok(maelstrom_base::proto::deserialize(&buffer)?)
 }
 
-#[allow(dead_code)]
+pub async fn decode_file<T: DeserializeOwned>(file: &mut File<'_>) -> Result<T> {
+    let res = decode(&mut *file).await;
+    res.with_context(|| {
+        format!(
+            "error decoding {} while reading from {:?}",
+            std::any::type_name::<T>(),
+            file.path()
+        )
+    })
+}
+
 pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) -> Result<()> {
     let mut buffer = vec![0; 8];
     maelstrom_base::proto::serialize_into(&mut buffer, t).unwrap();
@@ -191,4 +201,15 @@ pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) ->
         .unwrap();
     stream.write_all(&buffer).await?;
     Ok(())
+}
+
+pub async fn encode_file<T: Serialize>(file: &mut File<'_>, t: &T) -> Result<()> {
+    let res = encode(&mut *file, t).await;
+    res.with_context(|| {
+        format!(
+            "error encoding {} while writing to {:?}",
+            std::any::type_name::<T>(),
+            file.path()
+        )
+    })
 }

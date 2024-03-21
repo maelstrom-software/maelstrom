@@ -403,6 +403,10 @@ pub struct File<'fs> {
 }
 
 impl<'fs> File<'fs> {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn into_inner(self) -> std::fs::File {
         self.inner
     }

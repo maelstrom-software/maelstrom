@@ -1,7 +1,7 @@
 use crate::fuse;
 use crate::layer_fs::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
 use crate::layer_fs::ty::{
-    decode, encode, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
+    decode_file, encode_file, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
 };
 use crate::layer_fs::{to_eio, LayerFs};
 use anyhow::Result;
@@ -9,9 +9,10 @@ use async_trait::async_trait;
 use maelstrom_util::async_fs::File;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
+use std::borrow::BorrowMut;
 use std::io::SeekFrom;
 use std::pin::Pin;
-use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _};
+use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
 pub struct DirectoryDataReader<'fs> {
     stream: File<'fs>,
@@ -26,7 +27,7 @@ impl<'fs> DirectoryDataReader<'fs> {
             .open_file(layer_fs.dir_data_path(file_id).await?)
             .await?;
         let length = stream.metadata().await?.len();
-        let _header: DirectoryEntryStorageHeader = decode(&mut stream).await?;
+        let _header: DirectoryEntryStorageHeader = decode_file(&mut stream).await?;
         let entry_begin = stream.stream_position().await?;
         Ok(Self {
             stream,
@@ -48,7 +49,7 @@ impl<'fs> DirectoryDataReader<'fs> {
         if self.stream.stream_position().await? == self.length {
             return Ok(None);
         }
-        let entry: DirectoryEntry = decode(&mut self.stream).await?;
+        let entry: DirectoryEntry = decode_file(&mut self.stream).await?;
         Ok(Some(entry))
     }
 
@@ -93,12 +94,12 @@ pub struct DirectoryEntryStorageHeader {
     pub root: Option<AvlPtr>,
 }
 
-struct DirectoryEntryStorage<StreamT> {
-    stream: StreamT,
+struct DirectoryEntryStorage<FileT> {
+    stream: FileT,
 }
 
-impl<StreamT> DirectoryEntryStorage<StreamT> {
-    fn new(stream: StreamT) -> Self {
+impl<FileT> DirectoryEntryStorage<FileT> {
+    fn new(stream: FileT) -> Self {
         Self { stream }
     }
 }
@@ -106,51 +107,61 @@ impl<StreamT> DirectoryEntryStorage<StreamT> {
 type DirectoryEntry = AvlNode<String, DirectoryEntryData>;
 
 #[async_trait]
-impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin + Send> AvlStorage
-    for DirectoryEntryStorage<StreamT>
-{
+impl<'fs, FileT: BorrowMut<File<'fs>> + Send> AvlStorage for DirectoryEntryStorage<FileT> {
     type Key = String;
     type Value = DirectoryEntryData;
 
     async fn root(&mut self) -> Result<Option<AvlPtr>> {
-        self.stream.seek(SeekFrom::Start(0)).await?;
-        let header: DirectoryEntryStorageHeader = decode(&mut self.stream).await?;
+        self.stream.borrow_mut().seek(SeekFrom::Start(0)).await?;
+        let header: DirectoryEntryStorageHeader = decode_file(self.stream.borrow_mut()).await?;
         Ok(header.root)
     }
 
     async fn set_root(&mut self, root: AvlPtr) -> Result<()> {
-        self.stream.seek(SeekFrom::Start(0)).await?;
+        self.stream.borrow_mut().seek(SeekFrom::Start(0)).await?;
         let header = DirectoryEntryStorageHeader {
             root: Some(root),
             ..Default::default()
         };
-        encode(&mut self.stream, &header).await?;
+        encode_file(self.stream.borrow_mut(), &header).await?;
         Ok(())
     }
 
     async fn look_up(&mut self, key: AvlPtr) -> Result<DirectoryEntry> {
-        self.stream.seek(SeekFrom::Start(key.as_u64())).await?;
-        Ok(decode(&mut self.stream).await?)
+        self.stream
+            .borrow_mut()
+            .seek(SeekFrom::Start(key.as_u64()))
+            .await?;
+        Ok(decode_file(self.stream.borrow_mut()).await?)
     }
 
     async fn update(&mut self, key: AvlPtr, value: DirectoryEntry) -> Result<()> {
-        self.stream.seek(SeekFrom::Start(key.as_u64())).await?;
+        self.stream
+            .borrow_mut()
+            .seek(SeekFrom::Start(key.as_u64()))
+            .await?;
 
         #[cfg(debug_assertions)]
         let old_len = {
             use tokio::io::AsyncReadExt as _;
-            let old_len = self.stream.read_u64().await?;
-            self.stream.seek(SeekFrom::Start(key.as_u64())).await?;
+            let old_len = self.stream.borrow_mut().read_u64().await?;
+            self.stream
+                .borrow_mut()
+                .seek(SeekFrom::Start(key.as_u64()))
+                .await?;
             old_len
         };
 
-        encode(&mut self.stream, &value).await?;
+        encode_file(self.stream.borrow_mut(), &value).await?;
 
         #[cfg(debug_assertions)]
         {
             use tokio::io::AsyncReadExt as _;
-            self.stream.seek(SeekFrom::Start(key.as_u64())).await?;
-            let new_len = self.stream.read_u64().await?;
+            self.stream
+                .borrow_mut()
+                .seek(SeekFrom::Start(key.as_u64()))
+                .await?;
+            let new_len = self.stream.borrow_mut().read_u64().await?;
             assert_eq!(old_len, new_len);
         }
 
@@ -158,14 +169,14 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin + Send> AvlStorage
     }
 
     async fn insert(&mut self, node: DirectoryEntry) -> Result<AvlPtr> {
-        self.stream.seek(SeekFrom::End(0)).await?;
-        let new_ptr = self.stream.stream_position().await?;
-        encode(&mut self.stream, &node).await?;
+        self.stream.borrow_mut().seek(SeekFrom::End(0)).await?;
+        let new_ptr = self.stream.borrow_mut().stream_position().await?;
+        encode_file(self.stream.borrow_mut(), &node).await?;
         Ok(AvlPtr::new(new_ptr).unwrap())
     }
 
     async fn flush(&mut self) -> Result<()> {
-        self.stream.flush().await?;
+        self.stream.borrow_mut().flush().await?;
         Ok(())
     }
 }
@@ -188,7 +199,7 @@ impl<'fs> DirectoryDataWriter<'fs> {
         let existing = layer_fs.data_fs.exists(&path).await;
         let mut stream = layer_fs.data_fs.open_or_create_file(path).await?;
         if !existing {
-            encode(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
+            encode_file(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
         }
         Ok(Self {
             tree: AvlTree::new(DirectoryEntryStorage::new(stream)),
