@@ -96,6 +96,13 @@ impl FromStr for CacheRoot {
     }
 }
 
+impl TryFrom<&str> for CacheRoot {
+    type Error = <CacheRoot as FromStr>::Err;
+    fn try_from(from: &str) -> Result<Self, Self::Error> {
+        CacheRoot::from_str(from)
+    }
+}
+
 #[derive(Deserialize, From)]
 #[serde(from = "u64")]
 pub struct CacheBytesUsedTarget(u64);

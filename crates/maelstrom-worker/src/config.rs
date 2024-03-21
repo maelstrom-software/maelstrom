@@ -41,6 +41,20 @@ impl TryFrom<u16> for Slots {
     }
 }
 
+impl TryFrom<usize> for Slots {
+    type Error = String;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        if value < 1 {
+            Err("value must be at least 1".to_string())
+        } else if value > 1000 {
+            Err("value must be less than 1000".to_string())
+        } else {
+            Ok(Slots(value.try_into().unwrap()))
+        }
+    }
+}
+
 impl Debug for Slots {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
