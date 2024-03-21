@@ -5,6 +5,7 @@ use crate::layer_fs::ty::{
 use crate::layer_fs::LayerFs;
 use crate::FileType;
 use anyhow::Result;
+use anyhow_trace::anyhow_trace;
 use maelstrom_util::async_fs::File;
 use maelstrom_util::async_fs::Fs;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,7 @@ pub struct FileMetadataReader<'fs> {
     layer_id: LayerId,
 }
 
+#[anyhow_trace]
 impl<'fs> FileMetadataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
         let mut file_table = layer_fs
@@ -95,6 +97,7 @@ pub struct FileMetadataWriter<'fs> {
 }
 
 #[allow(dead_code)]
+#[anyhow_trace]
 impl<'fs> FileMetadataWriter<'fs> {
     pub async fn new(
         data_fs: &'fs Fs,

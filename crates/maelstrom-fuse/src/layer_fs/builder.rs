@@ -6,6 +6,7 @@ use crate::layer_fs::ty::{
 use crate::layer_fs::LayerFs;
 use anyhow::bail;
 use anyhow::{anyhow, Result};
+use anyhow_trace::anyhow_trace;
 use futures::stream::{Peekable, StreamExt as _};
 use maelstrom_base::Sha256Digest;
 use maelstrom_base::{
@@ -26,6 +27,7 @@ pub struct BottomLayerBuilder<'fs> {
     time: UnixTimestamp,
 }
 
+#[anyhow_trace]
 impl<'fs> BottomLayerBuilder<'fs> {
     pub async fn new(
         log: slog::Logger,
@@ -344,6 +346,7 @@ struct WalkStream<'fs> {
     right_parent: FileId,
 }
 
+#[anyhow_trace]
 impl<'fs> WalkStream<'fs> {
     async fn new(fs: &'fs LayerFs, file_id: FileId, right_parent: FileId) -> Result<Self> {
         Ok(Self {
@@ -378,6 +381,7 @@ struct WalkEntry {
 }
 
 #[allow(dead_code)]
+#[anyhow_trace]
 impl<'fs> DoubleFsWalk<'fs> {
     async fn new(left_fs: &'fs LayerFs, right_fs: &'fs LayerFs) -> Result<Self> {
         let streams = vec![(
@@ -468,6 +472,7 @@ pub struct UpperLayerBuilder<'fs> {
 }
 
 #[allow(dead_code)]
+#[anyhow_trace]
 impl<'fs> UpperLayerBuilder<'fs> {
     pub async fn new(
         log: slog::Logger,

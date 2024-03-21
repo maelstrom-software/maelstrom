@@ -10,6 +10,7 @@ use crate::{
     ReadResponse, Request,
 };
 use anyhow::{anyhow, Result};
+use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
 pub use builder::*;
 pub use dir::{DirectoryDataReader, DirectoryStream};
@@ -88,6 +89,7 @@ pub struct LayerFs {
     log: slog::Logger,
 }
 
+#[anyhow_trace]
 impl LayerFs {
     pub fn from_path(log: slog::Logger, data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();

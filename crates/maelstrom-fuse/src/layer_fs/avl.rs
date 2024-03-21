@@ -1,4 +1,5 @@
 use anyhow::Result;
+use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
@@ -106,6 +107,7 @@ pub struct AvlTree<StorageT> {
     storage: StorageT,
 }
 
+#[anyhow_trace]
 impl<StorageT: AvlStorage> AvlTree<StorageT>
 where
     StorageT::Key: PartialEq + Eq + PartialOrd + Ord,

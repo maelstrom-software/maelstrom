@@ -5,6 +5,7 @@ use crate::layer_fs::ty::{
 };
 use crate::layer_fs::{to_eio, LayerFs};
 use anyhow::Result;
+use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
 use maelstrom_util::async_fs::File;
 use serde::{Deserialize, Serialize};
@@ -20,6 +21,7 @@ pub struct DirectoryDataReader<'fs> {
     length: u64,
 }
 
+#[anyhow_trace]
 impl<'fs> DirectoryDataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
         let mut stream = layer_fs
@@ -114,6 +116,7 @@ impl<FileT> DirectoryEntryStorage<FileT> {
 type DirectoryEntry = AvlNode<String, DirectoryEntryData>;
 
 #[async_trait]
+#[anyhow_trace]
 impl<'fs, FileT: BorrowMut<File<'fs>> + Send> AvlStorage for DirectoryEntryStorage<FileT> {
     type Key = String;
     type Value = DirectoryEntryData;
@@ -200,6 +203,7 @@ pub struct DirectoryDataWriter<'fs> {
 }
 
 #[allow(dead_code)]
+#[anyhow_trace]
 impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
         let path = layer_fs.dir_data_path(file_id).await?;
