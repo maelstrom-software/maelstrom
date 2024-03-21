@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
 use std::io::SeekFrom;
 use std::pin::Pin;
-use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt as _, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt as _, AsyncWrite, AsyncWriteExt as _};
 
 pub struct DirectoryDataReader<'fs> {
     stream: File<'fs>,
@@ -163,6 +163,11 @@ impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin + Send> AvlStorage
         encode(&mut self.stream, &node).await?;
         Ok(AvlPtr::new(new_ptr).unwrap())
     }
+
+    async fn flush(&mut self) -> Result<()> {
+        self.stream.flush().await?;
+        Ok(())
+    }
 }
 
 pub type DirectoryStream<'fs> =
@@ -191,7 +196,8 @@ impl<'fs> DirectoryDataWriter<'fs> {
     }
 
     pub async fn write_empty(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<()> {
-        Self::new(layer_fs, file_id).await?;
+        let mut s = Self::new(layer_fs, file_id).await?;
+        s.flush().await?;
         Ok(())
     }
 
@@ -203,5 +209,10 @@ impl<'fs> DirectoryDataWriter<'fs> {
         self.tree
             .insert_if_not_exists(entry_name.into(), entry_data)
             .await
+    }
+
+    pub async fn flush(&mut self) -> Result<()> {
+        self.tree.flush().await?;
+        Ok(())
     }
 }

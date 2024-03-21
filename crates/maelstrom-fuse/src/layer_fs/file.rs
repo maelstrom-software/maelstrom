@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::io::SeekFrom;
 use std::num::NonZeroU32;
 use std::path::Path;
-use tokio::io::AsyncSeekExt as _;
+use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
 pub struct FileMetadataReader<'fs> {
     file_table: File<'fs>,
@@ -169,6 +169,12 @@ impl<'fs> FileMetadataWriter<'fs> {
         self.attr_table
             .seek(SeekFrom::Start(old_attr_table_pos))
             .await?;
+        Ok(())
+    }
+
+    pub async fn flush(&mut self) -> Result<()> {
+        self.file_table.flush().await?;
+        self.attr_table.flush().await?;
         Ok(())
     }
 }

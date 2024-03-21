@@ -95,6 +95,9 @@ pub trait AvlStorage {
 
     /// Add a new node and return its pointer
     async fn insert(&mut self, node: AvlNode<Self::Key, Self::Value>) -> Result<AvlPtr>;
+
+    /// Flush any changes to permanent storage
+    async fn flush(&mut self) -> Result<()>;
 }
 
 /// An async error capable AVL tree backed something implementing AvlStorage trait. It is intended
@@ -376,6 +379,10 @@ where
         Ok(new_root_ptr)
     }
 
+    pub async fn flush(&mut self) -> Result<()> {
+        self.storage.flush().await
+    }
+
     #[cfg(test)]
     async fn height_of(&mut self, node_ptr: Option<AvlPtr>) -> Result<usize> {
         let Some(node_ptr) = node_ptr else {
@@ -558,6 +565,10 @@ mod tests {
         async fn insert(&mut self, node: AvlNode<u32, u32>) -> Result<AvlPtr> {
             self.values.push(node);
             Ok(AvlPtr::new(self.values.len() as u64).unwrap())
+        }
+
+        async fn flush(&mut self) -> Result<()> {
+            Ok(())
         }
     }
 

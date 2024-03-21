@@ -57,6 +57,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             .await?;
         assert_eq!(root, FileId::root(LayerId::BOTTOM));
         DirectoryDataWriter::write_empty(&layer_fs, root).await?;
+        file_writer.flush().await?;
 
         Ok(Self {
             layer_fs,
@@ -133,9 +134,11 @@ impl<'fs> BottomLayerBuilder<'fs> {
         kind: FileType,
     ) -> Result<bool> {
         let mut dir_writer = DirectoryDataWriter::new(&self.layer_fs, parent).await?;
-        dir_writer
+        let inserted = dir_writer
             .insert_entry(name, DirectoryEntryData { file_id, kind })
-            .await
+            .await?;
+        dir_writer.flush().await?;
+        Ok(inserted)
     }
 
     pub async fn add_file_path(
@@ -310,6 +313,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
             }
         }
+        self.file_writer.flush().await?;
+
         Ok(())
     }
 
@@ -522,6 +527,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
                     let mut writer = DirectoryDataWriter::new(&self.upper, dir_id).await?;
                     writer.insert_entry(&entry.key, entry.data).await?;
+                    writer.flush().await?;
                 }
                 LeftRight::Right(mut entry) | LeftRight::Both(_, mut entry) => {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
@@ -530,6 +536,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
                     entry.data.file_id = file_id;
                     let kind = entry.data.kind;
                     writer.insert_entry(&entry.key, entry.data).await?;
+                    writer.flush().await?;
                     if kind == FileType::Directory {
                         DirectoryDataWriter::write_empty(&self.upper, file_id).await?;
                     }
