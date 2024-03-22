@@ -1,7 +1,7 @@
 use anyhow::Result;
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot, LogLevel};
+use maelstrom_util::config::{CacheRoot, CacheSize, LogLevel};
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -83,8 +83,8 @@ pub struct Config {
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
-    #[config(short = 'B', value_name = "BYTES", default = "1_000_000_000")]
-    pub cache_bytes_used_target: CacheBytesUsedTarget,
+    #[config(short = 's', value_name = "BYTES", default = "1_000_000_000")]
+    pub cache_size: CacheSize,
 
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]

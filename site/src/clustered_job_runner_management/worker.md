@@ -12,7 +12,7 @@ Here are the different options
 - [`broker`](#the-broker-field) the address of the broker
 - [`slots`](#the-slots-field) number of slots to allocate
 - [`cache_root`](#the-cache_root-field) location of cache
-- [`cache_bytes_used_target`](#the-cache_bytes_used_target-field) target amount
+- [`cache_size`](#the-cache_sie-field) target amount
     of disk space used for cache
 - [`inline_limit`](#the-inline_limit-field) maximum size of inline captured job
     output
@@ -42,10 +42,10 @@ for this worker.
 
 This is the path on the local file-system where the worker will store its cache.
 
-## The `cache_bytes_used_target` Field
-- TOML: `cache_bytes_used_target = 1048576`
-- CLI: `--cache-bytes-used-target 1048576`
-- ENV: `MAELSTROM_WORKER_CACHE_BYTES_USED_TARGET=1048576`
+## The `cache_size` Field
+- TOML: `cache_size = 1048576`
+- CLI: `--cache-size-used-target 1048576`
+- ENV: `MAELSTROM_WORKER_CACHE_SIZE=1048576`
 
 This is the target number of bytes for the cache. This bound isn't followed
 strictly, so it's best to be conservative.

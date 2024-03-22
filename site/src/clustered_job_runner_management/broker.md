@@ -12,7 +12,7 @@ Here are the different options
 - [`port`](#the-port-field) main port to listen on
 - [`http_port`](#the-http_port-field) web UI port to listen on
 - [`cache_root`](#the-cache_root-field) location of cache
-- [`cache_bytes_used_target`](#the-cache_bytes_used_target-field) target amount
+- [`cache_size`](#the-cache_size-field) target amount
     of disk space used for cache
 - [`log_level`](#the-log_level-field) minimum log level to output
 
@@ -38,9 +38,9 @@ the web UI.
 
 This is the path on the local file-system where the broker will store its cache.
 
-## The `cache_bytes_used_target` Field
-- TOML: `cache_bytes_used_target = 1048576`
-- CLI: `--cache-bytes-used-target 1048576`
+## The `cache_size` Field
+- TOML: `cache_size = 1048576`
+- CLI: `--cache-size 1048576`
 - ENV: `MAELSTROM_BROKER_CACHE_BYTES_USED_TARGET=1048576`
 
 This is the target number of bytes for the cache. This bound isn't followed

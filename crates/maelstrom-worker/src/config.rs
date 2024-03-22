@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
+use maelstrom_util::config::{BrokerAddr, CacheRoot, CacheSize, LogLevel};
 use serde::Deserialize;
 use std::{
     error,
@@ -130,7 +130,7 @@ pub struct Config {
     pub broker: BrokerAddr,
 
     /// The number of job slots available.
-    #[config(short = 's', value_name = "N", default = "num_cpus::get()")]
+    #[config(short = 'S', value_name = "N", default = "num_cpus::get()")]
     pub slots: Slots,
 
     /// The directory to use for the cache.
@@ -143,8 +143,8 @@ pub struct Config {
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
-    #[config(short = 'B', value_name = "BYTES", default = "1_000_000_000")]
-    pub cache_bytes_used_target: CacheBytesUsedTarget,
+    #[config(short = 's', value_name = "BYTES", default = "1_000_000_000")]
+    pub cache_size: CacheSize,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
     #[config(short = 'i', value_name = "BYTES", default = "1_000_000")]

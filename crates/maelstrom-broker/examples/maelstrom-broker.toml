@@ -43,7 +43,7 @@
 # environment variable.
 #
 # Default:
-# cache_bytes_used_target = 1000000000
+# cache_size = 1000000000
 
 # The minimum log level to output.
 #

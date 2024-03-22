@@ -48,7 +48,7 @@ fn main() -> Result<()> {
                 listener,
                 http_listener,
                 config.cache_root,
-                config.cache_bytes_used_target,
+                config.cache_size,
                 log.clone(),
             )
             .await;

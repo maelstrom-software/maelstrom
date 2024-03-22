@@ -3,7 +3,7 @@
 use bytesize::ByteSize;
 use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
-    config::{CacheBytesUsedTarget, CacheRoot},
+    config::{CacheRoot, CacheSize},
     heap::{Heap, HeapDeps, HeapIndex},
 };
 use slog::{debug, Logger};
@@ -226,12 +226,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(
-        mut fs: FsT,
-        root: CacheRoot,
-        bytes_used_target: CacheBytesUsedTarget,
-        log: Logger,
-    ) -> Self {
+    pub fn new(mut fs: FsT, root: CacheRoot, bytes_used_target: CacheSize, log: Logger) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
 

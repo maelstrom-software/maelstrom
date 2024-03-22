@@ -8,7 +8,7 @@ mod http;
 mod scheduler_task;
 
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use maelstrom_util::config::{CacheBytesUsedTarget, CacheRoot};
+use maelstrom_util::config::{CacheRoot, CacheSize};
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, Logger};
 use std::sync::{
@@ -57,10 +57,10 @@ pub async fn main(
     listener: TcpListener,
     http_listener: TcpListener,
     cache_root: CacheRoot,
-    cache_bytes_used_target: CacheBytesUsedTarget,
+    cache_size: CacheSize,
     log: Logger,
 ) {
-    let scheduler_task = SchedulerTask::new(cache_root, cache_bytes_used_target, log.clone());
+    let scheduler_task = SchedulerTask::new(cache_root, cache_size, log.clone());
     let id_vendor = Arc::new(IdVendor {
         id: AtomicU32::new(0),
     });

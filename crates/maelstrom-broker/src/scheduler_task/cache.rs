@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
-    config::{CacheBytesUsedTarget, CacheRoot},
+    config::{CacheRoot, CacheSize},
     heap::{Heap, HeapDeps, HeapIndex},
     manifest::ManifestReader,
 };
@@ -241,7 +241,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     pub fn new(
         mut fs: FsT,
         root: CacheRoot,
-        bytes_used_target: CacheBytesUsedTarget,
+        bytes_used_target: CacheSize,
         log: slog::Logger,
     ) -> Self {
         let root = root.into_inner();

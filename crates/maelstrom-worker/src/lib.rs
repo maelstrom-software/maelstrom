@@ -297,7 +297,7 @@ async fn dispatcher_main(
     let cache = Cache::new(
         StdCacheFs,
         CacheRoot::from(cache_root.clone()),
-        config.cache_bytes_used_target,
+        config.cache_size,
         log.clone(),
     );
     match DispatcherAdapter::new(
