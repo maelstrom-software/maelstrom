@@ -2931,6 +2931,7 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-client",
  "maelstrom-config",
+ "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
  "serde",

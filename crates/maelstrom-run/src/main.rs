@@ -8,7 +8,7 @@ use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
     Client, ClientBgProcess,
 };
-use maelstrom_config::CommandBuilder;
+use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::{BrokerAddr, LogLevel},
@@ -22,39 +22,15 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-#[derive(Debug)]
+#[derive(Config, Debug)]
 pub struct Config {
     /// Socket address of broker.
+    #[config(short = 'b', value_name = "SOCKADDR")]
     pub broker: BrokerAddr,
+
     /// Minimum log level to output.
+    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
-}
-
-impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
-        builder
-            .value(
-                "broker",
-                Some('b'),
-                "SOCKADDR",
-                None,
-                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
-            )
-            .value(
-                "log_level",
-                Some('l'),
-                "LEVEL",
-                Some("info".to_string()),
-                "Minimum log level to output.",
-            )
-    }
-
-    fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
-        Ok(Self {
-            broker: config.get("broker")?,
-            log_level: config.get_or("log_level", LogLevel::Info)?,
-        })
-    }
 }
 
 fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -> Result<()> {

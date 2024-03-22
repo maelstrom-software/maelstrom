@@ -19,6 +19,7 @@ indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
 maelstrom-config.workspace = true
+maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
