@@ -2711,6 +2711,7 @@ dependencies = [
  "itertools",
  "maelstrom-base",
  "maelstrom-config",
+ "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-web",

@@ -21,6 +21,7 @@ hyper-tungstenite.workspace = true
 hyper.workspace = true
 maelstrom-base.workspace = true
 maelstrom-config.workspace = true
+maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 maelstrom-web.workspace = true
 serde.workspace = true
