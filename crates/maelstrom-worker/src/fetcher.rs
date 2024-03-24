@@ -3,10 +3,10 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use maelstrom_util::{config::BrokerAddr, fs::Fs, io::ChunkedReader, net};
+use maelstrom_util::{config::BrokerAddr, fs::Fs, net};
 use slog::{debug, Logger};
 use std::{
-    io::{self, BufReader},
+    io::{self, BufReader, Read as _},
     net::TcpStream,
     path::PathBuf,
 };
@@ -27,14 +27,16 @@ pub fn main(
     net::write_message_to_socket(&mut writer, msg)?;
     let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut reader)?;
     debug!(log, "artifact fetcher received message"; "msg" => ?msg);
-    msg.0
+    let size = msg
+        .0
         .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
-
-    let mut reader = countio::Counter::new(ChunkedReader::new(reader));
 
     let fs = Fs::new();
     let mut file = fs.create_file(path)?;
-    io::copy(&mut reader, &mut file)?;
+    let copied = io::copy(&mut reader.take(size), &mut file)?;
+    if copied != size {
+        return Err(anyhow!("got unexpected EOF receiving artifact"));
+    }
 
-    Ok(reader.reader_bytes() as u64)
+    Ok(size)
 }

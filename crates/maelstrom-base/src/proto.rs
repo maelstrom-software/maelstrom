@@ -56,7 +56,7 @@ pub enum ClientToBroker {
 /// details about what went wrong. After a failure, the broker will close the artifact fetcher
 /// connection.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct BrokerToArtifactFetcher(pub Result<(), String>);
+pub struct BrokerToArtifactFetcher(pub Result<u64, String>);
 
 /// Message sent from an artifact fetcher to the broker. It will be answered with a
 /// [`BrokerToArtifactFetcher`].

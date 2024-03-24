@@ -6,7 +6,6 @@ use maelstrom_base::{
 };
 use maelstrom_util::{
     fs::{File, Fs},
-    io::ChunkedWriter,
     net,
 };
 use slog::{debug, Logger};
@@ -41,8 +40,6 @@ fn send_artifact(
     Ok(())
 }
 
-const MAX_CHUNK_SIZE: usize = 1024 * 1024;
-
 fn handle_one_message(
     msg: ArtifactFetcherToBroker,
     mut socket: &mut impl io::Write,
@@ -53,14 +50,17 @@ fn handle_one_message(
     let ArtifactFetcherToBroker(digest) = msg;
     let fs = Fs::new();
     let result = get_file(&fs, &digest, scheduler_sender);
-    let msg = BrokerToArtifactFetcher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+    let msg = BrokerToArtifactFetcher(
+        result
+            .as_ref()
+            .map(|(_, size)| *size)
+            .map_err(|e| e.to_string()),
+    );
     debug!(log, "sending artifact fetcher message"; "msg" => ?msg);
     net::write_message_to_socket(&mut socket, msg)?;
 
-    let mut socket = ChunkedWriter::new(socket, MAX_CHUNK_SIZE);
     let (mut f, size) = result?;
     send_artifact(scheduler_sender, &mut f, &mut socket, size, digest)?;
-    socket.finish()?;
 
     Ok(())
 }
