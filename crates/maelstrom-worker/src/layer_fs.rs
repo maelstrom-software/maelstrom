@@ -20,16 +20,18 @@ pub async fn build_bottom_layer(
     layer_path: PathBuf,
     cache_path: PathBuf,
     artifact_digest: Sha256Digest,
-    _artifact_type: ArtifactType,
+    artifact_type: ArtifactType,
     artifact_path: PathBuf,
 ) -> Result<u64> {
     let fs = Fs::new();
     fs.create_dir_all(&layer_path).await?;
     let mut builder =
         BottomLayerBuilder::new(log, &fs, &layer_path, &cache_path, UnixTimestamp::EPOCH).await?;
-    builder
-        .add_from_tar(artifact_digest, fs.open_file(artifact_path).await?)
-        .await?;
+    let artifact_file = fs.open_file(artifact_path).await?;
+    match artifact_type {
+        ArtifactType::Tar => builder.add_from_tar(artifact_digest, artifact_file).await?,
+        ArtifactType::Manifest => builder.add_from_manifest(artifact_file).await?,
+    }
     builder.finish();
 
     dir_size(&fs, &layer_path).await
