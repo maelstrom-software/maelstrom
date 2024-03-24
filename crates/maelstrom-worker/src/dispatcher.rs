@@ -341,6 +341,10 @@ where
             }
         }
     }
+
+    fn fetch_manifest_digests(&mut self, _digest: &Sha256Digest, _path: &Path) {
+        unimplemented!()
+    }
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job

@@ -9,10 +9,24 @@ use std::{
 };
 
 #[derive(Debug, PartialEq, Eq)]
+enum PendingManifestDigests {
+    WaitingForDigests,
+    WaitingForArtifacts { num_remaining: u64 },
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum PendingBottomLayer {
-    WaitingForArtifact { type_: ArtifactType },
+    WaitingForArtifact {
+        type_: ArtifactType,
+    },
+    WaitingForManifestDigests {
+        path: PathBuf,
+        pending_digests: PendingManifestDigests,
+    },
     WaitingForFsLayer,
-    Ready { fs_layer_path: PathBuf },
+    Ready {
+        fs_layer_path: PathBuf,
+    },
 }
 
 impl PendingBottomLayer {
@@ -66,11 +80,13 @@ pub fn upper_layer_digest(upper_layer: &Sha256Digest, lower_layer: &Sha256Digest
 }
 
 /// Track which layers have been gotten from the cache.
+#[derive(Debug)]
 pub struct LayerTracker {
     layers: NonEmpty<Sha256Digest>,
     bottom_layers: HashMap<Sha256Digest, PendingBottomLayer>,
     top_fs_layer: PendingTopLayer,
     cache_keys: HashSet<CacheKey>,
+    pending_manifest_dependencies: HashMap<Sha256Digest, Vec<Sha256Digest>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -93,6 +109,7 @@ pub trait Fetcher {
         lower_layer_path: &Path,
         upper_layer_path: &Path,
     ) -> FetcherResult;
+    fn fetch_manifest_digests(&mut self, digest: &Sha256Digest, path: &Path);
 }
 
 impl LayerTracker {
@@ -105,6 +122,7 @@ impl LayerTracker {
             bottom_layers: HashMap::new(),
             top_fs_layer: PendingTopLayer::NoStackedUpperLayers,
             cache_keys: HashSet::new(),
+            pending_manifest_dependencies: HashMap::new(),
         };
         let mut seen = HashMap::<Sha256Digest, ArtifactType>::new();
         for (digest, type_) in layers {
@@ -185,24 +203,116 @@ impl LayerTracker {
         }
     }
 
+    fn fetch_bottom_fs_layer(
+        &mut self,
+        digest: &Sha256Digest,
+        type_: ArtifactType,
+        path: PathBuf,
+        fetcher: &mut impl Fetcher,
+    ) {
+        let result = fetcher.fetch_bottom_fs_layer(digest, type_, &path);
+        *self.bottom_layers.get_mut(digest).unwrap() = PendingBottomLayer::WaitingForFsLayer;
+        if let FetcherResult::Got(path) = result {
+            self.got_bottom_fs_layer(digest, path, fetcher)
+        }
+    }
+
     pub fn got_artifact(
         &mut self,
         digest: &Sha256Digest,
         path: PathBuf,
         fetcher: &mut impl Fetcher,
     ) {
+        self.cache_keys
+            .insert(CacheKey::new(CacheEntryKind::Blob, digest.clone()));
+
+        if self.pending_manifest_dependencies.contains_key(digest) {
+            self.got_manifest_artifact(digest, fetcher);
+            if !self.bottom_layers.contains_key(digest) {
+                return;
+            }
+        }
+
         let PendingBottomLayer::WaitingForArtifact { type_ } =
             self.bottom_layers.get(digest).unwrap()
         else {
             panic!("unexpected got_artifact")
         };
-        self.cache_keys
-            .insert(CacheKey::new(CacheEntryKind::Blob, digest.clone()));
 
-        let result = fetcher.fetch_bottom_fs_layer(digest, *type_, &path);
-        *self.bottom_layers.get_mut(digest).unwrap() = PendingBottomLayer::WaitingForFsLayer;
-        if let FetcherResult::Got(path) = result {
-            self.got_bottom_fs_layer(digest, path, fetcher)
+        if *type_ == ArtifactType::Manifest {
+            fetcher.fetch_manifest_digests(digest, &path);
+            *self.bottom_layers.get_mut(digest).unwrap() =
+                PendingBottomLayer::WaitingForManifestDigests {
+                    path,
+                    pending_digests: PendingManifestDigests::WaitingForDigests,
+                };
+            return;
+        }
+
+        self.fetch_bottom_fs_layer(digest, *type_, path, fetcher);
+    }
+
+    fn got_manifest_artifact(&mut self, digest: &Sha256Digest, fetcher: &mut impl Fetcher) {
+        let layers = self.pending_manifest_dependencies.remove(digest).unwrap();
+        for manifest_digest in layers {
+            let PendingBottomLayer::WaitingForManifestDigests {
+                path,
+                pending_digests: PendingManifestDigests::WaitingForArtifacts { num_remaining },
+            } = self.bottom_layers.get_mut(&manifest_digest).unwrap()
+            else {
+                panic!("got manifest digest for layer which wasn't expecting it");
+            };
+            *num_remaining -= 1;
+            if *num_remaining == 0 {
+                let path = path.clone();
+                self.fetch_bottom_fs_layer(&manifest_digest, ArtifactType::Manifest, path, fetcher);
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn got_manifest_digests(
+        &mut self,
+        manifest_digest: &Sha256Digest,
+        digests: HashSet<Sha256Digest>,
+        fetcher: &mut impl Fetcher,
+    ) {
+        let bottom_layer_keys: HashSet<_> = self.bottom_layers.keys().cloned().collect();
+        let PendingBottomLayer::WaitingForManifestDigests {
+            path,
+            pending_digests,
+        } = self.bottom_layers.get_mut(manifest_digest).unwrap()
+        else {
+            panic!("unexpected got_manifest_digests");
+        };
+        let mut num_remaining = 0;
+        for digest in digests {
+            let cache_key = CacheKey::new(CacheEntryKind::Blob, digest.clone());
+            if self.cache_keys.contains(&cache_key) {
+                continue;
+            }
+
+            // XXX this artifact_type is meaningless and should be removed.
+            let ty = ArtifactType::Tar;
+
+            if let Some(pending_entry) = self.pending_manifest_dependencies.get_mut(&digest) {
+                pending_entry.push(manifest_digest.clone());
+                num_remaining += 1;
+            } else if bottom_layer_keys.contains(&digest)
+                || fetcher.fetch_artifact(&digest, ty) == FetcherResult::Pending
+            {
+                self.pending_manifest_dependencies
+                    .insert(digest, vec![manifest_digest.clone()]);
+                num_remaining += 1;
+            } else {
+                self.cache_keys.insert(cache_key);
+            }
+        }
+        if num_remaining > 0 {
+            *pending_digests = PendingManifestDigests::WaitingForArtifacts { num_remaining };
+        } else {
+            let path = path.clone();
+            self.fetch_bottom_fs_layer(manifest_digest, ArtifactType::Manifest, path, fetcher);
         }
     }
 
@@ -275,12 +385,14 @@ mod tests {
     use super::*;
     use maelstrom_base::nonempty;
     use maelstrom_test::{digest, path_buf};
+    use maelstrom_util::ext::BoolExt as _;
     use maplit::hashset;
 
     struct TestFetcher {
         artifacts: HashMap<Sha256Digest, FetcherResult>,
         bottom_fs_layers: HashMap<Sha256Digest, FetcherResult>,
         upper_fs_layers: HashMap<Sha256Digest, FetcherResult>,
+        manifest_digests: HashSet<(Sha256Digest, PathBuf)>,
     }
 
     impl TestFetcher {
@@ -288,11 +400,13 @@ mod tests {
             artifacts: impl IntoIterator<Item = (Sha256Digest, FetcherResult)>,
             bottom_fs_layers: impl IntoIterator<Item = (Sha256Digest, FetcherResult)>,
             upper_fs_layers: impl IntoIterator<Item = (Sha256Digest, FetcherResult)>,
+            manifest_digests: impl IntoIterator<Item = (Sha256Digest, PathBuf)>,
         ) -> Self {
             Self {
                 artifacts: artifacts.into_iter().collect(),
                 bottom_fs_layers: bottom_fs_layers.into_iter().collect(),
                 upper_fs_layers: upper_fs_layers.into_iter().collect(),
+                manifest_digests: manifest_digests.into_iter().collect(),
             }
         }
     }
@@ -319,6 +433,12 @@ mod tests {
         ) -> FetcherResult {
             self.upper_fs_layers.remove(digest).unwrap()
         }
+
+        fn fetch_manifest_digests(&mut self, manifest_digest: &Sha256Digest, path: &Path) {
+            self.manifest_digests
+                .remove(&(manifest_digest.clone(), path.to_path_buf()))
+                .assert_is_true();
+        }
     }
 
     impl Drop for TestFetcher {
@@ -326,6 +446,7 @@ mod tests {
             assert_eq!(self.artifacts, Default::default());
             assert_eq!(self.bottom_fs_layers, Default::default());
             assert_eq!(self.upper_fs_layers, Default::default());
+            assert_eq!(self.manifest_digests, Default::default());
         }
     }
 
@@ -345,6 +466,7 @@ mod tests {
             [(digest!(1), FetcherResult::Got(path_buf!("/blob/1")))],
             [(digest!(1), FetcherResult::Got(path_buf!("/fs_b/1")))],
             [],
+            [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
 
@@ -362,11 +484,41 @@ mod tests {
     }
 
     #[test]
+    fn one_layer_manifest_everything_in_cache_into_path_and_cache_keys() {
+        let layers = nonempty![(digest!(1), ArtifactType::Manifest)];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+            ],
+            [(digest!(1), FetcherResult::Got(path_buf!("/fs_b/1")))],
+            [],
+            [(digest!(1), path_buf!("/blob/1"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+        tracker.got_manifest_digests(&digest!(1), hashset! { digest!(2) }, &mut fetcher);
+
+        assert!(tracker.is_complete());
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_b/1"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                }
+            ),
+        );
+    }
+
+    #[test]
     fn one_layer_pending_then_got_into_path_and_cache_keys() {
         let layers = nonempty![(digest!(1), ArtifactType::Tar)];
         let mut fetcher = TestFetcher::new(
             [(digest!(1), FetcherResult::Pending)],
             [(digest!(1), FetcherResult::Pending)],
+            [],
             [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
@@ -380,6 +532,41 @@ mod tests {
                 path_buf!("/fs_b/1"),
                 hashset! {
                     CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                }
+            ),
+        );
+    }
+
+    #[test]
+    fn one_layer_manifest_pending_then_got_into_path_and_cache_keys() {
+        let layers = nonempty![(digest!(1), ArtifactType::Manifest)];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Pending),
+                (digest!(2), FetcherResult::Pending),
+            ],
+            [(digest!(1), FetcherResult::Pending)],
+            [],
+            [(digest!(1), path_buf!("/blob/1"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_artifact(&digest!(1), path_buf!("/blob/1"), &mut fetcher);
+
+        tracker.got_manifest_digests(&digest!(1), hashset! { digest!(2) }, &mut fetcher);
+        tracker.got_artifact(&digest!(2), path_buf!("/blob/2"), &mut fetcher);
+
+        tracker.got_bottom_fs_layer(&digest!(1), path_buf!("/fs_b/1"), &mut fetcher);
+
+        assert!(tracker.is_complete());
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_b/1"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
                 }
             ),
@@ -405,6 +592,7 @@ mod tests {
                 upper_digest!(1, 2),
                 FetcherResult::Got(path_buf!("/fs_u/2")),
             )],
+            [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
 
@@ -416,6 +604,55 @@ mod tests {
                 hashset! {
                     CacheKey::new(CacheEntryKind::Blob, digest!(1)),
                     CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
+                    CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2)),
+                }
+            ),
+        );
+    }
+
+    #[test]
+    fn two_layers_one_manifest_everything_in_cache_into_path_and_cache_keys() {
+        let layers = nonempty![
+            (digest!(2), ArtifactType::Tar),
+            (digest!(1), ArtifactType::Manifest)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+                (digest!(3), FetcherResult::Got(path_buf!("/blob/3"))),
+                (digest!(4), FetcherResult::Got(path_buf!("/blob/4"))),
+            ],
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/fs_b/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
+            ],
+            [(
+                upper_digest!(1, 2),
+                FetcherResult::Got(path_buf!("/fs_u/2")),
+            )],
+            [(digest!(1), path_buf!("/blob/1"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(
+            &digest!(1),
+            hashset! { digest!(3), digest!(4) },
+            &mut fetcher,
+        );
+
+        assert!(tracker.is_complete());
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_u/2"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(3)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(4)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
                     CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2)),
@@ -437,6 +674,7 @@ mod tests {
             ],
             [(digest!(2), FetcherResult::Got(path_buf!("/fs_b/2")))],
             [],
+            [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
 
@@ -446,6 +684,41 @@ mod tests {
             hashset! {
                 CacheKey::new(CacheEntryKind::Blob, digest!(2)),
                 CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn two_layers_one_artifact_gotten_with_pending_manifest_one_pending_into_cache_keys() {
+        let layers = nonempty![
+            (digest!(2), ArtifactType::Manifest),
+            (digest!(1), ArtifactType::Tar)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Pending),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+                (digest!(3), FetcherResult::Got(path_buf!("/blob/3"))),
+                (digest!(4), FetcherResult::Pending),
+            ],
+            [],
+            [],
+            [(digest!(2), path_buf!("/blob/2"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(
+            &digest!(2),
+            hashset! { digest!(3), digest!(4) },
+            &mut fetcher,
+        );
+
+        assert!(!tracker.is_complete());
+        assert_eq!(
+            tracker.into_cache_keys(),
+            hashset! {
+                CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                CacheKey::new(CacheEntryKind::Blob, digest!(3)),
             }
         );
     }
@@ -466,6 +739,7 @@ mod tests {
                 (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
             ],
             [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
         tracker.got_artifact(&digest!(1), path_buf!("/blob/1"), &mut fetcher);
@@ -476,6 +750,50 @@ mod tests {
             hashset! {
                 CacheKey::new(CacheEntryKind::Blob, digest!(1)),
                 CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
+            }
+        );
+    }
+
+    #[test]
+    fn two_layers_one_artifact_gotten_one_manifest_pending_then_got_into_cache_keys() {
+        let layers = nonempty![
+            (digest!(2), ArtifactType::Manifest),
+            (digest!(1), ArtifactType::Tar)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Pending),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+                (digest!(3), FetcherResult::Got(path_buf!("/blob/3"))),
+                (digest!(4), FetcherResult::Pending),
+            ],
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/fs_b/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
+            ],
+            [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [(digest!(2), path_buf!("/blob/2"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(
+            &digest!(2),
+            hashset! { digest!(3), digest!(4) },
+            &mut fetcher,
+        );
+        tracker.got_artifact(&digest!(1), path_buf!("/blob/1"), &mut fetcher);
+        tracker.got_artifact(&digest!(4), path_buf!("/blob/4"), &mut fetcher);
+
+        assert!(!tracker.is_complete());
+        assert_eq!(
+            tracker.into_cache_keys(),
+            hashset! {
+                CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                CacheKey::new(CacheEntryKind::Blob, digest!(3)),
+                CacheKey::new(CacheEntryKind::Blob, digest!(4)),
                 CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
                 CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
             }
@@ -497,6 +815,7 @@ mod tests {
                 (digest!(1), FetcherResult::Pending),
                 (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
             ],
+            [],
             [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
@@ -528,6 +847,7 @@ mod tests {
                 (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
             ],
             [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
         tracker.got_bottom_fs_layer(&digest!(1), path_buf!("/fs_b/1"), &mut fetcher);
@@ -560,6 +880,7 @@ mod tests {
                 (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
             ],
             [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
 
@@ -591,6 +912,7 @@ mod tests {
                 (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
             ],
             [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
         tracker.got_upper_fs_layer(&upper_digest!(1, 2), path_buf!("/fs_u/2"), &mut fetcher);
@@ -624,6 +946,7 @@ mod tests {
                 (digest!(2), FetcherResult::Pending),
             ],
             [(upper_digest!(1, 2), FetcherResult::Pending)],
+            [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
         tracker.got_artifact(&digest!(2), path_buf!("/blob/2"), &mut fetcher);
@@ -678,6 +1001,7 @@ mod tests {
                     FetcherResult::Got(path_buf!("/fs_u/3")),
                 ),
             ],
+            [],
         );
         let tracker = LayerTracker::new(&layers, &mut fetcher);
 
@@ -690,6 +1014,81 @@ mod tests {
                     CacheKey::new(CacheEntryKind::Blob, digest!(1)),
                     CacheKey::new(CacheEntryKind::Blob, digest!(2)),
                     CacheKey::new(CacheEntryKind::Blob, digest!(3)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(3)),
+                    CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(2, 3)),
+                    CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2, 3)),
+                }
+            ),
+        );
+    }
+
+    #[test]
+    fn three_manifest_layers_with_duplicates() {
+        let layers = nonempty![
+            (digest!(3), ArtifactType::Manifest),
+            (digest!(2), ArtifactType::Manifest),
+            (digest!(1), ArtifactType::Manifest)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+                (digest!(3), FetcherResult::Got(path_buf!("/blob/3"))),
+                (digest!(4), FetcherResult::Got(path_buf!("/blob/4"))),
+                (digest!(5), FetcherResult::Got(path_buf!("/blob/5"))),
+            ],
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/fs_b/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
+                (digest!(3), FetcherResult::Got(path_buf!("/fs_b/3"))),
+            ],
+            [
+                (
+                    upper_digest!(2, 3),
+                    FetcherResult::Got(path_buf!("/fs_u/2")),
+                ),
+                (
+                    upper_digest!(1, 2, 3),
+                    FetcherResult::Got(path_buf!("/fs_u/3")),
+                ),
+            ],
+            [
+                (digest!(1), path_buf!("/blob/1")),
+                (digest!(2), path_buf!("/blob/2")),
+                (digest!(3), path_buf!("/blob/3")),
+            ],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(
+            &digest!(1),
+            hashset! { digest!(4), digest!(5) },
+            &mut fetcher,
+        );
+        tracker.got_manifest_digests(
+            &digest!(2),
+            hashset! { digest!(4), digest!(5) },
+            &mut fetcher,
+        );
+        tracker.got_manifest_digests(
+            &digest!(3),
+            hashset! { digest!(4), digest!(5) },
+            &mut fetcher,
+        );
+
+        assert!(tracker.is_complete());
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_u/3"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(3)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(4)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(5)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
                     CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(3)),
@@ -741,6 +1140,7 @@ mod tests {
                     FetcherResult::Got(path_buf!("/fs_u/6")),
                 ),
             ],
+            [],
         );
         let mut tracker = LayerTracker::new(&layers, &mut fetcher);
         tracker.got_artifact(&digest!(2), path_buf!("/blob/2"), &mut fetcher);
@@ -760,6 +1160,89 @@ mod tests {
                     CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(2, 1, 2, 1, 2)),
                     CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2, 1, 2)),
                     CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(2, 1, 2)),
+                    CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2)),
+                }
+            ),
+        );
+    }
+
+    #[test]
+    fn manifest_depends_on_existing_layer_fetch_manifest_dependency_after_layer() {
+        let layers = nonempty![
+            (digest!(2), ArtifactType::Tar),
+            (digest!(1), ArtifactType::Manifest)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/blob/2"))),
+            ],
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/fs_b/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
+            ],
+            [(
+                upper_digest!(1, 2),
+                FetcherResult::Got(path_buf!("/fs_u/3")),
+            )],
+            [(digest!(1), path_buf!("/blob/1"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(&digest!(1), hashset! { digest!(2) }, &mut fetcher);
+
+        assert!(tracker.is_complete());
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_u/3"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
+                    CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2)),
+                }
+            ),
+        );
+    }
+
+    #[test]
+    fn manifest_depends_on_existing_layer_fetch_manifest_dependency_before_layer() {
+        let layers = nonempty![
+            (digest!(2), ArtifactType::Tar),
+            (digest!(1), ArtifactType::Manifest)
+        ];
+        let mut fetcher = TestFetcher::new(
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/blob/1"))),
+                (digest!(2), FetcherResult::Pending),
+            ],
+            [
+                (digest!(1), FetcherResult::Got(path_buf!("/fs_b/1"))),
+                (digest!(2), FetcherResult::Got(path_buf!("/fs_b/2"))),
+            ],
+            [(
+                upper_digest!(1, 2),
+                FetcherResult::Got(path_buf!("/fs_u/3")),
+            )],
+            [(digest!(1), path_buf!("/blob/1"))],
+        );
+        let mut tracker = LayerTracker::new(&layers, &mut fetcher);
+
+        tracker.got_manifest_digests(&digest!(1), hashset! { digest!(2) }, &mut fetcher);
+        tracker.got_artifact(&digest!(2), path_buf!("/blob/2"), &mut fetcher);
+
+        assert!(tracker.is_complete(), "{tracker:#?}");
+        assert_eq!(
+            tracker.into_path_and_cache_keys(),
+            (
+                path_buf!("/fs_u/3"),
+                hashset! {
+                    CacheKey::new(CacheEntryKind::Blob, digest!(1)),
+                    CacheKey::new(CacheEntryKind::Blob, digest!(2)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(1)),
+                    CacheKey::new(CacheEntryKind::BottomFsLayer, digest!(2)),
                     CacheKey::new(CacheEntryKind::UpperFsLayer, upper_digest!(1, 2)),
                 }
             ),
