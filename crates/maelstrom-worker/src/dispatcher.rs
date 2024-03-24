@@ -92,6 +92,9 @@ pub trait DispatcherDeps {
         lower_layer_path: PathBuf,
         upper_layer_path: PathBuf,
     );
+
+    /// Start a task to read the digests out of the given path to a manfiest.
+    fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId);
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -154,6 +157,7 @@ pub enum Message {
     ArtifactFetcher(Sha256Digest, Result<u64>),
     BuiltBottomFsLayer(Sha256Digest, Result<u64>),
     BuiltUpperFsLayer(Sha256Digest, Result<u64>),
+    ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -200,6 +204,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
             Message::BuiltUpperFsLayer(digest, Err(err)) => {
                 self.build_upper_fs_layer_failure(digest, err)
+            }
+            Message::ReadManifestDigests(digest, jid, Ok(digests)) => {
+                self.read_manifest_digests_success(digest, jid, digests)
+            }
+            Message::ReadManifestDigests(digest, jid, Err(err)) => {
+                self.read_manifest_digests_failure(digest, jid, err)
             }
         }
     }
@@ -342,8 +352,9 @@ where
         }
     }
 
-    fn fetch_manifest_digests(&mut self, _digest: &Sha256Digest, _path: &Path) {
-        unimplemented!()
+    fn fetch_manifest_digests(&mut self, digest: &Sha256Digest, path: &Path) {
+        self.deps
+            .read_manifest_digests(digest.clone(), path.into(), self.jid);
     }
 }
 
@@ -561,6 +572,23 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
+    fn job_failure(&mut self, digest: &Sha256Digest, jid: JobId, msg: &str, err: &Error) {
+        if let Some(entry) = self.awaiting_layers.remove(&jid) {
+            // If this was the first layer error for this request, then we'll find something in
+            // the hash table, and we'll need to clean up.
+            //
+            // Otherwise, it means that there were previous errors for this entry, or it was
+            // canceled, and there's nothing to do here.
+            self.deps.send_message_to_broker(WorkerToBroker(
+                jid,
+                Err(JobError::System(format!("{msg} {digest}: {err}"))),
+            ));
+            for CacheKey { kind, digest } in entry.tracker.into_cache_keys() {
+                self.cache.decrement_ref_count(kind, &digest);
+            }
+        }
+    }
+
     fn cache_fill_failure(
         &mut self,
         kind: CacheEntryKind,
@@ -569,26 +597,43 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         err: Error,
     ) {
         for jid in self.cache.got_artifact_failure(kind, &digest) {
-            if let Some(entry) = self.awaiting_layers.remove(&jid) {
-                // If this was the first layer error for this request, then we'll find something in
-                // the hash table, and we'll need to clean up.
-                //
-                // Otherwise, it means that there were previous errors for this entry, or it was
-                // canceled, and there's nothing to do here.
-                self.deps.send_message_to_broker(WorkerToBroker(
-                    jid,
-                    Err(JobError::System(format!("{msg} {digest}: {err}"))),
-                ));
-                for CacheKey { kind, digest } in entry.tracker.into_cache_keys() {
-                    self.cache.decrement_ref_count(kind, &digest);
-                }
-            }
+            self.job_failure(&digest, jid, msg, &err)
         }
     }
 
     fn receive_artifact_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to download and extract layer artifact";
         self.cache_fill_failure(CacheEntryKind::Blob, digest, msg, err)
+    }
+
+    fn advance_job(
+        &mut self,
+        jid: JobId,
+        kind: CacheEntryKind,
+        digest: &Sha256Digest,
+        cb: impl FnOnce(&mut LayerTracker, &Sha256Digest, &mut Fetcher<'_, DepsT, CacheT>),
+    ) {
+        match self.awaiting_layers.entry(jid) {
+            Entry::Vacant(_) => {
+                // If there were previous errors for this job, or the job was canceled, then
+                // we'll find nothing in the hash table, and we'll need to release this layer.
+                self.cache.decrement_ref_count(kind, digest);
+            }
+            Entry::Occupied(mut entry) => {
+                // So far all is good. We then need to check if we've gotten all layers. If we
+                // have, then we can go ahead and schedule the job.
+                let mut fetcher = Fetcher {
+                    deps: &mut self.deps,
+                    cache: &mut self.cache,
+                    jid,
+                };
+                cb(&mut entry.get_mut().tracker, digest, &mut fetcher);
+                if entry.get().tracker.is_complete() {
+                    let AwaitingLayersEntry { spec, tracker } = entry.remove();
+                    self.enqueue_job_with_all_layers(jid, spec, tracker);
+                }
+            }
+        }
     }
 
     fn cache_fill_success(
@@ -600,32 +645,9 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     ) {
         let (path, jobs) = self.cache.got_artifact_success(kind, &digest, bytes_used);
         for jid in jobs {
-            match self.awaiting_layers.entry(jid) {
-                Entry::Vacant(_) => {
-                    // If there were previous errors for this job, or the job was canceled, then
-                    // we'll find nothing in the hash table, and we'll need to release this layer.
-                    self.cache.decrement_ref_count(kind, &digest);
-                }
-                Entry::Occupied(mut entry) => {
-                    // So far all is good. We then need to check if we've gotten all layers. If we
-                    // have, then we can go ahead and schedule the job.
-                    let mut fetcher = Fetcher {
-                        deps: &mut self.deps,
-                        cache: &mut self.cache,
-                        jid,
-                    };
-                    cb(
-                        &mut entry.get_mut().tracker,
-                        &digest,
-                        path.clone(),
-                        &mut fetcher,
-                    );
-                    if entry.get().tracker.is_complete() {
-                        let AwaitingLayersEntry { spec, tracker } = entry.remove();
-                        self.enqueue_job_with_all_layers(jid, spec, tracker);
-                    }
-                }
-            }
+            self.advance_job(jid, kind, &digest, |tracker, digest, fetcher| {
+                cb(tracker, digest, path.clone(), fetcher)
+            });
         }
     }
 
@@ -665,6 +687,26 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let msg = "Failed to build upper FS layer";
         self.cache_fill_failure(CacheEntryKind::UpperFsLayer, digest, msg, err)
     }
+
+    fn read_manifest_digests_success(
+        &mut self,
+        digest: Sha256Digest,
+        jid: JobId,
+        digests: HashSet<Sha256Digest>,
+    ) {
+        self.advance_job(
+            jid,
+            CacheEntryKind::Blob,
+            &digest,
+            move |tracker, digest, fetcher| {
+                tracker.got_manifest_digests(digest, digests, fetcher);
+            },
+        );
+    }
+
+    fn read_manifest_digests_failure(&mut self, digest: Sha256Digest, jid: JobId, err: Error) {
+        self.job_failure(&digest, jid, "failed to read manifest", &err);
+    }
 }
 
 /*  _            _
@@ -691,6 +733,7 @@ mod tests {
         StartArtifactFetch(Sha256Digest, ArtifactType, PathBuf),
         BuildBottomFsLayer(Sha256Digest, PathBuf, ArtifactType, PathBuf),
         BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf, PathBuf),
+        ReadManifestDigests(Sha256Digest, PathBuf, JobId),
         CacheGetArtifact(CacheEntryKind, Sha256Digest, JobId),
         CacheGotArtifactSuccess(CacheEntryKind, Sha256Digest, u64),
         CacheGotArtifactFailure(CacheEntryKind, Sha256Digest),
@@ -780,6 +823,12 @@ mod tests {
                 lower_layer_path,
                 upper_layer_path,
             ));
+        }
+
+        fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId) {
+            self.borrow_mut()
+                .messages
+                .push(TestMessage::ReadManifestDigests(digest, path, jid));
         }
 
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {

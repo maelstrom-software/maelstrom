@@ -14,6 +14,7 @@ use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::Executor;
 use maelstrom_base::{
+    manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobError, JobId, JobResult, JobSpec, JobStatus, Sha256Digest,
 };
@@ -22,10 +23,13 @@ use maelstrom_util::{
     async_fs,
     config::{BrokerAddr, CacheRoot},
     fs::Fs,
+    manifest::AsyncManifestReader,
     net, sync,
 };
 use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
+use std::collections::HashSet;
+use std::path::Path;
 use std::{ops::ControlFlow, path::PathBuf, process, thread, time::Duration};
 use tokio::{
     io::BufReader,
@@ -35,6 +39,18 @@ use tokio::{
     task::{self, JoinHandle, JoinSet},
     time,
 };
+
+async fn read_manifest(path: &Path) -> Result<HashSet<Sha256Digest>> {
+    let fs = async_fs::Fs::new();
+    let mut reader = AsyncManifestReader::new(fs.open_file(path).await?).await?;
+    let mut digests = HashSet::new();
+    while let Some(entry) = reader.next().await? {
+        if let ManifestEntryData::File(Some(digest)) = entry.data {
+            digests.insert(digest);
+        }
+    }
+    Ok(digests)
+}
 
 type DispatcherReceiver = UnboundedReceiver<Message>;
 type DispatcherSender = UnboundedSender<Message>;
@@ -246,6 +262,19 @@ impl DispatcherDeps for DispatcherAdapter {
             .await;
             debug!(log, "built upper FS layer"; "result" => ?result);
             sender.send(Message::BuiltUpperFsLayer(digest, result)).ok();
+        });
+    }
+
+    fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId) {
+        let sender = self.dispatcher_sender.clone();
+        let log = self.log.clone();
+        task::spawn(async move {
+            debug!(log, "reading digests from manifest"; "manifest_path" => ?path);
+            let result = read_manifest(&path).await;
+            debug!(log, "read digests from manifest"; "result" => ?result);
+            sender
+                .send(Message::ReadManifestDigests(digest, jid, result))
+                .ok();
         });
     }
 
