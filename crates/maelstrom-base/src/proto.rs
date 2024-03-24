@@ -2,7 +2,7 @@
 
 use crate::{
     stats::{BrokerStatistics, JobStateCounts},
-    ArtifactType, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
+    ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use bincode::Options;
 use serde::{Deserialize, Serialize};
@@ -61,7 +61,7 @@ pub struct BrokerToArtifactFetcher(pub Result<(), String>);
 /// Message sent from an artifact fetcher to the broker. It will be answered with a
 /// [`BrokerToArtifactFetcher`].
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-pub struct ArtifactFetcherToBroker(pub Sha256Digest, pub ArtifactType);
+pub struct ArtifactFetcherToBroker(pub Sha256Digest);
 
 /// Message sent from the broker to an artifact pusher. This will be in response to an
 /// [`ArtifactPusherToBroker`] message and the artifact's body. On success, the message contains no

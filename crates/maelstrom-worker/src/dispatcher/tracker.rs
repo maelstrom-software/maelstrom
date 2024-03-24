@@ -96,7 +96,7 @@ pub enum FetcherResult {
 }
 
 pub trait Fetcher {
-    fn fetch_artifact(&mut self, digest: &Sha256Digest, type_: ArtifactType) -> FetcherResult;
+    fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult;
     fn fetch_bottom_fs_layer(
         &mut self,
         digest: &Sha256Digest,
@@ -143,8 +143,8 @@ impl LayerTracker {
                 seen.insert(digest.clone(), *type_).assert_is_none();
             }
         }
-        for (digest, type_) in seen {
-            if let FetcherResult::Got(path) = fetcher.fetch_artifact(&digest, type_) {
+        for (digest, _) in seen {
+            if let FetcherResult::Got(path) = fetcher.fetch_artifact(&digest) {
                 tracker.got_artifact(&digest, path, fetcher);
             }
         }
@@ -292,14 +292,11 @@ impl LayerTracker {
                 continue;
             }
 
-            // XXX this artifact_type is meaningless and should be removed.
-            let ty = ArtifactType::Tar;
-
             if let Some(pending_entry) = self.pending_manifest_dependencies.get_mut(&digest) {
                 pending_entry.push(manifest_digest.clone());
                 num_remaining += 1;
             } else if bottom_layer_keys.contains(&digest)
-                || fetcher.fetch_artifact(&digest, ty) == FetcherResult::Pending
+                || fetcher.fetch_artifact(&digest) == FetcherResult::Pending
             {
                 self.pending_manifest_dependencies
                     .insert(digest, vec![manifest_digest.clone()]);
@@ -412,7 +409,7 @@ mod tests {
     }
 
     impl Fetcher for TestFetcher {
-        fn fetch_artifact(&mut self, digest: &Sha256Digest, _: ArtifactType) -> FetcherResult {
+        fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
             self.artifacts.remove(digest).unwrap()
         }
 

@@ -73,7 +73,7 @@ pub trait DispatcherDeps {
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
 
     /// Start a thread that will download an artifact from the broker and extract it into `path`.
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf);
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 
     /// Start a task that will build a layer-fs bottom layer out of an artifact
     fn build_bottom_fs_layer(
@@ -290,7 +290,7 @@ where
     DepsT: DispatcherDeps,
     CacheT: DispatcherCache,
 {
-    fn fetch_artifact(&mut self, digest: &Sha256Digest, type_: ArtifactType) -> FetcherResult {
+    fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
         match self
             .cache
             .get_artifact(CacheEntryKind::Blob, digest.clone(), self.jid)
@@ -298,7 +298,7 @@ where
             GetArtifact::Success(path) => FetcherResult::Got(path),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get(path) => {
-                self.deps.start_artifact_fetch(digest.clone(), type_, path);
+                self.deps.start_artifact_fetch(digest.clone(), path);
                 FetcherResult::Pending
             }
         }
@@ -730,7 +730,7 @@ mod tests {
     enum TestMessage {
         StartJob(JobId, JobSpec, PathBuf),
         SendMessageToBroker(WorkerToBroker),
-        StartArtifactFetch(Sha256Digest, ArtifactType, PathBuf),
+        StartArtifactFetch(Sha256Digest, PathBuf),
         BuildBottomFsLayer(Sha256Digest, PathBuf, ArtifactType, PathBuf),
         BuildUpperFsLayer(Sha256Digest, PathBuf, PathBuf, PathBuf),
         ReadManifestDigests(Sha256Digest, PathBuf, JobId),
@@ -784,15 +784,10 @@ mod tests {
             self.borrow_mut().messages.push(CancelTimer(handle));
         }
 
-        fn start_artifact_fetch(
-            &mut self,
-            digest: Sha256Digest,
-            type_: ArtifactType,
-            path: PathBuf,
-        ) {
+        fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
             self.borrow_mut()
                 .messages
-                .push(StartArtifactFetch(digest, type_, path));
+                .push(StartArtifactFetch(digest, path));
         }
 
         fn build_bottom_fs_layer(
@@ -1036,7 +1031,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
             CacheGetArtifact(Blob, digest!(42), jid!(1)),
             CacheGetArtifact(Blob, digest!(43), jid!(1)),
-            StartArtifactFetch(digest!(42), ArtifactType::Tar, path_buf!("/b")),
+            StartArtifactFetch(digest!(42), path_buf!("/b")),
         };
         Broker(CancelJob(jid!(1))) => {
             CacheDecrementRefCount(Blob, digest!(41)),

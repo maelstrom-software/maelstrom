@@ -50,7 +50,7 @@ fn handle_one_message(
     log: &mut Logger,
 ) -> Result<()> {
     debug!(log, "received artifact fetcher message"; "msg" => ?msg);
-    let ArtifactFetcherToBroker(digest, _) = msg;
+    let ArtifactFetcherToBroker(digest) = msg;
     let fs = Fs::new();
     let result = get_file(&fs, &digest, scheduler_sender);
     let msg = BrokerToArtifactFetcher(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));

@@ -197,7 +197,7 @@ impl DispatcherDeps for DispatcherAdapter {
         handle.abort()
     }
 
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, type_: ArtifactType, path: PathBuf) {
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
         let sender = self.dispatcher_sender.clone();
         let broker_addr = self.broker_addr;
         let mut log = self.log.new(o!(
@@ -206,7 +206,7 @@ impl DispatcherDeps for DispatcherAdapter {
         ));
         debug!(log, "artifact fetcher starting");
         thread::spawn(move || {
-            let result = fetcher::main(&digest, type_, path, broker_addr, &mut log);
+            let result = fetcher::main(&digest, path, broker_addr, &mut log);
             debug!(log, "artifact fetcher completed"; "result" => ?result);
             sender.send(Message::ArtifactFetcher(digest, result)).ok();
         });
