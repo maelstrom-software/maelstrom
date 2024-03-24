@@ -270,7 +270,6 @@ impl LayerTracker {
         }
     }
 
-    #[allow(dead_code)]
     pub fn got_manifest_digests(
         &mut self,
         manifest_digest: &Sha256Digest,

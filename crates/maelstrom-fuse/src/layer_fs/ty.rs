@@ -67,7 +67,6 @@ impl FileId {
         Self { layer_id, offset }
     }
 
-    #[allow(dead_code)]
     pub fn root(layer_id: LayerId) -> Self {
         Self {
             layer_id,

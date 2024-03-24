@@ -87,7 +87,6 @@ pub struct AttributesTableHeader {
     pub version: LayerFsVersion,
 }
 
-#[allow(dead_code)]
 pub struct FileMetadataWriter<'fs> {
     layer_id: LayerId,
     file_table: File<'fs>,
@@ -96,7 +95,6 @@ pub struct FileMetadataWriter<'fs> {
     attr_table_start: u64,
 }
 
-#[allow(dead_code)]
 #[anyhow_trace]
 impl<'fs> FileMetadataWriter<'fs> {
     pub async fn new(

@@ -197,12 +197,10 @@ pub type DirectoryStream<'fs> =
 pub type OrderedDirectoryStream<'fs> =
     Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send + 'fs>>;
 
-#[allow(dead_code)]
 pub struct DirectoryDataWriter<'fs> {
     tree: AvlTree<DirectoryEntryStorage<File<'fs>>>,
 }
 
-#[allow(dead_code)]
 #[anyhow_trace]
 impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {

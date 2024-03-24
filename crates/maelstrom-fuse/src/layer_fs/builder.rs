@@ -420,7 +420,6 @@ struct WalkEntry {
     right_parent: FileId,
 }
 
-#[allow(dead_code)]
 #[anyhow_trace]
 impl<'fs> DoubleFsWalk<'fs> {
     async fn new(left_fs: &'fs LayerFs, right_fs: &'fs LayerFs) -> Result<Self> {
@@ -504,14 +503,11 @@ impl<'fs> DoubleFsWalk<'fs> {
     }
 }
 
-#[allow(dead_code)]
 pub struct UpperLayerBuilder<'fs> {
     upper: LayerFs,
     lower: &'fs LayerFs,
-    log: slog::Logger,
 }
 
-#[allow(dead_code)]
 #[anyhow_trace]
 impl<'fs> UpperLayerBuilder<'fs> {
     pub async fn new(
@@ -530,7 +526,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
 
         let upper = LayerFs::new(log.clone(), data_dir, cache_dir, upper_super).await?;
 
-        Ok(Self { upper, lower, log })
+        Ok(Self { upper, lower })
     }
 
     async fn hard_link_files(&mut self, other: &LayerFs) -> Result<()> {
