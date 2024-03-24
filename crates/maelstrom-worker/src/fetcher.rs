@@ -6,7 +6,7 @@ use maelstrom_base::{
 use maelstrom_util::{config::BrokerAddr, fs::Fs, net};
 use slog::{debug, Logger};
 use std::{
-    io::{self, BufReader, Read as _},
+    io::{self, Read as _},
     net::TcpStream,
     path::PathBuf,
 };
@@ -17,23 +17,22 @@ pub fn main(
     broker_addr: BrokerAddr,
     log: &mut Logger,
 ) -> Result<u64> {
-    let mut writer = TcpStream::connect(broker_addr.inner())?;
-    let mut reader = BufReader::new(writer.try_clone()?);
-    net::write_message_to_socket(&mut writer, Hello::ArtifactFetcher)?;
+    let mut stream = TcpStream::connect(broker_addr.inner())?;
+    net::write_message_to_socket(&mut stream, Hello::ArtifactFetcher)?;
 
     let msg = ArtifactFetcherToBroker(digest.clone());
     debug!(log, "artifact fetcher sending message"; "msg" => ?msg);
 
-    net::write_message_to_socket(&mut writer, msg)?;
-    let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut reader)?;
+    net::write_message_to_socket(&mut stream, msg)?;
+    let msg = net::read_message_from_socket::<BrokerToArtifactFetcher>(&mut stream)?;
     debug!(log, "artifact fetcher received message"; "msg" => ?msg);
     let size = msg
         .0
         .map_err(|e| anyhow!("Broker error reading artifact: {e}"))?;
 
     let fs = Fs::new();
-    let mut file = fs.create_file(path)?;
-    let copied = io::copy(&mut reader.take(size), &mut file)?;
+    let file = fs.create_file(path)?;
+    let copied = io::copy(&mut stream.take(size), &mut file.into_inner())?;
     if copied != size {
         return Err(anyhow!("got unexpected EOF receiving artifact"));
     }
