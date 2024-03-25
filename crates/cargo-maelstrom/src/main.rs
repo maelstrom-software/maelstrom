@@ -72,8 +72,8 @@ pub fn main() -> Result<ExitCode> {
 
     let (config, mut args): (Config, _) = maelstrom_util::config::new_config2(
         command!(),
-        "maelstrom/worker",
-        "MAELSTROM_WORKER",
+        "maelstrom/cargo-maelstrom",
+        "CARGO_MAELSTROM",
         add_more_command_line_options,
         args,
     )?;
