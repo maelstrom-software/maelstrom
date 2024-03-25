@@ -1,7 +1,7 @@
 use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::{BrokerAddr, LogLevel};
+use maelstrom_util::config::common::{BrokerAddr, LogLevel};
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},

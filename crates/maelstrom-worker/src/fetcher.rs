@@ -3,7 +3,7 @@ use maelstrom_base::{
     proto::{ArtifactFetcherToBroker, BrokerToArtifactFetcher, Hello},
     Sha256Digest,
 };
-use maelstrom_util::{config::BrokerAddr, fs::Fs, net};
+use maelstrom_util::{config::common::BrokerAddr, fs::Fs, net};
 use slog::{debug, Logger};
 use std::{
     io::{self, Read as _},

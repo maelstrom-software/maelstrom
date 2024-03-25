@@ -21,7 +21,7 @@ use maelstrom_base::{
 use maelstrom_linux::{self as linux, Errno, Pid, Signal};
 use maelstrom_util::{
     async_fs,
-    config::{BrokerAddr, CacheRoot},
+    config::common::{BrokerAddr, CacheRoot},
     fs::Fs,
     manifest::AsyncManifestReader,
     net, sync,

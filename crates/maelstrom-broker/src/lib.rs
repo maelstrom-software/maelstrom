@@ -8,7 +8,7 @@ mod http;
 mod scheduler_task;
 
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use maelstrom_util::config::{CacheRoot, CacheSize};
+use maelstrom_util::config::common::{CacheRoot, CacheSize};
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, Logger};
 use std::sync::{

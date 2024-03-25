@@ -11,7 +11,7 @@ use maelstrom_client::{
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
-    config::{BrokerAddr, LogLevel},
+    config::common::{BrokerAddr, LogLevel},
     process::{ExitCode, ExitCodeAccumulator},
 };
 use slog::Drain as _;

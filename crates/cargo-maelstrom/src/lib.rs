@@ -19,7 +19,7 @@ use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess, ClientDriverMode};
 use maelstrom_util::{
-    config::{BrokerAddr, LogLevel},
+    config::common::{BrokerAddr, LogLevel},
     process::ExitCode,
 };
 use metadata::{AllMetadata, TestMetadata};

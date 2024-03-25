@@ -4,7 +4,7 @@ mod scheduler;
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use maelstrom_base::proto::{BrokerToClient, BrokerToWorker};
 use maelstrom_util::{
-    config::{CacheRoot, CacheSize},
+    config::common::{CacheRoot, CacheSize},
     sync,
 };
 use scheduler::{Message, Scheduler, SchedulerDeps};

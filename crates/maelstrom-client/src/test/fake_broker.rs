@@ -6,7 +6,9 @@ use maelstrom_base::{
     stats::JobStateCounts,
     ClientJobId, JobOutcomeResult, JobSpec,
 };
-use maelstrom_util::{config::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader};
+use maelstrom_util::{
+    config::common::BrokerAddr, ext::OptionExt as _, fs::Fs, io::FixedSizeReader,
+};
 use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 use std::io::{self, Read as _, Write as _};

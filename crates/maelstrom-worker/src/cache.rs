@@ -3,7 +3,7 @@
 use bytesize::ByteSize;
 use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
-    config::{CacheRoot, CacheSize},
+    config::common::{CacheRoot, CacheSize},
     heap::{Heap, HeapDeps, HeapIndex},
 };
 use slog::{debug, Logger};

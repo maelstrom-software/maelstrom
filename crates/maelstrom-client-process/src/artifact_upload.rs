@@ -5,7 +5,7 @@ use maelstrom_base::{
     Sha256Digest,
 };
 use maelstrom_client_base::ArtifactUploadProgress;
-use maelstrom_util::{async_fs::Fs, config::BrokerAddr, net};
+use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
 use std::pin::{pin, Pin};
 use std::sync::{
     atomic::{AtomicU64, Ordering},

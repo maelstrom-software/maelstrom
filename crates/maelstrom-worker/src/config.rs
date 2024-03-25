@@ -2,7 +2,7 @@ use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::{BrokerAddr, CacheRoot, CacheSize, LogLevel};
+use maelstrom_util::config::common::{BrokerAddr, CacheRoot, CacheSize, LogLevel};
 use serde::Deserialize;
 use std::{
     error,

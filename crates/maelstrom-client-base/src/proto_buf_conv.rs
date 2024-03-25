@@ -542,7 +542,7 @@ impl TryFromProtoBuf for EnumMap<maelstrom_base::stats::JobState, u64> {
 // |_| |_| |_|\__,_|\___|_|___/\__|_|  \___/|_| |_| |_|      \__,_|\__|_|_|
 //
 
-impl IntoProtoBuf for maelstrom_util::config::BrokerAddr {
+impl IntoProtoBuf for maelstrom_util::config::common::BrokerAddr {
     type ProtoBufType = String;
 
     fn into_proto_buf(self) -> String {
@@ -550,7 +550,7 @@ impl IntoProtoBuf for maelstrom_util::config::BrokerAddr {
     }
 }
 
-impl TryFromProtoBuf for maelstrom_util::config::BrokerAddr {
+impl TryFromProtoBuf for maelstrom_util::config::common::BrokerAddr {
     type ProtoBufType = String;
 
     fn try_from_proto_buf(v: String) -> Result<Self> {

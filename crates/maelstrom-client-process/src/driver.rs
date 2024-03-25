@@ -5,7 +5,7 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
-use maelstrom_util::{config::BrokerAddr, net};
+use maelstrom_util::{config::common::BrokerAddr, net};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};

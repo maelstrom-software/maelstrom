@@ -26,7 +26,7 @@ use maelstrom_client_base::{
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
     async_fs,
-    config::BrokerAddr,
+    config::common::BrokerAddr,
     io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
 };

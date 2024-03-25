@@ -8,7 +8,7 @@ use anyhow::{anyhow, bail, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
-    config::{CacheRoot, CacheSize},
+    config::common::{CacheRoot, CacheSize},
     heap::{Heap, HeapDeps, HeapIndex},
     manifest::ManifestReader,
 };

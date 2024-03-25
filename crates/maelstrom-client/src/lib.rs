@@ -13,7 +13,7 @@ use maelstrom_client_base::{
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_container::ContainerImage;
-use maelstrom_util::config::BrokerAddr;
+use maelstrom_util::config::common::BrokerAddr;
 use spec::Layer;
 use std::future::Future;
 use std::os::unix::net::UnixStream;
