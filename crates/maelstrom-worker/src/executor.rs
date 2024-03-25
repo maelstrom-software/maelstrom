@@ -820,7 +820,7 @@ mod tests {
             let tar_bytes = include_bytes!("executor-test-deps.tar");
             let tar_path = cache_path.join(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
-            let mut builder = maelstrom_fuse::BottomLayerBuilder::new(
+            let mut builder = maelstrom_layer_fs::BottomLayerBuilder::new(
                 test_logger(),
                 &fs,
                 &data_path,

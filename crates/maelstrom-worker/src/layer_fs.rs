@@ -1,7 +1,7 @@
 use anyhow::Result;
 use futures::StreamExt as _;
 use maelstrom_base::{manifest::UnixTimestamp, ArtifactType, Sha256Digest};
-use maelstrom_fuse::{BottomLayerBuilder, LayerFs, UpperLayerBuilder};
+use maelstrom_layer_fs::{BottomLayerBuilder, LayerFs, UpperLayerBuilder};
 use maelstrom_util::async_fs::Fs;
 use std::path::{Path, PathBuf};
 

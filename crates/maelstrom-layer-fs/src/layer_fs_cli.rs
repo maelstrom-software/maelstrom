@@ -1,8 +1,5 @@
 use anyhow::{anyhow, Result};
-use maelstrom_fuse::{
-    layer_fs::{DirectoryDataReader, FileMetadataReader, FileType},
-    FileId, LayerFs,
-};
+use maelstrom_layer_fs::{DirectoryDataReader, FileId, FileMetadataReader, FileType, LayerFs};
 use slog::{o, Drain, LevelFilter, Logger};
 use slog_async::Async;
 use slog_term::{FullFormat, TermDecorator};

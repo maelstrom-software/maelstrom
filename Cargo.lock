@@ -2868,6 +2868,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-layer-fs"
+version = "0.6.0-dev"
+dependencies = [
+ "anyhow",
+ "anyhow_trace",
+ "async-trait",
+ "clap",
+ "derive_more",
+ "fuser",
+ "futures",
+ "maelstrom-base",
+ "maelstrom-fuse",
+ "maelstrom-linux",
+ "maelstrom-util",
+ "serde",
+ "serde_repr",
+ "serde_with",
+ "slog",
+ "slog-async",
+ "slog-term",
+ "tempfile",
+ "tokio",
+ "tokio-tar",
+]
+
+[[package]]
 name = "maelstrom-linux"
 version = "0.6.0-dev"
 dependencies = [
@@ -3002,6 +3028,7 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-config",
  "maelstrom-fuse",
+ "maelstrom-layer-fs",
  "maelstrom-linux",
  "maelstrom-test",
  "maelstrom-util",

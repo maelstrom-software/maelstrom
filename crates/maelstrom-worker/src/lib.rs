@@ -138,7 +138,7 @@ impl DispatcherDeps for DispatcherAdapter {
         let cache_dir = self.cache_dir.join("blob/sha256");
         let mount_path2 = mount_path.clone();
         let layer_fs =
-            maelstrom_fuse::LayerFs::from_path(self.log.clone(), &layer_fs_path, &cache_dir)
+            maelstrom_layer_fs::LayerFs::from_path(self.log.clone(), &layer_fs_path, &cache_dir)
                 .map_err(|e| JobError::System(e.to_string()))?;
         let fuse_handle = layer_fs
             .mount(&mount_path2)

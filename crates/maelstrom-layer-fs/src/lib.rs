@@ -4,11 +4,6 @@ mod dir;
 mod file;
 mod ty;
 
-pub use crate::FileType;
-use crate::{
-    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadLinkResponse,
-    ReadResponse, Request,
-};
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
@@ -16,6 +11,10 @@ pub use builder::*;
 pub use dir::{DirectoryDataReader, DirectoryStream};
 pub use file::FileMetadataReader;
 use maelstrom_base::Sha256Digest;
+use maelstrom_fuse::{
+    AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadLinkResponse,
+    ReadResponse, Request,
+};
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
@@ -24,8 +23,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
-pub use ty::{FileAttributes, FileData, FileId};
-pub use ty::{LayerId, LayerSuper};
+pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
                                               //
@@ -173,9 +171,9 @@ impl LayerFs {
         self.cache_path.join(digest.to_string())
     }
 
-    pub fn mount(self, mount_path: &Path) -> Result<crate::FuseHandle> {
+    pub fn mount(self, mount_path: &Path) -> Result<maelstrom_fuse::FuseHandle> {
         slog::debug!(self.log, "mounting FUSE file-system"; "path" => ?mount_path);
-        crate::fuse_mount(self, mount_path, "Maelstrom LayerFS")
+        maelstrom_fuse::fuse_mount(self, mount_path, "Maelstrom LayerFS")
     }
 }
 

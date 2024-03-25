@@ -1,9 +1,8 @@
-use crate::layer_fs::ty::{
+use crate::ty::{
     decode_file, encode_file, AttributesId, FileAttributes, FileData, FileId, FileTableEntry,
-    LayerFsVersion, LayerId,
+    FileType, LayerFsVersion, LayerId,
 };
-use crate::layer_fs::LayerFs;
-use crate::FileType;
+use crate::LayerFs;
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use maelstrom_util::async_fs::File;

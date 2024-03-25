@@ -34,7 +34,7 @@ mounts = [
 
 [[directives]]
 filter = """
-package.equals(maelstrom-fuse) ||
+package.equals(maelstrom-layer-fs) ||
 package.equals(maelstrom-container) ||
 package.equals(maelstrom-client) ||
 package.equals(maelstrom-client-process) ||
@@ -44,7 +44,7 @@ layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-filter = "package.equals(maelstrom-fuse)"
+filter = "package.equals(maelstrom-layer-fs)"
 added_layers = [{ stubs = [ "dev/fuse" ] }]
 added_devices = ["fuse"]
 

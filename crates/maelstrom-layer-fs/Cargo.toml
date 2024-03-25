@@ -1,6 +1,6 @@
 [package]
-name = "maelstrom-fuse"
-description = "Library for interacting with FUSE with async Rust"
+name = "maelstrom-layer-fs"
+description = "FUSE filesystem for use with Maelstrom"
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -17,6 +17,7 @@ derive_more.workspace = true
 fuser.workspace = true
 futures.workspace = true
 maelstrom-base.workspace = true
+maelstrom-fuse.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
 serde.workspace = true
@@ -31,3 +32,7 @@ tokio-tar = { workspace = true }
 [dev-dependencies]
 clap.workspace = true
 tempfile.workspace = true
+
+[[bin]]
+name = "layer-fs-cli"
+path = "src/layer_fs_cli.rs"

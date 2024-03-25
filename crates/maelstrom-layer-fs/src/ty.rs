@@ -1,11 +1,11 @@
-use crate::fuse::ErrnoResult;
-pub use crate::fuse::FileType;
 use anyhow::{Context as _, Result};
 use derive_more::{From, Into};
 use maelstrom_base::{
     manifest::{Mode, UnixTimestamp},
     Sha256Digest,
 };
+use maelstrom_fuse::ErrnoResult;
+pub use maelstrom_fuse::FileType;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::{File, Fs};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};

@@ -75,6 +75,7 @@ maelstrom-client-process = { version = "0.6.0-dev", path = "crates/maelstrom-cli
 maelstrom-config = { version = "0.6.0-dev", path = "crates/maelstrom-config" }
 maelstrom-container = { version = "0.6.0-dev", path = "crates/maelstrom-container" }
 maelstrom-fuse = { version = "0.6.0-dev", path = "crates/maelstrom-fuse" }
+maelstrom-layer-fs = { version = "0.6.0-dev", path = "crates/maelstrom-layer-fs" }
 maelstrom-linux = { version = "0.6.0-dev", path = "crates/maelstrom-linux" }
 maelstrom-macro = { version = "0.6.0-dev", path = "crates/maelstrom-macro" }
 maelstrom-plot = { version = "0.6.0-dev", path = "crates/maelstrom-plot" }

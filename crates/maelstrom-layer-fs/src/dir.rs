@@ -1,9 +1,8 @@
-use crate::fuse;
-use crate::layer_fs::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
-use crate::layer_fs::ty::{
+use crate::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
+use crate::ty::{
     decode_file, encode_file, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
 };
-use crate::layer_fs::{to_eio, LayerFs};
+use crate::{to_eio, LayerFs};
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
@@ -55,12 +54,12 @@ impl<'fs> DirectoryDataReader<'fs> {
         Ok(Some(entry))
     }
 
-    async fn next_fuse_entry(&mut self) -> Result<Option<fuse::DirEntry>> {
+    async fn next_fuse_entry(&mut self) -> Result<Option<maelstrom_fuse::DirEntry>> {
         let Some(entry) = self.next_entry().await? else {
             return Ok(None);
         };
         let offset = i64::try_from(self.stream.stream_position().await?).unwrap();
-        Ok(Some(fuse::DirEntry {
+        Ok(Some(maelstrom_fuse::DirEntry {
             ino: entry.value.file_id.as_u64(),
             offset: offset - i64::try_from(self.entry_begin).unwrap(),
             kind: entry.value.kind,
@@ -191,8 +190,13 @@ impl<'fs, FileT: BorrowMut<File<'fs>> + Send> AvlStorage for DirectoryEntryStora
     }
 }
 
-pub type DirectoryStream<'fs> =
-    Pin<Box<dyn futures::Stream<Item = fuse::ErrnoResult<fuse::DirEntry>> + Send + 'fs>>;
+pub type DirectoryStream<'fs> = Pin<
+    Box<
+        dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>>
+            + Send
+            + 'fs,
+    >,
+>;
 
 pub type OrderedDirectoryStream<'fs> =
     Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send + 'fs>>;

@@ -1,9 +1,9 @@
-use crate::layer_fs::dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream};
-use crate::layer_fs::file::FileMetadataWriter;
-use crate::layer_fs::ty::{
+use crate::dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream};
+use crate::file::FileMetadataWriter;
+use crate::ty::{
     DirectoryEntryData, FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper,
 };
-use crate::layer_fs::LayerFs;
+use crate::LayerFs;
 use anyhow::bail;
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
