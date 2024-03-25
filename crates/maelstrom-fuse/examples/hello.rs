@@ -21,14 +21,12 @@ const HELLO_DIR_ATTR: FileAttr = FileAttr {
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
     mtime: UNIX_EPOCH,
     ctime: UNIX_EPOCH,
-    crtime: UNIX_EPOCH,
     kind: FileType::Directory,
     perm: 0o755,
     nlink: 2,
     uid: 501,
     gid: 20,
     rdev: 0,
-    flags: 0,
     blksize: 512,
 };
 
@@ -41,14 +39,12 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
     atime: UNIX_EPOCH, // 1970-01-01 00:00:00
     mtime: UNIX_EPOCH,
     ctime: UNIX_EPOCH,
-    crtime: UNIX_EPOCH,
     kind: FileType::RegularFile,
     perm: 0o644,
     nlink: 1,
     uid: 501,
     gid: 20,
     rdev: 0,
-    flags: 0,
     blksize: 512,
 };
 

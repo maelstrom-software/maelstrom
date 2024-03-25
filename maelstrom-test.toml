@@ -34,17 +34,29 @@ mounts = [
 
 [[directives]]
 filter = """
-package.equals(maelstrom-layer-fs) ||
-package.equals(maelstrom-container) ||
 package.equals(maelstrom-client) ||
 package.equals(maelstrom-client-process) ||
+package.equals(maelstrom-container) ||
+package.equals(maelstrom-fuse) ||
+package.equals(maelstrom-layer-fs) ||
 package.equals(maelstrom-util) &&
 (name.starts_with(manifest::) || name.starts_with(fs::) || name.starts_with(async_fs::))"""
 layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-filter = "package.equals(maelstrom-layer-fs)"
+filter = "package.equals(maelstrom-fuse) && name.equals(fuser::mnt::test::mount_unmount)"
+image.name = "alpine"
+image.use = ["layers", "environment"]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "proc", mount_point = "/proc" },
+]
+added_layers = [{ stubs = [ "dev/null" ] }]
+added_devices = ["null"]
+
+[[directives]]
+filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 added_layers = [{ stubs = [ "dev/fuse" ] }]
 added_devices = ["fuse"]
 

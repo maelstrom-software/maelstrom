@@ -1,3 +1,5 @@
+pub mod fuser;
+
 use anyhow::Result;
 use async_trait::async_trait;
 pub use fuser::{FileAttr, FileType};

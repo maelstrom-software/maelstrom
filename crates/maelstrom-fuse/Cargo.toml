@@ -14,19 +14,48 @@ anyhow.workspace = true
 anyhow_trace.workspace = true
 async-trait.workspace = true
 derive_more.workspace = true
-fuser.workspace = true
 futures.workspace = true
+libc.workspace = true
 maelstrom-base.workspace = true
 maelstrom-linux.workspace = true
 maelstrom-util.workspace = true
+memchr.workspace = true
+page_size.workspace = true
 serde.workspace = true
 serde_repr.workspace = true
 serde_with.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
+smallvec.workspace = true
 tokio = { workspace = true, features = [ "io-std", "sync" ] }
-tokio-tar = { workspace = true }
+tokio-tar.workspace = true
+zerocopy.workspace = true
+
+[features]
+abi-7-9 = []
+abi-7-10 = ["abi-7-9"]
+abi-7-11 = ["abi-7-10"]
+abi-7-12 = ["abi-7-11"]
+abi-7-13 = ["abi-7-12"]
+abi-7-14 = ["abi-7-13"]
+abi-7-15 = ["abi-7-14"]
+abi-7-16 = ["abi-7-15"]
+abi-7-17 = ["abi-7-16"]
+abi-7-18 = ["abi-7-17"]
+abi-7-19 = ["abi-7-18"]
+abi-7-20 = ["abi-7-19"]
+abi-7-21 = ["abi-7-20"]
+abi-7-22 = ["abi-7-21"]
+abi-7-23 = ["abi-7-22"]
+abi-7-24 = ["abi-7-23"]
+abi-7-25 = ["abi-7-24"]
+abi-7-26 = ["abi-7-25"]
+abi-7-27 = ["abi-7-26"]
+abi-7-28 = ["abi-7-27"]
+abi-7-29 = ["abi-7-28"]
+abi-7-30 = ["abi-7-29"]
+abi-7-31 = ["abi-7-30"]
 
 [dev-dependencies]
 clap.workspace = true

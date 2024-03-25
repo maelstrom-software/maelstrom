@@ -1864,21 +1864,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fuser"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e697f6f62c20b6fad1ba0f84ae909f25971cf16e735273524e3977c94604cf8"
-dependencies = [
- "libc",
- "log",
- "memchr",
- "page_size",
- "serde",
- "smallvec",
- "zerocopy",
-]
-
-[[package]]
 name = "futures"
 version = "0.3.30"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2838,20 +2823,24 @@ dependencies = [
  "async-trait",
  "clap",
  "derive_more",
- "fuser",
  "futures",
+ "libc",
  "maelstrom-base",
  "maelstrom-linux",
  "maelstrom-util",
+ "memchr",
+ "page_size",
  "serde",
  "serde_repr",
  "serde_with",
  "slog",
  "slog-async",
  "slog-term",
+ "smallvec",
  "tempfile",
  "tokio",
  "tokio-tar",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2863,7 +2852,6 @@ dependencies = [
  "async-trait",
  "clap",
  "derive_more",
- "fuser",
  "futures",
  "maelstrom-base",
  "maelstrom-fuse",
