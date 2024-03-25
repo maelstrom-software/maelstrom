@@ -882,6 +882,7 @@ dependencies = [
  "maelstrom-broker",
  "maelstrom-client",
  "maelstrom-config",
+ "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",

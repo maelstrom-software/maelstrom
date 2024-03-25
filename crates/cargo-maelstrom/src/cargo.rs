@@ -2,6 +2,7 @@ use anyhow::{Error, Result};
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
+use maelstrom_macro::Config;
 use regex::Regex;
 use std::{
     ffi::OsString,
@@ -99,15 +100,23 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
         .collect())
 }
 
-#[derive(Debug, Default)]
+#[derive(Config, Debug, Default)]
 pub struct FeatureSelectionOptions {
-    /// Space or comma separated list of features to activate
+    /// Comma separated list of features to activate.
+    #[config(
+        option,
+        short = 'F',
+        value_name = "FEATURES",
+        default = r#""cargo's default""#
+    )]
     pub features: Option<String>,
 
-    /// Activate all available features
+    /// Activate all available features.
+    #[config(flag)]
     pub all_features: bool,
 
-    /// Do not activate the `default` feature
+    /// Do not activate the `default` feature.
+    #[config(flag)]
     pub no_default_features: bool,
 }
 
@@ -127,15 +136,18 @@ impl FeatureSelectionOptions {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Config, Debug, Default)]
 pub struct CompilationOptions {
-    /// Build artifacts with the specified profile
+    /// Build artifacts with the specified profile.
+    #[config(option, value_name = "PROFILE-NAME", default = r#""cargo's default""#)]
     pub profile: Option<String>,
 
-    /// Build for the target triple
+    /// Build for the target triple.
+    #[config(option, value_name = "TRIPLE", default = r#""cargo's default""#)]
     pub target: Option<String>,
 
-    /// Directory for all generated artifacts
+    /// Directory for all generated artifacts.
+    #[config(option, value_name = "DIRECTORY", default = r#""cargo's default""#)]
     pub target_dir: Option<PathBuf>,
 }
 
@@ -162,18 +174,22 @@ impl CompilationOptions {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Config, Debug, Default)]
 pub struct ManifestOptions {
-    /// Path to Cargo.toml
+    /// Path to Cargo.toml.
+    #[config(option, value_name = "PATH", default = r#""cargo's default""#)]
     pub manifest_path: Option<PathBuf>,
 
-    /// Require Cargo.lock and cache are up to date
+    /// Require Cargo.lock and cache are up to date.
+    #[config(flag)]
     pub frozen: bool,
 
-    /// Require Cargo.lock is up to date
+    /// Require Cargo.lock is up to date.
+    #[config(flag)]
     pub locked: bool,
 
-    /// Run without accessing the network
+    /// Run without cargo accessing the network.
+    #[config(flag)]
     pub offline: bool,
 }
 
