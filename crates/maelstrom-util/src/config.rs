@@ -103,6 +103,13 @@ impl TryFrom<&str> for CacheRoot {
     }
 }
 
+impl TryFrom<String> for CacheRoot {
+    type Error = <CacheRoot as FromStr>::Err;
+    fn try_from(from: String) -> Result<Self, Self::Error> {
+        CacheRoot::from_str(from.as_str())
+    }
+}
+
 #[derive(Deserialize, From)]
 #[serde(from = "u64")]
 pub struct CacheSize(u64);

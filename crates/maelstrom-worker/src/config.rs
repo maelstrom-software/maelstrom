@@ -11,6 +11,7 @@ use std::{
     result,
     str::FromStr,
 };
+use xdg::BaseDirectories;
 
 #[derive(Deserialize)]
 #[serde(try_from = "u16")]
@@ -137,7 +138,7 @@ pub struct Config {
     #[config(
         short = 'r',
         value_name = "PATH",
-        default = r#"".cache/maelstrom-worker""#
+        default = "|bd: &BaseDirectories| bd.get_cache_home().into_os_string().into_string().unwrap()"
     )]
     pub cache_root: CacheRoot,
 
