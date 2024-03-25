@@ -70,7 +70,7 @@ pub fn main() -> Result<ExitCode> {
         args.remove(1);
     }
 
-    let (config, mut args): (Config, _) = maelstrom_config::new_config2(
+    let (config, mut args): (Config, _) = maelstrom_util::config::new_config2(
         command!(),
         "maelstrom/worker",
         "MAELSTROM_WORKER",

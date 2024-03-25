@@ -21,7 +21,6 @@ derive_more.workspace = true
 futures.workspace = true
 gethostname.workspace = true
 maelstrom-base.workspace = true
-maelstrom-config.workspace = true
 maelstrom-fuse.workspace = true
 maelstrom-layer-fs.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }

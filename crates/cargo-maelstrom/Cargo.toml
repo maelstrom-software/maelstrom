@@ -26,7 +26,6 @@ indicatif.workspace = true
 lddtree.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
-maelstrom-config.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true

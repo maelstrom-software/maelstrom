@@ -881,7 +881,6 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-broker",
  "maelstrom-client",
- "maelstrom-config",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
@@ -2711,7 +2710,6 @@ dependencies = [
  "hyper-tungstenite",
  "itertools",
  "maelstrom-base",
- "maelstrom-config",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
@@ -2805,19 +2803,6 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tonic",
-]
-
-[[package]]
-name = "maelstrom-config"
-version = "0.6.0-dev"
-dependencies = [
- "anyhow",
- "clap",
- "indoc",
- "maelstrom-util",
- "serde",
- "toml",
- "xdg",
 ]
 
 [[package]]
@@ -2931,7 +2916,6 @@ dependencies = [
  "indicatif",
  "maelstrom-base",
  "maelstrom-client",
- "maelstrom-config",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
@@ -2978,6 +2962,7 @@ dependencies = [
  "futures",
  "futures-lite 2.2.0",
  "globset",
+ "indoc",
  "maelstrom-base",
  "rand",
  "serde",
@@ -2986,7 +2971,9 @@ dependencies = [
  "strum",
  "tempfile",
  "tokio",
+ "toml",
  "walkdir",
+ "xdg",
 ]
 
 [[package]]
@@ -3029,7 +3016,6 @@ dependencies = [
  "gethostname 0.4.3",
  "itertools",
  "maelstrom-base",
- "maelstrom-config",
  "maelstrom-fuse",
  "maelstrom-layer-fs",
  "maelstrom-linux",

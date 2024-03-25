@@ -233,9 +233,9 @@ impl ConfigInput {
             .collect::<syn::Result<Vec<_>>>()?;
         Ok(parse_quote! {
             fn add_command_line_options(
-                builder: ::maelstrom_config::CommandBuilder,
+                builder: ::maelstrom_util::config::CommandBuilder,
                 base_directories: &::xdg::BaseDirectories
-            ) -> ::maelstrom_config::CommandBuilder {
+            ) -> ::maelstrom_util::config::CommandBuilder {
                 #(#builder_value_calls;)*
                 builder
             }
@@ -264,7 +264,7 @@ impl ConfigInput {
         });
         Ok(parse_quote! {
             fn from_config_bag(
-                config_bag: &mut ::maelstrom_config::ConfigBag,
+                config_bag: &mut ::maelstrom_util::config::ConfigBag,
                 base_directories: &::xdg::BaseDirectories
             ) -> ::anyhow::Result<Self> {
                 Ok(Self {
@@ -279,7 +279,7 @@ impl ConfigInput {
         let add_command_line_options = self.gen_add_command_line_options_fn()?;
         let from_config_bag = self.gen_from_config_bag_fn()?;
         Ok(parse_quote! {
-            impl ::maelstrom_config::Config for #self_ident {
+            impl ::maelstrom_util::config::Config for #self_ident {
                 #add_command_line_options
                 #from_config_bag
             }

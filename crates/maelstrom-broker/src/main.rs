@@ -11,8 +11,11 @@ use std::{
 use tokio::{net::TcpListener, runtime::Runtime};
 
 fn main() -> Result<()> {
-    let config =
-        maelstrom_config::new_config::<Config>(command!(), "maelstrom/broker", "MAELSTROM_BROKER")?;
+    let config = maelstrom_util::config::new_config::<Config>(
+        command!(),
+        "maelstrom/broker",
+        "MAELSTROM_BROKER",
+    )?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();

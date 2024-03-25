@@ -72,7 +72,6 @@ maelstrom-broker = { version = "0.6.0-dev", path = "crates/maelstrom-broker" }
 maelstrom-client = { version = "0.6.0-dev", path = "crates/maelstrom-client" }
 maelstrom-client-base = { version = "0.6.0-dev", path = "crates/maelstrom-client-base" }
 maelstrom-client-process = { version = "0.6.0-dev", path = "crates/maelstrom-client-process" }
-maelstrom-config = { version = "0.6.0-dev", path = "crates/maelstrom-config" }
 maelstrom-container = { version = "0.6.0-dev", path = "crates/maelstrom-container" }
 maelstrom-fuse = { version = "0.6.0-dev", path = "crates/maelstrom-fuse" }
 maelstrom-layer-fs = { version = "0.6.0-dev", path = "crates/maelstrom-layer-fs" }

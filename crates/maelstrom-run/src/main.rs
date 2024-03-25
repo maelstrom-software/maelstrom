@@ -101,7 +101,7 @@ fn cache_dir() -> PathBuf {
 
 fn main() -> Result<ExitCode> {
     let config =
-        maelstrom_config::new_config::<Config>(command!(), "maelstrom/run", "MAELSTROM_RUN")?;
+        maelstrom_util::config::new_config::<Config>(command!(), "maelstrom/run", "MAELSTROM_RUN")?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 
