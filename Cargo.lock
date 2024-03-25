@@ -3030,6 +3030,7 @@ dependencies = [
  "maelstrom-fuse",
  "maelstrom-layer-fs",
  "maelstrom-linux",
+ "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker-child",

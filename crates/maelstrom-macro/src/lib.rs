@@ -1,3 +1,4 @@
+mod config;
 mod into_proto_buf;
 mod into_result;
 mod try_from_proto_buf;
@@ -28,6 +29,15 @@ pub fn into_proto_buf(input: TokenStream) -> TokenStream {
 pub fn try_from_proto_buf(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match try_from_proto_buf::main(input) {
+        Err(e) => e.into_compile_error().into(),
+        Ok(v) => quote!(#v).into(),
+    }
+}
+
+#[proc_macro_derive(Config, attributes(config))]
+pub fn config(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match config::main(input) {
         Err(e) => e.into_compile_error().into(),
         Ok(v) => quote!(#v).into(),
     }

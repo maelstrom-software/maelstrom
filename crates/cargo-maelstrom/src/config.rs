@@ -8,6 +8,7 @@ use std::{
     fmt::{self, Debug, Formatter},
     result,
 };
+use xdg::BaseDirectories;
 
 #[derive(Clone, Deserialize, From)]
 #[serde(transparent)]
@@ -37,7 +38,10 @@ pub struct Config {
 }
 
 impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
+    fn add_command_line_options(
+        builder: CommandBuilder,
+        _base_directories: &BaseDirectories,
+    ) -> CommandBuilder {
         builder
             .value(
                 "broker",
@@ -119,7 +123,10 @@ impl maelstrom_config::Config for Config {
             .flag_value("offline", None, "Run without cargo accessing the network.")
     }
 
-    fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
+    fn from_config_bag(
+        config: &mut maelstrom_config::ConfigBag,
+        _base_directories: &BaseDirectories,
+    ) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
             log_level: config.get_or("log_level", LogLevel::Info)?,

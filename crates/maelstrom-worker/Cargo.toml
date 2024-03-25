@@ -25,6 +25,7 @@ maelstrom-config.workspace = true
 maelstrom-fuse.workspace = true
 maelstrom-layer-fs.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
+maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true
 netlink-packet-core.workspace = true

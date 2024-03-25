@@ -1,14 +1,13 @@
 use anyhow::Result;
 use bytesize::ByteSize;
 use derive_more::From;
-use maelstrom_config::CommandBuilder;
+use maelstrom_macro::Config;
 use maelstrom_util::config::{BrokerAddr, CacheBytesUsedTarget, CacheRoot, LogLevel};
 use serde::Deserialize;
 use std::{
     error,
     fmt::{self, Debug, Display, Formatter},
     num::ParseIntError,
-    path::PathBuf,
     result,
     str::FromStr,
 };
@@ -124,90 +123,34 @@ impl Display for InlineLimitFromStrError {
 
 impl error::Error for InlineLimitFromStrError {}
 
-#[derive(Debug)]
+#[derive(Config, Debug)]
 pub struct Config {
     /// Socket address of broker.
+    #[config(short = 'b', value_name = "SOCKADDR")]
     pub broker: BrokerAddr,
 
     /// The number of job slots available.
+    #[config(short = 's', value_name = "N", default = "num_cpus::get()")]
     pub slots: Slots,
 
     /// The directory to use for the cache.
+    #[config(
+        short = 'r',
+        value_name = "PATH",
+        default = r#"".cache/maelstrom-worker""#
+    )]
     pub cache_root: CacheRoot,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
+    #[config(short = 'B', value_name = "BYTES", default = "1_000_000_000")]
     pub cache_bytes_used_target: CacheBytesUsedTarget,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    #[config(short = 'i', value_name = "BYTES", default = "1_000_000")]
     pub inline_limit: InlineLimit,
 
     /// Minimum log level to output.
+    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
-}
-
-impl maelstrom_config::Config for Config {
-    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder {
-        builder
-            .value(
-                "broker",
-                Some('b'),
-                "SOCKADDR",
-                None,
-                r#"Socket address of broker. Examples: "[::]:5000", "host.example.com:2000"."#,
-            )
-            .value(
-                "slots",
-                Some('s'),
-                "N",
-                Some(num_cpus::get().to_string()),
-                "The number of job slots available. Most jobs will take one job slot.",
-            )
-            .value(
-                "cache_root",
-                Some('r'),
-                "PATH",
-                Some(".cache/maelstrom-worker".to_string()),
-                "The directory to use for the cache.",
-            )
-            .value(
-                "cache_bytes_used_target",
-                Some('B'),
-                "BYTES",
-                Some(1_000_000_000.to_string()),
-                "The target amount of disk space to use for the cache. \
-                This bound won't be followed strictly, so it's best to be conservative.",
-            )
-            .value(
-                "inline_limit",
-                Some('i'),
-                "BYTES",
-                Some(1_000_000.to_string()),
-                "The maximum amount of bytes to return inline for captured stdout and stderr.",
-            )
-            .value(
-                "log_level",
-                Some('l'),
-                "LEVEL",
-                Some("info".to_string()),
-                "Minimum log level to output.",
-            )
-    }
-
-    fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
-        Ok(Self {
-            broker: config.get("broker")?,
-            slots: config.get_or_else("slots", || {
-                Slots::try_from(u16::try_from(num_cpus::get()).unwrap()).unwrap()
-            })?,
-            cache_root: config.get_or_else("cache_root", || {
-                PathBuf::from(".cache/maelstrom-worker").into()
-            })?,
-            cache_bytes_used_target: config.get_or_else("cache_bytes_used_target", || {
-                CacheBytesUsedTarget::from(1_000_000_000)
-            })?,
-            inline_limit: config.get_or_else("inline_limit", || InlineLimit::from(1_000_000))?,
-            log_level: config.get_or("log_level", LogLevel::Info)?,
-        })
-    }
 }

@@ -229,8 +229,11 @@ impl ConfigBag {
 }
 
 pub trait Config: Sized {
-    fn add_command_line_options(builder: CommandBuilder) -> CommandBuilder;
-    fn from_config_bag(config: &mut ConfigBag) -> Result<Self>;
+    fn add_command_line_options(
+        builder: CommandBuilder,
+        base_directories: &BaseDirectories,
+    ) -> CommandBuilder;
+    fn from_config_bag(config: &mut ConfigBag, base_directories: &BaseDirectories) -> Result<Self>;
 }
 
 pub struct CommandBuilder {
@@ -404,7 +407,7 @@ where
     let base_directories = BaseDirectories::with_prefix(base_directories_prefix)
         .context("searching for config files")?;
     let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
-    let builder = T::add_command_line_options(builder);
+    let builder = T::add_command_line_options(builder, &base_directories);
     let command = add_more_command_line_options(builder.build());
     let mut args = command.get_matches_from(args);
     let env_var_prefix = env_var_prefix.to_string() + "_";
@@ -430,7 +433,7 @@ where
     let mut config_bag = ConfigBag::new(args, &env_var_prefix, env, files)
         .context("loading configuration from environment variables and config files")?;
 
-    let config = T::from_config_bag(&mut config_bag)?;
+    let config = T::from_config_bag(&mut config_bag, &base_directories)?;
 
     if print_config {
         println!("{config:#?}");
