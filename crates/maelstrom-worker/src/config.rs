@@ -200,14 +200,14 @@ impl maelstrom_config::Config for Config {
             slots: config.get_or_else("slots", || {
                 Slots::try_from(u16::try_from(num_cpus::get()).unwrap()).unwrap()
             })?,
-            cache_root: config.get_or_else("cache-root", || {
+            cache_root: config.get_or_else("cache_root", || {
                 PathBuf::from(".cache/maelstrom-worker").into()
             })?,
-            cache_bytes_used_target: config.get_or_else("cache-bytes-used-target", || {
+            cache_bytes_used_target: config.get_or_else("cache_bytes_used_target", || {
                 CacheBytesUsedTarget::from(1_000_000_000)
             })?,
-            inline_limit: config.get_or_else("inline-limit", || InlineLimit::from(1_000_000))?,
-            log_level: config.get_or("log-level", LogLevel::Info)?,
+            inline_limit: config.get_or_else("inline_limit", || InlineLimit::from(1_000_000))?,
+            log_level: config.get_or("log_level", LogLevel::Info)?,
         })
     }
 }

@@ -53,36 +53,42 @@ impl ConfigBag {
         self.args
     }
 
-    fn get_internal<T>(&self, key: &str) -> Result<result::Result<T, KeyNames>>
+    fn get_internal<T>(&self, field: &str) -> Result<result::Result<T, KeyNames>>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let mut args_result = self.args.try_get_one::<String>(key);
+        let command_line_key: String = field
+            .chars()
+            .map(|c| match c {
+                '_' => '-',
+                c => c,
+            })
+            .collect();
+        let env_key: String = self
+            .env_prefix
+            .chars()
+            .chain(field.chars())
+            .map(|c| c.to_ascii_uppercase())
+            .collect();
+        let toml_key: String = command_line_key.clone();
+
+        let mut args_result = self.args.try_get_one::<String>(&command_line_key);
         if let Err(MatchesError::UnknownArgument { .. }) = args_result {
             args_result = Ok(None);
         }
         let mut value = args_result
             .with_context(|| {
-                format!("error getting matches data for command-line option `--{key}`")
+                format!("error getting matches data for command-line option `--{command_line_key}`")
             })?
             .map(String::as_str)
             .map(T::from_str)
             .transpose()
-            .with_context(|| format!("error parsing command-line option `--{key}`"))?;
+            .with_context(|| format!("error parsing command-line option `--{command_line_key}`"))?;
         if let Some(value) = value {
             return Ok(Ok(value));
         }
 
-        let env_key: String = self
-            .env_prefix
-            .chars()
-            .chain(key.chars())
-            .map(|c| match c {
-                '-' => '_',
-                c => c.to_ascii_uppercase(),
-            })
-            .collect();
         value = self
             .env
             .get(&env_key)
@@ -94,13 +100,6 @@ impl ConfigBag {
             return Ok(Ok(value));
         }
 
-        let toml_key: String = key
-            .chars()
-            .map(|c| match c {
-                '-' => '_',
-                c => c,
-            })
-            .collect();
         for (path, table) in &self.files {
             if let Some(value) = table.get(&toml_key) {
                 return T::deserialize(value.clone())
@@ -115,18 +114,18 @@ impl ConfigBag {
         }
 
         Ok(Err(KeyNames {
-            key: key.to_string(),
+            key: command_line_key,
             env_key,
             toml_key,
         }))
     }
 
-    pub fn get<T>(&self, key: &str) -> Result<T>
+    pub fn get<T>(&self, field: &str) -> Result<T>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        match self.get_internal(key) {
+        match self.get_internal(field) {
             Err(err) => Err(err),
             Ok(Ok(v)) => Ok(v),
             Ok(Err(KeyNames {
@@ -140,42 +139,57 @@ impl ConfigBag {
         }
     }
 
-    pub fn get_or<T>(&self, key: &str, default: T) -> Result<T>
+    pub fn get_or<T>(&self, field: &str, default: T) -> Result<T>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        self.get_internal(key).map(|v| v.unwrap_or(default))
+        self.get_internal(field).map(|v| v.unwrap_or(default))
     }
 
-    pub fn get_or_else<T, F>(&self, key: &str, mut default: F) -> Result<T>
+    pub fn get_or_else<T, F>(&self, field: &str, mut default: F) -> Result<T>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
         F: FnMut() -> T,
     {
-        self.get_internal(key)
+        self.get_internal(field)
             .map(|v| v.unwrap_or_else(|_| default()))
     }
 
-    pub fn get_option<T>(&self, key: &str) -> Result<Option<T>>
+    pub fn get_option<T>(&self, field: &str) -> Result<Option<T>>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        self.get_internal(key).map(Result::ok)
+        self.get_internal(field).map(Result::ok)
     }
 
-    pub fn get_flag<T>(&self, key: &str) -> Result<Option<T>>
+    pub fn get_flag<T>(&self, field: &str) -> Result<Option<T>>
     where
         T: From<bool> + for<'a> Deserialize<'a>,
     {
-        let mut args_result = self.args.try_get_one::<bool>(key);
+        let command_line_key: String = field
+            .chars()
+            .map(|c| match c {
+                '_' => '-',
+                c => c,
+            })
+            .collect();
+        let env_key: String = self
+            .env_prefix
+            .chars()
+            .chain(field.chars())
+            .map(|c| c.to_ascii_uppercase())
+            .collect();
+        let toml_key: String = command_line_key.clone();
+
+        let mut args_result = self.args.try_get_one::<bool>(&command_line_key);
         if let Err(MatchesError::UnknownArgument { .. }) = args_result {
             args_result = Ok(None);
         }
         if let Ok(Some(_)) = args_result {
-            if self.args.value_source(key).unwrap() == ValueSource::DefaultValue {
+            if self.args.value_source(&command_line_key).unwrap() == ValueSource::DefaultValue {
                 args_result = Ok(None);
             }
         }
@@ -184,15 +198,6 @@ impl ConfigBag {
             return Ok(value);
         }
 
-        let env_key: String = self
-            .env_prefix
-            .chars()
-            .chain(key.chars())
-            .map(|c| match c {
-                '-' => '_',
-                c => c.to_ascii_uppercase(),
-            })
-            .collect();
         value = self
             .env
             .get(&env_key)
@@ -206,13 +211,6 @@ impl ConfigBag {
             return Ok(value);
         }
 
-        let toml_key: String = key
-            .chars()
-            .map(|c| match c {
-                '-' => '_',
-                c => c,
-            })
-            .collect();
         for (path, table) in &self.files {
             if let Some(value) = table.get(&toml_key) {
                 return Some(T::deserialize(value.clone()))
@@ -509,17 +507,17 @@ mod tests {
                 (
                     "config-1.toml",
                     indoc! {r#"
-                        key_3 = "value-3"
-                        int_key_3 = 3
-                        bool_key_3 = true
+                        key-3 = "value-3"
+                        int-key-3 = 3
+                        bool-key-3 = true
                     "#},
                 ),
                 (
                     "config-2.toml",
                     indoc! {r#"
-                        key_4 = "value-4"
-                        int_key_4 = 4
-                        bool_key_4 = true
+                        key-4 = "value-4"
+                        int-key-4 = 4
+                        bool-key-4 = true
                     "#},
                 ),
             ],
@@ -531,19 +529,19 @@ mod tests {
     fn string_values() {
         let config = get_config();
         assert_eq!(
-            config.get::<String>("key-1").unwrap(),
+            config.get::<String>("key_1").unwrap(),
             "value-1".to_string()
         );
         assert_eq!(
-            config.get::<String>("key-2").unwrap(),
+            config.get::<String>("key_2").unwrap(),
             "value-2".to_string()
         );
         assert_eq!(
-            config.get::<String>("key-3").unwrap(),
+            config.get::<String>("key_3").unwrap(),
             "value-3".to_string()
         );
         assert_eq!(
-            config.get::<String>("key-4").unwrap(),
+            config.get::<String>("key_4").unwrap(),
             "value-4".to_string()
         );
     }
@@ -551,18 +549,18 @@ mod tests {
     #[test]
     fn int_values() {
         let config = get_config();
-        assert_eq!(config.get::<i32>("int-key-1").unwrap(), 1);
-        assert_eq!(config.get::<i32>("int-key-2").unwrap(), 2);
-        assert_eq!(config.get::<i32>("int-key-3").unwrap(), 3);
-        assert_eq!(config.get::<i32>("int-key-4").unwrap(), 4);
+        assert_eq!(config.get::<i32>("int_key_1").unwrap(), 1);
+        assert_eq!(config.get::<i32>("int_key_2").unwrap(), 2);
+        assert_eq!(config.get::<i32>("int_key_3").unwrap(), 3);
+        assert_eq!(config.get::<i32>("int_key_4").unwrap(), 4);
     }
 
     #[test]
     fn bool_values() {
         let config = get_config();
-        assert_eq!(config.get_flag("bool-key-1").unwrap(), Some(true));
-        assert_eq!(config.get_flag("bool-key-2").unwrap(), Some(true));
-        assert_eq!(config.get_flag("bool-key-3").unwrap(), Some(true));
-        assert_eq!(config.get_flag("bool-key-4").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_1").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_2").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_3").unwrap(), Some(true));
+        assert_eq!(config.get_flag("bool_key_4").unwrap(), Some(true));
     }
 }

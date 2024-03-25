@@ -52,7 +52,7 @@ impl maelstrom_config::Config for Config {
     fn from_config_bag(config: &mut maelstrom_config::ConfigBag) -> Result<Self> {
         Ok(Self {
             broker: config.get("broker")?,
-            log_level: config.get_or("log-level", LogLevel::Info)?,
+            log_level: config.get_or("log_level", LogLevel::Info)?,
         })
     }
 }
