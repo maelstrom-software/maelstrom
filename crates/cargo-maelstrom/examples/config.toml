@@ -1,0 +1,158 @@
+# Example config for cargo-maelstrom.
+#
+# Save this as ~/.config/maelstrom/cargo-maelstrom/config.toml or wherever you
+# specify the config file using the --config-file or -c option.
+
+# The host and port of the broker.
+#
+# Can also be specified via the `--broker` or `-b` command-line options, or via
+# the CARGO_MAELSTROM_BROKER environment variable.
+#
+# There is no default. This option must be specified.
+#
+# Examples:
+# broker = "localhost:1234"
+# broker = "127.0.0.1:1234"
+broker = "[::1]:1234"
+
+# The minimum log level to output.
+#
+# Can also be specified via the `--log-level` or `-l` command-line options, or
+# via the CARGO_MAELSTROM_LOG_LEVEL environment variable.
+#
+# Possibilities: "error", "warning", "info", and "debug"
+#
+# Default:
+# log-level = "info"
+#
+# Examples:
+# log-level = "debug"
+
+# Whether the output should be quiet. If this is true, then only a single
+# status bar will be output.
+#
+# Can also be specified via the `--quiet` or `-q` command-line options, or via
+# the CARGO_MAELSTROM_QUIET environment variable.
+#
+# Default:
+# quiet = false
+#
+# Examples:
+# quiet = true
+
+# Override timeout value for all tests executed. O indicates no timeout (infinite).
+#
+# Can also be specified via the `--timeout` or `-t` command-line options, or via
+# the CARGO_MAELSTROM_TIMEOUT environment variable.
+#
+# By default, there is no timeout unless one is specified for a specific test
+# case using test metadata.
+#
+# Examples:
+# timeout = 0
+# timeout = 120
+
+# Specify cargo test's -features flag, which specifies which features to activate.
+#
+# Can also be specified via the `--features` or `-F` command-line options, or via the
+# CARGO_MAELSTROM_FEATURES environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# features = "foo,bar"
+
+# Specify cargo test's --all-features flag.
+#
+# Can also be specified via the `--all-features`, or via the
+# CARGO_MAELSTROM_ALL_FEATURES environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# all-features = true
+# all-features = false
+
+# Specify cargo test's --no-default-features flag.
+#
+# Can also be specified via the `--no-default-features`, or via the
+# CARGO_MAELSTROM_NO_DEFAULT_FEATURES environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# no-default-features = true
+# no-default-features = false
+
+# Specify cargo test's --profile flag.
+#
+# Can also be specified via the `--profile`, or via the CARGO_MAELSTROM_PROFILE
+# environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# profile = "release"
+
+# Specify cargo test's --target flag.
+#
+# Can also be specified via the `--target`, or via the CARGO_MAELSTROM_TARGET
+# environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# target = "wasm32-unknown-unknown"
+
+# Specify cargo test's --target-dir flag.
+#
+# Can also be specified via the `--target-dir`, or via the
+# CARGO_MAELSTROM_TARGET_DIR environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# target-dir = "other-target-dir"
+
+# Specify cargo test's --manifest-path flag.
+#
+# Can also be specified via the `--manifest-path`, or via the
+# CARGO_MAELSTROM_MANIFEST_PATH environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# manifest-path = "Other.Cargo.toml"
+
+# Specify cargo test's --frozen flag.
+#
+# Can also be specified via the `--frozen`, or via the CARGO_MAELSTROM_FROZEN
+# environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# frozen = true
+# frozen = false
+
+# Specify cargo test's --locked flag.
+#
+# Can also be specified via the `--locked`, or via the CARGO_MAELSTROM_LOCKED
+# environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# locked = true
+# locked = false
+
+# Specify cargo test's --offline flag.
+#
+# Can also be specified via the `--offline`, or via the CARGO_MAELSTROM_OFFLINE
+# environment variable.
+#
+# If not specified, cargo will do whatever its default is.
+#
+# Examples:
+# offline = true
+# offline = false
