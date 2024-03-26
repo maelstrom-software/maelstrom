@@ -331,7 +331,7 @@ impl CommandBuilder {
     }
 }
 
-pub fn new_config2<T, U, AI, AT>(
+pub fn new_config_with_extra_from_args<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
@@ -413,7 +413,7 @@ pub fn new_config<T: Config + Debug>(
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
 ) -> Result<T> {
-    let (config, _): (_, NoExtraCommandLineOptions) = new_config2(
+    let (config, _): (_, NoExtraCommandLineOptions) = new_config_with_extra_from_args(
         command,
         base_directories_prefix,
         env_var_prefix,

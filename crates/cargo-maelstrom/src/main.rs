@@ -70,7 +70,7 @@ pub fn main() -> Result<ExitCode> {
     }
 
     let (config, extra_options): (Config, ExtraCommandLineOptions) =
-        maelstrom_util::config::new_config2(
+        maelstrom_util::config::new_config_with_extra_from_args(
             command!(),
             "maelstrom/cargo-maelstrom",
             "CARGO_MAELSTROM",
