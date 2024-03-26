@@ -66,7 +66,7 @@ impl FromStr for HttpPort {
 
 #[derive(Config, Debug)]
 pub struct Config {
-    /// The port the broker listens on for connections from workers and clients.",
+    /// The port the broker listens on for connections from workers and clients.
     #[config(short = 'p', value_name = "PORT", default = "0")]
     pub port: BrokerPort,
 
