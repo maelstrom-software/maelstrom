@@ -22,6 +22,7 @@ fs2.workspace = true
 futures-lite.workspace = true
 futures.workspace = true
 globset.workspace = true
+heck.workspace = true
 indoc.workspace = true
 maelstrom-base.workspace = true
 serde.workspace = true

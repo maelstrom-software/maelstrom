@@ -5,6 +5,7 @@ use clap::{
     parser::{MatchesError, ValueSource},
     Arg, ArgAction, ArgMatches, Command,
 };
+use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
     collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
@@ -60,19 +61,8 @@ impl ConfigBag {
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let command_line_key: String = field
-            .chars()
-            .map(|c| match c {
-                '_' => '-',
-                c => c,
-            })
-            .collect();
-        let env_key: String = self
-            .env_prefix
-            .chars()
-            .chain(field.chars())
-            .map(|c| c.to_ascii_uppercase())
-            .collect();
+        let command_line_key = field.to_kebab_case();
+        let env_key = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
         let toml_key: String = command_line_key.clone();
 
         let mut args_result = self.args.try_get_one::<String>(&command_line_key);
@@ -163,19 +153,8 @@ impl ConfigBag {
     where
         T: From<bool> + for<'a> Deserialize<'a>,
     {
-        let command_line_key: String = field
-            .chars()
-            .map(|c| match c {
-                '_' => '-',
-                c => c,
-            })
-            .collect();
-        let env_key: String = self
-            .env_prefix
-            .chars()
-            .chain(field.chars())
-            .map(|c| c.to_ascii_uppercase())
-            .collect();
+        let command_line_key = field.to_kebab_case();
+        let env_key = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
         let toml_key: String = command_line_key.clone();
 
         let mut args_result = self.args.try_get_one::<bool>(&command_line_key);
@@ -314,15 +293,6 @@ impl CommandBuilder {
         }
     }
 
-    fn env_var_from_field(&self, field: &'static str) -> String {
-        self.env_var_prefix
-            .chars()
-            .chain(iter::once('_'))
-            .chain(field.chars())
-            .map(|c| c.to_ascii_uppercase())
-            .collect()
-    }
-
     fn _value(
         mut self,
         field: &'static str,
@@ -332,15 +302,8 @@ impl CommandBuilder {
         help: &'static str,
         action: ArgAction,
     ) -> Self {
-        fn name_from_field(field: &'static str) -> String {
-            field
-                .chars()
-                .map(|c| if c == '_' { '-' } else { c })
-                .collect()
-        }
-
-        let name = name_from_field(field);
-        let env_var = self.env_var_from_field(field);
+        let name = field.to_kebab_case();
+        let env_var = format!("{}{}", self.env_var_prefix, field.to_shouty_snake_case());
         let default = default.unwrap_or("no default, must be specified".to_string());
         let mut arg = Arg::new(name.clone())
             .long(name)

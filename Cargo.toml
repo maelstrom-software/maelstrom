@@ -57,6 +57,7 @@ gethostname = "0.4.2"
 globset = "0.4"
 gloo-net = "0.4"
 gloo-utils = "0.2"
+heck = "0.5.0"
 hex = "0.4.3"
 hyper-tungstenite = "0.11"
 hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
