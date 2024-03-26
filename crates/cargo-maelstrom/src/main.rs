@@ -3,7 +3,7 @@ use cargo_maelstrom::{
     config::Config, main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
-use clap::{command, Args, Command, FromArgMatches as _};
+use clap::{command, Args};
 use console::Term;
 use maelstrom_base::Timeout;
 use maelstrom_client::ClientBgProcess;
@@ -64,24 +64,18 @@ struct ListOptions {
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
-    let add_more_command_line_options = |command: Command| {
-        ExtraCommandLineOptions::augment_args(command)
-    };
-
     let mut args = Vec::from_iter(env::args());
     if args.len() > 1 && args[0].ends_with(format!("cargo-{}", args[1]).as_str()) {
         args.remove(1);
     }
 
-    let (config, args): (Config, _) = maelstrom_util::config::new_config2(
-        command!(),
-        "maelstrom/cargo-maelstrom",
-        "CARGO_MAELSTROM",
-        add_more_command_line_options,
-        args,
-    )?;
-
-    let extra_options = ExtraCommandLineOptions::from_arg_matches(&args)?;
+    let (config, extra_options): (Config, ExtraCommandLineOptions) =
+        maelstrom_util::config::new_config2(
+            command!(),
+            "maelstrom/cargo-maelstrom",
+            "CARGO_MAELSTROM",
+            args,
+        )?;
 
     let list_action = match (
         extra_options.list.tests,

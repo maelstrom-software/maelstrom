@@ -1,11 +1,11 @@
 pub mod common;
 
 use anyhow::{anyhow, Context as _, Result};
-use clap::{Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Args, Command, FromArgMatches};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
-    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process,
+    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
     str::FromStr,
 };
 use toml::Table;
@@ -198,7 +198,7 @@ pub struct CommandBuilder {
 
 impl CommandBuilder {
     pub fn new(
-        command: clap::Command,
+        command: Command,
         base_directories: &BaseDirectories,
         env_var_prefix: &'static str,
     ) -> Self {
@@ -331,15 +331,15 @@ impl CommandBuilder {
     }
 }
 
-pub fn new_config2<T, AI, AT>(
+pub fn new_config2<T, U, AI, AT>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
-    add_more_command_line_options: impl FnOnce(Command) -> Command,
     args: AI,
-) -> Result<(T, ArgMatches)>
+) -> Result<(T, U)>
 where
     T: Config + Debug,
+    U: Args,
     AI: IntoIterator<Item = AT>,
     AT: Into<OsString> + Clone,
 {
@@ -347,7 +347,7 @@ where
         .context("searching for config files")?;
     let builder = CommandBuilder::new(command, &base_directories, env_var_prefix);
     let builder = T::add_command_line_options(builder, &base_directories);
-    let command = add_more_command_line_options(builder.build());
+    let command = U::augment_args(builder.build());
     let mut args = command.get_matches_from(args);
     let env_var_prefix = env_var_prefix.to_string() + "_";
     let env = env::vars().filter(|(key, _)| key.starts_with(&env_var_prefix));
@@ -373,13 +373,39 @@ where
         .context("loading configuration from environment variables and config files")?;
 
     let config = T::from_config_bag(&mut config_bag, &base_directories)?;
+    let extra = U::from_arg_matches(&config_bag.into_args())?;
 
     if print_config {
         println!("{config:#?}");
         process::exit(0);
     }
 
-    Ok((config, config_bag.into_args()))
+    Ok((config, extra))
+}
+
+struct NoExtraCommandLineOptions;
+
+impl FromArgMatches for NoExtraCommandLineOptions {
+    fn from_arg_matches(_matches: &ArgMatches) -> result::Result<Self, clap::Error> {
+        Ok(NoExtraCommandLineOptions)
+    }
+
+    fn update_from_arg_matches(
+        &mut self,
+        _matches: &ArgMatches,
+    ) -> result::Result<(), clap::Error> {
+        Ok(())
+    }
+}
+
+impl Args for NoExtraCommandLineOptions {
+    fn augment_args(cmd: Command) -> Command {
+        cmd
+    }
+
+    fn augment_args_for_update(cmd: Command) -> Command {
+        cmd
+    }
 }
 
 pub fn new_config<T: Config + Debug>(
@@ -387,14 +413,13 @@ pub fn new_config<T: Config + Debug>(
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
 ) -> Result<T> {
-    Ok(new_config2(
+    let (config, _): (_, NoExtraCommandLineOptions) = new_config2(
         command,
         base_directories_prefix,
         env_var_prefix,
-        |command| command,
         env::args_os(),
-    )?
-    .0)
+    )?;
+    Ok(config)
 }
 
 #[cfg(test)]
