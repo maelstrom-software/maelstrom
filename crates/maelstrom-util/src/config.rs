@@ -1,7 +1,7 @@
 pub mod common;
 
 use anyhow::{anyhow, Context as _, Result};
-use clap::{parser::ValueSource, Arg, ArgAction, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
@@ -146,18 +146,14 @@ impl ConfigBag {
         let key = field.to_kebab_case();
         let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
-        let mut args_result = self.args.try_get_one::<bool>(&key);
-        if let Ok(Some(_)) = args_result {
-            if self.args.value_source(&key).unwrap() == ValueSource::DefaultValue {
-                args_result = Ok(None);
-            }
-        }
-        let mut value = args_result?.copied().map(T::from);
-        if value.is_some() {
-            return Ok(value);
+        let Some(&args_result) = self.args.get_one::<bool>(&key) else {
+            panic!("didn't expect None")
+        };
+        if args_result {
+            return Ok(Some(T::from(args_result)));
         }
 
-        value = self
+        let value = self
             .env
             .get(&env_var)
             .map(String::as_str)
