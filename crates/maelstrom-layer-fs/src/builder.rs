@@ -503,6 +503,45 @@ impl<'fs> DoubleFsWalk<'fs> {
     }
 }
 
+struct DirectoryDataWriterStack<'fs> {
+    layer_fs: &'fs LayerFs,
+    writers: Vec<(FileId, DirectoryDataWriter<'fs>)>,
+}
+
+#[anyhow_trace]
+impl<'fs> DirectoryDataWriterStack<'fs> {
+    fn new(layer_fs: &'fs LayerFs) -> Self {
+        Self {
+            layer_fs,
+            writers: vec![],
+        }
+    }
+
+    async fn get_writer(&mut self, file_id: FileId) -> Result<&mut DirectoryDataWriter<'fs>> {
+        if self.writers.len() > 1 && self.writers[self.writers.len() - 2].0 == file_id {
+            let mut writer = self.writers.pop().unwrap().1;
+            writer.flush().await?;
+            return Ok(&mut self.writers.last_mut().unwrap().1);
+        }
+
+        if !self.writers.last().is_some_and(|(id, _)| *id == file_id) {
+            self.writers.push((
+                file_id,
+                DirectoryDataWriter::new(self.layer_fs, file_id).await?,
+            ));
+        }
+
+        return Ok(&mut self.writers.last_mut().unwrap().1);
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        for (_, writer) in &mut self.writers {
+            writer.flush().await?;
+        }
+        Ok(())
+    }
+}
+
 pub struct UpperLayerBuilder<'fs> {
     upper: LayerFs,
     lower: &'fs LayerFs,
@@ -568,30 +607,30 @@ impl<'fs> UpperLayerBuilder<'fs> {
 
     pub async fn fill_from_bottom_layer(&mut self, other: &LayerFs) -> Result<()> {
         self.hard_link_files(other).await?;
+        let mut dir_writers = DirectoryDataWriterStack::new(&self.upper);
         let upper_id = self.upper.layer_super().await?.layer_id;
         let mut walker = DoubleFsWalk::new(self.lower, other).await?;
         while let Some(res) = walker.next().await? {
             match res {
                 LeftRight::Left(entry) => {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
-                    let mut writer = DirectoryDataWriter::new(&self.upper, dir_id).await?;
+                    let writer = dir_writers.get_writer(dir_id).await?;
                     writer.insert_entry(&entry.key, entry.data).await?;
-                    writer.flush().await?;
                 }
                 LeftRight::Right(mut entry) | LeftRight::Both(_, mut entry) => {
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
-                    let mut writer = DirectoryDataWriter::new(&self.upper, dir_id).await?;
+                    let writer = dir_writers.get_writer(dir_id).await?;
                     let file_id = FileId::new(upper_id, entry.data.file_id.offset());
                     entry.data.file_id = file_id;
                     let kind = entry.data.kind;
                     writer.insert_entry(&entry.key, entry.data).await?;
-                    writer.flush().await?;
                     if kind == FileType::Directory {
-                        DirectoryDataWriter::write_empty(&self.upper, file_id).await?;
+                        dir_writers.get_writer(file_id).await?;
                     }
                 }
             }
         }
+        dir_writers.flush().await?;
         Ok(())
     }
 
