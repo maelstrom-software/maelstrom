@@ -44,7 +44,7 @@ pub struct Config {
         short = 't',
         value_name = "SECONDS",
         default = r#""whatever individual tests specify""#,
-        next_help_heading = "Test Override Config Options",
+        next_help_heading = "Test Override Config Options"
     )]
     pub timeout: Option<u32>,
 
