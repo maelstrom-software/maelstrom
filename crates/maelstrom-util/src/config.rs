@@ -141,14 +141,6 @@ impl ConfigBag {
         }
     }
 
-    pub fn get_or<T>(&self, field: &str, default: T) -> Result<T>
-    where
-        T: FromStr + for<'a> Deserialize<'a>,
-        <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
-    {
-        self.get_internal(field).map(|v| v.unwrap_or(default))
-    }
-
     pub fn get_or_else<T, F>(&self, field: &str, mut default: F) -> Result<T>
     where
         T: FromStr + for<'a> Deserialize<'a>,
