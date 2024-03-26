@@ -56,7 +56,7 @@ impl LayerSuper {
     }
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FileId {
     layer_id: LayerId,
     offset: NonZeroU32,

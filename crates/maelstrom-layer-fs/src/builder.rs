@@ -8,6 +8,7 @@ use anyhow::bail;
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
 use futures::stream::{Peekable, StreamExt as _};
+use lru::LruCache;
 use maelstrom_base::{
     manifest::{ManifestEntryData, Mode, UnixTimestamp},
     Sha256Digest, Utf8Component, Utf8Path,
@@ -19,10 +20,49 @@ use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncSeek};
 use tokio_tar::{Archive, EntryType};
 
+struct DirectoryDataWriterCache<'fs> {
+    data_fs: &'fs Fs,
+    cache: LruCache<FileId, DirectoryDataWriter<'fs>>,
+}
+
+impl<'fs> DirectoryDataWriterCache<'fs> {
+    const CACHE_SIZE: usize = 100;
+
+    fn new(data_fs: &'fs Fs) -> Self {
+        Self {
+            data_fs,
+            cache: LruCache::new(Self::CACHE_SIZE.try_into().unwrap()),
+        }
+    }
+
+    async fn get_writer(
+        &mut self,
+        layer_fs: &LayerFs,
+        file_id: FileId,
+    ) -> Result<&mut DirectoryDataWriter<'fs>> {
+        if !self.cache.contains(&file_id) {
+            let writer = DirectoryDataWriter::new(layer_fs, self.data_fs, file_id).await?;
+            if let Some(mut old) = self.cache.put(file_id, writer) {
+                old.flush().await?;
+            }
+        }
+
+        Ok(self.cache.get_mut(&file_id).unwrap())
+    }
+
+    async fn flush(&mut self) -> Result<()> {
+        for (_, writer) in &mut self.cache {
+            writer.flush().await?;
+        }
+        Ok(())
+    }
+}
+
 pub struct BottomLayerBuilder<'fs> {
     layer_fs: LayerFs,
     file_writer: FileMetadataWriter<'fs>,
     time: UnixTimestamp,
+    dir_writer_cache: DirectoryDataWriterCache<'fs>,
 }
 
 #[anyhow_trace]
@@ -65,6 +105,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             layer_fs,
             file_writer,
             time,
+            dir_writer_cache: DirectoryDataWriterCache::new(data_fs),
         })
     }
 
@@ -135,11 +176,13 @@ impl<'fs> BottomLayerBuilder<'fs> {
         file_id: FileId,
         kind: FileType,
     ) -> Result<bool> {
-        let mut dir_writer = DirectoryDataWriter::new(&self.layer_fs, parent).await?;
+        let dir_writer = self
+            .dir_writer_cache
+            .get_writer(&self.layer_fs, parent)
+            .await?;
         let inserted = dir_writer
             .insert_entry(name, DirectoryEntryData { file_id, kind })
             .await?;
-        dir_writer.flush().await?;
         Ok(inserted)
     }
 
@@ -357,13 +400,15 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
             }
         }
-        self.file_writer.flush().await?;
 
         Ok(())
     }
 
-    pub fn finish(self) -> LayerFs {
-        self.layer_fs
+    pub async fn finish(mut self) -> Result<LayerFs> {
+        self.file_writer.flush().await?;
+        self.dir_writer_cache.flush().await?;
+
+        Ok(self.layer_fs)
     }
 }
 
@@ -527,7 +572,7 @@ impl<'fs> DirectoryDataWriterStack<'fs> {
         if !self.writers.last().is_some_and(|(id, _)| *id == file_id) {
             self.writers.push((
                 file_id,
-                DirectoryDataWriter::new(self.layer_fs, file_id).await?,
+                DirectoryDataWriter::new(self.layer_fs, &self.layer_fs.data_fs, file_id).await?,
             ));
         }
 
@@ -634,7 +679,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
         Ok(())
     }
 
-    pub fn finish(self) -> LayerFs {
-        self.upper
+    pub async fn finish(self) -> Result<LayerFs> {
+        Ok(self.upper)
     }
 }

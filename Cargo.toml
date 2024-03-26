@@ -65,6 +65,7 @@ indoc = "2.0.4"
 itertools = "0.10.5"
 lddtree = "0.3"
 libc = "0.2"
+lru = "0.12"
 maelstrom-base = { version = "0.6.0-dev", path = "crates/maelstrom-base" }
 maelstrom-broker = { version = "0.6.0-dev", path = "crates/maelstrom-broker" }
 maelstrom-client = { version = "0.6.0-dev", path = "crates/maelstrom-client" }

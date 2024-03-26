@@ -833,7 +833,7 @@ mod tests {
                 .add_from_tar(digest!(42), fs.open_file(&tar_path).await.unwrap())
                 .await
                 .unwrap();
-            let layer_fs = builder.finish();
+            let layer_fs = builder.finish().await.unwrap();
             let handle = layer_fs.mount(&mount_path).unwrap();
             Self {
                 temp_dir,

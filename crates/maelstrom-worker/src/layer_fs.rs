@@ -32,7 +32,7 @@ pub async fn build_bottom_layer(
         ArtifactType::Tar => builder.add_from_tar(artifact_digest, artifact_file).await?,
         ArtifactType::Manifest => builder.add_from_manifest(artifact_file).await?,
     }
-    builder.finish();
+    builder.finish().await?;
 
     dir_size(&fs, &layer_path).await
 }
@@ -51,7 +51,7 @@ pub async fn build_upper_layer(
     let mut builder = UpperLayerBuilder::new(log, &layer_path, &cache_path, &lower).await?;
     builder.fill_from_bottom_layer(&upper).await?;
     builder.fill_from_bottom_layer(&upper).await?;
-    builder.finish();
+    builder.finish().await?;
 
     dir_size(&fs, &layer_path).await
 }

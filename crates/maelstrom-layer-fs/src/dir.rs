@@ -6,7 +6,7 @@ use crate::{to_eio, LayerFs};
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
-use maelstrom_util::async_fs::File;
+use maelstrom_util::async_fs::{File, Fs};
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
 use std::borrow::BorrowMut;
@@ -207,10 +207,10 @@ pub struct DirectoryDataWriter<'fs> {
 
 #[anyhow_trace]
 impl<'fs> DirectoryDataWriter<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
+    pub async fn new(layer_fs: &LayerFs, data_fs: &'fs Fs, file_id: FileId) -> Result<Self> {
         let path = layer_fs.dir_data_path(file_id).await?;
-        let existing = layer_fs.data_fs.exists(&path).await;
-        let mut stream = layer_fs.data_fs.open_or_create_file(path).await?;
+        let existing = data_fs.exists(&path).await;
+        let mut stream = data_fs.open_or_create_file(path).await?;
         if !existing {
             encode_file(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
         }
@@ -220,7 +220,7 @@ impl<'fs> DirectoryDataWriter<'fs> {
     }
 
     pub async fn write_empty(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<()> {
-        let mut s = Self::new(layer_fs, file_id).await?;
+        let mut s = Self::new(layer_fs, &layer_fs.data_fs, file_id).await?;
         s.flush().await?;
         Ok(())
     }

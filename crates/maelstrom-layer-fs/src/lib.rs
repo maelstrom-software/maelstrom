@@ -520,7 +520,7 @@ mod tests {
             }
         }
 
-        builder.finish()
+        builder.finish().await.unwrap()
     }
 
     async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
@@ -995,7 +995,7 @@ mod tests {
 
         populate_fn(&fs, &cache_dir, input, &mut builder).await;
 
-        let layer_fs = builder.finish();
+        let layer_fs = builder.finish().await.unwrap();
 
         let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
@@ -1106,7 +1106,7 @@ mod tests {
             .await
             .unwrap();
         builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
-        let layer_fs = builder.finish();
+        let layer_fs = builder.finish().await.unwrap();
 
         let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
@@ -1171,13 +1171,13 @@ mod tests {
             .await
             .unwrap();
         builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
-        let upper_layer_fs = builder.finish();
+        let upper_layer_fs = builder.finish().await.unwrap();
 
         let mut builder = UpperLayerBuilder::new(log, &data_dir5, &cache_dir, &upper_layer_fs)
             .await
             .unwrap();
         builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
-        let layer_fs = builder.finish();
+        let layer_fs = builder.finish().await.unwrap();
 
         let mount_handle = layer_fs.mount(&mount_point).unwrap();
 
