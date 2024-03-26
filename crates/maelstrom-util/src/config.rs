@@ -1,10 +1,7 @@
 pub mod common;
 
 use anyhow::{anyhow, Context as _, Result};
-use clap::{
-    parser::{MatchesError, ValueSource},
-    Arg, ArgAction, ArgMatches, Command,
-};
+use clap::{parser::ValueSource, Arg, ArgAction, ArgMatches, Command};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
@@ -65,11 +62,9 @@ impl ConfigBag {
         let env_key = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
         let toml_key: String = command_line_key.clone();
 
-        let mut args_result = self.args.try_get_one::<String>(&command_line_key);
-        if let Err(MatchesError::UnknownArgument { .. }) = args_result {
-            args_result = Ok(None);
-        }
-        let mut value = args_result
+        let mut value = self
+            .args
+            .try_get_one::<String>(&command_line_key)
             .with_context(|| {
                 format!("error getting matches data for command-line option `--{command_line_key}`")
             })?
@@ -158,9 +153,6 @@ impl ConfigBag {
         let toml_key: String = command_line_key.clone();
 
         let mut args_result = self.args.try_get_one::<bool>(&command_line_key);
-        if let Err(MatchesError::UnknownArgument { .. }) = args_result {
-            args_result = Ok(None);
-        }
         if let Ok(Some(_)) = args_result {
             if self.args.value_source(&command_line_key).unwrap() == ValueSource::DefaultValue {
                 args_result = Ok(None);
