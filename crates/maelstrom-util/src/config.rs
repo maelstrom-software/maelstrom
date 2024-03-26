@@ -20,8 +20,7 @@ pub struct ConfigBag {
 
 struct KeyNames {
     key: String,
-    env_key: String,
-    toml_key: String,
+    env_var: String,
 }
 
 impl ConfigBag {
@@ -58,53 +57,48 @@ impl ConfigBag {
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        let command_line_key = field.to_kebab_case();
-        let env_key = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
-        let toml_key: String = command_line_key.clone();
+        let key = field.to_kebab_case();
+        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
         let mut value = self
             .args
-            .try_get_one::<String>(&command_line_key)
+            .try_get_one::<String>(&key)
             .with_context(|| {
-                format!("error getting matches data for command-line option `--{command_line_key}`")
+                format!("error getting matches data for command-line option `--{key}`")
             })?
             .map(String::as_str)
             .map(T::from_str)
             .transpose()
-            .with_context(|| format!("error parsing command-line option `--{command_line_key}`"))?;
+            .with_context(|| format!("error parsing command-line option `--{key}`"))?;
         if let Some(value) = value {
             return Ok(Ok(value));
         }
 
         value = self
             .env
-            .get(&env_key)
+            .get(&env_var)
             .map(String::as_str)
             .map(T::from_str)
             .transpose()
-            .with_context(|| format!("error parsing environment variable `{env_key}`"))?;
+            .with_context(|| format!("error parsing environment variable `{env_var}`"))?;
         if let Some(value) = value {
             return Ok(Ok(value));
         }
 
         for (path, table) in &self.files {
-            if let Some(value) = table.get(&toml_key) {
+            if let Some(value) = table.get(&key) {
                 return T::deserialize(value.clone())
                     .map(Result::Ok)
                     .with_context(|| {
                         format!(
-                            "error parsing value for key `{toml_key}` in config file `{}`",
+                            "error parsing value for key `{key}` in config file `{}`",
                             path.to_string_lossy()
                         )
                     });
             }
         }
 
-        Ok(Err(KeyNames {
-            key: command_line_key,
-            env_key,
-            toml_key,
-        }))
+        Ok(Err(KeyNames { key, env_var }))
     }
 
     pub fn get<T>(&self, field: &str) -> Result<T>
@@ -115,13 +109,9 @@ impl ConfigBag {
         match self.get_internal(field) {
             Err(err) => Err(err),
             Ok(Ok(v)) => Ok(v),
-            Ok(Err(KeyNames {
-                key,
-                env_key,
-                toml_key,
-            })) => Err(anyhow!(
+            Ok(Err(KeyNames { key, env_var })) => Err(anyhow!(
                 "config value `{key}` must be set via `--{key}` command-line option, \
-                `{env_key}` environment variable, or `{toml_key}` key in config file"
+                `{env_var}` environment variable, or `{key}` key in config file"
             )),
         }
     }
@@ -148,13 +138,12 @@ impl ConfigBag {
     where
         T: From<bool> + for<'a> Deserialize<'a>,
     {
-        let command_line_key = field.to_kebab_case();
-        let env_key = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
-        let toml_key: String = command_line_key.clone();
+        let key = field.to_kebab_case();
+        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
 
-        let mut args_result = self.args.try_get_one::<bool>(&command_line_key);
+        let mut args_result = self.args.try_get_one::<bool>(&key);
         if let Ok(Some(_)) = args_result {
-            if self.args.value_source(&command_line_key).unwrap() == ValueSource::DefaultValue {
+            if self.args.value_source(&key).unwrap() == ValueSource::DefaultValue {
                 args_result = Ok(None);
             }
         }
@@ -165,11 +154,11 @@ impl ConfigBag {
 
         value = self
             .env
-            .get(&env_key)
+            .get(&env_var)
             .map(String::as_str)
             .map(bool::from_str)
             .transpose()
-            .with_context(|| format!("error parsing environment variable `{env_key}`"))?
+            .with_context(|| format!("error parsing environment variable `{env_var}`"))?
             .map(T::from);
 
         if value.is_some() {
@@ -177,12 +166,12 @@ impl ConfigBag {
         }
 
         for (path, table) in &self.files {
-            if let Some(value) = table.get(&toml_key) {
+            if let Some(value) = table.get(&key) {
                 return Some(T::deserialize(value.clone()))
                     .transpose()
                     .with_context(|| {
                         format!(
-                            "error parsing value for key `{toml_key}` in config file `{}`",
+                            "error parsing value for key `{key}` in config file `{}`",
                             path.to_string_lossy(),
                         )
                     });
