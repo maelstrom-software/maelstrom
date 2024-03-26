@@ -110,7 +110,10 @@ impl<'fs> BottomLayerBuilder<'fs> {
     }
 
     async fn look_up(&mut self, dir_id: FileId, name: &str) -> Result<Option<FileId>> {
-        let mut dir_reader = DirectoryDataReader::new(&self.layer_fs, dir_id).await?;
+        let dir_reader = self
+            .dir_writer_cache
+            .get_writer(&self.layer_fs, dir_id)
+            .await?;
         dir_reader.look_up(name).await
     }
 
@@ -119,7 +122,10 @@ impl<'fs> BottomLayerBuilder<'fs> {
         dir_id: FileId,
         name: &str,
     ) -> Result<Option<DirectoryEntryData>> {
-        let mut dir_reader = DirectoryDataReader::new(&self.layer_fs, dir_id).await?;
+        let dir_reader = self
+            .dir_writer_cache
+            .get_writer(&self.layer_fs, dir_id)
+            .await?;
         dir_reader.look_up_entry(name).await
     }
 
@@ -164,7 +170,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         self.add_link(parent, name, file_id, FileType::Directory)
             .await?
             .assert_is_true();
-        DirectoryDataWriter::write_empty(&self.layer_fs, file_id).await?;
+        self.dir_writer_cache
+            .get_writer(&self.layer_fs, file_id)
+            .await?;
 
         Ok(file_id)
     }

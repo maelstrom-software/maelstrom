@@ -219,6 +219,14 @@ impl<'fs> DirectoryDataWriter<'fs> {
         })
     }
 
+    pub async fn look_up(&mut self, entry_name: &str) -> Result<Option<FileId>> {
+        Ok(self.look_up_entry(entry_name).await?.map(|e| e.file_id))
+    }
+
+    pub async fn look_up_entry(&mut self, entry_name: &str) -> Result<Option<DirectoryEntryData>> {
+        self.tree.get(&entry_name.into()).await
+    }
+
     pub async fn write_empty(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<()> {
         let mut s = Self::new(layer_fs, &layer_fs.data_fs, file_id).await?;
         s.flush().await?;
