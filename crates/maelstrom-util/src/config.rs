@@ -5,7 +5,7 @@ use clap::{parser::ValueSource, Arg, ArgAction, ArgMatches, Command};
 use heck::{ToKebabCase as _, ToShoutySnakeCase as _};
 use serde::Deserialize;
 use std::{
-    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process, result,
+    collections::HashMap, env, ffi::OsString, fmt::Debug, fs, iter, path::PathBuf, process,
     str::FromStr,
 };
 use toml::Table;
@@ -18,9 +18,9 @@ pub struct ConfigBag {
     files: Vec<(PathBuf, Table)>,
 }
 
-struct KeyNames {
-    key: String,
-    env_var: String,
+enum GetResult<T> {
+    Some(T),
+    None { key: String, env_var: String },
 }
 
 impl ConfigBag {
@@ -52,7 +52,7 @@ impl ConfigBag {
         self.args
     }
 
-    fn get_internal<T>(&self, field: &str) -> Result<result::Result<T, KeyNames>>
+    fn get_internal<T>(&self, field: &str) -> Result<GetResult<T>>
     where
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
@@ -71,7 +71,7 @@ impl ConfigBag {
             .transpose()
             .with_context(|| format!("error parsing command-line option `--{key}`"))?;
         if let Some(value) = value {
-            return Ok(Ok(value));
+            return Ok(GetResult::Some(value));
         }
 
         value = self
@@ -82,23 +82,23 @@ impl ConfigBag {
             .transpose()
             .with_context(|| format!("error parsing environment variable `{env_var}`"))?;
         if let Some(value) = value {
-            return Ok(Ok(value));
+            return Ok(GetResult::Some(value));
         }
 
         for (path, table) in &self.files {
             if let Some(value) = table.get(&key) {
-                return T::deserialize(value.clone())
-                    .map(Result::Ok)
-                    .with_context(|| {
+                return Ok(GetResult::Some(
+                    T::deserialize(value.clone()).with_context(|| {
                         format!(
                             "error parsing value for key `{key}` in config file `{}`",
                             path.to_string_lossy()
                         )
-                    });
+                    })?,
+                ));
             }
         }
 
-        Ok(Err(KeyNames { key, env_var }))
+        Ok(GetResult::None { key, env_var })
     }
 
     pub fn get<T>(&self, field: &str) -> Result<T>
@@ -108,8 +108,8 @@ impl ConfigBag {
     {
         match self.get_internal(field) {
             Err(err) => Err(err),
-            Ok(Ok(v)) => Ok(v),
-            Ok(Err(KeyNames { key, env_var })) => Err(anyhow!(
+            Ok(GetResult::Some(v)) => Ok(v),
+            Ok(GetResult::None { key, env_var }) => Err(anyhow!(
                 "config value `{key}` must be set via `--{key}` command-line option, \
                 `{env_var}` environment variable, or `{key}` key in config file"
             )),
@@ -122,8 +122,10 @@ impl ConfigBag {
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
         F: FnMut() -> T,
     {
-        self.get_internal(field)
-            .map(|v| v.unwrap_or_else(|_| default()))
+        self.get_internal(field).map(|v| match v {
+            GetResult::Some(v) => v,
+            GetResult::None { .. } => default(),
+        })
     }
 
     pub fn get_option<T>(&self, field: &str) -> Result<Option<T>>
@@ -131,7 +133,10 @@ impl ConfigBag {
         T: FromStr + for<'a> Deserialize<'a>,
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
-        self.get_internal(field).map(Result::ok)
+        self.get_internal(field).map(|v| match v {
+            GetResult::Some(v) => Some(v),
+            GetResult::None { .. } => None,
+        })
     }
 
     pub fn get_flag<T>(&self, field: &str) -> Result<Option<T>>
