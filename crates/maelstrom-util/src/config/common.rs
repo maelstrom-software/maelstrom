@@ -2,6 +2,7 @@ use bytesize::ByteSize;
 use clap::ValueEnum;
 use derive_more::From;
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 use slog::Level;
 use std::{
     error,
@@ -13,9 +14,9 @@ use std::{
 };
 use strum::EnumString;
 
+#[serde_as]
 #[derive(Clone, Copy, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct BrokerAddr(SocketAddr);
+pub struct BrokerAddr(#[serde_as(as = "DisplayFromStr")] SocketAddr);
 
 impl BrokerAddr {
     pub fn new(inner: SocketAddr) -> Self {
@@ -28,14 +29,6 @@ impl BrokerAddr {
 
     pub fn into_inner(self) -> SocketAddr {
         self.0
-    }
-}
-
-impl TryFrom<String> for BrokerAddr {
-    type Error = <Self as FromStr>::Err;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::from_str(value.as_str())
     }
 }
 

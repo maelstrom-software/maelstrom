@@ -554,7 +554,7 @@ impl TryFromProtoBuf for maelstrom_util::config::common::BrokerAddr {
     type ProtoBufType = String;
 
     fn try_from_proto_buf(v: String) -> Result<Self> {
-        Ok(v.try_into()?)
+        Ok(v.parse()?)
     }
 }
 

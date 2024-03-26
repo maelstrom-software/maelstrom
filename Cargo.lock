@@ -2966,6 +2966,7 @@ dependencies = [
  "maelstrom-base",
  "rand",
  "serde",
+ "serde_with",
  "sha2",
  "slog",
  "strum",
