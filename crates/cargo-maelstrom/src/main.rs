@@ -69,13 +69,8 @@ pub fn main() -> Result<ExitCode> {
         args.remove(1);
     }
 
-    let (config, extra_options): (Config, ExtraCommandLineOptions) =
-        maelstrom_util::config::new_config_with_extra_from_args(
-            command!(),
-            "maelstrom/cargo-maelstrom",
-            "CARGO_MAELSTROM",
-            args,
-        )?;
+    let (config, extra_options): (_, ExtraCommandLineOptions) =
+        Config::new_with_extra_from_args("maelstrom/cargo-maelstrom", "CARGO_MAELSTROM", args)?;
 
     let list_action = match (
         extra_options.list.tests,

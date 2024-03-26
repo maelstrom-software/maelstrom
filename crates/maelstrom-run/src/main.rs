@@ -1,5 +1,4 @@
 use anyhow::Result;
-use clap::command;
 use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
@@ -100,8 +99,7 @@ fn cache_dir() -> PathBuf {
 }
 
 fn main() -> Result<ExitCode> {
-    let config =
-        maelstrom_util::config::new_config::<Config>(command!(), "maelstrom/run", "MAELSTROM_RUN")?;
+    let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 

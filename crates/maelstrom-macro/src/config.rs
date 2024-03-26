@@ -1,5 +1,6 @@
 use darling::{ast::Data, FromDeriveInput, FromField};
-use proc_macro2::Span;
+use proc_macro2::{Span, TokenStream};
+use quote::quote;
 use syn::{
     parse_quote, Attribute, DeriveInput, Expr, ExprLit, Ident, Item, ItemImpl, Lit, Meta,
     MetaNameValue, Path, Result, Type,
@@ -285,8 +286,45 @@ impl ConfigInput {
             }
         })
     }
+
+    fn gen_new_impl_item(&self) -> Result<ItemImpl> {
+        let self_ident: Path = self.ident.clone().into();
+        Ok(parse_quote! {
+            impl #self_ident {
+                pub fn new(
+                    base_directories_prefix: &'static str,
+                    env_var_prefix: &'static str,
+                ) -> ::anyhow::Result<Self> {
+                    ::maelstrom_util::config::new_config(
+                        ::clap::command!(), base_directories_prefix, env_var_prefix,
+                    )
+                }
+
+                pub fn new_with_extra_from_args<U, AI, AT>(
+                    base_directories_prefix: &'static str,
+                    env_var_prefix: &'static str,
+                    args: AI,
+                ) -> ::anyhow::Result<(Self, U)>
+                where
+                    U: ::clap::Args,
+                    AI: ::std::iter::IntoIterator<Item = AT>,
+                    AT: ::std::convert::Into<::std::ffi::OsString> + ::std::clone::Clone,
+                {
+                    ::maelstrom_util::config::new_config_with_extra_from_args(
+                        ::clap::command!(), base_directories_prefix, env_var_prefix, args,
+                    )
+                }
+            }
+        })
+    }
 }
 
-pub fn main(input: DeriveInput) -> Result<ItemImpl> {
-    ConfigInput::from_derive_input(&input)?.gen_config_impl_item()
+pub fn main(input: DeriveInput) -> Result<TokenStream> {
+    let input = ConfigInput::from_derive_input(&input)?;
+    let config_impl = input.gen_config_impl_item()?;
+    let new_impl = input.gen_new_impl_item()?;
+    Ok(quote! {
+        #config_impl
+        #new_impl
+    })
 }

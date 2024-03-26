@@ -1,5 +1,4 @@
 use anyhow::{Context as _, Result};
-use clap::command;
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
 };
@@ -79,11 +78,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 }
 
 fn main() -> Result<()> {
-    let config = maelstrom_util::config::new_config::<Config>(
-        command!(),
-        "maelstrom/worker",
-        "MAELSTROM_WORKER",
-    )?;
+    let config = Config::new("maelstrom/worker", "MAELSTROM_WORKER")?;
     clone_into_pid_and_user_namespace()?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();

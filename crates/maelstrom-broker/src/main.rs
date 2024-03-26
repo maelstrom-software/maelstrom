@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use clap::command;
 use maelstrom_broker::config::Config;
 use slog::{info, o, Drain, LevelFilter, Logger};
 use slog_async::Async;
@@ -11,11 +10,7 @@ use std::{
 use tokio::{net::TcpListener, runtime::Runtime};
 
 fn main() -> Result<()> {
-    let config = maelstrom_util::config::new_config::<Config>(
-        command!(),
-        "maelstrom/broker",
-        "MAELSTROM_BROKER",
-    )?;
+    let config = Config::new("maelstrom/broker", "MAELSTROM_BROKER")?;
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
