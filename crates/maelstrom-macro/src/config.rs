@@ -52,19 +52,19 @@ impl ConfigStructField {
     fn default_as_string_option(&self) -> Expr {
         match self.default() {
             DefaultValue::Closure(closure) => {
-                parse_quote!(Some((#closure)(base_directories).to_string()))
+                parse_quote!(::std::option::Option::Some(::std::string::ToString::to_string(&(#closure)(base_directories))))
             }
             DefaultValue::Expression(expr) => {
-                parse_quote!(Some((#expr).to_string()))
+                parse_quote!(::std::option::Option::Some(::std::string::ToString::to_string(&(#expr))))
             }
-            DefaultValue::None => parse_quote!(None),
+            DefaultValue::None => parse_quote!(::std::option::Option::None),
         }
     }
 
     fn short(&self) -> Expr {
         match &self.short {
-            Some(short) => parse_quote!(Some(#short)),
-            None => parse_quote!(None),
+            Some(short) => parse_quote!(::std::option::Option::Some(#short)),
+            None => parse_quote!(::std::option::Option::None),
         }
     }
 
@@ -107,7 +107,8 @@ impl ConfigStructField {
         let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
-            let builder = builder.value(
+            let builder = ::maelstrom_util::config::CommandBuilder::value(
+                builder,
                 #name,
                 #short,
                 #value_name,
@@ -122,7 +123,8 @@ impl ConfigStructField {
         let short = self.short();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
-            let builder = builder.flag_value(
+            let builder = ::maelstrom_util::config::CommandBuilder::flag_value(
+                builder,
                 #name,
                 #short,
                 #doc,
@@ -137,7 +139,8 @@ impl ConfigStructField {
         let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
-            let builder = builder.value(
+            let builder = ::maelstrom_util::config::CommandBuilder::value(
+                builder,
                 #name,
                 #short,
                 #value_name,
@@ -150,14 +153,8 @@ impl ConfigStructField {
     fn gen_flatten_add_command_line_options_call(&self) -> Expr {
         let field_type = &self.ty;
         parse_quote! {
-            let builder = #field_type::add_command_line_options(builder, base_directories)
-        }
-    }
-
-    fn gen_flatten_from_config_bag_call(&self) -> Expr {
-        let field_type = &self.ty;
-        parse_quote! {
-            #field_type::from_config_bag(config_bag, base_directories)?
+            let builder = <#field_type as ::maelstrom_util::config::Config>
+                ::add_command_line_options(builder, base_directories)
         }
     }
 
@@ -166,30 +163,43 @@ impl ConfigStructField {
         match self.default() {
             DefaultValue::Closure(closure) => {
                 parse_quote! {
-                    config_bag.get_or_else(#name, || (#closure)(base_directories).try_into().unwrap())?
+                    ::maelstrom_util::config::ConfigBag::get_or_else(
+                        &config_bag, #name, || (#closure)(base_directories).try_into().unwrap())?
                 }
             }
             DefaultValue::Expression(expr) => {
                 parse_quote! {
-                    config_bag.get_or_else(#name, || #expr.try_into().unwrap())?
+                    ::maelstrom_util::config::ConfigBag::get_or_else(
+                        &config_bag, #name, || #expr.try_into().unwrap())?
                 }
             }
-            DefaultValue::None => parse_quote!(config_bag.get(#name)?),
+            DefaultValue::None => parse_quote! {
+                ::maelstrom_util::config::ConfigBag::get(&config_bag, #name)?
+            },
         }
     }
 
     fn gen_config_bag_get_flag_call(&self) -> Expr {
         let name = self.ident().to_string();
-        let field_type = &self.ty;
         parse_quote! {
-            config_bag.get_flag(#name)?.unwrap_or(#field_type::from(false))
+            ::std::option::Option::unwrap_or(
+                ::maelstrom_util::config::ConfigBag::get_flag(&config_bag, #name)?,
+                ::std::convert::From::from(false))
         }
     }
 
     fn gen_config_bag_get_option_call(&self) -> Expr {
         let name = self.ident().to_string();
         parse_quote! {
-            config_bag.get_option(#name)?
+            ::maelstrom_util::config::ConfigBag::get_option(&config_bag, #name)?
+        }
+    }
+
+    fn gen_flatten_from_config_bag_call(&self) -> Expr {
+        let field_type = &self.ty;
+        parse_quote! {
+            <#field_type as ::maelstrom_util::config::Config>::from_config_bag(
+                config_bag, base_directories)?
         }
     }
 }
@@ -244,10 +254,7 @@ impl ConfigInput {
         let Data::Struct(ref fields) = self.data else {
             panic!()
         };
-        let field_names = fields
-            .fields
-            .iter()
-            .map(ConfigStructField::ident);
+        let field_names = fields.fields.iter().map(ConfigStructField::ident);
         let field_exprs = fields.fields.iter().map(|field| {
             if field.flatten {
                 field.gen_flatten_from_config_bag_call()
