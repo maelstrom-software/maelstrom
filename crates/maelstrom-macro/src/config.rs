@@ -3,7 +3,7 @@ use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{
     parse_quote, Attribute, DeriveInput, Expr, ExprLit, Ident, Item, ItemImpl, Lit, Meta,
-    MetaNameValue, Path, Result, Type,
+    MetaNameValue, Path, Result, Type, Visibility,
 };
 
 enum DefaultValue<'a> {
@@ -209,6 +209,7 @@ impl ConfigStructField {
 #[darling(attributes(config))]
 struct ConfigInput {
     ident: Ident,
+    vis: Visibility,
     data: darling::ast::Data<(), ConfigStructField>,
 }
 
@@ -292,9 +293,10 @@ impl ConfigInput {
 
     fn gen_new_impl_item(&self) -> Result<ItemImpl> {
         let self_ident: Path = self.ident.clone().into();
+        let vis = &self.vis;
         Ok(parse_quote! {
             impl #self_ident {
-                pub fn new(
+                #vis fn new(
                     base_directories_prefix: &'static str,
                     env_var_prefix: &'static str,
                 ) -> ::anyhow::Result<Self> {
@@ -303,7 +305,7 @@ impl ConfigInput {
                     )
                 }
 
-                pub fn new_with_extra_from_args<U, AI, AT>(
+                #vis fn new_with_extra_from_args<U, AI, AT>(
                     base_directories_prefix: &'static str,
                     env_var_prefix: &'static str,
                     args: AI,
