@@ -49,6 +49,18 @@ impl ConfigStructField {
         }
     }
 
+    fn default_as_string_option(&self) -> Expr {
+        match self.default() {
+            DefaultValue::Closure(closure) => {
+                parse_quote!(Some((#closure)(base_directories).to_string()))
+            }
+            DefaultValue::Expression(expr) => {
+                parse_quote!(Some((#expr).to_string()))
+            }
+            DefaultValue::None => parse_quote!(None),
+        }
+    }
+
     fn short(&self) -> Expr {
         match &self.short {
             Some(short) => parse_quote!(Some(#short)),
@@ -92,15 +104,7 @@ impl ConfigStructField {
         let name = self.ident().to_string();
         let short = self.short();
         let value_name = self.value_name()?;
-        let default: Expr = match self.default() {
-            DefaultValue::Closure(closure) => {
-                parse_quote!(Some((#closure)(base_directories).to_string()))
-            }
-            DefaultValue::Expression(expr) => {
-                parse_quote!(Some((#expr).to_string()))
-            }
-            DefaultValue::None => parse_quote!(None),
-        };
+        let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = builder.value(
@@ -130,15 +134,7 @@ impl ConfigStructField {
         let name = self.ident().to_string();
         let short = self.short();
         let value_name = self.value_name()?;
-        let default: Expr = match self.default() {
-            DefaultValue::Closure(closure) => {
-                parse_quote!(Some((#closure)(base_directories).to_string()))
-            }
-            DefaultValue::Expression(expr) => {
-                parse_quote!(Some((#expr).to_string()))
-            }
-            DefaultValue::None => parse_quote!(None),
-        };
+        let default = self.default_as_string_option();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = builder.value(
