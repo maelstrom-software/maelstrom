@@ -180,8 +180,8 @@ impl LayerFs {
 #[async_trait]
 impl FuseFileSystem for LayerFs {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
-        let name = name.to_str().ok_or(Errno::EINVAL)?;
-        let parent = FileId::try_from(parent).map_err(|_| Errno::EINVAL)?;
+        let name = to_einval(self.log.clone(), name.to_str().ok_or("invalid name"))?;
+        let parent = to_einval(self.log.clone(), FileId::try_from(parent))?;
         let mut reader = to_eio(
             self.log.clone(),
             DirectoryDataReader::new(self, parent).await,
@@ -197,7 +197,7 @@ impl FuseFileSystem for LayerFs {
     }
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
-        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
             FileMetadataReader::new(self, file.layer()).await,
@@ -233,7 +233,7 @@ impl FuseFileSystem for LayerFs {
         _flags: i32,
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
-        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
             FileMetadataReader::new(self, file.layer()).await,
@@ -245,7 +245,7 @@ impl FuseFileSystem for LayerFs {
         match data {
             FileData::Empty => Ok(ReadResponse { data: vec![] }),
             FileData::Inline(inline) => {
-                let offset = usize::try_from(offset).map_err(|_| Errno::EINVAL)?;
+                let offset = to_einval(self.log.clone(), usize::try_from(offset))?;
                 if offset >= inline.len() {
                     return Err(Errno::EINVAL);
                 }
@@ -294,7 +294,7 @@ impl FuseFileSystem for LayerFs {
         _fh: u64,
         offset: i64,
     ) -> ErrnoResult<Self::ReadDirStream<'a>> {
-        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let reader = to_eio(self.log.clone(), DirectoryDataReader::new(self, file).await)?;
         Ok(to_eio(
             self.log.clone(),
@@ -305,7 +305,7 @@ impl FuseFileSystem for LayerFs {
     }
 
     async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {
-        let file = FileId::try_from(ino).map_err(|_| Errno::EINVAL)?;
+        let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
             FileMetadataReader::new(self, file.layer()).await,
