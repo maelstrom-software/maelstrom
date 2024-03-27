@@ -1,4 +1,4 @@
-pub use crate::fs::Metadata;
+pub use crate::fs::{GetPath, Metadata};
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
 use futures_lite::stream::StreamExt;
@@ -8,6 +8,33 @@ use std::path::{Path, PathBuf};
 use std::pin::{pin, Pin};
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
+
+impl<T> GetPath for tokio::io::BufReader<T>
+where
+    T: GetPath + AsyncRead,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
+
+impl<T> GetPath for tokio::io::BufWriter<T>
+where
+    T: GetPath + AsyncWrite,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
+
+impl<T> GetPath for tokio::io::BufStream<T>
+where
+    T: GetPath + AsyncRead + AsyncWrite,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
 
 pub struct Fs;
 
@@ -373,6 +400,12 @@ pub struct File<'fs> {
     path: PathBuf,
     #[allow(dead_code)]
     fs: &'fs Fs,
+}
+
+impl GetPath for File<'_> {
+    fn path(&self) -> &Path {
+        self.path()
+    }
 }
 
 impl<'fs> File<'fs> {

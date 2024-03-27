@@ -1,5 +1,5 @@
 use crate::ty::{
-    decode_file, encode_file, AttributesId, FileAttributes, FileData, FileId, FileTableEntry,
+    decode_path, encode_path, AttributesId, FileAttributes, FileData, FileId, FileTableEntry,
     FileType, LayerFsVersion, LayerId,
 };
 use crate::LayerFs;
@@ -28,14 +28,14 @@ impl<'fs> FileMetadataReader<'fs> {
             .data_fs
             .open_file(layer_fs.file_table_path(layer_id).await?)
             .await?;
-        let _header: FileTableHeader = decode_file(&mut file_table).await?;
+        let _header: FileTableHeader = decode_path(&mut file_table).await?;
         let file_table_start = file_table.stream_position().await?;
 
         let mut attr_table = layer_fs
             .data_fs
             .open_file(layer_fs.attributes_table_path(layer_id).await?)
             .await?;
-        let _header: AttributesTableHeader = decode_file(&mut attr_table).await?;
+        let _header: AttributesTableHeader = decode_path(&mut attr_table).await?;
         let attr_table_start = attr_table.stream_position().await?;
         Ok(Self {
             file_table,
@@ -52,14 +52,14 @@ impl<'fs> FileMetadataReader<'fs> {
         self.file_table
             .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
-        let entry: FileTableEntry = decode_file(&mut self.file_table).await?;
+        let entry: FileTableEntry = decode_path(&mut self.file_table).await?;
 
         self.attr_table
             .seek(SeekFrom::Start(
                 self.attr_table_start + entry.attr_id.offset() - 1,
             ))
             .await?;
-        let attrs: FileAttributes = decode_file(&mut self.attr_table).await?;
+        let attrs: FileAttributes = decode_path(&mut self.attr_table).await?;
 
         Ok((entry.kind, attrs))
     }
@@ -70,7 +70,7 @@ impl<'fs> FileMetadataReader<'fs> {
         self.file_table
             .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
-        let entry: FileTableEntry = decode_file(&mut self.file_table).await?;
+        let entry: FileTableEntry = decode_path(&mut self.file_table).await?;
 
         Ok((entry.kind, entry.data))
     }
@@ -103,12 +103,12 @@ impl<'fs> FileMetadataWriter<'fs> {
         attributes_table_path: &Path,
     ) -> Result<Self> {
         let mut file_table = data_fs.create_file_read_write(file_table_path).await?;
-        encode_file(&mut file_table, &FileTableHeader::default()).await?;
+        encode_path(&mut file_table, &FileTableHeader::default()).await?;
         let file_table_start = file_table.stream_position().await?;
         let mut attr_table = data_fs
             .create_file_read_write(attributes_table_path)
             .await?;
-        encode_file(&mut attr_table, &AttributesTableHeader::default()).await?;
+        encode_path(&mut attr_table, &AttributesTableHeader::default()).await?;
         let attr_table_start = file_table.stream_position().await?;
 
         Ok(Self {
@@ -130,7 +130,7 @@ impl<'fs> FileMetadataWriter<'fs> {
             self.attr_table.stream_position().await? - self.attr_table_start + 1,
         )
         .unwrap();
-        encode_file(&mut self.attr_table, &attrs).await?;
+        encode_path(&mut self.attr_table, &attrs).await?;
 
         let entry = FileTableEntry {
             kind,
@@ -142,7 +142,7 @@ impl<'fs> FileMetadataWriter<'fs> {
             u32::try_from(self.file_table.stream_position().await? - self.file_table_start + 1)
                 .unwrap();
         let file_id = FileId::new(self.layer_id, NonZeroU32::new(offset).unwrap());
-        encode_file(&mut self.file_table, &entry).await?;
+        encode_path(&mut self.file_table, &entry).await?;
 
         Ok(file_id)
     }
@@ -155,13 +155,13 @@ impl<'fs> FileMetadataWriter<'fs> {
         self.file_table
             .seek(SeekFrom::Start(self.file_table_start + id.offset_u64() - 1))
             .await?;
-        let entry: FileTableEntry = decode_file(&mut self.file_table).await?;
+        let entry: FileTableEntry = decode_path(&mut self.file_table).await?;
         self.attr_table
             .seek(SeekFrom::Start(
                 self.attr_table_start + entry.attr_id.offset() - 1,
             ))
             .await?;
-        encode_file(&mut self.attr_table, &attrs).await?;
+        encode_path(&mut self.attr_table, &attrs).await?;
 
         self.file_table
             .seek(SeekFrom::Start(old_file_table_pos))

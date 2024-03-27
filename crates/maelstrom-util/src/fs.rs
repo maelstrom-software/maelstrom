@@ -6,6 +6,42 @@ use std::{
     path::{Path, PathBuf},
 };
 
+pub trait GetPath {
+    fn path(&self) -> &Path;
+}
+
+impl<'a, T: GetPath> GetPath for &'a mut T {
+    fn path(&self) -> &Path {
+        let self_: &T = self;
+        self_.path()
+    }
+}
+
+impl<'a, T: GetPath> GetPath for &'a T {
+    fn path(&self) -> &Path {
+        let self_: &T = self;
+        self_.path()
+    }
+}
+
+impl<T> GetPath for io::BufReader<T>
+where
+    T: GetPath + io::Read,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
+
+impl<T> GetPath for io::BufWriter<T>
+where
+    T: GetPath + io::Write,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
+
 pub struct Fs;
 
 impl Fs {
@@ -400,6 +436,12 @@ pub struct File<'fs> {
     path: PathBuf,
     #[allow(dead_code)]
     fs: &'fs Fs,
+}
+
+impl GetPath for File<'_> {
+    fn path(&self) -> &Path {
+        self.path()
+    }
 }
 
 impl<'fs> File<'fs> {
