@@ -49,6 +49,13 @@ impl ConfigStructField {
         }
     }
 
+    fn short(&self) -> Expr {
+        match &self.short {
+            Some(short) => parse_quote!(Some(#short)),
+            None => parse_quote!(None),
+        }
+    }
+
     fn doc_comment(&self) -> Result<String> {
         let doc = self
             .attrs
@@ -83,10 +90,7 @@ impl ConfigStructField {
 
     fn gen_builder_value_call(&self) -> Result<Expr> {
         let name = self.ident().to_string();
-        let short: Expr = match &self.short {
-            Some(short) => parse_quote!(Some(#short)),
-            None => parse_quote!(None),
-        };
+        let short = self.short();
         let value_name = self.value_name()?;
         let default: Expr = match self.default() {
             DefaultValue::Closure(closure) => {
@@ -111,10 +115,7 @@ impl ConfigStructField {
 
     fn gen_builder_flag_value_call(&self) -> Result<Expr> {
         let name = self.ident().to_string();
-        let short: Expr = match &self.short {
-            Some(short) => parse_quote!(Some(#short)),
-            None => parse_quote!(None),
-        };
+        let short = self.short();
         let doc = self.doc_comment()?;
         Ok(parse_quote! {
             let builder = builder.flag_value(
@@ -127,10 +128,7 @@ impl ConfigStructField {
 
     fn gen_builder_option_value_call(&self) -> Result<Expr> {
         let name = self.ident().to_string();
-        let short: Expr = match &self.short {
-            Some(short) => parse_quote!(Some(#short)),
-            None => parse_quote!(None),
-        };
+        let short = self.short();
         let value_name = self.value_name()?;
         let default: Expr = match self.default() {
             DefaultValue::Closure(closure) => {
