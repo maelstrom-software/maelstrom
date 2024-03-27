@@ -247,8 +247,7 @@ impl ConfigInput {
         let field_names = fields
             .fields
             .iter()
-            .map(ConfigStructField::ident)
-            .map(Clone::clone);
+            .map(ConfigStructField::ident);
         let field_exprs = fields.fields.iter().map(|field| {
             if field.flatten {
                 field.gen_flatten_from_config_bag_call()
