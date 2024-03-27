@@ -431,9 +431,27 @@ mod tests {
     fn get_config() -> ConfigBag {
         let args = Command::new("command")
             .arg(Arg::new("key-1").long("key-1").action(ArgAction::Set))
+            .arg(Arg::new("key-2").long("key-2").action(ArgAction::Set))
+            .arg(Arg::new("key-3").long("key-3").action(ArgAction::Set))
+            .arg(Arg::new("key-4").long("key-4").action(ArgAction::Set))
             .arg(
                 Arg::new("int-key-1")
                     .long("int-key-1")
+                    .action(ArgAction::Set),
+            )
+            .arg(
+                Arg::new("int-key-2")
+                    .long("int-key-2")
+                    .action(ArgAction::Set),
+            )
+            .arg(
+                Arg::new("int-key-3")
+                    .long("int-key-3")
+                    .action(ArgAction::Set),
+            )
+            .arg(
+                Arg::new("int-key-4")
+                    .long("int-key-4")
                     .action(ArgAction::Set),
             )
             .arg(
@@ -464,7 +482,7 @@ mod tests {
             ]);
         ConfigBag::new(
             args,
-            "prefix_",
+            "PREFIX_",
             [
                 ("PREFIX_KEY_2", "value-2"),
                 ("PREFIX_INT_KEY_2", "2"),
