@@ -17,9 +17,12 @@ enum DefaultValue<'a> {
 struct ConfigStructField {
     ident: Option<Ident>,
     ty: Type,
-    flag: Option<()>,
-    option: Option<()>,
-    flatten: Option<()>,
+    #[darling(default)]
+    flag: bool,
+    #[darling(default)]
+    option: bool,
+    #[darling(default)]
+    flatten: bool,
     short: Option<char>,
     value_name: Option<String>,
     default: Option<Expr>,
@@ -220,11 +223,11 @@ impl ConfigInput {
                         let builder = builder.next_help_heading(#heading)
                     }))
                 }
-                exprs.push(if field.flatten.is_some() {
+                exprs.push(if field.flatten {
                     Ok(field.gen_flatten_add_command_line_options_call())
-                } else if field.flag.is_some() {
+                } else if field.flag {
                     field.gen_builder_flag_value_call()
-                } else if field.option.is_some() {
+                } else if field.option {
                     field.gen_builder_option_value_call()
                 } else {
                     field.gen_builder_value_call()
@@ -253,11 +256,11 @@ impl ConfigInput {
             .map(ConfigStructField::ident)
             .map(Clone::clone);
         let field_exprs = fields.fields.iter().map(|field| {
-            if field.flatten.is_some() {
+            if field.flatten {
                 field.gen_flatten_from_config_bag_call()
-            } else if field.flag.is_some() {
+            } else if field.flag {
                 field.gen_config_bag_get_flag_call()
-            } else if field.option.is_some() {
+            } else if field.option {
                 field.gen_config_bag_get_option_call()
             } else {
                 field.gen_config_bag_get_call()
