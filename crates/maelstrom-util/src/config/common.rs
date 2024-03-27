@@ -89,13 +89,6 @@ impl FromStr for CacheRoot {
     }
 }
 
-impl TryFrom<&str> for CacheRoot {
-    type Error = <CacheRoot as FromStr>::Err;
-    fn try_from(from: &str) -> Result<Self, Self::Error> {
-        CacheRoot::from_str(from)
-    }
-}
-
 impl TryFrom<String> for CacheRoot {
     type Error = <CacheRoot as FromStr>::Err;
     fn try_from(from: String) -> Result<Self, Self::Error> {
