@@ -96,29 +96,50 @@ impl TryFrom<String> for CacheRoot {
     }
 }
 
-#[derive(Deserialize, From)]
-#[serde(from = "u64")]
-pub struct CacheSize(u64);
+#[derive(Debug)]
+pub struct StringError(pub String);
+
+impl Display for StringError {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl error::Error for StringError {}
+
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct CacheSize(#[serde(with = "bytesize_serde")] ByteSize);
 
 impl CacheSize {
-    pub fn into_inner(self) -> u64 {
-        self.0
+    pub fn as_bytes(self) -> u64 {
+        self.0 .0
+    }
+}
+
+impl From<ByteSize> for CacheSize {
+    fn from(inner: ByteSize) -> Self {
+        Self(inner)
     }
 }
 
 impl Debug for CacheSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        Debug::fmt(&ByteSize::b(self.0), f)
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl Display for CacheSize {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
 impl FromStr for CacheSize {
-    type Err = CacheSizeFromStrError;
-    fn from_str(slots: &str) -> Result<Self, Self::Err> {
-        Ok(Self::from(
-            ByteSize::from_str(slots)
-                .map_err(CacheSizeFromStrError)?
-                .as_u64(),
+    type Err = StringError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(
+            <ByteSize as FromStr>::from_str(s).map_err(StringError)?,
         ))
     }
 }
@@ -153,5 +174,47 @@ impl LogLevel {
             LogLevel::Info => slog::Level::Info,
             LogLevel::Debug => slog::Level::Debug,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Deserialize, Eq, PartialEq)]
+    struct TwoCacheSizes {
+        one: CacheSize,
+        two: CacheSize,
+    }
+
+    #[test]
+    fn cache_size() {
+        assert_eq!(
+            CacheSize::from(ByteSize::b(1234)),
+            CacheSize::from(ByteSize::b(1234))
+        );
+        assert_eq!(
+            format!("{:?}", CacheSize::from(ByteSize::b(1234))),
+            "1.2 KB"
+        );
+        assert_eq!(format!("{}", CacheSize::from(ByteSize::b(1234))), "1.2 KB");
+        assert_eq!(
+            CacheSize::from_str("10 MB").unwrap(),
+            CacheSize::from(ByteSize::mb(10))
+        );
+        let two_cache_sizes: TwoCacheSizes = toml::from_str(
+            r#"
+            one = 1000
+            two = "1.23 MB"
+        "#,
+        )
+        .unwrap();
+        assert_eq!(
+            two_cache_sizes,
+            TwoCacheSizes {
+                one: "1 kB".parse().unwrap(),
+                two: "1.23 MB".parse().unwrap()
+            }
+        );
     }
 }

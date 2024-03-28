@@ -226,7 +226,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// `bytes_used_target` is the goal on-disk size for the cache. The cache will periodically grow
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
-    pub fn new(mut fs: FsT, root: CacheRoot, bytes_used_target: CacheSize, log: Logger) -> Self {
+    pub fn new(mut fs: FsT, root: CacheRoot, size: CacheSize, log: Logger) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
 
@@ -254,7 +254,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_target: bytes_used_target.into_inner(),
+            bytes_used_target: size.as_bytes(),
             log,
         }
     }
@@ -538,7 +538,7 @@ mod tests {
             let cache = Cache::new(
                 test_cache_fs,
                 PathBuf::from("/z").into(),
-                bytes_used_target.into(),
+                ByteSize::b(bytes_used_target).into(),
                 Logger::root(Discard, o!()),
             );
             Fixture { messages, cache }

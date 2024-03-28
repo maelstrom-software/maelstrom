@@ -826,6 +826,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a3e368af43e418a04d52505cf3dbc23dda4e3407ae2fa99fd0e4f308ce546acc"
 
 [[package]]
+name = "bytesize-serde"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "86d1eb2fd2668859e9785b99700c66b7ea9fdeda35d99f95827a4e5493440178"
+dependencies = [
+ "bytesize",
+ "serde",
+]
+
+[[package]]
 name = "c_str_macro"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2969,6 +2979,7 @@ dependencies = [
  "async-walkdir",
  "byteorder",
  "bytesize",
+ "bytesize-serde",
  "clap",
  "concat-idents",
  "derive_more",
@@ -3024,6 +3035,7 @@ dependencies = [
  "assert_matches",
  "bumpalo",
  "bytesize",
+ "bytesize-serde",
  "c_str_macro",
  "clap",
  "colored-diff",

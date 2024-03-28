@@ -245,7 +245,7 @@ async fn output_reader(
     stream: impl AsyncRead + std::marker::Unpin,
 ) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
-    let mut take = stream.take(inline_limit.into_inner());
+    let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
     let truncated = io::copy(&mut take.into_inner(), &mut io::sink()).await?;
@@ -753,6 +753,7 @@ mod tests {
     use super::*;
     use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
+    use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::async_fs;
@@ -862,7 +863,7 @@ mod tests {
         fn new(spec: JobSpec, mount: TarMount) -> Self {
             Test {
                 spec,
-                inline_limit: InlineLimit::from(1000),
+                inline_limit: InlineLimit::from(ByteSize::b(1000)),
                 expected_status: JobStatus::Exited(0),
                 expected_stdout: JobOutputResult::None,
                 expected_stderr: JobOutputResult::None,
@@ -990,7 +991,7 @@ mod tests {
     async fn stdout_inline_limit_0() {
         Test::from_spec(bash_spec("echo a"))
             .await
-            .inline_limit(0)
+            .inline_limit(ByteSize::b(0))
             .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b""),
                 truncated: 2,
@@ -1004,7 +1005,7 @@ mod tests {
     async fn stdout_inline_limit_1() {
         Test::from_spec(bash_spec("echo a"))
             .await
-            .inline_limit(1)
+            .inline_limit(ByteSize::b(1))
             .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b"a"),
                 truncated: 1,
@@ -1018,7 +1019,7 @@ mod tests {
     async fn stdout_inline_limit_2() {
         Test::from_spec(bash_spec("echo a"))
             .await
-            .inline_limit(2)
+            .inline_limit(ByteSize::b(2))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
             .await;
@@ -1029,7 +1030,7 @@ mod tests {
     async fn stdout_inline_limit_3() {
         Test::from_spec(bash_spec("echo a"))
             .await
-            .inline_limit(3)
+            .inline_limit(ByteSize::b(3))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
             .await;
@@ -1040,7 +1041,7 @@ mod tests {
     async fn stderr_inline_limit_0() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
-            .inline_limit(0)
+            .inline_limit(ByteSize::b(0))
             .expected_stderr(JobOutputResult::Truncated {
                 first: boxed_u8!(b""),
                 truncated: 2,
@@ -1054,7 +1055,7 @@ mod tests {
     async fn stderr_inline_limit_1() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
-            .inline_limit(1)
+            .inline_limit(ByteSize::b(1))
             .expected_stderr(JobOutputResult::Truncated {
                 first: boxed_u8!(b"a"),
                 truncated: 1,
@@ -1068,7 +1069,7 @@ mod tests {
     async fn stderr_inline_limit_2() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
-            .inline_limit(2)
+            .inline_limit(ByteSize::b(2))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
             .await;
@@ -1079,7 +1080,7 @@ mod tests {
     async fn stderr_inline_limit_3() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
-            .inline_limit(3)
+            .inline_limit(ByteSize::b(3))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
             .await;
@@ -1571,7 +1572,12 @@ mod tests {
                 tempfile::tempdir().unwrap().into_path()
             )
             .unwrap()
-            .start(&spec, 0.into(), |_| unreachable!(), |_| unreachable!()),
+            .start(
+                &spec,
+                ByteSize::b(0).into(),
+                |_| unreachable!(),
+                |_| unreachable!()
+            ),
             Err(JobError::Execution(_))
         );
         mount.umount_and_join().await

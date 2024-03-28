@@ -31,6 +31,7 @@ bracoxide = "0.1.3"
 bumpalo = { version = "3.14.0", features = ["collections"] }
 byteorder = "1.5.0"
 bytesize = "1.3.0"
+bytesize-serde = "0.2.1"
 c_str_macro = "1.0.3"
 camino = { version = "1.1.6", features = ["serde1"] }
 cargo_metadata = "0.18"

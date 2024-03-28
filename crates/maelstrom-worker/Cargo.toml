@@ -15,6 +15,7 @@ version.workspace = true
 anyhow.workspace = true
 bumpalo.workspace = true
 bytesize.workspace = true
+bytesize-serde.workspace = true
 c_str_macro.workspace = true
 clap.workspace = true
 derive_more.workspace = true

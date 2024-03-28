@@ -238,12 +238,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// cannot. If there are existing entries in the cache, this function will scan them and
     /// incorporate them into the new cache. If there are garbage files in the directories, likely
     /// from incomplete downloads in the previous instance, this function will remove them.
-    pub fn new(
-        mut fs: FsT,
-        root: CacheRoot,
-        bytes_used_target: CacheSize,
-        log: slog::Logger,
-    ) -> Self {
+    pub fn new(mut fs: FsT, root: CacheRoot, size: CacheSize, log: slog::Logger) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
 
@@ -261,7 +256,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
-            bytes_used_target: bytes_used_target.into_inner(),
+            bytes_used_target: size.as_bytes(),
             log,
         };
 
@@ -587,7 +582,7 @@ mod tests {
             let cache = Cache::new(
                 fs.clone(),
                 Path::new("/z").to_owned().into(),
-                bytes_used_target.into(),
+                ByteSize::b(bytes_used_target).into(),
                 slog::Logger::root(slog::Discard, slog::o!()),
             );
             Fixture { fs, cache }

@@ -1,8 +1,7 @@
 use anyhow::Result;
 use bytesize::ByteSize;
-use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::common::{BrokerAddr, CacheRoot, CacheSize, LogLevel};
+use maelstrom_util::config::common::{BrokerAddr, CacheRoot, CacheSize, LogLevel, StringError};
 use serde::Deserialize;
 use std::{
     error,
@@ -86,43 +85,42 @@ impl Display for SlotsFromStrError {
 
 impl error::Error for SlotsFromStrError {}
 
-#[derive(Clone, Copy, Deserialize, From)]
-#[serde(from = "u64")]
-pub struct InlineLimit(u64);
+#[derive(Clone, Copy, Deserialize, Eq, PartialEq)]
+#[serde(transparent)]
+pub struct InlineLimit(#[serde(with = "bytesize_serde")] ByteSize);
 
 impl InlineLimit {
-    pub fn into_inner(self) -> u64 {
-        self.0
+    pub fn as_bytes(self) -> u64 {
+        self.0 .0
+    }
+}
+
+impl From<ByteSize> for InlineLimit {
+    fn from(inner: ByteSize) -> Self {
+        Self(inner)
     }
 }
 
 impl Debug for InlineLimit {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), fmt::Error> {
-        Debug::fmt(&ByteSize::b(self.0), f)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Debug::fmt(&self.0, f)
     }
 }
 
-impl FromStr for InlineLimit {
-    type Err = InlineLimitFromStrError;
-    fn from_str(slots: &str) -> Result<Self, Self::Err> {
-        Ok(Self::from(
-            ByteSize::from_str(slots)
-                .map_err(InlineLimitFromStrError)?
-                .as_u64(),
-        ))
-    }
-}
-
-#[derive(Debug)]
-pub struct InlineLimitFromStrError(String);
-
-impl Display for InlineLimitFromStrError {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl Display for InlineLimit {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
     }
 }
 
-impl error::Error for InlineLimitFromStrError {}
+impl FromStr for InlineLimit {
+    type Err = StringError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(
+            <ByteSize as FromStr>::from_str(s).map_err(StringError)?,
+        ))
+    }
+}
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -143,12 +141,20 @@ pub struct Config {
     pub cache_root: CacheRoot,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative.
-    #[config(short = 's', value_name = "BYTES", default = "1_000_000_000")]
+    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
+    #[config(
+        short = 's',
+        value_name = "BYTES",
+        default = "bytesize::ByteSize::gb(1)"
+    )]
     pub cache_size: CacheSize,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(short = 'i', value_name = "BYTES", default = "1_000_000")]
+    #[config(
+        short = 'i',
+        value_name = "BYTES",
+        default = "bytesize::ByteSize::mb(1)"
+    )]
     pub inline_limit: InlineLimit,
 
     /// Minimum log level to output.

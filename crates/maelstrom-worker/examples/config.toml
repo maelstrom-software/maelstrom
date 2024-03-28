@@ -43,7 +43,12 @@ broker = "[::1]:1234"
 # via the MAELSTROM_WORKER_CACHE_SIZE environment variable.
 #
 # Default:
+# cache-size = "1 GB"
+#
+# Examples:
 # cache-size = 1000000000
+# cache-size = "1000000000"
+# cache-size = "1.2 GiB"
 
 # The maximum amount of bytes to return inline for captured stdout and stderr.
 #
@@ -52,7 +57,12 @@ broker = "[::1]:1234"
 # variable.
 #
 # Default:
+# inline-limit = "1 MB"
+#
+# Examples:
 # inline-limit = 1000000
+# inline-limit = "1000000"
+# inline-limit = "1.2 MiB"
 
 # The minimum log level to output.
 #

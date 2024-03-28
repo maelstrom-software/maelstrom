@@ -84,7 +84,11 @@ pub struct Config {
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
-    #[config(short = 's', value_name = "BYTES", default = "1_000_000_000")]
+    #[config(
+        short = 's',
+        value_name = "BYTES",
+        default = "bytesize::ByteSize::gb(1)"
+    )]
     pub cache_size: CacheSize,
 
     /// Minimum log level to output.
