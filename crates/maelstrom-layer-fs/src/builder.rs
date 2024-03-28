@@ -15,6 +15,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::path::Path;
 use std::pin::Pin;
 use tokio::io::{AsyncRead, AsyncSeek};
@@ -559,6 +560,7 @@ impl<'fs> DoubleFsWalk<'fs> {
 struct DirectoryDataWriterStack<'fs> {
     layer_fs: &'fs LayerFs,
     writers: Vec<(FileId, DirectoryDataWriter<'fs>)>,
+    seen: HashSet<FileId>,
 }
 
 #[anyhow_trace]
@@ -567,22 +569,25 @@ impl<'fs> DirectoryDataWriterStack<'fs> {
         Self {
             layer_fs,
             writers: vec![],
+            seen: HashSet::new(),
         }
     }
 
     async fn get_writer(&mut self, file_id: FileId) -> Result<&mut DirectoryDataWriter<'fs>> {
-        if self.writers.len() > 1 && self.writers[self.writers.len() - 2].0 == file_id {
-            let mut writer = self.writers.pop().unwrap().1;
-            writer.flush().await?;
+        if self.seen.contains(&file_id) {
+            while self.writers.last().unwrap().0 != file_id {
+                let (old_id, mut writer) = self.writers.pop().unwrap();
+                writer.flush().await?;
+                self.seen.remove(&old_id).assert_is_true();
+            }
             return Ok(&mut self.writers.last_mut().unwrap().1);
         }
 
-        if !self.writers.last().is_some_and(|(id, _)| *id == file_id) {
-            self.writers.push((
-                file_id,
-                DirectoryDataWriter::new(self.layer_fs, &self.layer_fs.data_fs, file_id).await?,
-            ));
-        }
+        self.writers.push((
+            file_id,
+            DirectoryDataWriter::new(self.layer_fs, &self.layer_fs.data_fs, file_id).await?,
+        ));
+        self.seen.insert(file_id).assert_is_true();
 
         return Ok(&mut self.writers.last_mut().unwrap().1);
     }
