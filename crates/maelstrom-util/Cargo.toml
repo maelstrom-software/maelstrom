@@ -25,6 +25,7 @@ futures.workspace = true
 globset.workspace = true
 heck.workspace = true
 indoc.workspace = true
+lru.workspace = true
 maelstrom-base.workspace = true
 serde.workspace = true
 serde_with.workspace = true
@@ -38,6 +39,7 @@ xdg.workspace = true
 
 [dev-dependencies]
 concat-idents.workspace = true
+maelstrom-simex.workspace = true
 rand.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread"] }

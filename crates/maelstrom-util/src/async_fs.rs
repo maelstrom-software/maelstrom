@@ -417,6 +417,14 @@ impl<'fs> File<'fs> {
         self.inner
     }
 
+    pub async fn try_clone(&self) -> Result<Self> {
+        Ok(Self {
+            inner: self.inner.try_clone().await?,
+            path: self.path.clone(),
+            fs: self.fs,
+        })
+    }
+
     pub async fn set_len(&self, size: u64) -> Result<()> {
         fs_inner_trampoline!(self, set_len, size)
     }

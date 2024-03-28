@@ -39,8 +39,7 @@ package.equals(maelstrom-client-process) ||
 package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||
 package.equals(maelstrom-layer-fs) ||
-package.equals(maelstrom-util) &&
-(name.starts_with(manifest::) || name.starts_with(fs::) || name.starts_with(async_fs::))"""
+package.equals(maelstrom-util)"""
 layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
