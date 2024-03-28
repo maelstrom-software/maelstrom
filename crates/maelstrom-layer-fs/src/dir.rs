@@ -7,6 +7,7 @@ use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use async_trait::async_trait;
 use maelstrom_util::async_fs::{File, Fs};
+use maelstrom_util::io::BufferedStream;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
 use std::borrow::BorrowMut;
@@ -15,19 +16,24 @@ use std::pin::Pin;
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
 pub struct DirectoryDataReader<'fs> {
-    stream: File<'fs>,
+    stream: BufferedStream<File<'fs>>,
     entry_begin: u64,
     length: u64,
 }
 
+const CHUNK_SIZE: usize = 4096;
+const CACHE_SIZE: usize = 2;
+
 #[anyhow_trace]
 impl<'fs> DirectoryDataReader<'fs> {
     pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
-        let mut stream = layer_fs
+        let file = layer_fs
             .data_fs
             .open_file(layer_fs.dir_data_path(file_id).await?)
             .await?;
-        let length = stream.metadata().await?.len();
+        let length = file.metadata().await?.len();
+        let mut stream =
+            BufferedStream::new(CHUNK_SIZE, CACHE_SIZE.try_into().unwrap(), file).await?;
         let _header: DirectoryEntryStorageHeader = decode_path(&mut stream).await?;
         let entry_begin = stream.stream_position().await?;
         Ok(Self {
@@ -116,7 +122,9 @@ type DirectoryEntry = AvlNode<String, DirectoryEntryData>;
 
 #[async_trait]
 #[anyhow_trace]
-impl<'fs, FileT: BorrowMut<File<'fs>> + Send> AvlStorage for DirectoryEntryStorage<FileT> {
+impl<'fs, FileT: BorrowMut<BufferedStream<File<'fs>>> + Send> AvlStorage
+    for DirectoryEntryStorage<FileT>
+{
     type Key = String;
     type Value = DirectoryEntryData;
 
@@ -202,7 +210,7 @@ pub type OrderedDirectoryStream<'fs> =
     Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send + 'fs>>;
 
 pub struct DirectoryDataWriter<'fs> {
-    tree: AvlTree<DirectoryEntryStorage<File<'fs>>>,
+    tree: AvlTree<DirectoryEntryStorage<BufferedStream<File<'fs>>>>,
 }
 
 #[anyhow_trace]
@@ -210,7 +218,12 @@ impl<'fs> DirectoryDataWriter<'fs> {
     pub async fn new(layer_fs: &LayerFs, data_fs: &'fs Fs, file_id: FileId) -> Result<Self> {
         let path = layer_fs.dir_data_path(file_id).await?;
         let existing = data_fs.exists(&path).await;
-        let mut stream = data_fs.open_or_create_file(path).await?;
+        let mut stream = BufferedStream::new(
+            CHUNK_SIZE,
+            CACHE_SIZE.try_into().unwrap(),
+            data_fs.open_or_create_file(path).await?,
+        )
+        .await?;
         if !existing {
             encode_path(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
         }

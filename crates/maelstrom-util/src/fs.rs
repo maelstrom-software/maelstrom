@@ -42,6 +42,15 @@ where
     }
 }
 
+impl<T> GetPath for crate::io::BufferedStream<T>
+where
+    T: GetPath,
+{
+    fn path(&self) -> &Path {
+        self.get_ref().path()
+    }
+}
+
 pub struct Fs;
 
 impl Fs {

@@ -440,6 +440,12 @@ impl<StreamT: AsyncSeek + Unpin> BufferedStream<StreamT> {
     }
 }
 
+impl<StreamT> BufferedStream<StreamT> {
+    pub fn get_ref(&self) -> &StreamT {
+        &self.stream
+    }
+}
+
 impl<StreamT: AsyncRead + AsyncWrite + AsyncSeek + Unpin> BufferedStream<StreamT> {
     fn attempt_cached_read(&mut self, dst: &mut ReadBuf<'_>) -> bool {
         let chunk_index = self.position / self.chunk_size as u64;
