@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### General
+### High-Level
 There were a lot of large changes in this release. At a high level:
 
 - Three synthetic layer types were added. This allows one to easily create
@@ -39,16 +39,23 @@ There were a lot of large changes in this release. At a high level:
   and fully support XDG. A side-effect of this is that some configuration
   values have changed their names or formats.
 
-### General
+### Jobs
 #### Added
 - Added support for job timeouts. When a job times out, the stdout and stderr
   are still returned to the client.
+- Added the `fuse` device (`/dev/fuse`).
 
 ### `cargo-maelstrom`
 #### Added
-- The `glob` layer type, which accepts a glob pattern. Matching files are added to that layer.
-- The `stubs` layer type. This makes it easy to create empty directories and files in a layer.
-- `symlinks` layer type added. This makes it easy to create symlinks in a layer.
+- Added the following layers types:
+  - `glob` layers are like `paths` layers, except you use glob patterns to specify the files to include.let you include files, like `paths`, except using The `glob` layer type, which accepts a glob pattern.
+  - `stubs` layers create empty files and directories. These are very useful
+    for ensuring mount points and device files exist.
+  - `symlinks` layers create symlinks.
+- Added the following options to the `glob` and `paths` layers:
+  - `follow-symlinks` will cause the generated layer to contain the target
+    value of symlinks instead of the symlinks themselves.
+  - `canonicalize`
 - `timeout` directive field which specifies the timeout in seconds. A value
   of 0 indicates no timeout.
   \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
