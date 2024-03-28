@@ -7,14 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### General
+There were a lot of large changes in this release. At a high level:
+
+- Three synthetic layer types were added. This allows one to easily create
+  container file systems with exactly the files and directories that are
+  necessary. These are: `glob`, `stubs`, and `symlinks`. Additionally, the
+  `canonicalize` and `follow-symlinks` options have been added to the `glob`
+  and `paths` layer types.
+
+- The execution model for the client has changed to support languages other
+  than Rust. Before this release, there was a client library that was
+  instantiated inside of `cargo-maelstrom` and `maelstrom-client-cli`
+  (which we renamed `maelstrom-run` in this release). The library would connect
+  directly to the broker. That client library had a lot of very useful
+  functionality that we wanted to make available to languages other than Rust.
+
+  So, we changed the client to be a program instead of a library. The client
+  program uses gRPC to make it easy to use from other languages.
+  `cargo-maelstrom` and `maelstrom-run` now start the client and communicate
+  with it over Unix-domain sockets. We also have a proof-of-concept Python
+  client.
+
+- We implemented our own overlay file system using FUSE instead of using
+  overlayfs on the worker. This unlocks some future features and fixes. In the
+  short-term, it has resulted in a bit of a performance regression, but we're
+  confident we'll regain the performance in the upcoming releases.
+
+- We re-implemented the configuration value system. We moved away from a
+  pre-existing create and impemented our own behavior. As a result, we have
+  much better command-line help messages, support multiple configuration files,
+  and fully support XDG. A side-effect of this is that some configuration
+  values have changed their names or formats.
+
+### General
 #### Added
 - Added support for job timeouts. When a job times out, the stdout and stderr
   are still returned to the client.
 
 ### `cargo-maelstrom`
 #### Added
-- `glob` layer type added which accepts a glob pattern. Matching files are added to that layer.
-- `stubs` layer type added. This makes it easy to create empty directories and files in a layer.
+- The `glob` layer type, which accepts a glob pattern. Matching files are added to that layer.
+- The `stubs` layer type. This makes it easy to create empty directories and files in a layer.
 - `symlinks` layer type added. This makes it easy to create symlinks in a layer.
 - `timeout` directive field which specifies the timeout in seconds. A value
   of 0 indicates no timeout.
