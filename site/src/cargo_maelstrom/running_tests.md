@@ -12,7 +12,8 @@ done via the command line by passing `--broker`. Since this is required every
 time the command is run, it is easier to provide it via the configuration file.
 See [Configuration](./configuration.md) for more details.
 
-Create a file in `.config/cargo-maelstrom.toml` and put the following contents
+Create a file in `~/.config/maelstrom/cargo-maelstrom/config.toml` and put the
+following contents
 
 ```toml
 broker = "<broker-address>:<broker-port>"
@@ -22,8 +23,7 @@ Replace `<broker-address>` with the hostname or IP of the machine the broker is
 running on. Replace `<broker-port>` with the port you provided to the broker via
 the `--port` CLI option. (In the book we chose port 9001 for this)
 
-Now we should be able to build and run tests just by running `cargo maelstrom
-run`
+Now we should be able to build and run tests just by running `cargo maelstrom`
 
 With no other arguments it will attempt to run all the tests in your project.
 
