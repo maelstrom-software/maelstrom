@@ -878,7 +878,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-maelstrom"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2699,7 +2699,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-base"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "bincode",
  "camino",
@@ -2716,7 +2716,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-broker"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2747,7 +2747,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2776,7 +2776,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client-base"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "enum-map",
@@ -2796,7 +2796,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-client-process"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2827,7 +2827,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-container"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-fuse"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "anyhow_trace",
@@ -2880,7 +2880,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-layer-fs"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "anyhow_trace",
@@ -2906,7 +2906,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-linux"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "derive_more",
  "libc",
@@ -2914,7 +2914,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-macro"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "darling 0.20.3",
  "proc-macro2",
@@ -2924,14 +2924,14 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-plot"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "egui",
 ]
 
 [[package]]
 name = "maelstrom-run"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -2954,14 +2954,14 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-simex"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "num",
 ]
 
 [[package]]
 name = "maelstrom-test"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "maelstrom-base",
@@ -2971,7 +2971,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-util"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anstyle",
  "anyhow",
@@ -3007,7 +3007,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-web"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "cargo_metadata",
@@ -3031,7 +3031,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "assert_matches",
@@ -3074,7 +3074,7 @@ dependencies = [
 
 [[package]]
 name = "maelstrom-worker-child"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "maelstrom-linux",
 ]
@@ -6008,7 +6008,7 @@ checksum = "0fcb9cbac069e033553e8bb871be2fbdffcab578eb25bd0f7c508cedc6dcd75a"
 
 [[package]]
 name = "xtask"
-version = "0.6.0-dev"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "camino",
