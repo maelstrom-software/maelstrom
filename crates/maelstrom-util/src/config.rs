@@ -58,7 +58,7 @@ impl ConfigBag {
         <T as FromStr>::Err: std::error::Error + Send + Sync + 'static,
     {
         let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
+        let env_var = format!("{}_{}", self.env_prefix, field.to_shouty_snake_case());
 
         let mut value = self
             .args
@@ -144,7 +144,7 @@ impl ConfigBag {
         T: From<bool> + for<'a> Deserialize<'a>,
     {
         let key = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_prefix, field.to_shouty_snake_case());
+        let env_var = format!("{}_{}", self.env_prefix, field.to_shouty_snake_case());
 
         let Some(&args_result) = self.args.get_one::<bool>(&key) else {
             panic!("didn't expect None")
@@ -285,7 +285,7 @@ impl CommandBuilder {
         action: ArgAction,
     ) -> Self {
         let name = field.to_kebab_case();
-        let env_var = format!("{}{}", self.env_var_prefix, field.to_shouty_snake_case());
+        let env_var = format!("{}_{}", self.env_var_prefix, field.to_shouty_snake_case());
         let default = default.unwrap_or("no default, must be specified".to_string());
         let mut arg = Arg::new(name.clone())
             .long(name)
