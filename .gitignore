@@ -6,3 +6,4 @@ rusty-tags.vi
 /.cache
 /.direnv
 result
+**/.DS_Store
