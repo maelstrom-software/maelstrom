@@ -43,7 +43,7 @@ impl<'fs> DirectoryDataWriterCache<'fs> {
     ) -> Result<&mut DirectoryDataWriter<'fs>> {
         if !self.cache.contains(&file_id) {
             let writer = DirectoryDataWriter::new(layer_fs, self.data_fs, file_id).await?;
-            if let Some(mut old) = self.cache.put(file_id, writer) {
+            if let Some((_, mut old)) = self.cache.push(file_id, writer) {
                 old.flush().await?;
             }
         }
