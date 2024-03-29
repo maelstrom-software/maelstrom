@@ -39,43 +39,62 @@ There were a lot of large changes in this release. At a high level:
   and fully support XDG. A side-effect of this is that some configuration
   values have changed their names or formats.
 
-### Jobs
+### General
 #### Added
-- Added support for job timeouts. When a job times out, the stdout and stderr
+- Support for job timeouts. When a job times out, the stdout and stderr
   are still returned to the client.
-- Added the `fuse` device (`/dev/fuse`).
+  \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
+- The `fuse` device (`/dev/fuse`).
+- `cargo xtask` for various tasks related to buiding and publishing.
+#### Changed
+- The XDG Base Directories spec is now used for locating config files.
+  Binaries now also supports multiple config files.
+- The default value for cache directories now is based on the XDG Base
+  Directories spec.
+- Config value names now use '-'s instead of '\_'s.
+- Renamed the `--cache-target-bytes-used` flag to `--cache-size`.
 
 ### `cargo-maelstrom`
 #### Added
-- Added the following layers types:
-  - `glob` layers are like `paths` layers, except you use glob patterns to specify the files to include.let you include files, like `paths`, except using The `glob` layer type, which accepts a glob pattern.
+- The following layers types:
+  - `glob` layers are like `paths` layers, except you use glob patterns to specify the files to include.
   - `stubs` layers create empty files and directories. These are very useful
     for ensuring mount points and device files exist.
   - `symlinks` layers create symlinks.
-- Added the following options to the `glob` and `paths` layers:
+- The following options to the `glob` and `paths` layers:
   - `follow-symlinks` will cause the generated layer to contain the target
     value of symlinks instead of the symlinks themselves.
-  - `canonicalize`
-- `timeout` directive field which specifies the timeout in seconds. A value
+  - `canonicalize` will take the absolute paths on the generating system the
+    same as for the container.
+- The `timeout` directive field to specify a timeout in seconds. A value
   of 0 indicates no timeout.
-  \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
-- `--timeout` command-line option to override the timeout for the test
+- The `--timeout` command-line option to override the timeout for the test
   specified. A value of 0 indicates no timeout.
-- Progress bars for uploads being done to the broker
-- `canonicalize` layer option added to glob and paths layer
-- `follow-symlinks` option added to glob and paths layer
-- `fuse` device option for `/dev/fuse`
+- Support for the `fuse` device in directives.
+- Progress bars for uploads of artifacts to the broker.
+- The following cargo pass-through options:
+  - `--features` (`-F`)
+  - `--all-features`
+  - `--no-default-features`
+  - `--profile`
+  - `--target`
+  - `--target-dir`
+  - `--manifest-path`
+  - `--frozen`
+  - `--locked`
+  - `--offline`
 
 ### Changed
-- Tweaked spinner text to provide more information
+- Tweaked spinner text to provide more information.
+- Switched around some of the short flag option assignments.
 
-### `maelstrom-client-cli`
+### `maelstrom-run`
+#### Changed
+- Renamed `maelstrom-client-cli` to `maelstrom-run`.
+
 #### Added
-- The new layer types from `cargo-maelstrom` have also been added.
-- `timeout` job field which specifies the timeout in seconds. A value of
-  0 indicates no timeout.
-- `canonicalize` layer option added to glob and paths layer
-- `follow_symlinks` option added to glob and paths layer
+- The new layer types and layer options from `cargo-maelstrom`.
+- The `timeout` field from `cargo-maelstrom`.
 
 ## [0.5.0] - 2024-02-08
 
