@@ -220,18 +220,17 @@ impl Fs {
         fs_trampoline!(tokio::fs::hard_link, original, link)
     }
 
-    pub async fn open_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+    pub async fn open_file<P: AsRef<Path>>(&self, path: P) -> Result<File> {
         let path = path.as_ref();
         Ok(File {
             inner: tokio::fs::File::open(path)
                 .await
                 .with_context(|| format!("open(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
         })
     }
 
-    pub async fn open_or_create_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+    pub async fn open_or_create_file<P: AsRef<Path>>(&self, path: P) -> Result<File> {
         let path = path.as_ref();
         Ok(File {
             inner: tokio::fs::OpenOptions::new()
@@ -243,22 +242,20 @@ impl Fs {
                 .await
                 .with_context(|| format!("open_or_create(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
         })
     }
 
-    pub async fn create_file<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+    pub async fn create_file<P: AsRef<Path>>(&self, path: P) -> Result<File> {
         let path = path.as_ref();
         Ok(File {
             inner: tokio::fs::File::create(path)
                 .await
                 .with_context(|| format!("create(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
         })
     }
 
-    pub async fn create_file_read_write<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+    pub async fn create_file_read_write<P: AsRef<Path>>(&self, path: P) -> Result<File> {
         let path = path.as_ref();
         Ok(File {
             inner: tokio::fs::File::options()
@@ -269,7 +266,6 @@ impl Fs {
                 .await
                 .with_context(|| format!("create(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
         })
     }
 
@@ -395,20 +391,18 @@ impl Fs {
     }
 }
 
-pub struct File<'fs> {
+pub struct File {
     inner: tokio::fs::File,
     path: PathBuf,
-    #[allow(dead_code)]
-    fs: &'fs Fs,
 }
 
-impl GetPath for File<'_> {
+impl GetPath for File {
     fn path(&self) -> &Path {
         self.path()
     }
 }
 
-impl<'fs> File<'fs> {
+impl File {
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -421,7 +415,6 @@ impl<'fs> File<'fs> {
         Ok(Self {
             inner: self.inner.try_clone().await?,
             path: self.path.clone(),
-            fs: self.fs,
         })
     }
 
@@ -481,7 +474,7 @@ impl<'fs> File<'fs> {
     }
 }
 
-impl AsyncRead for File<'_> {
+impl AsyncRead for File {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -492,7 +485,7 @@ impl AsyncRead for File<'_> {
     }
 }
 
-impl AsyncWrite for File<'_> {
+impl AsyncWrite for File {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -513,7 +506,7 @@ impl AsyncWrite for File<'_> {
     }
 }
 
-impl AsyncSeek for File<'_> {
+impl AsyncSeek for File {
     fn start_seek(self: Pin<&mut Self>, pos: io::SeekFrom) -> io::Result<()> {
         let me = self.get_mut();
         AsyncSeek::start_seek(pin!(&mut me.inner), pos)

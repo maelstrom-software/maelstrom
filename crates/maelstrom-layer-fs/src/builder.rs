@@ -23,7 +23,7 @@ use tokio_tar::{Archive, EntryType};
 
 struct DirectoryDataWriterCache<'fs> {
     data_fs: &'fs Fs,
-    cache: LruCache<FileId, DirectoryDataWriter<'fs>>,
+    cache: LruCache<FileId, DirectoryDataWriter>,
 }
 
 impl<'fs> DirectoryDataWriterCache<'fs> {
@@ -40,7 +40,7 @@ impl<'fs> DirectoryDataWriterCache<'fs> {
         &mut self,
         layer_fs: &LayerFs,
         file_id: FileId,
-    ) -> Result<&mut DirectoryDataWriter<'fs>> {
+    ) -> Result<&mut DirectoryDataWriter> {
         if !self.cache.contains(&file_id) {
             let writer = DirectoryDataWriter::new(layer_fs, self.data_fs, file_id).await?;
             if let Some((_, mut old)) = self.cache.push(file_id, writer) {
@@ -61,7 +61,7 @@ impl<'fs> DirectoryDataWriterCache<'fs> {
 
 pub struct BottomLayerBuilder<'fs> {
     layer_fs: LayerFs,
-    file_writer: FileMetadataWriter<'fs>,
+    file_writer: FileMetadataWriter,
     time: UnixTimestamp,
     dir_writer_cache: DirectoryDataWriterCache<'fs>,
 }
@@ -423,7 +423,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
 
 /// Walks the `right_fs` and yields together with it any matching entries from `left_fs`
 pub struct DoubleFsWalk<'fs> {
-    streams: Vec<(Option<WalkStream<'fs>>, WalkStream<'fs>)>,
+    streams: Vec<(Option<WalkStream>, WalkStream)>,
     left_fs: &'fs LayerFs,
     right_fs: &'fs LayerFs,
 }
@@ -435,14 +435,14 @@ enum LeftRight<T> {
     Both(T, T),
 }
 
-struct WalkStream<'fs> {
-    stream: Peekable<OrderedDirectoryStream<'fs>>,
+struct WalkStream {
+    stream: Peekable<OrderedDirectoryStream>,
     right_parent: FileId,
 }
 
 #[anyhow_trace]
-impl<'fs> WalkStream<'fs> {
-    async fn new(fs: &'fs LayerFs, file_id: FileId, right_parent: FileId) -> Result<Self> {
+impl WalkStream {
+    async fn new(fs: &LayerFs, file_id: FileId, right_parent: FileId) -> Result<Self> {
         Ok(Self {
             stream: DirectoryDataReader::new(fs, file_id)
                 .await?
@@ -559,7 +559,7 @@ impl<'fs> DoubleFsWalk<'fs> {
 
 struct DirectoryDataWriterStack<'fs> {
     layer_fs: &'fs LayerFs,
-    writers: Vec<(FileId, DirectoryDataWriter<'fs>)>,
+    writers: Vec<(FileId, DirectoryDataWriter)>,
     seen: HashSet<FileId>,
 }
 
@@ -573,7 +573,7 @@ impl<'fs> DirectoryDataWriterStack<'fs> {
         }
     }
 
-    async fn get_writer(&mut self, file_id: FileId) -> Result<&mut DirectoryDataWriter<'fs>> {
+    async fn get_writer(&mut self, file_id: FileId) -> Result<&mut DirectoryDataWriter> {
         if self.seen.contains(&file_id) {
             while self.writers.last().unwrap().0 != file_id {
                 let (old_id, mut writer) = self.writers.pop().unwrap();

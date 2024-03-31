@@ -15,8 +15,8 @@ use std::io::SeekFrom;
 use std::pin::Pin;
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
-pub struct DirectoryDataReader<'fs> {
-    stream: BufferedStream<File<'fs>>,
+pub struct DirectoryDataReader {
+    stream: BufferedStream<File>,
     entry_begin: u64,
     length: u64,
 }
@@ -25,8 +25,8 @@ const CHUNK_SIZE: usize = 4096;
 const CACHE_SIZE: usize = 2;
 
 #[anyhow_trace]
-impl<'fs> DirectoryDataReader<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<Self> {
+impl DirectoryDataReader {
+    pub async fn new(layer_fs: &LayerFs, file_id: FileId) -> Result<Self> {
         let file = layer_fs
             .data_fs
             .open_file(layer_fs.dir_data_path(file_id).await?)
@@ -77,7 +77,7 @@ impl<'fs> DirectoryDataReader<'fs> {
         mut self,
         log: slog::Logger,
         offset: DirectoryOffset,
-    ) -> Result<DirectoryStream<'fs>> {
+    ) -> Result<DirectoryStream> {
         self.stream
             .seek(SeekFrom::Start(self.entry_begin + u64::from(offset)))
             .await?;
@@ -91,7 +91,7 @@ impl<'fs> DirectoryDataReader<'fs> {
         )))
     }
 
-    pub async fn into_ordered_stream(self) -> Result<OrderedDirectoryStream<'fs>> {
+    pub async fn into_ordered_stream(self) -> Result<OrderedDirectoryStream> {
         Ok(Box::pin(
             AvlTree::new(DirectoryEntryStorage::new(self.stream))
                 .into_stream()
@@ -122,9 +122,7 @@ type DirectoryEntry = AvlNode<String, DirectoryEntryData>;
 
 #[async_trait]
 #[anyhow_trace]
-impl<'fs, FileT: BorrowMut<BufferedStream<File<'fs>>> + Send> AvlStorage
-    for DirectoryEntryStorage<FileT>
-{
+impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntryStorage<FileT> {
     type Key = String;
     type Value = DirectoryEntryData;
 
@@ -198,24 +196,20 @@ impl<'fs, FileT: BorrowMut<BufferedStream<File<'fs>>> + Send> AvlStorage
     }
 }
 
-pub type DirectoryStream<'fs> = Pin<
-    Box<
-        dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>>
-            + Send
-            + 'fs,
-    >,
+pub type DirectoryStream = Pin<
+    Box<dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>> + Send>,
 >;
 
-pub type OrderedDirectoryStream<'fs> =
-    Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send + 'fs>>;
+pub type OrderedDirectoryStream =
+    Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send>>;
 
-pub struct DirectoryDataWriter<'fs> {
-    tree: AvlTree<DirectoryEntryStorage<BufferedStream<File<'fs>>>>,
+pub struct DirectoryDataWriter {
+    tree: AvlTree<DirectoryEntryStorage<BufferedStream<File>>>,
 }
 
 #[anyhow_trace]
-impl<'fs> DirectoryDataWriter<'fs> {
-    pub async fn new(layer_fs: &LayerFs, data_fs: &'fs Fs, file_id: FileId) -> Result<Self> {
+impl DirectoryDataWriter {
+    pub async fn new(layer_fs: &LayerFs, data_fs: &Fs, file_id: FileId) -> Result<Self> {
         let path = layer_fs.dir_data_path(file_id).await?;
         let existing = data_fs.exists(&path).await;
         let mut stream = BufferedStream::new(
@@ -240,7 +234,7 @@ impl<'fs> DirectoryDataWriter<'fs> {
         self.tree.get(&entry_name.into()).await
     }
 
-    pub async fn write_empty(layer_fs: &'fs LayerFs, file_id: FileId) -> Result<()> {
+    pub async fn write_empty(layer_fs: &LayerFs, file_id: FileId) -> Result<()> {
         let mut s = Self::new(layer_fs, &layer_fs.data_fs, file_id).await?;
         s.flush().await?;
         Ok(())

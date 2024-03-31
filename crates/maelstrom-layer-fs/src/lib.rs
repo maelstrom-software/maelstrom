@@ -285,7 +285,7 @@ impl FuseFileSystem for LayerFs {
         }
     }
 
-    type ReadDirStream<'a> = DirectoryStream<'a>;
+    type ReadDirStream<'a> = DirectoryStream;
 
     async fn read_dir<'a>(
         &'a self,

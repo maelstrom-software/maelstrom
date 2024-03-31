@@ -13,10 +13,10 @@ use std::num::NonZeroU32;
 use std::path::Path;
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
-pub struct FileMetadataReader<'fs> {
-    file_table: BufferedStream<File<'fs>>,
+pub struct FileMetadataReader {
+    file_table: BufferedStream<File>,
     file_table_start: u64,
-    attr_table: BufferedStream<File<'fs>>,
+    attr_table: BufferedStream<File>,
     attr_table_start: u64,
     layer_id: LayerId,
 }
@@ -25,8 +25,8 @@ const CHUNK_SIZE: usize = 4096;
 const CACHE_SIZE: usize = 2;
 
 #[anyhow_trace]
-impl<'fs> FileMetadataReader<'fs> {
-    pub async fn new(layer_fs: &'fs LayerFs, layer_id: LayerId) -> Result<Self> {
+impl FileMetadataReader {
+    pub async fn new(layer_fs: &LayerFs, layer_id: LayerId) -> Result<Self> {
         let mut file_table = BufferedStream::new(
             CHUNK_SIZE,
             CACHE_SIZE.try_into().unwrap(),
@@ -99,18 +99,18 @@ pub struct AttributesTableHeader {
     pub version: LayerFsVersion,
 }
 
-pub struct FileMetadataWriter<'fs> {
+pub struct FileMetadataWriter {
     layer_id: LayerId,
-    file_table: BufferedStream<File<'fs>>,
+    file_table: BufferedStream<File>,
     file_table_start: u64,
-    attr_table: BufferedStream<File<'fs>>,
+    attr_table: BufferedStream<File>,
     attr_table_start: u64,
 }
 
 #[anyhow_trace]
-impl<'fs> FileMetadataWriter<'fs> {
+impl FileMetadataWriter {
     pub async fn new(
-        data_fs: &'fs Fs,
+        data_fs: &Fs,
         layer_id: LayerId,
         file_table_path: &Path,
         attributes_table_path: &Path,

@@ -491,12 +491,12 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
 
 const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
 
-struct LockedTagsHandle<'fs> {
+struct LockedTagsHandle {
     locked_tags: LockedContainerImageTags,
-    lock_file: fs::File<'fs>,
+    lock_file: fs::File,
 }
 
-impl<'fs> LockedTagsHandle<'fs> {
+impl LockedTagsHandle {
     async fn write(mut self) -> Result<()> {
         self.lock_file.seek(SeekFrom::Start(0)).await?;
         self.lock_file.set_len(0).await?;
@@ -587,7 +587,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         body.await
     }
 
-    async fn lock_tags(&self) -> Result<LockedTagsHandle<'_>> {
+    async fn lock_tags(&self) -> Result<LockedTagsHandle> {
         let mut lock_file = self
             .fs
             .open_or_create_file(self.project_dir.join(TAG_FILE_NAME))
