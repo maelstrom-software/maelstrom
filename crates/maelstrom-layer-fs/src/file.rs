@@ -21,8 +21,8 @@ pub struct FileMetadataReader {
     layer_id: LayerId,
 }
 
-const CHUNK_SIZE: usize = 4096;
-const CACHE_SIZE: usize = 2;
+const CHUNK_SIZE: usize = 512;
+const CACHE_SIZE: usize = 64;
 
 #[anyhow_trace]
 impl FileMetadataReader {

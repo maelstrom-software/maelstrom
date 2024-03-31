@@ -759,8 +759,9 @@ mod tests {
     use maelstrom_util::async_fs;
     use serial_test::serial;
     use std::ops::ControlFlow;
+    use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio::sync::oneshot;
+    use tokio::sync::{oneshot, Mutex};
 
     struct ReaperAdapter {
         pid: Pid,
@@ -836,7 +837,8 @@ mod tests {
                 .await
                 .unwrap();
             let layer_fs = builder.finish().await.unwrap();
-            let handle = layer_fs.mount(log, &mount_path).unwrap();
+            let cache = Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new()));
+            let handle = layer_fs.mount(log, cache, &mount_path).unwrap();
             Self {
                 temp_dir,
                 mount_path,

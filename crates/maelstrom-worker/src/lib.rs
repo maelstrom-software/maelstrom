@@ -30,12 +30,14 @@ use reaper::ReaperDeps;
 use slog::{debug, error, info, o, warn, Logger};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 use std::{ops::ControlFlow, path::PathBuf, process, thread, time::Duration};
 use tokio::{
     io::BufReader,
     net::TcpStream,
     signal::unix::{self, SignalKind},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    sync::Mutex,
     task::{self, JoinHandle, JoinSet},
     time,
 };
@@ -65,6 +67,7 @@ struct DispatcherAdapter {
     executor: Executor,
     cache_dir: PathBuf,
     tmpfs_dir: PathBuf,
+    layer_fs_cache: Arc<Mutex<maelstrom_layer_fs::ReaderCache>>,
 }
 
 impl DispatcherAdapter {
@@ -91,6 +94,7 @@ impl DispatcherAdapter {
             executor: Executor::new(mount_dir, tmpfs_dir.clone())?,
             cache_dir,
             tmpfs_dir,
+            layer_fs_cache: Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new())),
         })
     }
 }
@@ -140,7 +144,7 @@ impl DispatcherDeps for DispatcherAdapter {
         let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)
             .map_err(|e| JobError::System(e.to_string()))?;
         let fuse_handle = layer_fs
-            .mount(self.log.clone(), &mount_path2)
+            .mount(self.log.clone(), self.layer_fs_cache.clone(), &mount_path2)
             .map_err(|e| JobError::System(e.to_string()))?;
         let fuse_handle = DispatcherAdapterFuseHandle {
             inner: fuse_handle,

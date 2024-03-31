@@ -10,16 +10,21 @@ use async_trait::async_trait;
 pub use builder::*;
 pub use dir::{DirectoryDataReader, DirectoryStream};
 pub use file::FileMetadataReader;
+use lru::LruCache;
 use maelstrom_base::Sha256Digest;
 use maelstrom_fuse::{
     AttrResponse, EntryResponse, ErrnoResult, FileAttr, FuseFileSystem, ReadLinkResponse,
     ReadResponse, Request,
 };
 use maelstrom_linux::Errno;
-use maelstrom_util::async_fs::Fs;
+use maelstrom_util::{
+    async_fs::{File, Fs},
+    io::BufferedStream,
+};
 use std::ffi::OsStr;
 use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
@@ -159,23 +164,112 @@ impl LayerFs {
         Ok(self.layer_super().await?.layer_id)
     }
 
-    fn cache_entry(&self, digest: Sha256Digest) -> PathBuf {
+    fn cache_entry(&self, digest: &Sha256Digest) -> PathBuf {
         self.cache_path.join(digest.to_string())
     }
 
-    pub fn mount(self, log: slog::Logger, mount_path: &Path) -> Result<maelstrom_fuse::FuseHandle> {
+    pub fn mount(
+        self,
+        log: slog::Logger,
+        cache: Arc<Mutex<ReaderCache>>,
+        mount_path: &Path,
+    ) -> Result<maelstrom_fuse::FuseHandle> {
         slog::debug!(log, "mounting FUSE file-system"; "path" => ?mount_path);
-        let adapter = LayerFsFuseAdapter {
-            layer_fs: self,
-            log,
-        };
+        let adapter = LayerFsFuseAdapter::new(self, log, cache);
         maelstrom_fuse::fuse_mount(adapter, mount_path, "Maelstrom LayerFS")
+    }
+}
+
+pub struct ReaderCache {
+    dir_readers: LruCache<PathBuf, Arc<Mutex<DirectoryDataReader>>>,
+    file_readers: LruCache<PathBuf, Arc<Mutex<FileMetadataReader>>>,
+    data_readers: LruCache<Sha256Digest, Arc<Mutex<BufferedStream<File>>>>,
+}
+
+impl Default for ReaderCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ReaderCache {
+    pub fn new() -> Self {
+        Self {
+            dir_readers: LruCache::new(300.try_into().unwrap()),
+            file_readers: LruCache::new(300.try_into().unwrap()),
+            data_readers: LruCache::new(200.try_into().unwrap()),
+        }
+    }
+
+    async fn open_dir(
+        &mut self,
+        layer_fs: &LayerFs,
+        file_id: FileId,
+    ) -> Result<Arc<Mutex<DirectoryDataReader>>> {
+        let path = layer_fs.dir_data_path(file_id).await?;
+        if let Some(reader) = self.dir_readers.get(&path) {
+            Ok(reader.clone())
+        } else {
+            let reader = Arc::new(Mutex::new(
+                DirectoryDataReader::new(layer_fs, file_id).await?,
+            ));
+            self.dir_readers.push(path, reader.clone());
+            Ok(reader)
+        }
+    }
+
+    async fn files(
+        &mut self,
+        layer_fs: &LayerFs,
+        layer_id: LayerId,
+    ) -> Result<Arc<Mutex<FileMetadataReader>>> {
+        let path = layer_fs.file_table_path(layer_id).await?;
+        if let Some(reader) = self.file_readers.get(&path) {
+            Ok(reader.clone())
+        } else {
+            let reader = Arc::new(Mutex::new(
+                FileMetadataReader::new(layer_fs, layer_id).await?,
+            ));
+            self.file_readers.push(path, reader.clone());
+            Ok(reader)
+        }
+    }
+
+    async fn file_data(
+        &mut self,
+        layer_fs: &LayerFs,
+        digest: &Sha256Digest,
+    ) -> Result<Arc<Mutex<BufferedStream<File>>>> {
+        if let Some(reader) = self.data_readers.get(digest) {
+            Ok(reader.clone())
+        } else {
+            let file = layer_fs
+                .data_fs
+                .open_file(layer_fs.cache_entry(digest))
+                .await?;
+            let reader = Arc::new(Mutex::new(
+                BufferedStream::new(4096, 10_000.try_into().unwrap(), file).await?,
+            ));
+            self.data_readers.push(digest.clone(), reader.clone());
+            Ok(reader)
+        }
     }
 }
 
 struct LayerFsFuseAdapter {
     layer_fs: LayerFs,
     log: slog::Logger,
+    cache: Arc<Mutex<ReaderCache>>,
+}
+
+impl LayerFsFuseAdapter {
+    fn new(layer_fs: LayerFs, log: slog::Logger, cache: Arc<Mutex<ReaderCache>>) -> Self {
+        Self {
+            layer_fs,
+            log,
+            cache,
+        }
+    }
 }
 
 #[async_trait]
@@ -183,12 +277,16 @@ impl FuseFileSystem for LayerFsFuseAdapter {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
         let name = to_einval(self.log.clone(), name.to_str().ok_or("invalid name"))?;
         let parent = to_einval(self.log.clone(), FileId::try_from(parent))?;
-        let mut reader = to_eio(
+        let reader = to_eio(
             self.log.clone(),
-            DirectoryDataReader::new(&self.layer_fs, parent).await,
+            self.cache
+                .lock()
+                .await
+                .open_dir(&self.layer_fs, parent)
+                .await,
         )?;
-        let child_id =
-            to_eio(self.log.clone(), reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
+        let child_id = to_eio(self.log.clone(), reader.lock().await.look_up(name).await)?
+            .ok_or(Errno::ENOENT)?;
         let attrs = self.get_attr(req, child_id.as_u64()).await?;
         Ok(EntryResponse {
             attr: attrs.attr,
@@ -199,11 +297,15 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 
     async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
-        let mut reader = to_eio(
+        let reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
+            self.cache
+                .lock()
+                .await
+                .files(&self.layer_fs, file.layer())
+                .await,
         )?;
-        let (kind, attrs) = to_eio(self.log.clone(), reader.get_attr(file).await)?;
+        let (kind, attrs) = to_eio(self.log.clone(), reader.lock().await.get_attr(file).await)?;
         Ok(AttrResponse {
             ttl: TTL,
             attr: FileAttr {
@@ -235,11 +337,15 @@ impl FuseFileSystem for LayerFsFuseAdapter {
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
-        let mut reader = to_eio(
+        let reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
+            self.cache
+                .lock()
+                .await
+                .files(&self.layer_fs, file.layer())
+                .await,
         )?;
-        let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
+        let (kind, data) = to_eio(self.log.clone(), reader.lock().await.get_data(file).await)?;
         if kind != FileType::RegularFile {
             return Err(Errno::EINVAL);
         }
@@ -271,19 +377,21 @@ impl FuseFileSystem for LayerFsFuseAdapter {
                 let read_end = std::cmp::min(read_start + size as u64, file_end);
                 let read_length = read_end - read_start;
 
-                let mut file = to_eio(
+                let mut buffer = vec![0; read_length as usize];
+                let file = to_eio(
                     self.log.clone(),
-                    self.layer_fs
-                        .data_fs
-                        .open_file(self.layer_fs.cache_entry(digest))
+                    self.cache
+                        .lock()
+                        .await
+                        .file_data(&self.layer_fs, &digest)
                         .await,
                 )?;
+                let mut file_locked = file.lock().await;
                 to_eio(
                     self.log.clone(),
-                    file.seek(SeekFrom::Start(read_start)).await,
+                    file_locked.seek(SeekFrom::Start(read_start)).await,
                 )?;
-                let mut buffer = vec![0; read_length as usize];
-                to_eio(self.log.clone(), file.read_exact(&mut buffer).await)?;
+                to_eio(self.log.clone(), file_locked.read_exact(&mut buffer).await)?;
                 Ok(ReadResponse { data: buffer })
             }
         }
@@ -313,11 +421,15 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 
     async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
-        let mut reader = to_eio(
+        let reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
+            self.cache
+                .lock()
+                .await
+                .files(&self.layer_fs, file.layer())
+                .await,
         )?;
-        let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
+        let (kind, data) = to_eio(self.log.clone(), reader.lock().await.get_data(file).await)?;
         if kind != FileType::Symlink {
             return Err(Errno::EINVAL);
         }
@@ -572,7 +684,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
 
@@ -607,7 +720,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
         assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
@@ -640,7 +754,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         for name in ["Foo", "Bar", "Baz"] {
             let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
@@ -676,7 +791,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
 
@@ -715,7 +831,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -749,7 +866,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -797,7 +915,8 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello");
@@ -1005,7 +1124,8 @@ mod tests {
 
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -1117,7 +1237,8 @@ mod tests {
         builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
 
         for (d, entries) in expected {
             assert_entries(&fs, &mount_point.join(d), entries).await;
@@ -1189,7 +1310,8 @@ mod tests {
         builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
 
         for (d, entries) in expected {
             assert_entries(&fs, &mount_point.join(d), entries).await;
@@ -1235,8 +1357,11 @@ mod tests {
         .await;
 
         let log = test_logger();
-        let mount_handle1 = layer_fs1.mount(log.clone(), &mount_point1).unwrap();
-        let mount_handle2 = layer_fs2.mount(log, &mount_point2).unwrap();
+        let cache = Arc::new(Mutex::new(ReaderCache::new()));
+        let mount_handle1 = layer_fs1
+            .mount(log.clone(), cache.clone(), &mount_point1)
+            .unwrap();
+        let mount_handle2 = layer_fs2.mount(log, cache, &mount_point2).unwrap();
 
         assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
         assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;
