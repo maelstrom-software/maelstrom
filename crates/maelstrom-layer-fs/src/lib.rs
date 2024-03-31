@@ -84,12 +84,11 @@ pub struct LayerFs {
     top_layer_path: PathBuf,
     layer_super: LazyLayerSuper,
     cache_path: PathBuf,
-    log: slog::Logger,
 }
 
 #[anyhow_trace]
 impl LayerFs {
-    pub fn from_path(log: slog::Logger, data_dir: &Path, cache_path: &Path) -> Result<Self> {
+    pub fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -98,16 +97,10 @@ impl LayerFs {
             layer_super: LazyLayerSuper::not_cached(data_dir.join("super.bin")),
             top_layer_path: data_dir,
             cache_path: cache_path.to_owned(),
-            log,
         })
     }
 
-    async fn new(
-        log: slog::Logger,
-        data_dir: &Path,
-        cache_path: &Path,
-        layer_super: LayerSuper,
-    ) -> Result<Self> {
+    async fn new(data_dir: &Path, cache_path: &Path, layer_super: LayerSuper) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -120,7 +113,6 @@ impl LayerFs {
             top_layer_path: data_dir,
             layer_super: LazyLayerSuper::cached(layer_super),
             cache_path: cache_path.to_owned(),
-            log,
         })
     }
 
@@ -171,20 +163,29 @@ impl LayerFs {
         self.cache_path.join(digest.to_string())
     }
 
-    pub fn mount(self, mount_path: &Path) -> Result<maelstrom_fuse::FuseHandle> {
-        slog::debug!(self.log, "mounting FUSE file-system"; "path" => ?mount_path);
-        maelstrom_fuse::fuse_mount(self, mount_path, "Maelstrom LayerFS")
+    pub fn mount(self, log: slog::Logger, mount_path: &Path) -> Result<maelstrom_fuse::FuseHandle> {
+        slog::debug!(log, "mounting FUSE file-system"; "path" => ?mount_path);
+        let adapter = LayerFsFuseAdapter {
+            layer_fs: self,
+            log,
+        };
+        maelstrom_fuse::fuse_mount(adapter, mount_path, "Maelstrom LayerFS")
     }
 }
 
+struct LayerFsFuseAdapter {
+    layer_fs: LayerFs,
+    log: slog::Logger,
+}
+
 #[async_trait]
-impl FuseFileSystem for LayerFs {
+impl FuseFileSystem for LayerFsFuseAdapter {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
         let name = to_einval(self.log.clone(), name.to_str().ok_or("invalid name"))?;
         let parent = to_einval(self.log.clone(), FileId::try_from(parent))?;
         let mut reader = to_eio(
             self.log.clone(),
-            DirectoryDataReader::new(self, parent).await,
+            DirectoryDataReader::new(&self.layer_fs, parent).await,
         )?;
         let child_id =
             to_eio(self.log.clone(), reader.look_up(name).await)?.ok_or(Errno::ENOENT)?;
@@ -200,7 +201,7 @@ impl FuseFileSystem for LayerFs {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(self, file.layer()).await,
+            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
         )?;
         let (kind, attrs) = to_eio(self.log.clone(), reader.get_attr(file).await)?;
         Ok(AttrResponse {
@@ -236,7 +237,7 @@ impl FuseFileSystem for LayerFs {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(self, file.layer()).await,
+            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
         )?;
         let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
         if kind != FileType::RegularFile {
@@ -272,7 +273,10 @@ impl FuseFileSystem for LayerFs {
 
                 let mut file = to_eio(
                     self.log.clone(),
-                    self.data_fs.open_file(self.cache_entry(digest)).await,
+                    self.layer_fs
+                        .data_fs
+                        .open_file(self.layer_fs.cache_entry(digest))
+                        .await,
                 )?;
                 to_eio(
                     self.log.clone(),
@@ -295,7 +299,10 @@ impl FuseFileSystem for LayerFs {
         offset: i64,
     ) -> ErrnoResult<Self::ReadDirStream<'a>> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
-        let reader = to_eio(self.log.clone(), DirectoryDataReader::new(self, file).await)?;
+        let reader = to_eio(
+            self.log.clone(),
+            DirectoryDataReader::new(&self.layer_fs, file).await,
+        )?;
         Ok(to_eio(
             self.log.clone(),
             reader
@@ -308,7 +315,7 @@ impl FuseFileSystem for LayerFs {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let mut reader = to_eio(
             self.log.clone(),
-            FileMetadataReader::new(self, file.layer()).await,
+            FileMetadataReader::new(&self.layer_fs, file.layer()).await,
         )?;
         let (kind, data) = to_eio(self.log.clone(), reader.get_data(file).await)?;
         if kind != FileType::Symlink {
@@ -565,7 +572,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
 
@@ -600,7 +607,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
         assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
@@ -633,7 +640,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         for name in ["Foo", "Bar", "Baz"] {
             let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
@@ -669,7 +676,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
 
@@ -708,7 +715,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -742,7 +749,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -790,7 +797,7 @@ mod tests {
         )
         .await;
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello");
@@ -988,8 +995,9 @@ mod tests {
             BuildEntry::link("Thud", "/Foo"),
         ];
 
+        let log = test_logger();
         let mut builder =
-            BottomLayerBuilder::new(test_logger(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
+            BottomLayerBuilder::new(log.clone(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
                 .await
                 .unwrap();
 
@@ -997,7 +1005,7 @@ mod tests {
 
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
 
         let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
@@ -1102,13 +1110,14 @@ mod tests {
         )
         .await;
 
-        let mut builder = UpperLayerBuilder::new(test_logger(), &data_dir3, &cache_dir, &layer_fs1)
+        let log = test_logger();
+        let mut builder = UpperLayerBuilder::new(log.clone(), &data_dir3, &cache_dir, &layer_fs1)
             .await
             .unwrap();
         builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
 
         for (d, entries) in expected {
             assert_entries(&fs, &mount_point.join(d), entries).await;
@@ -1173,13 +1182,14 @@ mod tests {
         builder.fill_from_bottom_layer(&layer_fs2).await.unwrap();
         let upper_layer_fs = builder.finish().await.unwrap();
 
-        let mut builder = UpperLayerBuilder::new(log, &data_dir5, &cache_dir, &upper_layer_fs)
-            .await
-            .unwrap();
+        let mut builder =
+            UpperLayerBuilder::new(log.clone(), &data_dir5, &cache_dir, &upper_layer_fs)
+                .await
+                .unwrap();
         builder.fill_from_bottom_layer(&layer_fs3).await.unwrap();
         let layer_fs = builder.finish().await.unwrap();
 
-        let mount_handle = layer_fs.mount(&mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, &mount_point).unwrap();
 
         for (d, entries) in expected {
             assert_entries(&fs, &mount_point.join(d), entries).await;
@@ -1224,8 +1234,9 @@ mod tests {
         )
         .await;
 
-        let mount_handle1 = layer_fs1.mount(&mount_point1).unwrap();
-        let mount_handle2 = layer_fs2.mount(&mount_point2).unwrap();
+        let log = test_logger();
+        let mount_handle1 = layer_fs1.mount(log.clone(), &mount_point1).unwrap();
+        let mount_handle2 = layer_fs2.mount(log, &mount_point2).unwrap();
 
         assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
         assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;

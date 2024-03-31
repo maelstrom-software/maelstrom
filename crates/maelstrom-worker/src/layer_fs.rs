@@ -46,8 +46,8 @@ pub async fn build_upper_layer(
 ) -> Result<u64> {
     let fs = Fs::new();
     fs.create_dir_all(&layer_path).await?;
-    let lower = LayerFs::from_path(log.clone(), &lower_layer_path, &cache_path)?;
-    let upper = LayerFs::from_path(log.clone(), &upper_layer_path, &cache_path)?;
+    let lower = LayerFs::from_path(&lower_layer_path, &cache_path)?;
+    let upper = LayerFs::from_path(&upper_layer_path, &cache_path)?;
     let mut builder = UpperLayerBuilder::new(log, &layer_path, &cache_path, &lower).await?;
     builder.fill_from_bottom_layer(&upper).await?;
     builder.fill_from_bottom_layer(&upper).await?;

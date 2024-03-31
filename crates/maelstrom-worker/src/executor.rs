@@ -821,8 +821,9 @@ mod tests {
             let tar_bytes = include_bytes!("executor-test-deps.tar");
             let tar_path = cache_path.join(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
+            let log = test_logger();
             let mut builder = maelstrom_layer_fs::BottomLayerBuilder::new(
-                test_logger(),
+                log.clone(),
                 &fs,
                 &data_path,
                 &cache_path,
@@ -835,7 +836,7 @@ mod tests {
                 .await
                 .unwrap();
             let layer_fs = builder.finish().await.unwrap();
-            let handle = layer_fs.mount(&mount_path).unwrap();
+            let handle = layer_fs.mount(log, &mount_path).unwrap();
             Self {
                 temp_dir,
                 mount_path,

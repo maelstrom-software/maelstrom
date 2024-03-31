@@ -69,14 +69,13 @@ pub struct BottomLayerBuilder<'fs> {
 #[anyhow_trace]
 impl<'fs> BottomLayerBuilder<'fs> {
     pub async fn new(
-        log: slog::Logger,
+        _log: slog::Logger,
         data_fs: &'fs Fs,
         data_dir: &Path,
         cache_path: &Path,
         time: UnixTimestamp,
     ) -> Result<Self> {
-        let layer_fs =
-            LayerFs::new(log.clone(), data_dir, cache_path, LayerSuper::default()).await?;
+        let layer_fs = LayerFs::new(data_dir, cache_path, LayerSuper::default()).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM).await?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM).await?;
 
@@ -608,7 +607,7 @@ pub struct UpperLayerBuilder<'fs> {
 #[anyhow_trace]
 impl<'fs> UpperLayerBuilder<'fs> {
     pub async fn new(
-        log: slog::Logger,
+        _log: slog::Logger,
         data_dir: &Path,
         cache_dir: &Path,
         lower: &'fs LayerFs,
@@ -621,7 +620,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
             .lower_layers
             .insert(lower_id, lower.top_layer_path.clone());
 
-        let upper = LayerFs::new(log.clone(), data_dir, cache_dir, upper_super).await?;
+        let upper = LayerFs::new(data_dir, cache_dir, upper_super).await?;
 
         Ok(Self { upper, lower })
     }
