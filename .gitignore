@@ -7,3 +7,4 @@ rusty-tags.vi
 /.direnv
 result
 **/.DS_Store
+/crates/maelstrom-web/target
