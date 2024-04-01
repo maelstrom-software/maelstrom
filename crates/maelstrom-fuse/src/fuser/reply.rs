@@ -436,12 +436,10 @@ impl ReplyIoctl {
 /// Poll Reply
 ///
 #[derive(Debug)]
-#[cfg(feature = "abi-7-11")]
 pub struct ReplyPoll {
     reply: ReplyRaw,
 }
 
-#[cfg(feature = "abi-7-11")]
 impl Reply for ReplyPoll {
     fn new<S: ReplySender>(unique: u64, sender: S) -> ReplyPoll {
         ReplyPoll {
@@ -450,7 +448,6 @@ impl Reply for ReplyPoll {
     }
 }
 
-#[cfg(feature = "abi-7-11")]
 impl ReplyPoll {
     /// Reply to a request with the given poll result
     pub fn poll(self, revents: u32) {
@@ -742,9 +739,7 @@ mod test {
             0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
         ];
 
-        if cfg!(feature = "abi-7-9") {
-            expected.extend(vec![0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        }
+        expected.extend(vec![0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         expected[0] = (expected.len()) as u8;
 
         let sender = AssertSender { expected };
@@ -782,9 +777,7 @@ mod test {
             0x00, 0x00, 0x66, 0x00, 0x00, 0x00, 0x77, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
         ];
 
-        if cfg!(feature = "abi-7-9") {
-            expected.extend_from_slice(&[0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
-        }
+        expected.extend_from_slice(&[0xbb, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]);
         expected[0] = expected.len() as u8;
 
         let sender = AssertSender { expected };
@@ -867,13 +860,11 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0xcc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
-        if cfg!(feature = "abi-7-9") {
-            let insert_at = expected.len() - 16;
-            expected.splice(
-                insert_at..insert_at,
-                vec![0xdd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
-            );
-        }
+        let insert_at = expected.len() - 16;
+        expected.splice(
+            insert_at..insert_at,
+            vec![0xdd, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00],
+        );
         expected[0] = (expected.len()) as u8;
 
         let sender = AssertSender { expected };

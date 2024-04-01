@@ -383,13 +383,10 @@ mod op {
             }
         }
         pub fn ctime(&self) -> Option<SystemTime> {
-            #[cfg(feature = "abi-7-23")]
             match self.arg.valid & FATTR_CTIME {
                 0 => None,
                 _ => Some(system_time_from_time(self.arg.ctime, self.arg.ctimensec)),
             }
-            #[cfg(not(feature = "abi-7-23"))]
-            None
         }
         /// The value set by the [Open] method. See [FileHandle].
         ///
@@ -463,9 +460,6 @@ mod op {
             self.arg.mode
         }
         pub fn umask(&self) -> u32 {
-            #[cfg(not(feature = "abi-7-12"))]
-            return 0;
-            #[cfg(feature = "abi-7-12")]
             self.arg.umask
         }
         pub fn rdev(&self) -> u32 {
@@ -489,9 +483,6 @@ mod op {
             self.arg.mode
         }
         pub fn umask(&self) -> u32 {
-            #[cfg(not(feature = "abi-7-12"))]
-            return 0;
-            #[cfg(feature = "abi-7-12")]
             self.arg.umask
         }
     }
@@ -615,9 +606,6 @@ mod op {
         }
         /// Only supported with ABI >= 7.9
         pub fn lock_owner(&self) -> Option<LockOwner> {
-            #[cfg(not(feature = "abi-7-9"))]
-            return None;
-            #[cfg(feature = "abi-7-9")]
             if self.arg.read_flags & FUSE_READ_LOCKOWNER != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -626,9 +614,6 @@ mod op {
         }
         /// The file flags, such as `O_SYNC`. Only supported with ABI >= 7.9
         pub fn flags(&self) -> i32 {
-            #[cfg(not(feature = "abi-7-9"))]
-            return 0;
-            #[cfg(feature = "abi-7-9")]
             self.arg.flags
         }
     }
@@ -667,22 +652,16 @@ mod op {
         }
         /// lock_owner: only supported with ABI >= 7.9
         pub fn lock_owner(&self) -> Option<LockOwner> {
-            #[cfg(feature = "abi-7-9")]
             if self.arg.write_flags & FUSE_WRITE_LOCKOWNER != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
                 None
             }
-            #[cfg(not(feature = "abi-7-9"))]
-            None
         }
         /// flags: these are the file flags, such as O_SYNC. Only supported with ABI >= 7.9
         /// TODO: Make a Flags type specifying valid values
         pub fn flags(&self) -> i32 {
-            #[cfg(feature = "abi-7-9")]
-            return self.arg.flags;
-            #[cfg(not(feature = "abi-7-9"))]
-            0
+            self.arg.flags
         }
     }
 
@@ -720,9 +699,6 @@ mod op {
             self.arg.flags
         }
         pub fn lock_owner(&self) -> Option<LockOwner> {
-            #[cfg(not(feature = "abi-7-17"))]
-            return Some(LockOwner(self.arg.lock_owner));
-            #[cfg(feature = "abi-7-17")]
             if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -912,22 +888,12 @@ mod op {
                 minor: FUSE_KERNEL_MINOR_VERSION,
                 max_readahead: config.max_readahead,
                 flags: self.capabilities() & config.requested, // use requested features and reported as capable
-                #[cfg(not(feature = "abi-7-13"))]
-                unused: 0,
-                #[cfg(feature = "abi-7-13")]
                 max_background: config.max_background,
-                #[cfg(feature = "abi-7-13")]
                 congestion_threshold: config.congestion_threshold(),
                 max_write: config.max_write,
-                #[cfg(feature = "abi-7-23")]
                 time_gran: config.time_gran.as_nanos() as u32,
-                #[cfg(all(feature = "abi-7-23", not(feature = "abi-7-28")))]
-                reserved: [0; 9],
-                #[cfg(feature = "abi-7-28")]
                 max_pages: config.max_pages(),
-                #[cfg(feature = "abi-7-28")]
                 unused2: 0,
-                #[cfg(feature = "abi-7-28")]
                 reserved: [0; 8],
             };
             Response::new_data(init.as_bytes())
@@ -995,9 +961,6 @@ mod op {
             self.arg.release_flags & consts::FUSE_RELEASE_FLUSH != 0
         }
         pub fn lock_owner(&self) -> Option<LockOwner> {
-            #[cfg(not(feature = "abi-7-17"))]
-            return Some(LockOwner(self.arg.lock_owner));
-            #[cfg(feature = "abi-7-17")]
             if self.arg.release_flags & FUSE_RELEASE_FLOCK_UNLOCK != 0 {
                 Some(LockOwner(self.arg.lock_owner))
             } else {
@@ -1139,9 +1102,6 @@ mod op {
             self.arg.flags
         }
         pub fn umask(&self) -> u32 {
-            #[cfg(not(feature = "abi-7-12"))]
-            return 0;
-            #[cfg(feature = "abi-7-12")]
             self.arg.umask
         }
     }
@@ -1225,16 +1185,13 @@ mod op {
     }
 
     /// Control device
-    #[cfg(feature = "abi-7-11")]
     #[derive(Debug)]
     pub struct IoCtl<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_ioctl_in,
         data: &'a [u8],
     }
-    #[cfg(feature = "abi-7-11")]
     impl_request!(IoCtl<'a>);
-    #[cfg(feature = "abi-7-11")]
     impl<'a> IoCtl<'a> {
         pub fn in_data(&self) -> &[u8] {
             &self.data[..self.arg.in_size as usize]
@@ -1260,15 +1217,12 @@ mod op {
     }
 
     /// Poll.
-    #[cfg(feature = "abi-7-11")]
     #[derive(Debug)]
     pub struct Poll<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_poll_in,
     }
-    #[cfg(feature = "abi-7-11")]
     impl_request!(Poll<'a>);
-    #[cfg(feature = "abi-7-11")]
     impl<'a> Poll<'a> {
         /// The value set by the [Open] method. See [FileHandle].
         pub fn file_handle(&self) -> FileHandle {
@@ -1282,10 +1236,7 @@ mod op {
 
         /// The requested poll events
         pub fn events(&self) -> u32 {
-            #[cfg(feature = "abi-7-21")]
-            return self.arg.events;
-            #[cfg(not(feature = "abi-7-21"))]
-            return 0;
+            self.arg.events
         }
 
         /// The poll request's flags
@@ -1294,19 +1245,7 @@ mod op {
         }
     }
 
-    /// NotifyReply.  TODO: currently unsupported by fuser
-    #[cfg(feature = "abi-7-15")]
-    #[derive(Debug)]
-    pub struct NotifyReply<'a> {
-        header: &'a fuse_in_header,
-        #[allow(unused)]
-        arg: &'a [u8],
-    }
-    #[cfg(feature = "abi-7-15")]
-    impl_request!(NotifyReply<'a>);
-
     /// BatchForget: TODO: merge with Forget
-    #[cfg(feature = "abi-7-16")]
     #[derive(Debug)]
     pub struct BatchForget<'a> {
         header: &'a fuse_in_header,
@@ -1314,9 +1253,7 @@ mod op {
         arg: &'a fuse_batch_forget_in,
         nodes: &'a [fuse_forget_one],
     }
-    #[cfg(feature = "abi-7-16")]
     impl_request!(BatchForget<'a>);
-    #[cfg(feature = "abi-7-16")]
     impl<'a> BatchForget<'a> {
         /// TODO: Don't return fuse_forget_one, this should be private
         pub fn nodes(&self) -> &'a [fuse_forget_one] {
@@ -1327,15 +1264,12 @@ mod op {
     /// Preallocate or deallocate space to a file
     ///
     /// Implementations should return EINVAL if offset or length are < 0
-    #[cfg(feature = "abi-7-19")]
     #[derive(Debug)]
     pub struct FAllocate<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_fallocate_in,
     }
-    #[cfg(feature = "abi-7-19")]
     impl_request!(FAllocate<'a>);
-    #[cfg(feature = "abi-7-19")]
     impl<'a> FAllocate<'a> {
         /// The value set by the [Open] method. See [FileHandle].
         pub fn file_handle(&self) -> FileHandle {
@@ -1356,15 +1290,12 @@ mod op {
     /// Read directory.
     ///
     /// TODO: Document when this is called rather than ReadDirectory
-    #[cfg(feature = "abi-7-21")]
     #[derive(Debug)]
     pub struct ReadDirPlus<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_read_in,
     }
-    #[cfg(feature = "abi-7-21")]
     impl_request!(ReadDirPlus<'a>);
-    #[cfg(feature = "abi-7-21")]
     impl<'a> ReadDirPlus<'a> {
         /// The value set by the [Open] method. See [FileHandle].
         pub fn file_handle(&self) -> FileHandle {
@@ -1381,7 +1312,6 @@ mod op {
     /// Rename a file.
     ///
     /// TODO: Document the differences to [Rename] and [Exchange]
-    #[cfg(feature = "abi-7-23")]
     #[derive(Debug)]
     pub struct Rename2<'a> {
         header: &'a fuse_in_header,
@@ -1390,9 +1320,7 @@ mod op {
         newname: &'a Path,
         old_parent: INodeNo,
     }
-    #[cfg(feature = "abi-7-23")]
     impl_request!(Rename2<'a>);
-    #[cfg(feature = "abi-7-23")]
     impl<'a> Rename2<'a> {
         pub fn from(&self) -> FilenameInDir<'a> {
             FilenameInDir::<'a> {
@@ -1420,15 +1348,12 @@ mod op {
     /// Reposition read/write file offset
     ///
     /// TODO: Document when you need to implement this.  Read and Write provide the offset anyway.
-    #[cfg(feature = "abi-7-24")]
     #[derive(Debug)]
     pub struct Lseek<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_lseek_in,
     }
-    #[cfg(feature = "abi-7-24")]
     impl_request!(Lseek<'a>);
-    #[cfg(feature = "abi-7-24")]
     impl<'a> Lseek<'a> {
         /// The value set by the [Open] method. See [FileHandle].
         pub fn file_handle(&self) -> FileHandle {
@@ -1451,15 +1376,12 @@ mod op {
         pub file_handle: FileHandle,
         pub offset: i64,
     }
-    #[cfg(feature = "abi-7-28")]
     #[derive(Debug)]
     pub struct CopyFileRange<'a> {
         header: &'a fuse_in_header,
         arg: &'a fuse_copy_file_range_in,
     }
-    #[cfg(feature = "abi-7-28")]
     impl_request!(CopyFileRange<'a>);
-    #[cfg(feature = "abi-7-28")]
     impl<'a> CopyFileRange<'a> {
         /// File and offset to copy data from
         pub fn src(&self) -> CopyFileRangeFile {
@@ -1488,14 +1410,12 @@ mod op {
     }
 
     /// TODO: Document
-    #[cfg(feature = "abi-7-12")]
     #[derive(Debug)]
     pub struct CuseInit<'a> {
         header: &'a fuse_in_header,
         #[allow(unused)]
         arg: &'a fuse_init_in,
     }
-    #[cfg(feature = "abi-7-12")]
     impl_request!(CuseInit<'a>);
 
     fn system_time_from_time(secs: i64, nsecs: u32) -> SystemTime {
@@ -1663,23 +1583,15 @@ mod op {
                 arg: data.fetch()?,
             }),
             fuse_opcode::FUSE_DESTROY => Operation::Destroy(Destroy { header }),
-            #[cfg(feature = "abi-7-11")]
             fuse_opcode::FUSE_IOCTL => Operation::IoCtl(IoCtl {
                 header,
                 arg: data.fetch()?,
                 data: data.fetch_all(),
             }),
-            #[cfg(feature = "abi-7-11")]
             fuse_opcode::FUSE_POLL => Operation::Poll(Poll {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-15")]
-            fuse_opcode::FUSE_NOTIFY_REPLY => Operation::NotifyReply(NotifyReply {
-                header,
-                arg: data.fetch_all(),
-            }),
-            #[cfg(feature = "abi-7-16")]
             fuse_opcode::FUSE_BATCH_FORGET => {
                 let arg = data.fetch()?;
                 Operation::BatchForget(BatchForget {
@@ -1688,17 +1600,14 @@ mod op {
                     nodes: data.fetch_slice(arg.count as usize)?,
                 })
             }
-            #[cfg(feature = "abi-7-19")]
             fuse_opcode::FUSE_FALLOCATE => Operation::FAllocate(FAllocate {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-21")]
             fuse_opcode::FUSE_READDIRPLUS => Operation::ReadDirPlus(ReadDirPlus {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-23")]
             fuse_opcode::FUSE_RENAME2 => Operation::Rename2(Rename2 {
                 header,
                 arg: data.fetch()?,
@@ -1706,18 +1615,15 @@ mod op {
                 newname: data.fetch_str()?.as_ref(),
                 old_parent: INodeNo(header.nodeid),
             }),
-            #[cfg(feature = "abi-7-24")]
             fuse_opcode::FUSE_LSEEK => Operation::Lseek(Lseek {
                 header,
                 arg: data.fetch()?,
             }),
-            #[cfg(feature = "abi-7-28")]
             fuse_opcode::FUSE_COPY_FILE_RANGE => Operation::CopyFileRange(CopyFileRange {
                 header,
                 arg: data.fetch()?,
             }),
 
-            #[cfg(feature = "abi-7-12")]
             fuse_opcode::CUSE_INIT => Operation::CuseInit(CuseInit {
                 header,
                 arg: data.fetch()?,
@@ -1768,26 +1674,15 @@ pub enum Operation<'a> {
     Interrupt(Interrupt<'a>),
     BMap(BMap<'a>),
     Destroy(Destroy<'a>),
-    #[cfg(feature = "abi-7-11")]
     IoCtl(IoCtl<'a>),
-    #[cfg(feature = "abi-7-11")]
     Poll(Poll<'a>),
-    #[cfg(feature = "abi-7-15")]
-    NotifyReply(NotifyReply<'a>),
-    #[cfg(feature = "abi-7-16")]
     BatchForget(BatchForget<'a>),
-    #[cfg(feature = "abi-7-19")]
     FAllocate(FAllocate<'a>),
-    #[cfg(feature = "abi-7-21")]
     ReadDirPlus(ReadDirPlus<'a>),
-    #[cfg(feature = "abi-7-23")]
     Rename2(Rename2<'a>),
-    #[cfg(feature = "abi-7-24")]
     Lseek(Lseek<'a>),
-    #[cfg(feature = "abi-7-28")]
     CopyFileRange(CopyFileRange<'a>),
 
-    #[cfg(feature = "abi-7-12")]
     CuseInit(CuseInit<'a>),
 }
 
@@ -1926,7 +1821,6 @@ impl<'a> fmt::Display for Operation<'a> {
             Operation::Interrupt(x) => write!(f, "INTERRUPT unique {:?}", x.unique()),
             Operation::BMap(x) => write!(f, "BMAP blocksize {}, ids {}", x.block_size(), x.block()),
             Operation::Destroy(_) => write!(f, "DESTROY"),
-            #[cfg(feature = "abi-7-11")]
             Operation::IoCtl(x) => write!(
                 f,
                 "IOCTL fh {:?}, cmd {}, data size {}, flags {:#x}",
@@ -1935,15 +1829,9 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.in_data().len(),
                 x.flags()
             ),
-            #[cfg(feature = "abi-7-11")]
             Operation::Poll(x) => write!(f, "POLL fh {:?}", x.file_handle()),
-            #[cfg(feature = "abi-7-15")]
-            Operation::NotifyReply(_) => write!(f, "NOTIFYREPLY"),
-            #[cfg(feature = "abi-7-16")]
             Operation::BatchForget(x) => write!(f, "BATCHFORGET nodes {:?}", x.nodes()),
-            #[cfg(feature = "abi-7-19")]
             Operation::FAllocate(_) => write!(f, "FALLOCATE"),
-            #[cfg(feature = "abi-7-21")]
             Operation::ReadDirPlus(x) => write!(
                 f,
                 "READDIRPLUS fh {:?}, offset {}, size {}",
@@ -1951,9 +1839,7 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.offset(),
                 x.size()
             ),
-            #[cfg(feature = "abi-7-23")]
             Operation::Rename2(x) => write!(f, "RENAME2 from {:?}, to {:?}", x.from(), x.to()),
-            #[cfg(feature = "abi-7-24")]
             Operation::Lseek(x) => write!(
                 f,
                 "LSEEK fh {:?}, offset {}, whence {}",
@@ -1961,7 +1847,6 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.offset(),
                 x.whence()
             ),
-            #[cfg(feature = "abi-7-28")]
             Operation::CopyFileRange(x) => write!(
                 f,
                 "COPY_FILE_RANGE src {:?}, dest {:?}, len {}",
@@ -1970,7 +1855,6 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.len()
             ),
 
-            #[cfg(feature = "abi-7-12")]
             Operation::CuseInit(_) => write!(f, "CUSE_INIT"),
         }
     }
@@ -2074,18 +1958,7 @@ mod tests {
         0x66, 0x6f, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
     ];
 
-    #[cfg(all(target_endian = "little", not(feature = "abi-7-12")))]
-    const MKNOD_REQUEST: AlignedData<[u8; 56]> = AlignedData([
-        0x38, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // len, opcode
-        0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
-        0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, // nodeid
-        0x0d, 0xd0, 0x01, 0xc0, 0xfe, 0xca, 0x01, 0xc0, // uid, gid
-        0x5e, 0xba, 0xde, 0xc0, 0x00, 0x00, 0x00, 0x00, // pid, padding
-        0xa4, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // mode, rdev
-        0x66, 0x6f, 0x6f, 0x2e, 0x74, 0x78, 0x74, 0x00, // name
-    ]);
-
-    #[cfg(all(target_endian = "little", feature = "abi-7-12"))]
+    #[cfg(target_endian = "little")]
     const MKNOD_REQUEST: AlignedData<[u8; 64]> = AlignedData([
         0x40, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x00, // len, opcode
         0x0d, 0xf0, 0xad, 0xba, 0xef, 0xbe, 0xad, 0xde, // unique
@@ -2135,9 +2008,6 @@ mod tests {
     #[test]
     fn mknod() {
         let req = AnyRequest::try_from(&MKNOD_REQUEST[..]).unwrap();
-        #[cfg(not(feature = "abi-7-12"))]
-        assert_eq!(req.header.len, 56);
-        #[cfg(feature = "abi-7-12")]
         assert_eq!(req.header.len, 64);
         assert_eq!(req.header.opcode, 8);
         assert_eq!(req.unique(), RequestId(0xdead_beef_baad_f00d));
@@ -2148,7 +2018,6 @@ mod tests {
         match req.operation().unwrap() {
             Operation::MkNod(x) => {
                 assert_eq!(x.mode(), 0o644);
-                #[cfg(feature = "abi-7-12")]
                 assert_eq!(x.umask(), 0o755);
                 assert_eq!(x.name(), OsStr::new("foo.txt"));
             }

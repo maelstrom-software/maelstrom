@@ -51,7 +51,6 @@ impl<'a> ArgumentIterator<'a> {
     }
 
     /// Fetch a slice of typed of arguments. Returns `None` if there's not enough data left.
-    #[cfg(feature = "abi-7-16")]
     pub fn fetch_slice<T: zerocopy::FromBytes>(&mut self, count: usize) -> Option<&'a [T]> {
         match zerocopy::Ref::<_, [T]>::new_slice_from_prefix(self.data, count) {
             None => {

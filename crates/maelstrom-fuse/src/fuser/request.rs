@@ -7,13 +7,11 @@
 
 use crate::fuser::ll::{Errno, Response};
 use std::convert::TryFrom;
-#[cfg(feature = "abi-7-28")]
 use std::convert::TryInto;
 use std::path::Path;
 
 use crate::fuser::channel::ChannelSender;
 use crate::fuser::ll::Request as _;
-#[cfg(feature = "abi-7-21")]
 use crate::fuser::reply::ReplyDirectoryPlus;
 use crate::fuser::reply::{Reply, ReplyDirectory, ReplySender};
 use crate::fuser::session::{Session, SessionACL};
@@ -71,64 +69,22 @@ impl<'a> Request<'a> {
             && self.request.uid() != 0)
             || (se.allowed == SessionACL::Owner && self.request.uid() != se.session_owner)
         {
-            #[cfg(feature = "abi-7-21")]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::ReadDirPlus(_)
-                    | ll::Operation::BatchForget(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        return Err(Errno::EACCES);
-                    }
-                }
-            }
-            #[cfg(all(feature = "abi-7-16", not(feature = "abi-7-21")))]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::BatchForget(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        return Err(Errno::EACCES);
-                    }
-                }
-            }
-            #[cfg(not(feature = "abi-7-16"))]
-            {
-                match op {
-                    // Only allow operations that the kernel may issue without a uid set
-                    ll::Operation::Init(_)
-                    | ll::Operation::Destroy(_)
-                    | ll::Operation::Read(_)
-                    | ll::Operation::ReadDir(_)
-                    | ll::Operation::Forget(_)
-                    | ll::Operation::Write(_)
-                    | ll::Operation::FSync(_)
-                    | ll::Operation::FSyncDir(_)
-                    | ll::Operation::Release(_)
-                    | ll::Operation::ReleaseDir(_) => {}
-                    _ => {
-                        return Err(Errno::EACCES);
-                    }
+            match op {
+                // Only allow operations that the kernel may issue without a uid set
+                ll::Operation::Init(_)
+                | ll::Operation::Destroy(_)
+                | ll::Operation::Read(_)
+                | ll::Operation::ReadDir(_)
+                | ll::Operation::ReadDirPlus(_)
+                | ll::Operation::BatchForget(_)
+                | ll::Operation::Forget(_)
+                | ll::Operation::Write(_)
+                | ll::Operation::FSync(_)
+                | ll::Operation::FSyncDir(_)
+                | ll::Operation::Release(_)
+                | ll::Operation::ReleaseDir(_) => {}
+                _ => {
+                    return Err(Errno::EACCES);
                 }
             }
         }
@@ -472,7 +428,6 @@ impl<'a> Request<'a> {
                 );
             }
 
-            #[cfg(feature = "abi-7-11")]
             ll::Operation::IoCtl(x) => {
                 if x.unrestricted() {
                     return Err(Errno::ENOSYS);
@@ -489,7 +444,6 @@ impl<'a> Request<'a> {
                     );
                 }
             }
-            #[cfg(feature = "abi-7-11")]
             ll::Operation::Poll(x) => {
                 se.filesystem.poll(
                     self,
@@ -501,16 +455,9 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-15")]
-            ll::Operation::NotifyReply(_) => {
-                // TODO: handle FUSE_NOTIFY_REPLY
-                return Err(Errno::ENOSYS);
-            }
-            #[cfg(feature = "abi-7-16")]
             ll::Operation::BatchForget(x) => {
                 se.filesystem.batch_forget(self, x.nodes()); // no reply
             }
-            #[cfg(feature = "abi-7-19")]
             ll::Operation::FAllocate(x) => {
                 se.filesystem.fallocate(
                     self,
@@ -522,7 +469,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-21")]
             ll::Operation::ReadDirPlus(x) => {
                 se.filesystem.readdirplus(
                     self,
@@ -536,7 +482,6 @@ impl<'a> Request<'a> {
                     ),
                 );
             }
-            #[cfg(feature = "abi-7-23")]
             ll::Operation::Rename2(x) => {
                 se.filesystem.rename(
                     self,
@@ -548,7 +493,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-24")]
             ll::Operation::Lseek(x) => {
                 se.filesystem.lseek(
                     self,
@@ -559,7 +503,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-28")]
             ll::Operation::CopyFileRange(x) => {
                 let (i, o) = (x.src(), x.dest());
                 se.filesystem.copy_file_range(
@@ -575,7 +518,6 @@ impl<'a> Request<'a> {
                     self.reply(),
                 );
             }
-            #[cfg(feature = "abi-7-12")]
             ll::Operation::CuseInit(_) => {
                 // TODO: handle CUSE_INIT
                 return Err(Errno::ENOSYS);

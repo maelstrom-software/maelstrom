@@ -8,13 +8,11 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 use std::io;
 use std::path::Path;
-#[cfg(feature = "abi-7-23")]
 use std::time::Duration;
 use std::time::SystemTime;
 use std::{convert::AsRef, io::ErrorKind};
 
 use ll::fuse_abi::consts::*;
-#[cfg(feature = "abi-7-16")]
 pub use ll::fuse_abi::fuse_forget_one;
 pub use ll::{
     fuse_abi::{consts, FUSE_ROOT_ID},
@@ -22,9 +20,6 @@ pub use ll::{
 };
 use mnt::mount_options::check_option_conflicts;
 pub use mnt::mount_options::MountOption;
-#[cfg(feature = "abi-7-11")]
-pub use notify::Notifier;
-#[cfg(feature = "abi-7-11")]
 pub use reply::ReplyPoll;
 pub use reply::ReplyXattr;
 pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
@@ -35,40 +30,25 @@ pub use reply::{
 pub use request::Request;
 use session::MAX_WRITE_SIZE;
 pub use session::{BackgroundSession, Session};
-#[cfg(feature = "abi-7-28")]
 use std::cmp::max;
-#[cfg(feature = "abi-7-13")]
 use std::cmp::min;
 
 mod channel;
 mod ll;
 mod mnt;
-#[cfg(feature = "abi-7-11")]
-mod notify;
 mod reply;
 mod request;
 mod session;
 
 /// We generally support async reads
-#[cfg(not(feature = "abi-7-10"))]
-const INIT_FLAGS: u32 = FUSE_ASYNC_READ;
-#[cfg(feature = "abi-7-10")]
 const INIT_FLAGS: u32 = FUSE_ASYNC_READ | FUSE_BIG_WRITES;
 
 const fn default_init_flags(#[allow(unused_variables)] capabilities: u32) -> u32 {
-    #[cfg(not(feature = "abi-7-28"))]
-    {
-        INIT_FLAGS
+    let mut flags = INIT_FLAGS;
+    if capabilities & FUSE_MAX_PAGES != 0 {
+        flags |= FUSE_MAX_PAGES;
     }
-
-    #[cfg(feature = "abi-7-28")]
-    {
-        let mut flags = INIT_FLAGS;
-        if capabilities & FUSE_MAX_PAGES != 0 {
-            flags |= FUSE_MAX_PAGES;
-        }
-        flags
-    }
+    flags
 }
 
 /// File types
@@ -128,12 +108,9 @@ pub struct KernelConfig {
     requested: u32,
     max_readahead: u32,
     max_max_readahead: u32,
-    #[cfg(feature = "abi-7-13")]
     max_background: u16,
-    #[cfg(feature = "abi-7-13")]
     congestion_threshold: Option<u16>,
     max_write: u32,
-    #[cfg(feature = "abi-7-23")]
     time_gran: Duration,
 }
 
@@ -144,14 +121,11 @@ impl KernelConfig {
             requested: default_init_flags(capabilities),
             max_readahead,
             max_max_readahead: max_readahead,
-            #[cfg(feature = "abi-7-13")]
             max_background: 16,
-            #[cfg(feature = "abi-7-13")]
             congestion_threshold: None,
             // use a max write size that fits into the session's buffer
             max_write: MAX_WRITE_SIZE as u32,
             // 1ns means nano-second granularity.
-            #[cfg(feature = "abi-7-23")]
             time_gran: Duration::new(0, 1),
         }
     }
@@ -161,7 +135,6 @@ impl KernelConfig {
     /// Must be a power of 10 nanoseconds. i.e. 1s, 0.1s, 0.01s, 1ms, 0.1ms...etc
     ///
     /// On success returns the previous value. On error returns the nearest value which will succeed
-    #[cfg(feature = "abi-7-23")]
     pub fn set_time_granularity(&mut self, value: Duration) -> Result<Duration, Duration> {
         if value.as_nanos() == 0 {
             return Err(Duration::new(0, 1));
@@ -226,7 +199,6 @@ impl KernelConfig {
     /// Set the maximum number of pending background requests. Such as readahead requests.
     ///
     /// On success returns the previous value. On error returns the nearest value which will succeed
-    #[cfg(feature = "abi-7-13")]
     pub fn set_max_background(&mut self, value: u16) -> Result<u16, u16> {
         if value == 0 {
             return Err(1);
@@ -240,7 +212,6 @@ impl KernelConfig {
     /// request queue congested. (it may then switch to sleeping instead of spin-waiting, for example)
     ///
     /// On success returns the previous value. On error returns the nearest value which will succeed
-    #[cfg(feature = "abi-7-13")]
     pub fn set_congestion_threshold(&mut self, value: u16) -> Result<u16, u16> {
         if value == 0 {
             return Err(1);
@@ -250,7 +221,6 @@ impl KernelConfig {
         Ok(previous)
     }
 
-    #[cfg(feature = "abi-7-13")]
     fn congestion_threshold(&self) -> u16 {
         match self.congestion_threshold {
             // Default to a threshold of 3/4 of the max background threads
@@ -259,7 +229,6 @@ impl KernelConfig {
         }
     }
 
-    #[cfg(feature = "abi-7-28")]
     fn max_pages(&self) -> u16 {
         ((max(self.max_write, self.max_readahead) - 1) / page_size::get() as u32) as u16 + 1
     }
@@ -300,7 +269,6 @@ pub trait Filesystem {
 
     /// Like forget, but take multiple forget requests at once for performance. The default
     /// implementation will fallback to forget.
-    #[cfg(feature = "abi-7-16")]
     fn batch_forget(&mut self, req: &Request<'_>, nodes: &[fuse_forget_one]) {
         for node in nodes {
             self.forget(req, node.nodeid, node.nlookup);
@@ -750,15 +718,14 @@ pub trait Filesystem {
     }
 
     /// Poll for events
-    #[cfg(feature = "abi-7-11")]
     fn poll(
         &mut self,
         _req: &Request<'_>,
-        ino: u64,
-        fh: u64,
-        kh: u64,
-        events: u32,
-        flags: u32,
+        _ino: u64,
+        _fh: u64,
+        _kh: u64,
+        _events: u32,
+        _flags: u32,
         reply: ReplyPoll,
     ) {
         reply.error(ENOSYS);
