@@ -77,16 +77,21 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
     }
 }
 
-fn main() -> Result<()> {
-    let config = Config::new("maelstrom/worker", "MAELSTROM_WORKER")?;
-    clone_into_pid_and_user_namespace()?;
+fn run_with_logger(config: Config, f: impl FnOnce(Config, Logger) -> Result<()>) -> Result<()> {
     let decorator = TermDecorator::new().build();
     let drain = FullFormat::new(decorator).build().fuse();
     let drain = Async::new(drain).build().fuse();
     let drain = LevelFilter::new(drain, config.log_level.as_slog_level()).fuse();
     let log = Logger::root(drain, o!());
-    Runtime::new()
-        .context("starting tokio runtime")?
-        .block_on(async move { maelstrom_worker::main(config, log).await })?;
-    Ok(())
+    f(config, log)
+}
+
+fn main() -> Result<()> {
+    let config = Config::new("maelstrom/worker", "MAELSTROM_WORKER")?;
+    clone_into_pid_and_user_namespace()?;
+    run_with_logger(config, |config, log| {
+        Runtime::new()
+            .context("starting tokio runtime")?
+            .block_on(async move { maelstrom_worker::main(config, log).await })
+    })
 }
