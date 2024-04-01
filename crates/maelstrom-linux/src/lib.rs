@@ -7,8 +7,8 @@ extern crate std;
 use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
 use derive_more::{BitOr, Display, Into};
 use libc::{
-    c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, mode_t, nfds_t, pid_t, pollfd,
-    sa_family_t, size_t, sockaddr, socklen_t, uid_t,
+    c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
+    pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
 #[cfg(feature = "std")]
@@ -641,6 +641,15 @@ fn extract_wait_status(status: c_int) -> WaitStatus {
     }
 }
 
+fn extract_wait_status_from_siginfo(siginfo: siginfo_t) -> WaitStatus {
+    let status = unsafe { siginfo.si_status() };
+    match siginfo.si_code {
+        libc::CLD_EXITED => WaitStatus::Exited(ExitCode(status)),
+        libc::CLD_KILLED | libc::CLD_DUMPED => WaitStatus::Signaled(Signal(status)),
+        code => panic!("siginfo's si_code was {code} instead of CLD_EXITED or CLD_KILLED"),
+    }
+}
+
 pub fn fork() -> Result<Option<Pid>, Errno> {
     Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
 }
@@ -665,6 +674,18 @@ pub fn waitpid(pid: Pid) -> Result<WaitStatus, Errno> {
     };
     let mut status = 0;
     Errno::result(inner(&mut status)).map(|_| extract_wait_status(status))
+}
+
+pub fn waitid(pidfd: Fd) -> Result<WaitStatus, Errno> {
+    let inner = |siginfo: &mut siginfo_t| {
+        let idtype = libc::P_PIDFD as idtype_t;
+        let id = pidfd.0 as id_t;
+        let siginfo_ptr = siginfo as *mut siginfo_t;
+        let options = libc::WEXITED;
+        unsafe { libc::waitid(idtype, id, siginfo_ptr, options) }
+    };
+    let mut siginfo = unsafe { mem::zeroed() };
+    Errno::result(inner(&mut siginfo)).map(|_| extract_wait_status_from_siginfo(siginfo))
 }
 
 pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
