@@ -69,9 +69,9 @@ impl ReplyRaw {
     fn send_ll_mut(&mut self, response: &ll::Response<'_>) {
         assert!(self.sender.is_some());
         let sender = self.sender.take().unwrap();
-        response
-            .with_iovec(self.unique, |iov| sender.send(iov))
-            .ok();
+        let header = response.header(self.unique);
+        let iov = response.as_iovec(&header);
+        sender.send(&iov).ok();
     }
     fn send_ll(mut self, response: &ll::Response<'_>) {
         self.send_ll_mut(response)

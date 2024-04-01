@@ -25,17 +25,13 @@ pub enum Response<'a> {
 }
 
 impl<'a> Response<'a> {
-    pub(crate) fn with_iovec<F: FnOnce(&[IoSlice<'_>]) -> T, T>(
-        &self,
-        unique: RequestId,
-        f: F,
-    ) -> T {
+    pub(crate) fn header(&self, unique: RequestId) -> abi::fuse_out_header {
         let datalen = match &self {
             Response::Error(_) => 0,
             Response::Data(v) => v.len(),
             Response::Slice(d) => d.len(),
         };
-        let header = abi::fuse_out_header {
+        abi::fuse_out_header {
             unique: unique.0,
             error: if let Response::Error(errno) = self {
                 -errno
@@ -45,14 +41,20 @@ impl<'a> Response<'a> {
             len: (size_of::<abi::fuse_out_header>() + datalen)
                 .try_into()
                 .expect("Too much data"),
-        };
+        }
+    }
+
+    pub(crate) fn as_iovec<'b>(
+        &'b self,
+        header: &'b abi::fuse_out_header,
+    ) -> SmallVec<[IoSlice<'b>; 3]> {
         let mut v: SmallVec<[IoSlice<'_>; 3]> = smallvec![IoSlice::new(header.as_bytes())];
         match &self {
             Response::Error(_) => {}
             Response::Data(d) => v.push(IoSlice::new(d)),
             Response::Slice(d) => v.push(IoSlice::new(d)),
         }
-        f(&v)
+        v
     }
 
     // Constructors
@@ -486,8 +488,9 @@ mod test {
     #[test]
     fn reply_empty() {
         let r = Response::new_empty();
+        let header = r.header(RequestId(0xdeadbeef));
         assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
+            ioslice_to_vec(&r.as_iovec(&header)),
             vec![
                 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
                 0x00, 0x00,
@@ -498,8 +501,9 @@ mod test {
     #[test]
     fn reply_error() {
         let r = Response::new_error(Errno(NonZeroI32::new(66).unwrap()));
+        let header = r.header(RequestId(0xdeadbeef));
         assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
+            ioslice_to_vec(&r.as_iovec(&header)),
             vec![
                 0x10, 0x00, 0x00, 0x00, 0xbe, 0xff, 0xff, 0xff, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
                 0x00, 0x00,
@@ -510,8 +514,9 @@ mod test {
     #[test]
     fn reply_data() {
         let r = Response::new_data([0xde, 0xad, 0xbe, 0xef].as_ref());
+        let header = r.header(RequestId(0xdeadbeef));
         assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
+            ioslice_to_vec(&r.as_iovec(&header)),
             vec![
                 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xef, 0xbe, 0xad, 0xde, 0x00, 0x00,
                 0x00, 0x00, 0xde, 0xad, 0xbe, 0xef,
@@ -555,10 +560,8 @@ mod test {
             blksize: 0xbb,
         };
         let r = Response::new_entry(INodeNo(0x11), Generation(0xaa), &attr.into(), ttl, ttl);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -595,10 +598,8 @@ mod test {
             blksize: 0xbb,
         };
         let r = Response::new_attr(&ttl, &attr.into());
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -609,10 +610,8 @@ mod test {
             0x00, 0x00, 0x00, 0x00,
         ];
         let r = Response::new_open(FileHandle(0x1122), 0x33);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -622,10 +621,8 @@ mod test {
             0x00, 0x00, 0x22, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         let r = Response::new_write(0x1122);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -640,10 +637,8 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         let r = Response::new_statfs(0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -687,10 +682,8 @@ mod test {
             blksize: 0xdd,
         };
         let r = Response::new_create(&ttl, &attr.into(), Generation(0xaa), FileHandle(0xbb), 0xcc);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -705,10 +698,8 @@ mod test {
             typ: 0x33,
             pid: 0x44,
         });
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -718,10 +709,8 @@ mod test {
             0x00, 0x00, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
         let r = Response::new_bmap(0x1234);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -731,10 +720,8 @@ mod test {
             0x00, 0x00, 0x78, 0x56, 0x34, 0x12, 0x00, 0x00, 0x00, 0x00,
         ];
         let r = Response::new_xattr_size(0x12345678);
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -744,10 +731,8 @@ mod test {
             0x00, 0x00, 0x11, 0x22, 0x33, 0x44,
         ];
         let r = Response::new_data([0x11, 0x22, 0x33, 0x44].as_ref());
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 
     #[test]
@@ -774,9 +759,7 @@ mod test {
             "world.rs"
         )));
         let r: Response<'_> = buf.into();
-        assert_eq!(
-            r.with_iovec(RequestId(0xdeadbeef), ioslice_to_vec),
-            expected
-        );
+        let header = r.header(RequestId(0xdeadbeef));
+        assert_eq!(ioslice_to_vec(&r.as_iovec(&header)), expected);
     }
 }

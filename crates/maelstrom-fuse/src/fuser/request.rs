@@ -49,13 +49,14 @@ impl<'a> Request<'a> {
     pub(crate) fn dispatch<FS: Filesystem>(&self, se: &mut Session<FS>) {
         let unique = self.request.unique();
 
-        match self.dispatch_req(se) {
+        let resp = match self.dispatch_req(se) {
             Ok(Some(resp)) => resp,
             Ok(None) => return,
             Err(errno) => self.request.reply_err(errno),
-        }
-        .with_iovec(unique, |iov| self.ch.send(iov))
-        .ok();
+        };
+        let header = resp.header(unique);
+        let iov = resp.as_iovec(&header);
+        self.ch.send(&iov).ok();
     }
 
     fn dispatch_req<FS: Filesystem>(
