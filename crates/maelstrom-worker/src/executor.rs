@@ -775,7 +775,6 @@ mod tests {
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::async_fs;
-    use serial_test::serial;
     use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::sync::{oneshot, Mutex};
@@ -933,13 +932,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn exited_0() {
         Test::from_spec(bash_spec("exit 0")).await.run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn exited_1() {
         Test::from_spec(bash_spec("exit 1"))
             .await
@@ -952,7 +949,6 @@ mod tests {
     // our executor. We should probably rewrite these tests to run python or something, and take
     // input from stdin.
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn signaled_11() {
         Test::from_spec(python_spec(concat!(
             "import os;",
@@ -972,7 +968,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stdout_inline_limit_0() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -986,7 +981,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stdout_inline_limit_1() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1000,7 +994,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stdout_inline_limit_2() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1011,7 +1004,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stdout_inline_limit_3() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1022,7 +1014,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stderr_inline_limit_0() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1036,7 +1027,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stderr_inline_limit_1() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1050,7 +1040,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stderr_inline_limit_2() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1061,7 +1050,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stderr_inline_limit_3() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1072,7 +1060,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn environment() {
         Test::from_spec(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
             .await
@@ -1082,13 +1069,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn stdin_empty() {
         Test::from_spec(test_spec("/bin/cat")).await.run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn pid_ppid_pgid_and_sid() {
         // We should be pid 1, that is, init for our namespace).
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
@@ -1110,7 +1095,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_loopback() {
         Test::from_spec(
             test_spec("/bin/cat")
@@ -1130,7 +1114,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn loopback() {
         Test::from_spec(
             test_spec("/bin/cat")
@@ -1148,7 +1131,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn user_and_group_0() {
         Test::from_spec(python_spec(concat!(
             "import os;",
@@ -1162,7 +1144,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn user_and_group_nonzero() {
         Test::from_spec(
             python_spec(concat!(
@@ -1180,7 +1161,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn close_range() {
         Test::from_spec(
             test_spec("/bin/ls")
@@ -1197,7 +1177,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn one_layer_is_read_only() {
         Test::from_spec(test_spec("/bin/touch").arguments(["/foo"]))
             .await
@@ -1210,7 +1189,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn one_layer_with_writable_file_system_is_writable() {
         Test::from_spec(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
             .await
@@ -1228,7 +1206,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn multiple_layers_with_writable_file_system_is_writable() {
         let mount = TarMount::new().await;
         let spec = JobSpec::from_spec_and_path(
@@ -1254,7 +1231,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_full() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
             .await
@@ -1264,7 +1240,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_full() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
@@ -1277,7 +1252,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_null() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
             .await
@@ -1287,7 +1261,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_null() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
@@ -1300,7 +1273,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_null_write() {
         Test::from_spec(
             bash_spec("echo foo > /dev/null && cat /dev/null")
@@ -1312,7 +1284,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_random() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .await
@@ -1322,7 +1293,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_random() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
@@ -1335,7 +1305,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_tty() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
             .await
@@ -1345,7 +1314,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_tty() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
@@ -1358,7 +1326,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_urandom() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
             .await
@@ -1368,7 +1335,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_urandom() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
@@ -1381,7 +1347,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_dev_zero() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
             .await
@@ -1391,7 +1356,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn dev_zero() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
@@ -1404,7 +1368,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_tmpfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1421,7 +1384,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn tmpfs() {
         Test::from_spec(
             test_spec("/bin/awk")
@@ -1444,7 +1406,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_sysfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1461,7 +1422,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn sysfs() {
         Test::from_spec(
             test_spec("/bin/awk")
@@ -1484,7 +1444,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn no_procfs() {
         Test::from_spec(test_spec("/bin/ls").arguments(["/proc"]))
             .await
@@ -1493,7 +1452,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn procfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1512,7 +1470,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn old_mounts_are_unmounted() {
         Test::from_spec(
             test_spec("/bin/wc")
@@ -1529,7 +1486,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn working_directory_root() {
         Test::from_spec(bash_spec("pwd"))
             .await
@@ -1539,7 +1495,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn working_directory_not_root() {
         Test::from_spec(bash_spec("pwd").working_directory("/usr/bin"))
             .await
@@ -1570,13 +1525,11 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn execution_error() {
         assert_execution_error(test_spec("a_program_that_does_not_exist")).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[serial]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
     }

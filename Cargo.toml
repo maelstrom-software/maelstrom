@@ -107,7 +107,6 @@ serde_json = { version = "1.0.107" }
 serde_repr = "0.1"
 serde_test = "1"
 serde_with = { version = "3.4", features = ["chrono"] }
-serial_test = "2.0.0"
 sha2 = "0.10.6"
 slog = { version = "2.7.0", features = ["max_level_debug", "release_max_level_debug"] }
 slog-async = "2.8.0"
