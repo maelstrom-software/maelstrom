@@ -6,26 +6,24 @@ pub use fuser::{FileAttr, FileType};
 use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::Errno;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc::{channel, error::SendError, Receiver, Sender};
 use tokio::sync::Semaphore;
 
 const MAX_INFLIGHT: usize = 1000;
 
 pub struct FuseHandle {
     fuser_session: fuser::BackgroundSession,
-    receiver: tokio::task::JoinHandle<Result<()>>,
 }
 
 impl FuseHandle {
     pub async fn umount_and_join(self) -> Result<()> {
-        drop(self.fuser_session);
-        self.receiver.await?
+        self.fuser_session.join().await;
+        Ok(())
     }
 }
 
@@ -36,24 +34,23 @@ pub fn fuse_mount(
 ) -> Result<FuseHandle> {
     let mount_point = mount_point.to_owned();
     let name = name.into();
-    let (send, recv) = channel(MAX_INFLIGHT / 2);
 
-    let fuser_session = fuse_mount_sender(send, mount_point, name)?;
-    let receiver = tokio::task::spawn(async move { fuse_mount_receiver(handler, recv).await });
+    let fuser_session = fuse_mount_dispatcher(handler, mount_point, name)?;
 
-    Ok(FuseHandle {
-        fuser_session,
-        receiver,
-    })
+    Ok(FuseHandle { fuser_session })
 }
 
-fn fuse_mount_sender(
-    send: Sender<FsMessage>,
+fn fuse_mount_dispatcher(
+    handler: impl FuseFileSystem + Send + Sync + 'static,
     mount_point: PathBuf,
     name: String,
 ) -> Result<fuser::BackgroundSession> {
     let options = vec![MountOption::RO, MountOption::FSName(name)];
-    Ok(fuser::spawn_mount2(SendingFs(send), mount_point, &options)?)
+    Ok(fuser::spawn_mount2(
+        DispatchingFs::new(handler),
+        mount_point,
+        &options,
+    )?)
 }
 
 trait ErrorResponse {
@@ -122,116 +119,32 @@ async fn handle_read_dir_resp(
     }
 }
 
-async fn fuse_mount_receiver(
-    handler: impl FuseFileSystem + Send + Sync + 'static,
-    mut recv: Receiver<FsMessage>,
-) -> Result<()> {
-    let handler = Arc::new(handler);
-    let sem = Arc::new(Semaphore::new(MAX_INFLIGHT / 2));
-    while let Some(msg) = recv.recv().await {
-        let handler = handler.clone();
-        let permit = sem.clone().acquire_owned().await.unwrap();
-        match msg {
-            FsMessage::LookUp {
-                request,
-                parent,
-                name,
-                reply,
-            } => tokio::task::spawn(async move {
-                handle_resp(handler.look_up(request, parent, &name).await, reply).await;
-                drop(permit);
-            }),
-            FsMessage::GetAttr {
-                request,
-                ino,
-                reply,
-            } => tokio::task::spawn(async move {
-                handle_resp(handler.get_attr(request, ino).await, reply).await;
-                drop(permit);
-            }),
-            FsMessage::Read {
-                request,
-                ino,
-                fh,
-                offset,
-                size,
-                flags,
-                lock_owner,
-                reply,
-            } => tokio::task::spawn(async move {
-                handle_resp(
-                    handler
-                        .read(request, ino, fh, offset, size, flags, lock_owner)
-                        .await,
-                    reply,
-                )
-                .await;
-                drop(permit);
-            }),
-            FsMessage::ReadDir {
-                request,
-                ino,
-                fh,
-                offset,
-                reply,
-            } => tokio::task::spawn(async move {
-                handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await;
-                drop(permit);
-            }),
-            FsMessage::ReadLink {
-                request,
-                ino,
-                reply,
-            } => tokio::task::spawn(async move {
-                handle_resp(handler.read_link(request, ino).await, reply).await;
-                drop(permit);
-            }),
-        };
+struct DispatchingFs<FileSystemT> {
+    handler: Arc<FileSystemT>,
+    sem: Arc<Semaphore>,
+}
+
+impl<FileSystemT> DispatchingFs<FileSystemT> {
+    fn new(handler: FileSystemT) -> Self {
+        Self {
+            handler: Arc::new(handler),
+            sem: Arc::new(Semaphore::new(MAX_INFLIGHT / 2)),
+        }
     }
-    sem.acquire_many(MAX_INFLIGHT as u32 / 2).await?.forget();
-    Ok(())
 }
-
-enum FsMessage {
-    LookUp {
-        request: Request,
-        parent: u64,
-        name: OsString,
-        reply: ReplyEntry,
-    },
-    GetAttr {
-        request: Request,
-        ino: u64,
-        reply: ReplyAttr,
-    },
-    Read {
-        request: Request,
-        ino: u64,
-        fh: u64,
-        offset: i64,
-        size: u32,
-        flags: i32,
-        lock_owner: Option<u64>,
-        reply: ReplyData,
-    },
-    ReadDir {
-        request: Request,
-        ino: u64,
-        fh: u64,
-        offset: i64,
-        reply: ReplyDirectory,
-    },
-    ReadLink {
-        request: Request,
-        ino: u64,
-        reply: ReplyData,
-    },
-}
-
-struct SendingFs(Sender<FsMessage>);
 
 #[async_trait]
-impl fuser::Filesystem for SendingFs {
+impl<FileSystemT: FuseFileSystem + Send + Sync + 'static> fuser::Filesystem
+    for DispatchingFs<FileSystemT>
+{
+    async fn destroy(&mut self) {
+        self.sem
+            .acquire_many(MAX_INFLIGHT as u32 / 2)
+            .await
+            .unwrap()
+            .forget();
+    }
+
     async fn lookup(
         &mut self,
         req: &fuser::Request<'_>,
@@ -239,26 +152,26 @@ impl fuser::Filesystem for SendingFs {
         name: &OsStr,
         reply: ReplyEntry,
     ) {
-        let msg = FsMessage::LookUp {
-            request: req.into(),
-            parent: parent,
-            name: name.into(),
-            reply,
-        };
-        if let Err(SendError(FsMessage::LookUp { reply, .. })) = self.0.send(msg).await {
-            reply.error(Errno::EIO.as_i32()).await
-        }
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        let name = name.to_owned();
+        tokio::task::spawn(async move {
+            handle_resp(handler.look_up(request, parent, &name).await, reply).await;
+            drop(permit);
+        });
     }
+
     async fn getattr(&mut self, req: &fuser::Request<'_>, ino: u64, reply: ReplyAttr) {
-        let msg = FsMessage::GetAttr {
-            request: req.into(),
-            ino,
-            reply,
-        };
-        if let Err(SendError(FsMessage::GetAttr { reply, .. })) = self.0.send(msg).await {
-            reply.error(Errno::EIO.as_i32()).await
-        }
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        tokio::task::spawn(async move {
+            handle_resp(handler.get_attr(request, ino).await, reply).await;
+            drop(permit);
+        });
     }
+
     async fn read(
         &mut self,
         req: &fuser::Request<'_>,
@@ -270,20 +183,21 @@ impl fuser::Filesystem for SendingFs {
         lock_owner: Option<u64>,
         reply: ReplyData,
     ) {
-        let msg = FsMessage::Read {
-            request: req.into(),
-            ino,
-            fh,
-            offset,
-            size,
-            flags,
-            lock_owner,
-            reply,
-        };
-        if let Err(SendError(FsMessage::Read { reply, .. })) = self.0.send(msg).await {
-            reply.error(Errno::EIO.as_i32()).await
-        }
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        tokio::task::spawn(async move {
+            handle_resp(
+                handler
+                    .read(request, ino, fh, offset, size, flags, lock_owner)
+                    .await,
+                reply,
+            )
+            .await;
+            drop(permit);
+        });
     }
+
     async fn readdir(
         &mut self,
         req: &fuser::Request<'_>,
@@ -292,26 +206,23 @@ impl fuser::Filesystem for SendingFs {
         offset: i64,
         reply: ReplyDirectory,
     ) {
-        let msg = FsMessage::ReadDir {
-            request: req.into(),
-            ino,
-            fh,
-            offset,
-            reply,
-        };
-        if let Err(SendError(FsMessage::ReadDir { reply, .. })) = self.0.send(msg).await {
-            reply.error(Errno::EIO.as_i32()).await
-        }
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        tokio::task::spawn(async move {
+            handle_read_dir_resp(handler.read_dir(request, ino, fh, offset).await, reply).await;
+            drop(permit);
+        });
     }
+
     async fn readlink(&mut self, req: &fuser::Request<'_>, ino: u64, reply: ReplyData) {
-        let msg = FsMessage::ReadLink {
-            request: req.into(),
-            ino,
-            reply,
-        };
-        if let Err(SendError(FsMessage::ReadLink { reply, .. })) = self.0.send(msg).await {
-            reply.error(Errno::EIO.as_i32()).await
-        }
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        tokio::task::spawn(async move {
+            handle_resp(handler.read_link(request, ino).await, reply).await;
+            drop(permit);
+        });
     }
 }
 

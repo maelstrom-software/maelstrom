@@ -146,6 +146,11 @@ impl<FS: Filesystem> Session<FS> {
                 },
             }
         }
+        if !self.destroyed {
+            self.filesystem.destroy().await;
+            self.destroyed = true;
+        }
+
         Ok(())
     }
 
@@ -189,15 +194,6 @@ impl<FS: 'static + Filesystem + Send> Session<FS> {
     /// Run the session loop in a background thread
     pub fn spawn(self) -> io::Result<BackgroundSession> {
         BackgroundSession::new(self)
-    }
-}
-
-impl<FS: Filesystem> Drop for Session<FS> {
-    fn drop(&mut self) {
-        if !self.destroyed {
-            self.filesystem.destroy();
-            self.destroyed = true;
-        }
     }
 }
 

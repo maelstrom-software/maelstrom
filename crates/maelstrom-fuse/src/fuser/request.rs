@@ -119,7 +119,7 @@ impl<'a> Request<'a> {
             }
             // Filesystem destroyed
             ll::Operation::Destroy(x) => {
-                se.filesystem.destroy();
+                se.filesystem.destroy().await;
                 se.destroyed = true;
                 return Ok(Some(x.reply()));
             }
@@ -590,6 +590,7 @@ impl<'a> Request<'a> {
                 return Err(Errno::ENOSYS);
             }
         }
+
         Ok(None)
     }
 
