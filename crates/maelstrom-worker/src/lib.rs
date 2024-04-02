@@ -6,7 +6,6 @@ mod dispatcher;
 mod executor;
 mod fetcher;
 mod layer_fs;
-mod reaper;
 
 use anyhow::Result;
 use cache::{Cache, StdCacheFs};
@@ -18,7 +17,7 @@ use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobError, JobId, JobResult, JobSpec, JobStatus, Sha256Digest,
 };
-use maelstrom_linux::{self as linux, Errno, Pid, Signal};
+use maelstrom_linux::{self as linux, Pid, Signal, WaitStatus};
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheRoot},
@@ -26,12 +25,11 @@ use maelstrom_util::{
     manifest::AsyncManifestReader,
     net, sync,
 };
-use reaper::ReaperDeps;
-use slog::{debug, error, info, o, warn, Logger};
+use slog::{debug, error, info, o, Logger};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
-use std::{ops::ControlFlow, path::PathBuf, process, thread, time::Duration};
+use std::{path::PathBuf, process, thread, time::Duration};
 use tokio::{
     io::BufReader,
     net::TcpStream,
@@ -123,11 +121,13 @@ impl DispatcherDeps for DispatcherAdapter {
     ) -> JobResult<(Pid, Self::FuseHandle), String> {
         let sender = self.dispatcher_sender.clone();
         let sender2 = sender.clone();
+        let sender3 = sender.clone();
         let log = self
             .log
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
         let log2 = log.clone();
+        let log3 = log.clone();
 
         let mount_path = self.tmpfs_dir.join(format!(
             "fuse_mount.{}.{}",
@@ -155,15 +155,20 @@ impl DispatcherDeps for DispatcherAdapter {
             self.executor.start(
                 &spec,
                 self.inline_limit,
+                move |pid, result| {
+                    debug!(log, "job process status"; "result" => ?result);
+                    let status = crate::job_status_from_wait_status(result.unwrap());
+                    sender.send(Message::PidStatus(pid, status)).ok();
+                },
                 move |result| {
-                    debug!(log, "job stdout"; "result" => ?result);
-                    sender
+                    debug!(log2, "job stdout"; "result" => ?result);
+                    sender2
                         .send(Message::JobStdout(jid, result.map_err(|e| e.to_string())))
                         .ok();
                 },
                 move |result| {
-                    debug!(log2, "job stderr"; "result" => ?result);
-                    sender2
+                    debug!(log3, "job stderr"; "result" => ?result);
+                    sender3
                         .send(Message::JobStderr(jid, result.map_err(|e| e.to_string())))
                         .ok();
                 },
@@ -331,27 +336,6 @@ async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
     error!(log, "received {signame}")
 }
 
-struct ReaperAdapter {
-    log: Logger,
-    sender: DispatcherSender,
-}
-
-impl ReaperDeps for ReaperAdapter {
-    fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()> {
-        warn!(self.log, "waitid errored"; "err" => %err);
-        ControlFlow::Continue(())
-    }
-    fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
-        panic!("dummy child process terminated");
-    }
-    fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
-        debug!(self.log, "waitid returned"; "pid" => %pid, "status" => ?status);
-        self.sender
-            .send(Message::PidStatus(pid, status))
-            .map_or(ControlFlow::Break(()), |_| ControlFlow::Continue(()))
-    }
-}
-
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 pub async fn main(config: Config, log: Logger) -> Result<()> {
@@ -380,14 +364,6 @@ pub async fn main(config: Config, log: Logger) -> Result<()> {
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_socket_sender, broker_socket_receiver) = mpsc::unbounded_channel();
-
-    let dummy_pid = reaper::clone_dummy_child()?;
-
-    let reaper_adapter = ReaperAdapter {
-        log: log.clone(),
-        sender: dispatcher_sender.clone(),
-    };
-    thread::spawn(move || reaper::main(reaper_adapter, dummy_pid));
 
     let mut join_set = JoinSet::new();
 
@@ -430,4 +406,11 @@ pub async fn main(config: Config, log: Logger) -> Result<()> {
     join_set.join_next().await;
     info!(log, "exiting");
     Ok(())
+}
+
+pub fn job_status_from_wait_status(wait_status: WaitStatus) -> JobStatus {
+    match wait_status {
+        WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
+        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
+    }
 }

@@ -15,7 +15,7 @@ use maelstrom_base::{
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, Pid, Signal, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags,
+    SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -32,7 +32,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, ReadBuf},
+    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, Interest, ReadBuf},
     task,
 };
 
@@ -197,10 +197,11 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
+        process_done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
-        self.start_inner(spec, inline_limit, stdout_done, stderr_done)
+        self.start_inner(spec, inline_limit, process_done, stdout_done, stderr_done)
     }
 }
 
@@ -212,6 +213,25 @@ impl Executor {
  * |_|
  *  FIGLET: private
  */
+
+async fn process_waiter(child_pid: Pid) -> Result<WaitStatus> {
+    // Note that any error before the call to waitid will result in the child not being waited for.
+    // It's unclear what to do in such a case. We could just wait, but that would block the current
+    // thread. It's probably best to accept not waiting and the accumulation of zombie children. We
+    // really don't expect any of these things to fail anyway.
+    let pidfd = linux::pidfd_open(child_pid)?;
+    let async_fd = AsyncFd::with_interest(pidfd, Interest::READABLE)?;
+    let _ = async_fd.readable().await?;
+    Ok(linux::waitid(async_fd.into_inner().as_fd())?)
+}
+
+async fn process_waiter_task_main(
+    child_pid: Pid,
+    done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
+) {
+    let status = process_waiter(child_pid).await.unwrap();
+    done(child_pid, Ok(status));
+}
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
 struct AsyncFile(AsyncFd<File>);
@@ -306,6 +326,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
+        process_done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
@@ -669,6 +690,9 @@ impl Executor {
             }
         };
 
+        // Spawn waiter task to wait on child to terminate.
+        task::spawn(process_waiter_task_main(child_pid, process_done));
+
         // At this point, it's still okay to return early in the parent. The child will continue to
         // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
         // Otherwise, it will continue until it's done, and then we'll reap the zombie. Since we won't
@@ -746,45 +770,15 @@ impl Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::async_fs;
     use serial_test::serial;
-    use std::ops::ControlFlow;
     use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::sync::{oneshot, Mutex};
-
-    struct ReaperAdapter {
-        pid: Pid,
-        result: Option<JobStatus>,
-    }
-
-    impl ReaperAdapter {
-        fn new(pid: Pid) -> Self {
-            ReaperAdapter { pid, result: None }
-        }
-    }
-
-    impl ReaperDeps for &mut ReaperAdapter {
-        fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()> {
-            panic!("waitid error: {err}");
-        }
-        fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
-            panic!("dummy child panicked");
-        }
-        fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
-            if self.pid == pid {
-                self.result = Some(status);
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        }
-    }
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -896,7 +890,7 @@ mod tests {
         }
 
         async fn run(self) {
-            let dummy_child_pid = reaper::clone_dummy_child().unwrap();
+            let (status_tx, status_rx) = oneshot::channel();
             let (stdout_tx, stdout_rx) = oneshot::channel();
             let (stderr_tx, stderr_rx) = oneshot::channel();
             let start_result = tokio::task::block_in_place(|| {
@@ -908,24 +902,17 @@ mod tests {
                 .start(
                     &self.spec,
                     self.inline_limit,
+                    |_pid, status| {
+                        status_tx
+                            .send(crate::job_status_from_wait_status(status.unwrap()))
+                            .unwrap()
+                    },
                     |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                     |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
                 )
             });
-            assert_matches!(start_result, Ok(_));
-            let Ok(pid) = start_result else {
-                unreachable!();
-            };
-            let reaper = task::spawn_blocking(move || {
-                let mut adapter = ReaperAdapter::new(pid);
-                reaper::main(&mut adapter, dummy_child_pid);
-                let result = adapter.result.unwrap();
-                linux::kill(dummy_child_pid, Signal::KILL).ok();
-                let mut adapter = ReaperAdapter::new(dummy_child_pid);
-                reaper::main(&mut adapter, Pid::new_for_test(0));
-                result
-            });
-            assert_eq!(reaper.await.unwrap(), self.expected_status);
+            assert!(start_result.is_ok());
+            assert_eq!(status_rx.await.unwrap(), self.expected_status);
             assert_eq!(stdout_rx.await.unwrap(), self.expected_stdout);
             assert_eq!(stderr_rx.await.unwrap(), self.expected_stderr);
 
@@ -1573,6 +1560,7 @@ mod tests {
             .start(
                 &spec,
                 ByteSize::b(0).into(),
+                |_, _| unreachable!(),
                 |_| unreachable!(),
                 |_| unreachable!()
             ),

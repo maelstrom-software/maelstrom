@@ -209,7 +209,7 @@ impl ErrnoSentinel for i64 {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct ExitCode(c_int);
 
 impl ExitCode {
@@ -387,7 +387,7 @@ impl PollFd {
     }
 }
 
-#[derive(Clone, Copy, Default, Into)]
+#[derive(Clone, Copy, Debug, Default, Into)]
 pub struct Signal(c_int);
 
 impl Signal {
@@ -462,7 +462,7 @@ pub struct WaitResult {
     pub status: WaitStatus,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum WaitStatus {
     Exited(ExitCode),
     Signaled(Signal),
