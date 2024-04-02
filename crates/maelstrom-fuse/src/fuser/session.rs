@@ -9,8 +9,8 @@ use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::thread::{self, JoinHandle};
 use std::{io, ops::DerefMut};
+use tokio::task::JoinHandle;
 
 use crate::fuser::ll::fuse_abi as abi;
 use crate::fuser::request::Request;
@@ -114,7 +114,7 @@ impl<FS: Filesystem> Session<FS> {
     /// calls into the filesystem. This read-dispatch-loop is non-concurrent to prevent
     /// having multiple buffers (which take up much memory), but the filesystem methods
     /// may run concurrent by spawning threads.
-    pub fn run(&mut self) -> io::Result<()> {
+    pub async fn run(&mut self) -> io::Result<()> {
         // Buffer for receiving requests from the kernel. Only one is allocated and
         // it is reused immediately after dispatching to conserve memory and allocations.
         let mut buffer = vec![0; BUFFER_SIZE];
@@ -125,10 +125,10 @@ impl<FS: Filesystem> Session<FS> {
         loop {
             // Read the next request from the given channel to kernel driver
             // The kernel driver makes sure that we get exactly one request per read
-            match self.ch.receive(buf) {
+            match self.ch.receive(buf).await {
                 Ok(size) => match Request::new(self.ch.sender(), &buf[..size]) {
                     // Dispatch request
-                    Some(req) => req.dispatch(self),
+                    Some(req) => req.dispatch(self).await,
                     // Quit loop on illegal request
                     None => break,
                 },
@@ -220,9 +220,9 @@ impl BackgroundSession {
         // Take the fuse_session, so that we can unmount it
         let mount = std::mem::take(&mut *se.mount.lock().unwrap());
         let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
-        let guard = thread::spawn(move || {
+        let guard = tokio::task::spawn(async move {
             let mut se = se;
-            se.run()
+            se.run().await
         });
         Ok(BackgroundSession {
             mountpoint,
@@ -231,14 +231,14 @@ impl BackgroundSession {
         })
     }
     /// Unmount the filesystem and join the background thread.
-    pub fn join(self) {
+    pub async fn join(self) {
         let Self {
             mountpoint: _,
             guard,
             _mount,
         } = self;
         drop(_mount);
-        guard.join().unwrap().unwrap();
+        guard.await.unwrap().unwrap();
     }
 }
 

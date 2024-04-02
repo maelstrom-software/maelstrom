@@ -21,6 +21,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::{mem, ptr};
+use tokio::io::unix::AsyncFd;
+use tokio::io::Interest;
 
 const FUSERMOUNT_BIN: &str = "fusermount";
 const FUSERMOUNT3_BIN: &str = "fusermount3";
@@ -30,13 +32,19 @@ const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
 pub struct Mount {
     mountpoint: CString,
     auto_unmount_socket: Option<UnixStream>,
-    fuse_device: Arc<File>,
+    fuse_device: Arc<AsyncFd<File>>,
 }
 impl Mount {
-    pub fn new(mountpoint: &Path, options: &[MountOption]) -> io::Result<(Arc<File>, Mount)> {
+    pub fn new(
+        mountpoint: &Path,
+        options: &[MountOption],
+    ) -> io::Result<(Arc<AsyncFd<File>>, Mount)> {
         let mountpoint = mountpoint.canonicalize()?;
         let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
-        let file = Arc::new(file);
+        let file = Arc::new(AsyncFd::with_interest(
+            file,
+            Interest::READABLE | Interest::WRITABLE | Interest::ERROR,
+        )?);
         Ok((
             file.clone(),
             Mount {
@@ -51,7 +59,7 @@ impl Mount {
 impl Drop for Mount {
     fn drop(&mut self) {
         use std::io::ErrorKind::PermissionDenied;
-        if !is_mounted(&self.fuse_device) {
+        if !is_mounted(self.fuse_device.get_ref()) {
             // If the filesystem has already been unmounted, avoid unmounting it again.
             // Unmounting it a second time could cause a race with a newly mounted filesystem
             // living at the same mountpoint
@@ -259,6 +267,7 @@ fn fuse_mount_fusermount(
 
     unsafe {
         libc::fcntl(file.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
+        libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
     }
 
     Ok((file, receive_socket))
@@ -360,6 +369,10 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
                 format!("Error calling mount() at {mountpoint:?}: {err}"),
             ));
         }
+    }
+
+    unsafe {
+        libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
     }
 
     Ok(Some(file))

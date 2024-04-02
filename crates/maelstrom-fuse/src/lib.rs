@@ -7,6 +7,7 @@ use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::Errno;
 use std::ffi::{OsStr, OsString};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
@@ -56,86 +57,69 @@ fn fuse_mount_sender(
 }
 
 trait ErrorResponse {
-    fn error(self, e: i32);
+    fn error(self, e: i32) -> impl Future<Output = ()>;
 }
 
 impl ErrorResponse for ReplyAttr {
-    fn error(self, e: i32) {
+    fn error(self, e: i32) -> impl Future<Output = ()> {
         ReplyAttr::error(self, e)
     }
 }
 
 impl ErrorResponse for ReplyEntry {
-    fn error(self, e: i32) {
+    fn error(self, e: i32) -> impl Future<Output = ()> {
         ReplyEntry::error(self, e)
     }
 }
 
 impl ErrorResponse for ReplyData {
-    fn error(self, e: i32) {
+    fn error(self, e: i32) -> impl Future<Output = ()> {
         ReplyData::error(self, e)
     }
 }
 
 trait Response {
     type Reply: ErrorResponse;
-    fn send(self, reply: Self::Reply);
+    fn send(self, reply: Self::Reply) -> impl Future<Output = ()>;
 }
 
 async fn handle_resp<RespT: Response>(res: ErrnoResult<RespT>, reply: RespT::Reply)
 where
     RespT: Send + 'static,
-    RespT::Reply: Send + 'static,
+    RespT::Reply: Send + std::fmt::Debug + 'static,
 {
-    tokio::task::spawn_blocking(move || match res {
-        Ok(resp) => resp.send(reply),
-        Err(e) => reply.error(e.as_i32()),
-    })
-    .await
-    .unwrap()
+    match res {
+        Ok(resp) => resp.send(reply).await,
+        Err(e) => reply.error(e.as_i32()).await,
+    }
 }
 
 async fn handle_read_dir_resp(
     res: ErrnoResult<impl Stream<Item = ErrnoResult<DirEntry>>>,
     mut reply: ReplyDirectory,
 ) {
-    let (send, mut recv) = channel::<ErrnoResult<DirEntry>>(100);
-    let blocking_handle = tokio::task::spawn_blocking(move || loop {
-        match recv.blocking_recv() {
-            Some(Ok(entry)) => {
-                if entry.add(&mut reply) {
-                    return;
-                }
-            }
-            Some(Err(e)) => {
-                reply.error(e.as_i32());
-                return;
-            }
-            None => {
-                reply.ok();
-                return;
-            }
-        }
-    });
     match res {
         Ok(stream) => {
             let mut pinned_stream = pin!(stream);
             while let Some(entry) = pinned_stream.next().await {
-                let is_err = entry.is_err();
-                if send.send(entry).await.is_err() {
-                    break;
-                }
-                if is_err {
-                    break;
+                match entry {
+                    Ok(entry) => {
+                        if entry.add(&mut reply) {
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        reply.error(e.as_i32()).await;
+                        return;
+                    }
                 }
             }
+            reply.ok().await;
         }
         Err(e) => {
-            send.send(Err(e)).await.unwrap();
+            reply.error(e.as_i32()).await;
         }
     }
-    drop(send);
-    blocking_handle.await.unwrap();
 }
 
 async fn fuse_mount_receiver(
@@ -246,64 +230,89 @@ enum FsMessage {
 
 struct SendingFs(Sender<FsMessage>);
 
-macro_rules! op {
-    ($op1:ident, $op2:ident { $($arg:ident: $ty:ty),* }) => {
-        fn $op1(&mut self, req: &fuser::Request, $($arg: $ty),*) {
-            let msg = FsMessage::$op2 {
-                request: req.into(),
-                $($arg: $arg.into()),*
-            };
-            if let Err(SendError(FsMessage::$op2 { reply, .. })) = self.0.blocking_send(msg) {
-                reply.error(Errno::EIO.as_i32())
-            }
+#[async_trait]
+impl fuser::Filesystem for SendingFs {
+    async fn lookup(
+        &mut self,
+        req: &fuser::Request<'_>,
+        parent: u64,
+        name: &OsStr,
+        reply: ReplyEntry,
+    ) {
+        let msg = FsMessage::LookUp {
+            request: req.into(),
+            parent: parent,
+            name: name.into(),
+            reply,
+        };
+        if let Err(SendError(FsMessage::LookUp { reply, .. })) = self.0.send(msg).await {
+            reply.error(Errno::EIO.as_i32()).await
         }
     }
-}
-
-impl fuser::Filesystem for SendingFs {
-    op!(
-        lookup,
-        LookUp {
-            parent: u64,
-            name: &OsStr,
-            reply: ReplyEntry
+    async fn getattr(&mut self, req: &fuser::Request<'_>, ino: u64, reply: ReplyAttr) {
+        let msg = FsMessage::GetAttr {
+            request: req.into(),
+            ino,
+            reply,
+        };
+        if let Err(SendError(FsMessage::GetAttr { reply, .. })) = self.0.send(msg).await {
+            reply.error(Errno::EIO.as_i32()).await
         }
-    );
-    op!(
-        getattr,
-        GetAttr {
-            ino: u64,
-            reply: ReplyAttr
+    }
+    async fn read(
+        &mut self,
+        req: &fuser::Request<'_>,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        size: u32,
+        flags: i32,
+        lock_owner: Option<u64>,
+        reply: ReplyData,
+    ) {
+        let msg = FsMessage::Read {
+            request: req.into(),
+            ino,
+            fh,
+            offset,
+            size,
+            flags,
+            lock_owner,
+            reply,
+        };
+        if let Err(SendError(FsMessage::Read { reply, .. })) = self.0.send(msg).await {
+            reply.error(Errno::EIO.as_i32()).await
         }
-    );
-    op!(
-        read,
-        Read {
-            ino: u64,
-            fh: u64,
-            offset: i64,
-            size: u32,
-            flags: i32,
-            lock_owner: Option<u64>,
-            reply: ReplyData
+    }
+    async fn readdir(
+        &mut self,
+        req: &fuser::Request<'_>,
+        ino: u64,
+        fh: u64,
+        offset: i64,
+        reply: ReplyDirectory,
+    ) {
+        let msg = FsMessage::ReadDir {
+            request: req.into(),
+            ino,
+            fh,
+            offset,
+            reply,
+        };
+        if let Err(SendError(FsMessage::ReadDir { reply, .. })) = self.0.send(msg).await {
+            reply.error(Errno::EIO.as_i32()).await
         }
-    );
-    op!(
-        readdir,
-        ReadDir {
-            ino: u64,
-            fh: u64,
-            offset: i64,
-            reply: ReplyDirectory
+    }
+    async fn readlink(&mut self, req: &fuser::Request<'_>, ino: u64, reply: ReplyData) {
+        let msg = FsMessage::ReadLink {
+            request: req.into(),
+            ino,
+            reply,
+        };
+        if let Err(SendError(FsMessage::ReadLink { reply, .. })) = self.0.send(msg).await {
+            reply.error(Errno::EIO.as_i32()).await
         }
-    );
-    op!(
-        readlink,
-        ReadLink {
-            ino: u64,
-            reply: ReplyData
-        }
-    );
+    }
 }
 
 pub struct Request {
@@ -324,6 +333,7 @@ impl From<&fuser::Request<'_>> for Request {
 
 pub type ErrnoResult<T> = std::result::Result<T, Errno>;
 
+#[derive(Debug)]
 pub struct EntryResponse {
     pub ttl: Duration,
     pub attr: FileAttr,
@@ -333,11 +343,12 @@ pub struct EntryResponse {
 impl Response for EntryResponse {
     type Reply = ReplyEntry;
 
-    fn send(self, reply: ReplyEntry) {
-        reply.entry(&self.ttl, &self.attr, self.generation)
+    async fn send(self, reply: ReplyEntry) {
+        reply.entry(&self.ttl, &self.attr, self.generation).await
     }
 }
 
+#[derive(Debug)]
 pub struct AttrResponse {
     pub ttl: Duration,
     pub attr: FileAttr,
@@ -346,11 +357,12 @@ pub struct AttrResponse {
 impl Response for AttrResponse {
     type Reply = ReplyAttr;
 
-    fn send(self, reply: ReplyAttr) {
-        reply.attr(&self.ttl, &self.attr)
+    async fn send(self, reply: ReplyAttr) {
+        reply.attr(&self.ttl, &self.attr).await
     }
 }
 
+#[derive(Debug)]
 pub struct ReadResponse {
     pub data: Vec<u8>,
 }
@@ -358,11 +370,12 @@ pub struct ReadResponse {
 impl Response for ReadResponse {
     type Reply = ReplyData;
 
-    fn send(self, reply: ReplyData) {
-        reply.data(&self.data)
+    async fn send(self, reply: ReplyData) {
+        reply.data(&self.data).await
     }
 }
 
+#[derive(Debug)]
 pub struct ReadLinkResponse {
     pub data: Vec<u8>,
 }
@@ -370,8 +383,8 @@ pub struct ReadLinkResponse {
 impl Response for ReadLinkResponse {
     type Reply = ReplyData;
 
-    fn send(self, reply: ReplyData) {
-        reply.data(&self.data)
+    async fn send(self, reply: ReplyData) {
+        reply.data(&self.data).await
     }
 }
 

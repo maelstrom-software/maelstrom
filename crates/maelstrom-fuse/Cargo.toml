@@ -28,7 +28,7 @@ slog-async.workspace = true
 slog-term.workspace = true
 slog.workspace = true
 smallvec.workspace = true
-tokio = { workspace = true, features = [ "io-std", "sync" ] }
+tokio = { workspace = true, features = [ "net", "io-std" ] }
 tokio-tar.workspace = true
 zerocopy.workspace = true
 

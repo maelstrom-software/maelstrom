@@ -72,8 +72,8 @@ mod test {
         .to_owned()
     }
 
-    #[test]
-    fn mount_unmount() {
+    #[tokio::test]
+    async fn mount_unmount() {
         // We use ManuallyDrop here to leak the directory on test failure.  We don't
         // want to try and clean up the directory if it's a mountpoint otherwise we'll
         // deadlock.
@@ -82,7 +82,7 @@ mod test {
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
         assert!(mnt.contains(&*tmp.path().to_string_lossy()));
-        assert!(is_mounted(&file));
+        assert!(is_mounted(file.get_ref()));
         drop(mount);
         let mnt = cmd_mount();
         eprintln!("Our mountpoint: {:?}\nfuse mounts:\n{}", tmp.path(), mnt,);
