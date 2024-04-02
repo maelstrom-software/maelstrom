@@ -321,10 +321,15 @@ impl OwnedFd {
         self.0
     }
 
+    pub fn into_fd(self) -> Fd {
+        let raw_fd = self.0;
+        mem::forget(self);
+        raw_fd
+    }
+
     #[cfg(feature = "std")]
     pub fn into_file(self) -> std::fs::File {
-        let raw_fd = self.0 .0;
-        mem::forget(self);
+        let raw_fd = self.into_fd().0;
         unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_fd) }
     }
 }
@@ -540,9 +545,11 @@ pub fn mount(
         .map(drop)
 }
 
-pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<Fd, Errno> {
+pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<OwnedFd, Errno> {
     let path_ptr = path.as_ptr();
-    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) }).map(Fd)
+    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) })
+        .map(Fd)
+        .map(OwnedFd)
 }
 
 pub fn pause() {

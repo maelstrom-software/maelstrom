@@ -50,7 +50,7 @@ impl<'a> Syscall<'a> {
             Syscall::ReadUsingSavedFd(buf) => linux::read(*saved_fd, buf).map(drop),
             Syscall::OpenAndSaveFd(filename, flags, mode) => linux::open(filename, *flags, *mode)
                 .map(|fd| {
-                    *saved_fd = fd;
+                    *saved_fd = fd.into_fd();
                 }),
             Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
             Syscall::SetSid => linux::setsid(),
