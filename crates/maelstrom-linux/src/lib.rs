@@ -607,8 +607,10 @@ pub fn socket(
     domain: SocketDomain,
     type_: SocketType,
     protocol: SocketProtocol,
-) -> Result<Fd, Errno> {
-    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) }).map(Fd)
+) -> Result<OwnedFd, Errno> {
+    Errno::result(unsafe { libc::socket(domain.0, type_.0, protocol.0) })
+        .map(Fd)
+        .map(OwnedFd)
 }
 
 pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {

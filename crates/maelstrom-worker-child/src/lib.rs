@@ -43,7 +43,7 @@ impl<'a> Syscall<'a> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|fd| {
-                    *saved_fd = fd;
+                    *saved_fd = fd.into_fd();
                 })
             }
             Syscall::BindNetlinkUsingSavedFd(sockaddr) => linux::bind_netlink(*saved_fd, sockaddr),
