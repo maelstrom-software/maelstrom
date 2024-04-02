@@ -26,7 +26,7 @@ use std::{
     fs::File,
     io::Read as _,
     iter, mem,
-    os::unix::ffi::OsStrExt as _,
+    os::{fd, unix::ffi::OsStrExt as _},
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -684,8 +684,7 @@ impl Executor {
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
         let mut exec_result_buf = vec![];
-        exec_result_read_fd
-            .into_file()
+        File::from(fd::OwnedFd::from(exec_result_read_fd))
             .read_to_end(&mut exec_result_buf)
             .map_err(Error::from)
             .map_err(JobError::System)?;
@@ -716,7 +715,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(stdout_read_fd.into_file())
+                AsyncFd::new(File::from(fd::OwnedFd::from(stdout_read_fd)))
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),
@@ -725,7 +724,7 @@ impl Executor {
         task::spawn(output_reader_task_main(
             inline_limit,
             AsyncFile(
-                AsyncFd::new(stderr_read_fd.into_file())
+                AsyncFd::new(File::from(fd::OwnedFd::from(stderr_read_fd)))
                     .map_err(Error::from)
                     .map_err(JobError::System)?,
             ),

@@ -326,11 +326,13 @@ impl OwnedFd {
         mem::forget(self);
         raw_fd
     }
+}
 
-    #[cfg(feature = "std")]
-    pub fn into_file(self) -> std::fs::File {
-        let raw_fd = self.into_fd().0;
-        unsafe { std::os::fd::FromRawFd::from_raw_fd(raw_fd) }
+#[cfg(feature = "std")]
+impl From<OwnedFd> for std::os::fd::OwnedFd {
+    fn from(owned_fd: OwnedFd) -> Self {
+        let raw_fd = owned_fd.into_fd();
+        unsafe { <Self as std::os::fd::FromRawFd>::from_raw_fd(raw_fd.0) }
     }
 }
 
