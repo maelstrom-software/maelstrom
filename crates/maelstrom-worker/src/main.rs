@@ -84,7 +84,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Gen 0 process.
 
             // The gen_0_pidfd is only used in the gen 1 process.
-            linux::close(gen_0_pidfd).unwrap_or_else(|err| panic!("error closing pidfd: {}", err));
+            drop(gen_0_pidfd);
 
             // Wait for the gen 1 process's termination and mimic how it terminated.
             mimic_child_death(linux::waitpid(gen_1_pid).unwrap_or_else(|e| {
@@ -108,13 +108,13 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
             // the gen 0 process. The pidfd will become readable once the process has terminated.
             // So, we can just do a non-blocking poll on the fd to see fi the gen 0 process has
             // already terminated. If it hasn't, we can rely on the parent death signal mechanism.
-            let mut pollfd = PollFd::new(gen_0_pidfd, PollEvents::IN);
+            let mut pollfd = PollFd::new(gen_0_pidfd.as_fd(), PollEvents::IN);
             if linux::poll(slice::from_mut(&mut pollfd), Duration::ZERO)? == 1 {
                 process::abort();
             }
 
             // We are done with the parent_pidfd now.
-            linux::close(gen_0_pidfd)?;
+            drop(gen_0_pidfd);
 
             // Map uid and guid. If we don't do this here, then children processes will not be able
             // to map their own uids and gids.

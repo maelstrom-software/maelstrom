@@ -556,9 +556,11 @@ pub fn pause() {
     unsafe { libc::pause() };
 }
 
-pub fn pidfd_open(pid: Pid) -> Result<Fd, Errno> {
+pub fn pidfd_open(pid: Pid) -> Result<OwnedFd, Errno> {
     let flags = 0 as c_uint;
-    Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid.0, flags) }).map(Fd::from_c_long)
+    Errno::result(unsafe { libc::syscall(libc::SYS_pidfd_open, pid.0, flags) })
+        .map(Fd::from_c_long)
+        .map(OwnedFd)
 }
 
 pub fn pipe() -> Result<(Fd, Fd), Errno> {
