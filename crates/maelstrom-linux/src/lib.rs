@@ -563,10 +563,11 @@ pub fn pidfd_open(pid: Pid) -> Result<OwnedFd, Errno> {
         .map(OwnedFd)
 }
 
-pub fn pipe() -> Result<(Fd, Fd), Errno> {
+pub fn pipe() -> Result<(OwnedFd, OwnedFd), Errno> {
     let mut fds: [c_int; 2] = [0; 2];
     let fds_ptr = fds.as_mut_ptr() as *mut c_int;
-    Errno::result(unsafe { libc::pipe(fds_ptr) }).map(|_| (Fd(fds[0]), Fd(fds[1])))
+    Errno::result(unsafe { libc::pipe(fds_ptr) })
+        .map(|_| (OwnedFd(Fd(fds[0])), OwnedFd(Fd(fds[1]))))
 }
 
 pub fn pivot_root(new_root: &CStr, put_old: &CStr) -> Result<(), Errno> {

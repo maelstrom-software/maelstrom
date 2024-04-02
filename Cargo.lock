@@ -3224,7 +3224,6 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "tuple",
  "xdg",
 ]
 

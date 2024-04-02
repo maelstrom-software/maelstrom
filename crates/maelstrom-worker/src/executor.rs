@@ -14,7 +14,7 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
+    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, Pid, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
@@ -35,7 +35,6 @@ use tokio::{
     io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, ReadBuf},
     task,
 };
-use tuple::Map as _;
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -112,7 +111,7 @@ impl Executor {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
-        let (stdin_read_fd, stdin_write_fd) = linux::pipe()?.map(OwnedFd::from_fd);
+        let (stdin_read_fd, stdin_write_fd) = linux::pipe()?;
         if stdin_read_fd.as_fd() == Fd::STDIN {
             // On the off chance that stdin was already closed, we may have already opened our read
             // fd onto stdin.
@@ -315,16 +314,13 @@ impl Executor {
         // parent before cloning and then closing the unnecessary ends in the parent and child.
         let (stdout_read_fd, stdout_write_fd) = linux::pipe()
             .map_err(Error::from)
-            .map_err(JobError::System)?
-            .map(OwnedFd::from_fd);
+            .map_err(JobError::System)?;
         let (stderr_read_fd, stderr_write_fd) = linux::pipe()
             .map_err(Error::from)
-            .map_err(JobError::System)?
-            .map(OwnedFd::from_fd);
+            .map_err(JobError::System)?;
         let (exec_result_read_fd, exec_result_write_fd) = linux::pipe()
             .map_err(Error::from)
-            .map_err(JobError::System)?
-            .map(OwnedFd::from_fd);
+            .map_err(JobError::System)?;
 
         // Now we set up the script. This will be run in the child where we have to follow some
         // very stringent rules to avoid deadlocking. This comes about because we're going to clone
