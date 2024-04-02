@@ -672,8 +672,8 @@ impl Executor {
                     | CloneFlags::NEWUSER,
             )
             .exit_signal(Signal::CHLD);
-        let child_pid = match linux::clone3(&mut clone_args) {
-            Ok(Some(child_pid)) => child_pid,
+        let (child_pid, child_pidfd) = match linux::clone3_with_child_pidfd(&mut clone_args) {
+            Ok(Some((child_pid, child_pidfd))) => (child_pid, child_pidfd),
             Ok(None) => {
                 // This is the child process.
                 maelstrom_worker_child::start_and_exec_in_child(
@@ -693,9 +693,6 @@ impl Executor {
         // anyway.
 
         // Spawn waiter task to wait on child to terminate.
-        let child_pidfd = linux::pidfd_open(child_pid)
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
         task::spawn(process_waiter_task_main(
             child_pid,
             child_pidfd,

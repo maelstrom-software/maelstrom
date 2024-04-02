@@ -482,8 +482,30 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
     let args_ptr = args as *mut CloneArgs;
     let size = mem::size_of::<CloneArgs>() as size_t;
-    Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) })
-        .map(|ret| (ret != 0).then_some(Pid::from_c_long(ret)))
+    let ret = Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) })?;
+    Ok(if ret == 0 {
+        None
+    } else {
+        Some(Pid::from_c_long(ret))
+    })
+}
+
+pub fn clone3_with_child_pidfd(args: &mut CloneArgs) -> Result<Option<(Pid, OwnedFd)>, Errno> {
+    let inner = |args: &mut CloneArgs, child_pidfd: &mut Fd| {
+        assert_eq!(args.0.flags & (libc::CLONE_PIDFD as c_ulong), 0);
+        args.0.flags |= libc::CLONE_PIDFD as c_ulong;
+        args.0.pidfd = child_pidfd as *mut Fd as u64;
+        let args_ptr = args as *mut CloneArgs;
+        let size = mem::size_of::<CloneArgs>() as size_t;
+        unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) }
+    };
+    let mut child_pidfd = Fd(0);
+    let ret = Errno::result(inner(args, &mut child_pidfd))?;
+    Ok(if ret == 0 {
+        None
+    } else {
+        Some((Pid::from_c_long(ret), OwnedFd(child_pidfd)))
+    })
 }
 
 pub fn close_range(
