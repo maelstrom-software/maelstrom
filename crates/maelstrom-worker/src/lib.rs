@@ -212,7 +212,7 @@ fn job_task_main(
     let pid = executor.start(
         &spec,
         inline_limit,
-        move |_, result| {
+        move |result| {
             debug!(log, "job process status"; "result" => ?result);
             status_tx
                 .send(result.map(crate::job_status_from_wait_status))

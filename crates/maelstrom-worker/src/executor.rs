@@ -197,7 +197,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
+        process_done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
@@ -221,12 +221,11 @@ async fn process_waiter(child_pidfd: OwnedFd) -> Result<WaitStatus> {
 }
 
 async fn process_waiter_task_main(
-    child_pid: Pid,
     child_pidfd: OwnedFd,
-    done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
+    done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
 ) {
     let status = process_waiter(child_pidfd).await.unwrap();
-    done(child_pid, Ok(status));
+    done(Ok(status));
 }
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
@@ -322,7 +321,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
+        process_done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
@@ -693,11 +692,7 @@ impl Executor {
         // anyway.
 
         // Spawn waiter task to wait on child to terminate.
-        task::spawn(process_waiter_task_main(
-            child_pid,
-            child_pidfd,
-            process_done,
-        ));
+        task::spawn(process_waiter_task_main(child_pidfd, process_done));
 
         // At this point, it's still okay to return early in the parent. The child will continue to
         // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
@@ -907,7 +902,7 @@ mod tests {
                 .start(
                     &self.spec,
                     self.inline_limit,
-                    |_pid, status| {
+                    |status| {
                         status_tx
                             .send(crate::job_status_from_wait_status(status.unwrap()))
                             .unwrap()
@@ -1521,7 +1516,7 @@ mod tests {
             .start(
                 &spec,
                 ByteSize::b(0).into(),
-                |_, _| unreachable!(),
+                |_| unreachable!(),
                 |_| unreachable!(),
                 |_| unreachable!()
             ),
