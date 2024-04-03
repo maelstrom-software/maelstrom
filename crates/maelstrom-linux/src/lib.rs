@@ -11,6 +11,9 @@ use libc::{
     sa_family_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
+#[cfg(feature = "std")]
+use std::os::fd;
+
 extern "C" {
     fn sigabbrev_np(sig: c_int) -> *const c_char;
     fn strerrorname_np(errnum: c_int) -> *const c_char;
@@ -329,10 +332,17 @@ impl OwnedFd {
 }
 
 #[cfg(feature = "std")]
-impl From<OwnedFd> for std::os::fd::OwnedFd {
+impl fd::AsRawFd for OwnedFd {
+    fn as_raw_fd(&self) -> fd::RawFd {
+        self.0 .0
+    }
+}
+
+#[cfg(feature = "std")]
+impl From<OwnedFd> for fd::OwnedFd {
     fn from(owned_fd: OwnedFd) -> Self {
         let raw_fd = owned_fd.into_fd();
-        unsafe { <Self as std::os::fd::FromRawFd>::from_raw_fd(raw_fd.0) }
+        unsafe { <Self as fd::FromRawFd>::from_raw_fd(raw_fd.0) }
     }
 }
 
