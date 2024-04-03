@@ -15,8 +15,7 @@ use executor::Executor;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobCompleted, JobEffects, JobError, JobId, JobResult, JobSpec,
-    Sha256Digest,
+    ArtifactType, JobCompleted, JobEffects, JobError, JobId, JobResult, JobSpec, Sha256Digest,
 };
 use maelstrom_linux::{self as linux, Pid, Signal};
 use maelstrom_util::{
