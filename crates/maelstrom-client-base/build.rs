@@ -12,7 +12,7 @@ const ENUM_PROTO: [(&str, &str); 4] = [
     ("JobDevice", "maelstrom_base::JobDevice"),
     ("JobMountFsType", "maelstrom_base::JobMountFsType"),
     ("ArtifactType", "maelstrom_base::ArtifactType"),
-    ("JobOutcomeCompleted.status", "maelstrom_base::JobStatus"),
+    ("JobCompleted.status", "maelstrom_base::JobStatus"),
 ];
 
 const MSG_PROTO: [(&str, &str, &str); 7] = [

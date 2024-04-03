@@ -214,7 +214,7 @@ message JobEffects {
     JobOutputResult stderr = 2;
 }
 
-message JobOutcomeCompleted {
+message JobCompleted {
     oneof status {
         uint32 exited = 1;
         uint32 signaled = 2;
@@ -224,7 +224,7 @@ message JobOutcomeCompleted {
 
 message JobOutcome {
     oneof outcome {
-        JobOutcomeCompleted completed = 1;
+        JobCompleted completed = 1;
         JobEffects timed_out = 2;
     }
 }
