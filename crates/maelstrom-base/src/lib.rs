@@ -325,13 +325,18 @@ pub struct JobEffects {
     pub stderr: JobOutputResult,
 }
 
+/// The outcome of a completed job. That is, a job that ran to completion, instead of timing out,
+/// being canceled, etc.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct JobCompleted {
+    pub status: JobStatus,
+    pub effects: JobEffects,
+}
+
 /// The outcome of a job. This doesn't include error outcomes, which are handled with JobError.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub enum JobOutcome {
-    Completed {
-        status: JobStatus,
-        effects: JobEffects,
-    },
+    Completed(JobCompleted),
     TimedOut(JobEffects),
 }
 

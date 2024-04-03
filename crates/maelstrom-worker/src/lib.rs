@@ -15,8 +15,8 @@ use executor::Executor;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobEffects, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec, JobStatus,
-    Sha256Digest,
+    ArtifactType, JobCompleted, JobEffects, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec,
+    JobStatus, Sha256Digest,
 };
 use maelstrom_linux::{self as linux, Pid, Signal, WaitStatus};
 use maelstrom_util::{
@@ -236,7 +236,7 @@ fn job_task_main(
         .map_err(|e| e.map(|inner| inner.to_string()))?;
     let _ = handle_sender.send((pid, fuse_handle));
 
-    Ok(JobOutcome::Completed {
+    Ok(JobOutcome::Completed(JobCompleted {
         status: status_rx
             .blocking_recv()
             .unwrap()
@@ -251,7 +251,7 @@ fn job_task_main(
                 .unwrap()
                 .map_err(JobError::System)?,
         },
-    })
+    }))
 }
 
 impl DispatcherDeps for DispatcherAdapter {

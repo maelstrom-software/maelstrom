@@ -10,7 +10,8 @@ use crate::{
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    ArtifactType, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec, Sha256Digest,
+    ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec,
+    Sha256Digest,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -513,7 +514,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             ExecutingJobState::TimedOut => self.deps.send_message_to_broker(WorkerToBroker(
                 jid,
                 result.map(|o| {
-                    let JobOutcome::Completed { status: _, effects } = o else {
+                    let JobOutcome::Completed(JobCompleted { status: _, effects }) = o else {
                         panic!("should be completed");
                     };
                     JobOutcome::TimedOut(effects)

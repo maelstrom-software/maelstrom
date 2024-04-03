@@ -420,7 +420,7 @@ impl IntoProtoBuf for maelstrom_base::JobOutcome {
         use proto::job_outcome::Outcome;
         proto::JobOutcome {
             outcome: Some(match self {
-                Self::Completed { status, effects } => {
+                Self::Completed(maelstrom_base::JobCompleted { status, effects }) => {
                     Outcome::Completed(proto::JobOutcomeCompleted {
                         status: Some(status.into_proto_buf()),
                         effects: Some(effects.into_proto_buf()),
@@ -439,14 +439,14 @@ impl TryFromProtoBuf for maelstrom_base::JobOutcome {
         use proto::job_outcome::Outcome;
         match v.outcome.ok_or(anyhow!("malformed JobOutcome"))? {
             Outcome::Completed(proto::JobOutcomeCompleted { status, effects }) => {
-                Ok(Self::Completed {
+                Ok(Self::Completed(maelstrom_base::JobCompleted {
                     status: TryFromProtoBuf::try_from_proto_buf(
                         status.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
                     )?,
                     effects: TryFromProtoBuf::try_from_proto_buf(
                         effects.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
                     )?,
-                })
+                }))
             }
             Outcome::TimedOut(effects) => Ok(Self::TimedOut(TryFromProtoBuf::try_from_proto_buf(
                 effects,

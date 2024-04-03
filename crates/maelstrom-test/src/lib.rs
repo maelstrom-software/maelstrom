@@ -71,40 +71,48 @@ macro_rules! spec {
 #[macro_export]
 macro_rules! outcome {
     [1] => {
-        Ok(maelstrom_base::JobOutcome::Completed {
-            status: maelstrom_base::JobStatus::Exited(0),
-            effects: maelstrom_base::JobEffects {
-                stdout: maelstrom_base::JobOutputResult::None,
-                stderr: maelstrom_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobOutcome::Completed(
+            maelstrom_base::JobCompleted {
+                status: maelstrom_base::JobStatus::Exited(0),
+                effects: maelstrom_base::JobEffects {
+                    stdout: maelstrom_base::JobOutputResult::None,
+                    stderr: maelstrom_base::JobOutputResult::None,
+                }
             }
-        })
+        ))
     };
     [2] => {
-        Ok(maelstrom_base::JobOutcome::Completed {
-            status: maelstrom_base::JobStatus::Exited(1),
-            effects: maelstrom_base::JobEffects {
-                stdout: maelstrom_base::JobOutputResult::None,
-                stderr: maelstrom_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobOutcome::Completed(
+            maelstrom_base::JobCompleted {
+                status: maelstrom_base::JobStatus::Exited(1),
+                effects: maelstrom_base::JobEffects {
+                    stdout: maelstrom_base::JobOutputResult::None,
+                    stderr: maelstrom_base::JobOutputResult::None,
+                }
             }
-        })
+        ))
     };
     [3] => {
-        Ok(maelstrom_base::JobOutcome::Completed {
-            status: maelstrom_base::JobStatus::Signaled(15),
-            effects: maelstrom_base::JobEffects {
-                stdout: maelstrom_base::JobOutputResult::None,
-                stderr: maelstrom_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobOutcome::Completed(
+            maelstrom_base::JobCompleted {
+                status: maelstrom_base::JobStatus::Signaled(15),
+                effects: maelstrom_base::JobEffects {
+                    stdout: maelstrom_base::JobOutputResult::None,
+                    stderr: maelstrom_base::JobOutputResult::None,
+                }
             }
-        })
+        ))
     };
     [$n:expr] => {
-        Ok(maelstrom_base::JobOutcome::Completed {
-            status: maelstrom_base::JobStatus::Exited($n),
-            effects: maelstrom_base::JobEffects {
-                stdout: maelstrom_base::JobOutputResult::None,
-                stderr: maelstrom_base::JobOutputResult::None,
+        Ok(maelstrom_base::JobOutcome::Completed(
+            maelstrom_base::JobCompleted {
+                status: maelstrom_base::JobStatus::Exited($n),
+                effects: maelstrom_base::JobEffects {
+                    stdout: maelstrom_base::JobOutputResult::None,
+                    stderr: maelstrom_base::JobOutputResult::None,
+                }
             }
-        })
+        ))
     };
 }
 

@@ -1,7 +1,8 @@
 use anyhow::Result;
 use indicatif::ProgressBar;
 use maelstrom_base::{
-    ClientJobId, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult, JobStatus,
+    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
+    JobStatus,
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
@@ -59,7 +60,7 @@ fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -
 
 fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccumulator>) {
     match result {
-        Ok(JobOutcome::Completed { status, effects }) => {
+        Ok(JobOutcome::Completed(JobCompleted { status, effects })) => {
             print_effects(cjid, effects).ok();
             match status {
                 JobStatus::Exited(0) => {}

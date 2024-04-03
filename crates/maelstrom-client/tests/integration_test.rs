@@ -1,7 +1,7 @@
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, Mode},
-    ArtifactType, JobEffects, JobOutcome, JobOutputResult, JobSpec, JobStatus, Sha256Digest,
-    Utf8Path, Utf8PathBuf,
+    ArtifactType, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec, JobStatus,
+    Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
@@ -40,13 +40,13 @@ fn basic_job_test(
     let artifact_dir = tmp_dir.path().join("artifacts");
     fs.create_dir(&artifact_dir).unwrap();
 
-    let test_job_outcome = JobOutcome::Completed {
+    let test_job_outcome = JobOutcome::Completed(JobCompleted {
         status: JobStatus::Exited(0),
         effects: JobEffects {
             stdout: JobOutputResult::None,
             stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
         },
-    };
+    });
 
     let state = FakeBrokerState {
         job_responses: hashmap! {
