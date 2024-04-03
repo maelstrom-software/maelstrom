@@ -15,7 +15,7 @@ use maelstrom_base::{
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags,
+    SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -217,9 +217,10 @@ impl Executor {
 async fn process_waiter(child_pidfd: OwnedFd) -> Result<JobStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
     let _ = async_fd.readable().await?;
-    Ok(crate::job_status_from_wait_status(linux::waitid(
-        async_fd.into_inner().as_fd(),
-    )?))
+    Ok(match linux::waitid(async_fd.into_inner().as_fd())? {
+        WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
+        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
+    })
 }
 
 async fn process_waiter_task_main(

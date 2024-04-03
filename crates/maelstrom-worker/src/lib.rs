@@ -15,10 +15,10 @@ use executor::Executor;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobCompleted, JobEffects, JobError, JobId, JobResult, JobSpec, JobStatus,
+    ArtifactType, JobCompleted, JobEffects, JobError, JobId, JobResult, JobSpec,
     Sha256Digest,
 };
-use maelstrom_linux::{self as linux, Pid, Signal, WaitStatus};
+use maelstrom_linux::{self as linux, Pid, Signal};
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheRoot},
@@ -514,11 +514,4 @@ pub async fn main(config: Config, log: Logger) -> Result<()> {
     join_set.join_next().await;
     info!(log, "exiting");
     Ok(())
-}
-
-pub fn job_status_from_wait_status(wait_status: WaitStatus) -> JobStatus {
-    match wait_status {
-        WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
-        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
-    }
 }
