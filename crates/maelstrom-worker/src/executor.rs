@@ -14,7 +14,7 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, Pid, Signal, SocketDomain,
+    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
 use maelstrom_worker_child::Syscall;
@@ -214,22 +214,18 @@ impl Executor {
  *  FIGLET: private
  */
 
-async fn process_waiter(child_pid: Pid) -> Result<WaitStatus> {
-    // Note that any error before the call to waitid will result in the child not being waited for.
-    // It's unclear what to do in such a case. We could just wait, but that would block the current
-    // thread. It's probably best to accept not waiting and the accumulation of zombie children. We
-    // really don't expect any of these things to fail anyway.
-    let pidfd = linux::pidfd_open(child_pid)?;
-    let async_fd = AsyncFd::with_interest(pidfd, Interest::READABLE)?;
+async fn process_waiter(child_pidfd: OwnedFd) -> Result<WaitStatus> {
+    let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
     let _ = async_fd.readable().await?;
     Ok(linux::waitid(async_fd.into_inner().as_fd())?)
 }
 
 async fn process_waiter_task_main(
     child_pid: Pid,
+    child_pidfd: OwnedFd,
     done: impl FnOnce(Pid, Result<WaitStatus>) + Send + 'static,
 ) {
-    let status = process_waiter(child_pid).await.unwrap();
+    let status = process_waiter(child_pidfd).await.unwrap();
     done(child_pid, Ok(status));
 }
 
@@ -690,8 +686,21 @@ impl Executor {
             }
         };
 
+        // Note that any early error return between here and the call to waitid will result in the
+        // child not being waited for. It's unclear what to do in such a case. We could just wait,
+        // but that would block the current thread. It's probably best to accept not waiting and
+        // the accumulation of zombie children. We really don't expect any of these things to fail
+        // anyway.
+
         // Spawn waiter task to wait on child to terminate.
-        task::spawn(process_waiter_task_main(child_pid, process_done));
+        let child_pidfd = linux::pidfd_open(child_pid)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        task::spawn(process_waiter_task_main(
+            child_pid,
+            child_pidfd,
+            process_done,
+        ));
 
         // At this point, it's still okay to return early in the parent. The child will continue to
         // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
