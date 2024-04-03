@@ -10,8 +10,7 @@ use crate::{
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec,
-    Sha256Digest,
+    ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobResult, JobSpec, Sha256Digest,
 };
 use maelstrom_util::ext::OptionExt as _;
 use std::{
@@ -140,7 +139,7 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 #[derive(Debug)]
 pub enum Message {
     Broker(BrokerToWorker),
-    JobCompleted(JobId, JobOutcomeResult),
+    JobCompleted(JobId, JobResult<JobCompleted, String>),
     JobTimer(JobId),
     ArtifactFetcher(Sha256Digest, Result<u64>),
     BuiltBottomFsLayer(Sha256Digest, Result<u64>),
@@ -496,7 +495,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
     */
 
-    fn receive_job_completed(&mut self, jid: JobId, result: JobOutcomeResult) {
+    fn receive_job_completed(&mut self, jid: JobId, result: JobResult<JobCompleted, String>) {
         let Some(job) = self.executing.remove(&jid) else {
             panic!("missing entry for {jid:?}");
         };
@@ -508,17 +507,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 }
                 self.deps.clean_up_fuse_handle_on_task(handle);
                 self.deps
-                    .send_message_to_broker(WorkerToBroker(jid, result));
+                    .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
             ExecutingJobState::Canceled => {}
             ExecutingJobState::TimedOut => self.deps.send_message_to_broker(WorkerToBroker(
                 jid,
-                result.map(|o| {
-                    let JobOutcome::Completed(JobCompleted { status: _, effects }) = o else {
-                        panic!("should be completed");
-                    };
-                    JobOutcome::TimedOut(effects)
-                }),
+                result.map(|c| JobOutcome::TimedOut(c.effects)),
             )),
         }
         for CacheKey { kind, digest } in job.cache_keys {
