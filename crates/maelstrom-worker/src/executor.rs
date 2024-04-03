@@ -10,12 +10,12 @@ use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
-    Timeout, UserId, Utf8PathBuf,
+    JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags, WaitStatus,
+    SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
@@ -197,7 +197,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
+        process_done: impl FnOnce(Result<JobStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
@@ -214,15 +214,17 @@ impl Executor {
  *  FIGLET: private
  */
 
-async fn process_waiter(child_pidfd: OwnedFd) -> Result<WaitStatus> {
+async fn process_waiter(child_pidfd: OwnedFd) -> Result<JobStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
     let _ = async_fd.readable().await?;
-    Ok(linux::waitid(async_fd.into_inner().as_fd())?)
+    Ok(crate::job_status_from_wait_status(linux::waitid(
+        async_fd.into_inner().as_fd(),
+    )?))
 }
 
 async fn process_waiter_task_main(
     child_pidfd: OwnedFd,
-    done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
+    done: impl FnOnce(Result<JobStatus>) + Send + 'static,
 ) {
     let status = process_waiter(child_pidfd).await.unwrap();
     done(Ok(status));
@@ -321,7 +323,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Result<WaitStatus>) + Send + 'static,
+        process_done: impl FnOnce(Result<JobStatus>) + Send + 'static,
         stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
         stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
     ) -> JobResult<Pid, Error> {
@@ -902,11 +904,7 @@ mod tests {
                 .start(
                     &self.spec,
                     self.inline_limit,
-                    |status| {
-                        status_tx
-                            .send(crate::job_status_from_wait_status(status.unwrap()))
-                            .unwrap()
-                    },
+                    |status| status_tx.send(status.unwrap()).unwrap(),
                     |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
                     |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
                 )

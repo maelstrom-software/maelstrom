@@ -214,9 +214,7 @@ fn job_task_main(
         inline_limit,
         move |result| {
             debug!(log, "job process status"; "result" => ?result);
-            status_tx
-                .send(result.map(crate::job_status_from_wait_status))
-                .unwrap();
+            status_tx.send(result).unwrap();
         },
         move |result| {
             debug!(log2, "job stdout"; "result" => ?result);
