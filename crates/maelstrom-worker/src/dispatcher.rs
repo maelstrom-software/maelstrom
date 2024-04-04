@@ -233,7 +233,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// The job is executing normally. It hasn't been canceled or timed-out. When it terminates,
     /// we're going to send a `JobOutcome::Completed` result to the broker, unless it times out or
     /// is canceled in the meantime.
-    Ok {
+    Nominal {
         handle: DepsT::JobHandle,
         timer: Option<DepsT::TimerHandle>,
     },
@@ -265,7 +265,7 @@ impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
         timer: Option<DepsT::TimerHandle>,
     ) -> Self {
         ExecutingJob {
-            state: ExecutingJobState::Ok { handle, timer },
+            state: ExecutingJobState::Nominal { handle, timer },
             cache_keys,
         }
     }
@@ -427,7 +427,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // wait around until it's actually teriminated. We don't want to release the layers
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
-            if let ExecutingJobState::Ok { handle, timer } =
+            if let ExecutingJobState::Nominal { handle, timer } =
                 mem::replace(state, ExecutingJobState::Canceled)
             {
                 self.deps.cancel_job(handle.clone());
@@ -457,7 +457,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         };
 
         match job.state {
-            ExecutingJobState::Ok { handle, timer } => {
+            ExecutingJobState::Nominal { handle, timer } => {
                 if let Some(handle) = timer {
                     self.deps.cancel_timer(handle)
                 }
@@ -490,7 +490,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         // didn't it would be possible for us to try to remove a directory that was still in
         // use, which would fail.
         match state {
-            ExecutingJobState::Ok { handle, timer: _ } => {
+            ExecutingJobState::Nominal { handle, timer: _ } => {
                 self.deps.cancel_job(handle.clone());
                 *state = ExecutingJobState::TimedOut;
             }
