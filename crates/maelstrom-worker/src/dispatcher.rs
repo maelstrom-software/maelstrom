@@ -456,25 +456,26 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_job_timer(&mut self, jid: JobId) {
-        if let Some(&mut ExecutingJob {
+        let Some(&mut ExecutingJob {
             ref mut state,
             cache_keys: _,
         }) = self.executing.get_mut(&jid)
-        {
-            // The job was executing. We kill the job, but we wait around until it's actually
-            // teriminated. We don't want to release the layers until the job has terminated. If we
-            // didn't it would be possible for us to try to remove a directory that was still in
-            // use, which would fail.
-            match state {
-                ExecutingJobState::Ok { handle, timer: _ } => {
-                    self.deps.cancel_job(handle.clone());
-                    *state = ExecutingJobState::TimedOut;
-                }
-                ExecutingJobState::TimedOut => {
-                    panic!("two timer expirations for job {jid:?}");
-                }
-                ExecutingJobState::Canceled => {}
+        else {
+            return;
+        };
+        // We kill the job, but we wait around until it's actually
+        // teriminated. We don't want to release the layers until the job has terminated. If we
+        // didn't it would be possible for us to try to remove a directory that was still in
+        // use, which would fail.
+        match state {
+            ExecutingJobState::Ok { handle, timer: _ } => {
+                self.deps.cancel_job(handle.clone());
+                *state = ExecutingJobState::TimedOut;
             }
+            ExecutingJobState::TimedOut => {
+                panic!("two timer expirations for job {jid:?}");
+            }
+            ExecutingJobState::Canceled => {}
         }
     }
 
