@@ -158,7 +158,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             cache,
             slots: slots.into_inner().into(),
             awaiting_layers: HashMap::default(),
-            queued: VecDeque::default(),
+            available: VecDeque::default(),
             executing: HashMap::default(),
         }
     }
@@ -259,7 +259,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
-    queued: VecDeque<AvailableJob>,
+    available: VecDeque<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
 
@@ -344,13 +344,13 @@ where
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
-        while self.executing.len() < self.slots && !self.queued.is_empty() {
+        while self.executing.len() < self.slots && !self.available.is_empty() {
             let AvailableJob {
                 jid,
                 spec,
                 path,
                 cache_keys,
-            } = self.queued.pop_front().unwrap();
+            } = self.available.pop_front().unwrap();
             let timeout = spec.timeout;
             let executing_job = ExecutingJob::new(
                 self.deps.start_job(jid, spec, path),
@@ -363,7 +363,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
     fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
         let (path, cache_keys) = tracker.into_path_and_cache_keys();
-        self.queued.push_back(AvailableJob {
+        self.available.push_back(AvailableJob {
             jid,
             spec,
             path,
@@ -410,7 +410,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             }
         } else {
             // It may be the queue.
-            self.queued.retain_mut(|entry| {
+            self.available.retain_mut(|entry| {
                 if entry.jid != jid {
                     true
                 } else {
