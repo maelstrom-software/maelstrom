@@ -9,12 +9,12 @@ use bumpalo::{
 use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
-    JobStatus, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobMountFsType,
+    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
+    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
 use maelstrom_worker_child::Syscall;
@@ -33,7 +33,9 @@ use std::{
 };
 use tokio::{
     io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, Interest, ReadBuf},
-    task,
+    runtime, select,
+    sync::oneshot,
+    task::JoinSet,
 };
 
 /*              _     _ _
@@ -197,11 +199,10 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Result<JobStatus>) + Send + 'static,
-        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> JobResult<Pid, Error> {
-        self.start_inner(spec, inline_limit, process_done, stdout_done, stderr_done)
+        killer: oneshot::Receiver<()>,
+        runtime: runtime::Handle,
+    ) -> JobResult<JobCompleted, Error> {
+        self.start_inner(spec, inline_limit, killer, runtime)
     }
 }
 
@@ -214,9 +215,26 @@ impl Executor {
  *  FIGLET: private
  */
 
-async fn process_waiter(child_pidfd: OwnedFd) -> Result<JobStatus> {
+async fn process_waiter(
+    child_pidfd: OwnedFd,
+    mut killer: oneshot::Receiver<()>,
+) -> Result<JobStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
-    let _ = async_fd.readable().await?;
+    let mut listen_for_killer = true;
+    loop {
+        select! {
+            res = &mut killer, if listen_for_killer => {
+                if res.is_ok() {
+                    linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
+                }
+                listen_for_killer = false;
+            },
+            res = async_fd.readable() => {
+                let _ = res?;
+                break;
+            },
+        }
+    }
     Ok(match linux::waitid(async_fd.into_inner().as_fd())? {
         WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
         WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
@@ -225,10 +243,13 @@ async fn process_waiter(child_pidfd: OwnedFd) -> Result<JobStatus> {
 
 async fn process_waiter_task_main(
     child_pidfd: OwnedFd,
-    done: impl FnOnce(Result<JobStatus>) + Send + 'static,
+    killer: oneshot::Receiver<()>,
+    sender: oneshot::Sender<Result<JobStatus>>,
 ) {
-    let status = process_waiter(child_pidfd).await.unwrap();
-    done(Ok(status));
+    // It's not clear what to do if we get an error waiting. In theory, that should never happen.
+    // What we do is return the error so that the client can get back a system error. An
+    // alternative would be to panic and send a plain JobStatus back.
+    let _ = sender.send(process_waiter(child_pidfd, killer).await);
 }
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
@@ -280,9 +301,9 @@ async fn output_reader(
 async fn output_reader_task_main(
     inline_limit: InlineLimit,
     stream: impl AsyncRead + std::marker::Unpin,
-    done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+    sender: oneshot::Sender<Result<JobOutputResult>>,
 ) {
-    done(output_reader(inline_limit, stream).await);
+    let _ = sender.send(output_reader(inline_limit, stream).await);
 }
 
 struct ScriptBuilder<'a> {
@@ -324,10 +345,9 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        process_done: impl FnOnce(Result<JobStatus>) + Send + 'static,
-        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
-    ) -> JobResult<Pid, Error> {
+        killer: oneshot::Receiver<()>,
+        runtime: runtime::Handle,
+    ) -> JobResult<JobCompleted, Error> {
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
@@ -674,8 +694,8 @@ impl Executor {
                     | CloneFlags::NEWUSER,
             )
             .exit_signal(Signal::CHLD);
-        let (child_pid, child_pidfd) = match linux::clone3_with_child_pidfd(&mut clone_args) {
-            Ok(Some((child_pid, child_pidfd))) => (child_pid, child_pidfd),
+        let child_pidfd = match linux::clone3_with_child_pidfd(&mut clone_args) {
+            Ok(Some((_, child_pidfd))) => child_pidfd,
             Ok(None) => {
                 // This is the child process.
                 maelstrom_worker_child::start_and_exec_in_child(
@@ -688,19 +708,17 @@ impl Executor {
             }
         };
 
-        // Note that any early error return between here and the call to waitid will result in the
-        // child not being waited for. It's unclear what to do in such a case. We could just wait,
-        // but that would block the current thread. It's probably best to accept not waiting and
-        // the accumulation of zombie children. We really don't expect any of these things to fail
-        // anyway.
+        let (status_sender, status_receiver) = oneshot::channel();
+        let (stdout_sender, stdout_receiver) = oneshot::channel();
+        let (stderr_sender, stderr_receiver) = oneshot::channel();
 
-        // Spawn waiter task to wait on child to terminate.
-        task::spawn(process_waiter_task_main(child_pidfd, process_done));
+        // Spawn a waiter task to wait on child to terminate. We do this immediately after the
+        // clone so that even if this functions returns early, we will make sure that we wait on
+        // the child.
+        runtime.spawn(process_waiter_task_main(child_pidfd, killer, status_sender));
 
         // At this point, it's still okay to return early in the parent. The child will continue to
-        // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
-        // Otherwise, it will continue until it's done, and then we'll reap the zombie. Since we won't
-        // have any jid->pid association, we'll just ignore the result.
+        // execute, but that's okay.
 
         // Drop the write sides of the pipes in the parent. It's important that we drop
         // exec_result_write_fd before reading from that pipe next.
@@ -739,27 +757,52 @@ impl Executor {
             .map_err(Error::from)
             .map_err(JobError::System)?;
 
-        // Spawn reader tasks to consume stdout and stderr.
-        task::spawn(output_reader_task_main(
-            inline_limit,
-            AsyncFile(
-                AsyncFd::new(File::from(fd::OwnedFd::from(stdout_read_fd)))
-                    .map_err(Error::from)
-                    .map_err(JobError::System)?,
+        // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
+        // that we don't cause a deadlock on one while we're reading the other one.
+        //
+        // We put these in a JoinSet so that they will be canceled if we return early.
+        let mut joinset = JoinSet::new();
+        joinset.spawn_on(
+            output_reader_task_main(
+                inline_limit,
+                AsyncFile(
+                    AsyncFd::new(File::from(fd::OwnedFd::from(stdout_read_fd)))
+                        .map_err(Error::from)
+                        .map_err(JobError::System)?,
+                ),
+                stdout_sender,
             ),
-            stdout_done,
-        ));
-        task::spawn(output_reader_task_main(
-            inline_limit,
-            AsyncFile(
-                AsyncFd::new(File::from(fd::OwnedFd::from(stderr_read_fd)))
-                    .map_err(Error::from)
-                    .map_err(JobError::System)?,
+            &runtime,
+        );
+        joinset.spawn_on(
+            output_reader_task_main(
+                inline_limit,
+                AsyncFile(
+                    AsyncFd::new(File::from(fd::OwnedFd::from(stderr_read_fd)))
+                        .map_err(Error::from)
+                        .map_err(JobError::System)?,
+                ),
+                stderr_sender,
             ),
-            stderr_done,
-        ));
+            &runtime,
+        );
 
-        Ok(child_pid)
+        Ok(JobCompleted {
+            status: status_receiver
+                .blocking_recv()
+                .unwrap()
+                .map_err(JobError::System)?,
+            effects: JobEffects {
+                stdout: stdout_receiver
+                    .blocking_recv()
+                    .unwrap()
+                    .map_err(JobError::System)?,
+                stderr: stderr_receiver
+                    .blocking_recv()
+                    .unwrap()
+                    .map_err(JobError::System)?,
+            },
+        })
     }
 }
 
@@ -893,10 +936,11 @@ mod tests {
         }
 
         async fn run(self) {
-            let (status_tx, status_rx) = oneshot::channel();
-            let (stdout_tx, stdout_rx) = oneshot::channel();
-            let (stderr_tx, stderr_rx) = oneshot::channel();
-            let start_result = tokio::task::block_in_place(|| {
+            let JobCompleted {
+                status,
+                effects: JobEffects { stdout, stderr },
+            } = tokio::task::spawn_blocking(move || {
+                let (_, signal_rx) = oneshot::channel();
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
@@ -905,15 +949,17 @@ mod tests {
                 .start(
                     &self.spec,
                     self.inline_limit,
-                    |status| status_tx.send(status.unwrap()).unwrap(),
-                    |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
-                    |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
+                    signal_rx,
+                    runtime::Handle::current(),
                 )
-            });
-            assert!(start_result.is_ok());
-            assert_eq!(status_rx.await.unwrap(), self.expected_status);
-            assert_eq!(stdout_rx.await.unwrap(), self.expected_stdout);
-            assert_eq!(stderr_rx.await.unwrap(), self.expected_stderr);
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+            assert_eq!(status, self.expected_status);
+            assert_eq!(stdout, self.expected_stdout);
+            assert_eq!(stderr, self.expected_stderr);
 
             self.mount.umount_and_join().await;
         }
@@ -1506,22 +1552,27 @@ mod tests {
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let mount = TarMount::new().await;
         let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
+        let (_, signal_rx) = oneshot::channel();
         assert_matches!(
-            Executor::new(
-                tempfile::tempdir().unwrap().into_path(),
-                tempfile::tempdir().unwrap().into_path()
-            )
-            .unwrap()
-            .start(
-                &spec,
-                ByteSize::b(0).into(),
-                |_| unreachable!(),
-                |_| unreachable!(),
-                |_| unreachable!()
-            ),
+            tokio::task::spawn_blocking(move || {
+                Executor::new(
+                    tempfile::tempdir().unwrap().into_path(),
+                    tempfile::tempdir().unwrap().into_path(),
+                )
+                .unwrap()
+                .start(
+                    &spec,
+                    ByteSize::b(0).into(),
+                    signal_rx,
+                    runtime::Handle::current(),
+                )
+            })
+            .await
+            .unwrap(),
             Err(JobError::Execution(_))
         );
-        mount.umount_and_join().await
+
+        mount.umount_and_join().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
