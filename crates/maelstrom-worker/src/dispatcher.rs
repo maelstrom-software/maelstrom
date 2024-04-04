@@ -180,22 +180,22 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 self.receive_artifact_success(digest, bytes_used)
             }
             Message::BuiltBottomFsLayer(digest, Ok(bytes_used)) => {
-                self.build_bottom_fs_layer_success(digest, bytes_used)
+                self.receive_build_bottom_fs_layer_success(digest, bytes_used)
             }
             Message::BuiltBottomFsLayer(digest, Err(err)) => {
-                self.build_bottom_fs_layer_failure(digest, err)
+                self.receive_build_bottom_fs_layer_failure(digest, err)
             }
             Message::BuiltUpperFsLayer(digest, Ok(bytes_used)) => {
-                self.build_upper_fs_layer_success(digest, bytes_used)
+                self.receive_build_upper_fs_layer_success(digest, bytes_used)
             }
             Message::BuiltUpperFsLayer(digest, Err(err)) => {
-                self.build_upper_fs_layer_failure(digest, err)
+                self.receive_build_upper_fs_layer_failure(digest, err)
             }
             Message::ReadManifestDigests(digest, jid, Ok(digests)) => {
-                self.read_manifest_digests_success(digest, jid, digests)
+                self.receive_read_manifest_digests_success(digest, jid, digests)
             }
             Message::ReadManifestDigests(digest, jid, Err(err)) => {
-                self.read_manifest_digests_failure(digest, jid, err)
+                self.receive_read_manifest_digests_failure(digest, jid, err)
             }
         }
     }
@@ -590,7 +590,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         )
     }
 
-    fn build_bottom_fs_layer_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
+    fn receive_build_bottom_fs_layer_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
         self.cache_fill_success(
             CacheEntryKind::BottomFsLayer,
             digest,
@@ -599,12 +599,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         )
     }
 
-    fn build_bottom_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
+    fn receive_build_bottom_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to build bottom FS layer";
         self.cache_fill_failure(CacheEntryKind::BottomFsLayer, digest, msg, err)
     }
 
-    fn build_upper_fs_layer_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
+    fn receive_build_upper_fs_layer_success(&mut self, digest: Sha256Digest, bytes_used: u64) {
         self.cache_fill_success(
             CacheEntryKind::UpperFsLayer,
             digest,
@@ -613,12 +613,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         )
     }
 
-    fn build_upper_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
+    fn receive_build_upper_fs_layer_failure(&mut self, digest: Sha256Digest, err: Error) {
         let msg = "Failed to build upper FS layer";
         self.cache_fill_failure(CacheEntryKind::UpperFsLayer, digest, msg, err)
     }
 
-    fn read_manifest_digests_success(
+    fn receive_read_manifest_digests_success(
         &mut self,
         digest: Sha256Digest,
         jid: JobId,
@@ -634,7 +634,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         );
     }
 
-    fn read_manifest_digests_failure(&mut self, digest: Sha256Digest, jid: JobId, err: Error) {
+    fn receive_read_manifest_digests_failure(
+        &mut self,
+        digest: Sha256Digest,
+        jid: JobId,
+        err: Error,
+    ) {
         self.job_failure(&digest, jid, "failed to read manifest", &err);
     }
 }
