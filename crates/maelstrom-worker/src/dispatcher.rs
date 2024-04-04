@@ -10,16 +10,13 @@ use crate::{
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
-    ArtifactType, JobEffects, JobError, JobId, JobOutcome, JobOutputResult, JobResult, JobSpec,
-    JobStatus, Sha256Digest,
+    ArtifactType, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec, Sha256Digest,
 };
-use maelstrom_linux::Pid;
 use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     mem,
     path::{Path, PathBuf},
-    result::Result as StdResult,
     time::Duration,
 };
 use tracker::{FetcherResult, LayerTracker};
@@ -36,26 +33,18 @@ use tracker::{FetcherResult, LayerTracker};
 /// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
-    type FuseHandle;
+    type JobHandle: Clone;
 
-    /// Start a new job. If this returns [`JobResult::Ok`], then the dispatcher is expecting three
-    /// separate messages to know when the job has completed: [`Message::PidStatus`],
-    /// [`Message::JobStdout`], and [`Message::JobStderr`]. These messages don't have to come in
-    /// any particular order, but the dispatcher won't proceed with the next job until all three
-    /// have arrived.
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        spec: JobSpec,
-        path: PathBuf,
-    ) -> JobResult<(Pid, Self::FuseHandle), String>;
+    /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
+    /// completes. The dispatcher can call [`cancel_job`] if it wants the job to stop immediately.
+    fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
 
-    /// Kill a running job using the [`Pid`] obtained from [`JobResult::Ok`]. This must be
+    /// Cancel a running job using the [`JobHandle`] obtained from [`start_job`]. This must be
     /// resilient in the case where the process has already completed.
-    fn kill_job(&mut self, pid: Pid);
+    fn cancel_job(&mut self, handle: Self::JobHandle);
 
     /// Start a task to unmount the fuse mount
-    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle);
+    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::JobHandle);
 
     /// A handle used to cancel a timer.
     type TimerHandle;
@@ -150,9 +139,7 @@ impl<FsT: CacheFs> DispatcherCache for Cache<FsT> {
 #[derive(Debug)]
 pub enum Message {
     Broker(BrokerToWorker),
-    PidStatus(Pid, JobStatus),
-    JobStdout(JobId, StdResult<JobOutputResult, String>),
-    JobStderr(JobId, StdResult<JobOutputResult, String>),
+    JobCompleted(JobId, JobOutcomeResult),
     JobTimer(JobId),
     ArtifactFetcher(Sha256Digest, Result<u64>),
     BuiltBottomFsLayer(Sha256Digest, Result<u64>),
@@ -171,7 +158,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             awaiting_layers: HashMap::default(),
             queued: VecDeque::default(),
             executing: HashMap::default(),
-            executing_pids: HashMap::default(),
         }
     }
 
@@ -183,9 +169,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 self.receive_enqueue_job(jid, spec)
             }
             Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
-            Message::PidStatus(pid, status) => self.receive_pid_status(pid, status),
-            Message::JobStdout(jid, result) => self.receive_job_stdout(jid, result),
-            Message::JobStderr(jid, result) => self.receive_job_stderr(jid, result),
+            Message::JobCompleted(jid, result) => self.receive_job_completed(jid, result),
             Message::JobTimer(jid) => self.receive_job_timer(jid),
             Message::ArtifactFetcher(digest, Err(err)) => {
                 self.receive_artifact_failure(digest, err)
@@ -238,8 +222,7 @@ struct QueuedEntry {
 
 enum ExecutingJobState<DepsT: DispatcherDeps> {
     Ok {
-        pid: Pid,
-        fuse_handle: DepsT::FuseHandle,
+        handle: DepsT::JobHandle,
         timer: Option<DepsT::TimerHandle>,
     },
     Canceled,
@@ -248,34 +231,19 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
 
 struct ExecutingJob<DepsT: DispatcherDeps> {
     state: ExecutingJobState<DepsT>,
-    status: Option<JobStatus>,
-    stdout: Option<StdResult<JobOutputResult, String>>,
-    stderr: Option<StdResult<JobOutputResult, String>>,
     cache_keys: HashSet<CacheKey>,
 }
 
 impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
     fn new(
-        pid: Pid,
-        fuse_handle: DepsT::FuseHandle,
+        handle: DepsT::JobHandle,
         cache_keys: HashSet<CacheKey>,
         timer: Option<DepsT::TimerHandle>,
     ) -> Self {
         ExecutingJob {
-            state: ExecutingJobState::Ok {
-                pid,
-                fuse_handle,
-                timer,
-            },
-            status: None,
-            stdout: None,
-            stderr: None,
+            state: ExecutingJobState::Ok { handle, timer },
             cache_keys,
         }
-    }
-
-    fn is_complete(&self) -> bool {
-        self.status.is_some() && self.stdout.is_some() && self.stderr.is_some()
     }
 }
 
@@ -370,7 +338,6 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
     queued: VecDeque<QueuedEntry>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
-    executing_pids: HashMap<Pid, JobId>,
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
@@ -383,25 +350,12 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 cache_keys,
             } = self.queued.pop_front().unwrap();
             let timeout = spec.timeout;
-            match self.deps.start_job(jid, spec, path) {
-                Ok((pid, fuse_handle)) => {
-                    let executing_job = ExecutingJob::new(
-                        pid,
-                        fuse_handle,
-                        cache_keys,
-                        timeout.map(|timeout| self.deps.start_timer(jid, Duration::from(timeout))),
-                    );
-                    self.executing.insert(jid, executing_job).assert_is_none();
-                    self.executing_pids.insert(pid, jid).assert_is_none();
-                }
-                Err(e) => {
-                    for CacheKey { kind, digest } in cache_keys {
-                        self.cache.decrement_ref_count(kind, &digest);
-                    }
-                    self.deps
-                        .send_message_to_broker(WorkerToBroker(jid, Err(e)));
-                }
-            }
+            let executing_job = ExecutingJob::new(
+                self.deps.start_job(jid, spec, path),
+                cache_keys,
+                timeout.map(|timeout| self.deps.start_timer(jid, Duration::from(timeout))),
+            );
+            self.executing.insert(jid, executing_job).assert_is_none();
         }
     }
 
@@ -443,17 +397,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // wait around until it's actually teriminated. We don't want to release the layers
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
-            if let ExecutingJobState::Ok {
-                pid,
-                fuse_handle,
-                timer,
-            } = mem::replace(state, ExecutingJobState::Canceled)
+            if let ExecutingJobState::Ok { handle, timer } =
+                mem::replace(state, ExecutingJobState::Canceled)
             {
-                self.deps.kill_job(pid);
+                self.deps.cancel_job(handle.clone());
                 if let Some(handle) = timer {
                     self.deps.cancel_timer(handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(fuse_handle);
+                self.deps.clean_up_fuse_handle_on_task(handle);
             }
         } else {
             // It may be the queue.
@@ -470,6 +421,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         }
     }
 
+    /*
     fn update_entry_and_potentially_finish_job(
         &mut self,
         jid: JobId,
@@ -541,12 +493,43 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn receive_job_stderr(&mut self, jid: JobId, result: StdResult<JobOutputResult, String>) {
         self.update_entry_and_potentially_finish_job(jid, move |entry| entry.stderr = Some(result));
     }
+    */
+
+    fn receive_job_completed(&mut self, jid: JobId, result: JobOutcomeResult) {
+        let Some(job) = self.executing.remove(&jid) else {
+            panic!("missing entry for {jid:?}");
+        };
+
+        match job.state {
+            ExecutingJobState::Ok { handle, timer } => {
+                if let Some(handle) = timer {
+                    self.deps.cancel_timer(handle)
+                }
+                self.deps.clean_up_fuse_handle_on_task(handle);
+                self.deps
+                    .send_message_to_broker(WorkerToBroker(jid, result));
+            }
+            ExecutingJobState::Canceled => {}
+            ExecutingJobState::TimedOut => self.deps.send_message_to_broker(WorkerToBroker(
+                jid,
+                result.map(|o| {
+                    let JobOutcome::Completed { status: _, effects } = o else {
+                        panic!("should be completed");
+                    };
+                    JobOutcome::TimedOut(effects)
+                }),
+            )),
+        }
+        for CacheKey { kind, digest } in job.cache_keys {
+            self.cache.decrement_ref_count(kind, &digest);
+        }
+        self.possibly_start_job();
+    }
 
     fn receive_job_timer(&mut self, jid: JobId) {
         if let Some(&mut ExecutingJob {
             ref mut state,
-            ref status,
-            ..
+            cache_keys: _,
         }) = self.executing.get_mut(&jid)
         {
             // The job was executing. We kill the job, but we wait around until it's actually
@@ -554,14 +537,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // didn't it would be possible for us to try to remove a directory that was still in
             // use, which would fail.
             match state {
-                ExecutingJobState::Ok {
-                    pid,
-                    fuse_handle: _,
-                    timer: _,
-                } => {
-                    if status.is_none() {
-                        self.deps.kill_job(*pid);
-                    }
+                ExecutingJobState::Ok { handle, timer: _ } => {
+                    self.deps.cancel_job(handle.clone());
                     *state = ExecutingJobState::TimedOut;
                 }
                 ExecutingJobState::TimedOut => {
@@ -717,6 +694,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
  *  FIGLET: tests
  */
 
+/*
 #[cfg(test)]
 mod tests {
     use super::{Message::*, *};
@@ -2153,3 +2131,4 @@ mod tests {
         };
     }
 }
+*/

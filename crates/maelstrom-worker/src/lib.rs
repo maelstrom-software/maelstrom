@@ -15,7 +15,8 @@ use executor::Executor;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobError, JobId, JobResult, JobSpec, JobStatus, Sha256Digest,
+    ArtifactType, JobEffects, JobError, JobId, JobOutcome, JobOutcomeResult, JobSpec, JobStatus,
+    Sha256Digest,
 };
 use maelstrom_linux::{self as linux, Pid, Signal, WaitStatus};
 use maelstrom_util::{
@@ -62,7 +63,7 @@ struct DispatcherAdapter {
     broker_addr: BrokerAddr,
     inline_limit: InlineLimit,
     log: Logger,
-    executor: Executor,
+    executor: Arc<Executor>,
     cache_dir: PathBuf,
     tmpfs_dir: PathBuf,
     layer_fs_cache: Arc<Mutex<maelstrom_layer_fs::ReaderCache>>,
@@ -89,7 +90,7 @@ impl DispatcherAdapter {
             broker_addr,
             inline_limit,
             log,
-            executor: Executor::new(mount_dir, tmpfs_dir.clone())?,
+            executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
             cache_dir,
             tmpfs_dir,
             layer_fs_cache: Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new())),
@@ -110,83 +111,196 @@ impl DispatcherAdapterFuseHandle {
     }
 }
 
-impl DispatcherDeps for DispatcherAdapter {
-    type FuseHandle = DispatcherAdapterFuseHandle;
+struct JobHandleInner {
+    receiver: Option<tokio::sync::oneshot::Receiver<(Pid, DispatcherAdapterFuseHandle)>>,
+    pid: Option<Pid>,
+    fuse_handle: Option<DispatcherAdapterFuseHandle>,
+}
 
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        spec: JobSpec,
-        layer_fs_path: PathBuf,
-    ) -> JobResult<(Pid, Self::FuseHandle), String> {
-        let sender = self.dispatcher_sender.clone();
-        let sender2 = sender.clone();
-        let sender3 = sender.clone();
-        let log = self
-            .log
-            .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
-        debug!(log, "job starting");
-        let log2 = log.clone();
-        let log3 = log.clone();
+impl JobHandleInner {
+    async fn fill_if_necessary(&mut self) {
+        if let Some(recv) = self.receiver.take() {
+            match recv.await {
+                Err(_) => {}
+                Ok((pid, fuse_handle)) => {
+                    self.pid = Some(pid);
+                    self.fuse_handle = Some(fuse_handle);
+                }
+            }
+        }
+    }
 
-        let mount_path = self.tmpfs_dir.join(format!(
-            "fuse_mount.{}.{}",
-            jid.cid.as_u32(),
-            jid.cjid.as_u32()
-        ));
-        let fs = Fs::new();
-        fs.create_dir_all(&mount_path)
-            .map_err(|e| JobError::System(e.to_string()))?;
-        let spec = executor::JobSpec::from_spec_and_path(spec, mount_path.clone());
+    async fn pid(&mut self) -> Option<Pid> {
+        self.fill_if_necessary().await;
+        self.pid
+    }
 
-        let cache_dir = self.cache_dir.join("blob/sha256");
-        let mount_path2 = mount_path.clone();
-        let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)
-            .map_err(|e| JobError::System(e.to_string()))?;
-        let fuse_handle = layer_fs
-            .mount(self.log.clone(), self.layer_fs_cache.clone(), &mount_path2)
-            .map_err(|e| JobError::System(e.to_string()))?;
-        let fuse_handle = DispatcherAdapterFuseHandle {
-            inner: fuse_handle,
-            mount_path,
-        };
+    async fn fuse_handle(&mut self) -> Option<DispatcherAdapterFuseHandle> {
+        self.fill_if_necessary().await;
+        self.fuse_handle.take()
+    }
+}
 
-        let pid = tokio::task::block_in_place(|| {
-            self.executor.start(
-                &spec,
-                self.inline_limit,
-                move |pid, result| {
-                    debug!(log, "job process status"; "result" => ?result);
-                    let status = crate::job_status_from_wait_status(result.unwrap());
-                    sender.send(Message::PidStatus(pid, status)).ok();
-                },
-                move |result| {
-                    debug!(log2, "job stdout"; "result" => ?result);
-                    sender2
-                        .send(Message::JobStdout(jid, result.map_err(|e| e.to_string())))
-                        .ok();
-                },
-                move |result| {
-                    debug!(log3, "job stderr"; "result" => ?result);
-                    sender3
-                        .send(Message::JobStderr(jid, result.map_err(|e| e.to_string())))
-                        .ok();
-                },
-            )
-        })
+#[derive(Clone)]
+struct JobHandle(std::sync::Arc<tokio::sync::Mutex<JobHandleInner>>);
+
+impl JobHandle {
+    fn new(receiver: tokio::sync::oneshot::Receiver<(Pid, DispatcherAdapterFuseHandle)>) -> Self {
+        Self(std::sync::Arc::new(tokio::sync::Mutex::new(
+            JobHandleInner {
+                receiver: Some(receiver),
+                pid: None,
+                fuse_handle: None,
+            },
+        )))
+    }
+
+    async fn pid(&self) -> Option<Pid> {
+        self.0.lock().await.pid().await
+    }
+
+    async fn fuse_handle(&mut self) -> Option<DispatcherAdapterFuseHandle> {
+        self.0.lock().await.fuse_handle().await
+    }
+}
+
+// XXX
+#[allow(clippy::too_many_arguments)]
+fn job_task_main(
+    jid: JobId,
+    spec: JobSpec,
+    layer_fs_path: PathBuf,
+    log: Logger,
+    tmpfs_dir: PathBuf,
+    cache_dir: PathBuf,
+    layer_fs_cache: Arc<Mutex<maelstrom_layer_fs::ReaderCache>>,
+    executor: Arc<Executor>,
+    inline_limit: InlineLimit,
+    handle_sender: tokio::sync::oneshot::Sender<(Pid, DispatcherAdapterFuseHandle)>,
+) -> JobOutcomeResult {
+    let log = log.new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
+    debug!(log, "job starting");
+    let log2 = log.clone();
+    let log3 = log.clone();
+
+    let mount_path = tmpfs_dir.join(format!(
+        "fuse_mount.{}.{}",
+        jid.cid.as_u32(),
+        jid.cjid.as_u32()
+    ));
+    let fs = Fs::new();
+    fs.create_dir_all(&mount_path)
+        .map_err(|e| JobError::System(e.to_string()))?;
+    let spec = executor::JobSpec::from_spec_and_path(spec, mount_path.clone());
+
+    let cache_dir = cache_dir.join("blob/sha256");
+    let mount_path2 = mount_path.clone();
+    let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)
+        .map_err(|e| JobError::System(e.to_string()))?;
+
+    let fuse_handle = layer_fs
+        .mount(log.clone(), layer_fs_cache.clone(), &mount_path2)
+        .map_err(|e| JobError::System(e.to_string()))?;
+    let fuse_handle = DispatcherAdapterFuseHandle {
+        inner: fuse_handle,
+        mount_path,
+    };
+
+    let (status_tx, status_rx) = tokio::sync::oneshot::channel();
+    let (stdout_tx, stdout_rx) = tokio::sync::oneshot::channel();
+    let (stderr_tx, stderr_rx) = tokio::sync::oneshot::channel();
+
+    let pid = executor
+        .start(
+            &spec,
+            inline_limit,
+            move |_, result| {
+                debug!(log, "job process status"; "result" => ?result);
+                status_tx
+                    .send(
+                        result
+                            .map(crate::job_status_from_wait_status)
+                            .map_err(|e| e.to_string()),
+                    )
+                    .unwrap();
+            },
+            move |result| {
+                debug!(log2, "job stdout"; "result" => ?result);
+                stdout_tx.send(result.map_err(|e| e.to_string())).unwrap();
+            },
+            move |result| {
+                debug!(log3, "job stderr"; "result" => ?result);
+                stderr_tx.send(result.map_err(|e| e.to_string())).unwrap();
+            },
+        )
         .map_err(|e| e.map(|inner| inner.to_string()))?;
-        Ok((pid, fuse_handle))
+    let _ = handle_sender.send((pid, fuse_handle));
+
+    Ok(JobOutcome::Completed {
+        status: status_rx
+            .blocking_recv()
+            .unwrap()
+            .map_err(JobError::System)?,
+        effects: JobEffects {
+            stdout: stdout_rx
+                .blocking_recv()
+                .unwrap()
+                .map_err(JobError::System)?,
+            stderr: stderr_rx
+                .blocking_recv()
+                .unwrap()
+                .map_err(JobError::System)?,
+        },
+    })
+}
+
+impl DispatcherDeps for DispatcherAdapter {
+    type JobHandle = JobHandle;
+
+    fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
+        let (handle_sender, recv) = tokio::sync::oneshot::channel();
+        let log = self.log.clone();
+        let tmpfs_dir = self.tmpfs_dir.clone();
+        let cache_dir = self.cache_dir.clone();
+        let layer_fs_cache = self.layer_fs_cache.clone();
+        let executor = self.executor.clone();
+        let inline_limit = self.inline_limit;
+        let dispatcher_sender = self.dispatcher_sender.clone();
+        task::spawn_blocking(move || {
+            let result = job_task_main(
+                jid,
+                spec,
+                layer_fs_path,
+                log,
+                tmpfs_dir,
+                cache_dir,
+                layer_fs_cache,
+                executor,
+                inline_limit,
+                handle_sender,
+            );
+            dispatcher_sender
+                .send(Message::JobCompleted(jid, result))
+                .ok()
+        });
+        JobHandle::new(recv)
     }
 
-    fn kill_job(&mut self, pid: Pid) {
-        linux::kill(pid, Signal::KILL).ok();
+    fn cancel_job(&mut self, handle: Self::JobHandle) {
+        task::spawn(async move {
+            if let Some(pid) = handle.pid().await {
+                linux::kill(pid, Signal::KILL).ok();
+            }
+        });
     }
 
-    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle) {
+    fn clean_up_fuse_handle_on_task(&mut self, mut handle: Self::JobHandle) {
         let log = self.log.clone();
         task::spawn(async move {
-            if let Err(e) = handle.clean_up().await {
-                error!(log, "error unmounting fuse: {e}")
+            if let Some(fuse_handle) = handle.fuse_handle().await {
+                if let Err(e) = fuse_handle.clean_up().await {
+                    error!(log, "error unmounting fuse: {e}")
+                }
             }
         });
     }
