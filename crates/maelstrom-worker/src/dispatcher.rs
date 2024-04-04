@@ -210,7 +210,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
  *  FIGLET: private
  */
 
-struct AwaitingLayersEntry {
+struct AwaitingLayersJob {
     spec: JobSpec,
     tracker: LayerTracker,
 }
@@ -337,7 +337,7 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     deps: DepsT,
     cache: CacheT,
     slots: usize,
-    awaiting_layers: HashMap<JobId, AwaitingLayersEntry>,
+    awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
     queued: VecDeque<QueuedEntry>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
@@ -383,7 +383,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             self.enqueue_job_with_all_layers(jid, spec, tracker);
         } else {
             self.awaiting_layers
-                .insert(jid, AwaitingLayersEntry { spec, tracker })
+                .insert(jid, AwaitingLayersJob { spec, tracker })
                 .assert_is_none();
         }
     }
@@ -529,7 +529,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 };
                 cb(&mut entry.get_mut().tracker, digest, &mut fetcher);
                 if entry.get().tracker.is_complete() {
-                    let AwaitingLayersEntry { spec, tracker } = entry.remove();
+                    let AwaitingLayersJob { spec, tracker } = entry.remove();
                     self.enqueue_job_with_all_layers(jid, spec, tracker);
                 }
             }
