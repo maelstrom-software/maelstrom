@@ -249,6 +249,20 @@ impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
     }
 }
 
+/// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
+/// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
+/// broker to order the requests properly.
+///
+/// All methods are completely nonblocking. They will never block the task or the thread.
+pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
+    deps: DepsT,
+    cache: CacheT,
+    slots: usize,
+    awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
+    queued: VecDeque<AvailableJob>,
+    executing: HashMap<JobId, ExecutingJob<DepsT>>,
+}
+
 struct Fetcher<'dispatcher, DepsT, CacheT> {
     deps: &'dispatcher mut DepsT,
     cache: &'dispatcher mut CacheT,
@@ -326,20 +340,6 @@ where
         self.deps
             .read_manifest_digests(digest.clone(), path.into(), self.jid);
     }
-}
-
-/// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
-/// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
-/// broker to order the requests properly.
-///
-/// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
-    deps: DepsT,
-    cache: CacheT,
-    slots: usize,
-    awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
-    queued: VecDeque<AvailableJob>,
-    executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
