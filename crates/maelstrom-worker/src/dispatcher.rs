@@ -215,7 +215,7 @@ struct AwaitingLayersJob {
     tracker: LayerTracker,
 }
 
-struct QueuedEntry {
+struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
     path: PathBuf,
@@ -338,14 +338,14 @@ pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
-    queued: VecDeque<QueuedEntry>,
+    queued: VecDeque<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     fn possibly_start_job(&mut self) {
         while self.executing.len() < self.slots && !self.queued.is_empty() {
-            let QueuedEntry {
+            let AvailableJob {
                 jid,
                 spec,
                 path,
@@ -363,7 +363,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
     fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
         let (path, cache_keys) = tracker.into_path_and_cache_keys();
-        self.queued.push_back(QueuedEntry {
+        self.queued.push_back(AvailableJob {
             jid,
             spec,
             path,
