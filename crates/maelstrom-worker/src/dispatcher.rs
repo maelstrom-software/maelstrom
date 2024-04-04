@@ -210,11 +210,17 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
  *  FIGLET: private
  */
 
+/// This struct represents a job where there's still work to do to fetch and/or build layers. These
+/// jobs sit on the sideline until we have their layers ready. At that point, they become
+/// `AvailableJob`s.
 struct AwaitingLayersJob {
     spec: JobSpec,
     tracker: LayerTracker,
 }
 
+/// This struct represents a job that is ready to be executed, but isn't yet executing. These jobs
+/// sit in a queue until there are slots available for them. At that point, they become
+/// `ExecutingJob`s.
 struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
@@ -222,15 +228,31 @@ struct AvailableJob {
     cache_keys: HashSet<CacheKey>,
 }
 
+/// An executing job may have been canceled or timed out, or it may be executing normally.
 enum ExecutingJobState<DepsT: DispatcherDeps> {
+    /// The job is executing normally. It hasn't been canceled or timed-out. When it terminates,
+    /// we're going to send a `JobOutcome::Completed` result to the broker, unless it times out or
+    /// is canceled in the meantime.
     Ok {
         handle: DepsT::JobHandle,
         timer: Option<DepsT::TimerHandle>,
     },
+
+    /// The job has been canceled. We've already used the job and timer handles to cancel the job
+    /// and timer, respectively. Now we're waiting for it to terminate. When it terminates, we're
+    /// not going to send any result to the broker.
     Canceled,
+
+    /// The job timer has expired. We've already used the job handle to cancel the job. Now we're
+    /// waiting for it to terminate. When it terminates, we're going to send a
+    /// `JobOutcome::TimedOut`, unless it is canceled in the meantime. We need to wait for it to
+    /// terminate before sending the `JobOutcome::TimedOut` because we want to include the
+    /// `JobEffects`, which we won't get until it terminates.
     TimedOut,
 }
 
+/// This struct represents an executing job. It is created when we call `start_job` on our deps,
+/// and destroyed when we get a `Message::JobCompleted`.
 struct ExecutingJob<DepsT: DispatcherDeps> {
     state: ExecutingJobState<DepsT>,
     cache_keys: HashSet<CacheKey>,
