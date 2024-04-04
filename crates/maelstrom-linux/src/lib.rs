@@ -594,6 +594,15 @@ pub fn pidfd_open(pid: Pid) -> Result<OwnedFd, Errno> {
         .map(OwnedFd)
 }
 
+pub fn pidfd_send_signal(pidfd: Fd, signal: Signal) -> Result<(), Errno> {
+    let info = ptr::null() as *const siginfo_t;
+    let flags = 0 as c_uint;
+    Errno::result(unsafe {
+        libc::syscall(libc::SYS_pidfd_send_signal, pidfd.0, signal.0, info, flags)
+    })
+    .map(drop)
+}
+
 pub fn pipe() -> Result<(OwnedFd, OwnedFd), Errno> {
     let mut fds: [c_int; 2] = [0; 2];
     let fds_ptr = fds.as_mut_ptr() as *mut c_int;
