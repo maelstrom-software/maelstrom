@@ -366,7 +366,8 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         self.executing.insert(jid, executing_job).assert_is_none();
     }
 
-    fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
+    /// Put a job on the available jobs queue. At this point, it must have all of its artifacts.
+    fn make_job_available(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
         let (path, cache_keys) = tracker.into_path_and_cache_keys();
         self.available.push_back(AvailableJob {
             jid,
@@ -385,7 +386,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         };
         let tracker = LayerTracker::new(&spec.layers, &mut fetcher);
         if tracker.is_complete() {
-            self.enqueue_job_with_all_layers(jid, spec, tracker);
+            self.make_job_available(jid, spec, tracker);
         } else {
             self.awaiting_layers
                 .insert(jid, AwaitingLayersJob { spec, tracker })
@@ -535,7 +536,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 cb(&mut entry.get_mut().tracker, digest, &mut fetcher);
                 if entry.get().tracker.is_complete() {
                     let AwaitingLayersJob { spec, tracker } = entry.remove();
-                    self.enqueue_job_with_all_layers(jid, spec, tracker);
+                    self.make_job_available(jid, spec, tracker);
                 }
             }
         }
