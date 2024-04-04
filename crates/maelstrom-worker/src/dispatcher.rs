@@ -234,8 +234,8 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// we're going to send a `JobOutcome::Completed` result to the broker, unless it times out or
     /// is canceled in the meantime.
     Nominal {
-        handle: DepsT::JobHandle,
-        timer: Option<DepsT::TimerHandle>,
+        job_handle: DepsT::JobHandle,
+        timer_handle: Option<DepsT::TimerHandle>,
     },
 
     /// The job has been canceled. We've already used the job and timer handles to cancel the job
@@ -260,12 +260,15 @@ struct ExecutingJob<DepsT: DispatcherDeps> {
 
 impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
     fn new(
-        handle: DepsT::JobHandle,
+        job_handle: DepsT::JobHandle,
         cache_keys: HashSet<CacheKey>,
-        timer: Option<DepsT::TimerHandle>,
+        timer_handle: Option<DepsT::TimerHandle>,
     ) -> Self {
         ExecutingJob {
-            state: ExecutingJobState::Nominal { handle, timer },
+            state: ExecutingJobState::Nominal {
+                job_handle,
+                timer_handle,
+            },
             cache_keys,
         }
     }
@@ -427,14 +430,16 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // wait around until it's actually teriminated. We don't want to release the layers
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
-            if let ExecutingJobState::Nominal { handle, timer } =
-                mem::replace(state, ExecutingJobState::Canceled)
+            if let ExecutingJobState::Nominal {
+                job_handle,
+                timer_handle,
+            } = mem::replace(state, ExecutingJobState::Canceled)
             {
-                self.deps.cancel_job(handle.clone());
-                if let Some(handle) = timer {
-                    self.deps.cancel_timer(handle)
+                self.deps.cancel_job(job_handle.clone());
+                if let Some(timer_handle) = timer_handle {
+                    self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(handle);
+                self.deps.clean_up_fuse_handle_on_task(job_handle);
             }
         } else {
             // It may be the queue.
@@ -457,11 +462,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         };
 
         match job.state {
-            ExecutingJobState::Nominal { handle, timer } => {
-                if let Some(handle) = timer {
-                    self.deps.cancel_timer(handle)
+            ExecutingJobState::Nominal {
+                job_handle,
+                timer_handle,
+            } => {
+                if let Some(timer_handle) = timer_handle {
+                    self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(handle);
+                self.deps.clean_up_fuse_handle_on_task(job_handle);
                 self.deps
                     .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
@@ -490,8 +498,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         // didn't it would be possible for us to try to remove a directory that was still in
         // use, which would fail.
         match state {
-            ExecutingJobState::Nominal { handle, timer: _ } => {
-                self.deps.cancel_job(handle.clone());
+            ExecutingJobState::Nominal {
+                job_handle,
+                timer_handle: _,
+            } => {
+                self.deps.cancel_job(job_handle.clone());
                 *state = ExecutingJobState::TimedOut;
             }
             ExecutingJobState::TimedOut => {
