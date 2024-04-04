@@ -343,22 +343,27 @@ where
 }
 
 impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
+    /// Start at most one job, depending on whether there are any queued jobs and if there are any
+    /// available slots.
     fn possibly_start_job(&mut self) {
-        while self.executing.len() < self.slots && !self.available.is_empty() {
-            let AvailableJob {
-                jid,
-                spec,
-                path,
-                cache_keys,
-            } = self.available.pop_front().unwrap();
-            let timeout = spec.timeout;
-            let executing_job = ExecutingJob::new(
-                self.deps.start_job(jid, spec, path),
-                cache_keys,
-                timeout.map(|timeout| self.deps.start_timer(jid, Duration::from(timeout))),
-            );
-            self.executing.insert(jid, executing_job).assert_is_none();
+        if self.executing.len() >= self.slots {
+            return;
         }
+        let Some(AvailableJob {
+            jid,
+            spec,
+            path,
+            cache_keys,
+        }) = self.available.pop_front()
+        else {
+            return;
+        };
+        let timer_handle = spec
+            .timeout
+            .map(|timeout| self.deps.start_timer(jid, Duration::from(timeout)));
+        let job_handle = self.deps.start_job(jid, spec, path);
+        let executing_job = ExecutingJob::new(job_handle, cache_keys, timer_handle);
+        self.executing.insert(jid, executing_job).assert_is_none();
     }
 
     fn enqueue_job_with_all_layers(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
