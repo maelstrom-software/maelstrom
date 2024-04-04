@@ -7,7 +7,7 @@ mod executor;
 mod fetcher;
 mod layer_fs;
 
-use anyhow::Result;
+use anyhow::{Error, Result};
 use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
@@ -177,7 +177,7 @@ fn job_task_main(
     executor: Arc<Executor>,
     inline_limit: InlineLimit,
     handle_sender: tokio::sync::oneshot::Sender<(Pid, DispatcherAdapterFuseHandle)>,
-) -> JobResult<JobCompleted, String> {
+) -> JobResult<JobCompleted, Error> {
     let log = log.new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
     debug!(log, "job starting");
     let log2 = log.clone();
@@ -189,18 +189,17 @@ fn job_task_main(
         jid.cjid.as_u32()
     ));
     let fs = Fs::new();
-    fs.create_dir_all(&mount_path)
-        .map_err(|e| JobError::System(e.to_string()))?;
+    fs.create_dir_all(&mount_path).map_err(JobError::System)?;
     let spec = executor::JobSpec::from_spec_and_path(spec, mount_path.clone());
 
     let cache_dir = cache_dir.join("blob/sha256");
     let mount_path2 = mount_path.clone();
     let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)
-        .map_err(|e| JobError::System(e.to_string()))?;
+        .map_err(JobError::System)?;
 
     let fuse_handle = layer_fs
         .mount(log.clone(), layer_fs_cache.clone(), &mount_path2)
-        .map_err(|e| JobError::System(e.to_string()))?;
+        .map_err(JobError::System)?;
     let fuse_handle = DispatcherAdapterFuseHandle {
         inner: fuse_handle,
         mount_path,
@@ -210,30 +209,24 @@ fn job_task_main(
     let (stdout_tx, stdout_rx) = tokio::sync::oneshot::channel();
     let (stderr_tx, stderr_rx) = tokio::sync::oneshot::channel();
 
-    let pid = executor
-        .start(
-            &spec,
-            inline_limit,
-            move |_, result| {
-                debug!(log, "job process status"; "result" => ?result);
-                status_tx
-                    .send(
-                        result
-                            .map(crate::job_status_from_wait_status)
-                            .map_err(|e| e.to_string()),
-                    )
-                    .unwrap();
-            },
-            move |result| {
-                debug!(log2, "job stdout"; "result" => ?result);
-                stdout_tx.send(result.map_err(|e| e.to_string())).unwrap();
-            },
-            move |result| {
-                debug!(log3, "job stderr"; "result" => ?result);
-                stderr_tx.send(result.map_err(|e| e.to_string())).unwrap();
-            },
-        )
-        .map_err(|e| e.map(|inner| inner.to_string()))?;
+    let pid = executor.start(
+        &spec,
+        inline_limit,
+        move |_, result| {
+            debug!(log, "job process status"; "result" => ?result);
+            status_tx
+                .send(result.map(crate::job_status_from_wait_status))
+                .unwrap();
+        },
+        move |result| {
+            debug!(log2, "job stdout"; "result" => ?result);
+            stdout_tx.send(result).unwrap();
+        },
+        move |result| {
+            debug!(log3, "job stderr"; "result" => ?result);
+            stderr_tx.send(result).unwrap();
+        },
+    )?;
     let _ = handle_sender.send((pid, fuse_handle));
 
     Ok(JobCompleted {
@@ -280,7 +273,10 @@ impl DispatcherDeps for DispatcherAdapter {
                 handle_sender,
             );
             dispatcher_sender
-                .send(Message::JobCompleted(jid, result))
+                .send(Message::JobCompleted(
+                    jid,
+                    result.map_err(|e| e.map(|inner| inner.to_string())),
+                ))
                 .ok()
         });
         JobHandle::new(recv)
