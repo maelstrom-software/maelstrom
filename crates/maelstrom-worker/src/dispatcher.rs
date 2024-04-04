@@ -258,22 +258,6 @@ struct ExecutingJob<DepsT: DispatcherDeps> {
     cache_keys: HashSet<CacheKey>,
 }
 
-impl<DepsT: DispatcherDeps> ExecutingJob<DepsT> {
-    fn new(
-        job_handle: DepsT::JobHandle,
-        cache_keys: HashSet<CacheKey>,
-        timer_handle: Option<DepsT::TimerHandle>,
-    ) -> Self {
-        ExecutingJob {
-            state: ExecutingJobState::Nominal {
-                job_handle,
-                timer_handle,
-            },
-            cache_keys,
-        }
-    }
-}
-
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
 /// requests than there are slots, the extra requests are queued in a FIFO queue. It's up to the
 /// broker to order the requests properly.
@@ -387,7 +371,13 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             .timeout
             .map(|timeout| self.deps.start_timer(jid, Duration::from(timeout)));
         let job_handle = self.deps.start_job(jid, spec, path);
-        let executing_job = ExecutingJob::new(job_handle, cache_keys, timer_handle);
+        let executing_job = ExecutingJob {
+            state: ExecutingJobState::Nominal {
+                job_handle,
+                timer_handle,
+            },
+            cache_keys,
+        };
         self.executing.insert(jid, executing_job).assert_is_none();
     }
 
