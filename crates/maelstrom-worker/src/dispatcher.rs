@@ -40,10 +40,12 @@ pub trait DispatcherDeps {
     fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
 
     /// Cancel a running job using the [`JobHandle`] obtained from [`start_job`]. This must be
-    /// resilient in the case where the process has already completed.
+    /// resilient in the case where the process has already completed. There must always be a
+    /// [`Message::JobCompleted`] message delivered for every job, regardless of whether it was
+    /// canceled or not.
     fn cancel_job(&mut self, handle: Self::JobHandle);
 
-    /// Start a task to unmount the fuse mount
+    /// Start a task to unmount the fuse mount.
     fn clean_up_fuse_handle_on_task(&mut self, handle: Self::JobHandle);
 
     /// A handle used to cancel a timer.
