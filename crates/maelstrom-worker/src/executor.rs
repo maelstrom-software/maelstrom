@@ -224,6 +224,8 @@ async fn process_waiter(
     loop {
         select! {
             res = &mut killer, if listen_for_killer => {
+                // We could kill when the sender is dropped, but that seems a little too magical.
+                // It also makes tests a little trickier.
                 if res.is_ok() {
                     linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
                 }
@@ -278,11 +280,11 @@ impl AsyncRead for AsyncFile {
 }
 
 /// Read all of the contents of `stream` and return the appropriate [`JobOutputResult`].
-async fn output_reader(
-    inline_limit: InlineLimit,
-    stream: impl AsyncRead + std::marker::Unpin,
-) -> Result<JobOutputResult> {
+async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
+    // Make the read side of the pipe non-blocking so that we can use it with Tokio.
+    linux::fcntl_setfl(fd.as_fd(), OpenFlags::NONBLOCK).map_err(Error::from)?;
+    let stream = AsyncFile(AsyncFd::new(File::from(fd::OwnedFd::from(fd))).map_err(Error::from)?);
     let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
@@ -299,11 +301,11 @@ async fn output_reader(
 
 /// Task main for the output reader: Read the output and then call the callback.
 async fn output_reader_task_main(
+    fd: OwnedFd,
     inline_limit: InlineLimit,
-    stream: impl AsyncRead + std::marker::Unpin,
     sender: oneshot::Sender<Result<JobOutputResult>>,
 ) {
-    let _ = sender.send(output_reader(inline_limit, stream).await);
+    let _ = sender.send(output_reader(fd, inline_limit).await);
 }
 
 struct ScriptBuilder<'a> {
@@ -748,42 +750,17 @@ impl Executor {
             ));
         }
 
-        // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
-        // Tokio.
-        linux::fcntl_setfl(stdout_read_fd.as_fd(), OpenFlags::NONBLOCK)
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        linux::fcntl_setfl(stderr_read_fd.as_fd(), OpenFlags::NONBLOCK)
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-
         // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
         // that we don't cause a deadlock on one while we're reading the other one.
         //
         // We put these in a JoinSet so that they will be canceled if we return early.
         let mut joinset = JoinSet::new();
         joinset.spawn_on(
-            output_reader_task_main(
-                inline_limit,
-                AsyncFile(
-                    AsyncFd::new(File::from(fd::OwnedFd::from(stdout_read_fd)))
-                        .map_err(Error::from)
-                        .map_err(JobError::System)?,
-                ),
-                stdout_sender,
-            ),
+            output_reader_task_main(stdout_read_fd, inline_limit, stdout_sender),
             &runtime,
         );
         joinset.spawn_on(
-            output_reader_task_main(
-                inline_limit,
-                AsyncFile(
-                    AsyncFd::new(File::from(fd::OwnedFd::from(stderr_read_fd)))
-                        .map_err(Error::from)
-                        .map_err(JobError::System)?,
-                ),
-                stderr_sender,
-            ),
+            output_reader_task_main(stderr_read_fd, inline_limit, stderr_sender),
             &runtime,
         );
 
