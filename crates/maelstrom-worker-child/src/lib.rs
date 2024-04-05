@@ -74,7 +74,7 @@ impl<'a> Syscall<'a> {
 /// the last syscall should be an execve. If this function returns, than an error was encountered.
 /// In that case, the script item index and the errno will be returned.
 fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
-    let mut saved_fd = Fd::STDIN;
+    let mut saved_fd = Fd::STDIN; // STDIN is arbitrary.
     for (index, syscall) in syscalls.iter_mut().enumerate() {
         if let Err(errno) = syscall.call(&mut saved_fd) {
             return (index, errno);

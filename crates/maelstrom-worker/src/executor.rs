@@ -467,7 +467,7 @@ impl Executor {
             syserr(anyhow!("dup2-ing to stderr: {err}"))
         });
 
-        // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
+        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
         builder.push(
             Syscall::CloseRange(
                 CloseRangeFirst::AfterStderr,
@@ -556,18 +556,23 @@ impl Executor {
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
         for device in spec.devices.iter() {
+            macro_rules! dev {
+                ($dev:literal) => {
+                    (
+                        c_str!(concat!("/dev/", $dev)),
+                        c_str!(concat!("./dev/", $dev)),
+                        concat!("/dev/", $dev),
+                    )
+                };
+            }
             let (source, target, device_name) = match device {
-                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
-                JobDevice::Fuse => (c_str!("/dev/fuse"), c_str!("./dev/fuse"), "/dev/fuse"),
-                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null"), "/dev/null"),
-                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random"), "/dev/random"),
-                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty"), "/dev/tty"),
-                JobDevice::Urandom => (
-                    c_str!("/dev/urandom"),
-                    c_str!("./dev/urandom"),
-                    "/dev/urandom",
-                ),
-                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero"), "/dev/zero"),
+                JobDevice::Full => dev!("full"),
+                JobDevice::Fuse => dev!("fuse"),
+                JobDevice::Null => dev!("null"),
+                JobDevice::Random => dev!("random"),
+                JobDevice::Tty => dev!("tty"),
+                JobDevice::Urandom => dev!("urandom"),
+                JobDevice::Zero => dev!("zero"),
             };
             builder.push(
                 Syscall::Mount(Some(source), target, None, MountFlags::BIND, None),
@@ -664,7 +669,7 @@ impl Executor {
             &|err| JobError::Execution(anyhow!("execvc: {err}")),
         );
 
-        // Do the clone.
+        // We're finally ready to actually clone the child.
         let mut clone_args = CloneArgs::default()
             .flags(
                 CloneFlags::NEWCGROUP
@@ -678,7 +683,7 @@ impl Executor {
         let child_pidfd = match linux::clone3_with_child_pidfd(&mut clone_args) {
             Ok(Some((_, child_pidfd))) => child_pidfd,
             Ok(None) => {
-                // This is the child process.
+                // This is the child process. The following function will never return.
                 maelstrom_worker_child::start_and_exec_in_child(
                     exec_result_write_fd.as_fd(),
                     builder.syscalls.as_mut_slice(),
