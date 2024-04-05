@@ -15,7 +15,6 @@ use maelstrom_base::{
 use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
-    mem,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -52,17 +51,15 @@ pub trait DispatcherDeps {
     /// Start a task to unmount the fuse mount.
     fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle);
 
-    /// A handle used to cancel a timer.
+    /// The timer handle should cancel an outstanding timer when it is dropped. It must be safe to
+    /// drop this handle after the timer has completed. Dropping this handle may or may not result
+    /// in no [`Message::JobTime`] message. The dispatcher must be prepared to handle the case
+    /// where the message arrives even after this handle has been dropped.
     type TimerHandle;
 
     /// Start a timer that will send a [`Message::JobTimer`] message when it's done, unless it is
     /// canceled beforehand.
     fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle;
-
-    /// Cancel a timer previously started by [`start_timer`]. There's no guarantee on timing, so
-    /// it's possible that a [`Message::JobTimer`] message may still be delivered for this job even
-    /// after the timer is canceled.
-    fn cancel_timer(&mut self, handle: Self::TimerHandle);
 
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
@@ -239,7 +236,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// is canceled in the meantime.
     Nominal {
         _job_handle: DepsT::JobHandle,
-        timer_handle: Option<DepsT::TimerHandle>,
+        _timer_handle: Option<DepsT::TimerHandle>,
     },
 
     /// The job has been canceled. We've already used the job and timer handles to cancel the job
@@ -379,7 +376,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let executing_job = ExecutingJob {
             state: ExecutingJobState::Nominal {
                 _job_handle: job_handle,
-                timer_handle,
+                _timer_handle: timer_handle,
             },
             cache_keys,
             fuse_handle,
@@ -426,13 +423,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // wait around until it's actually teriminated. We don't want to release the layers
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
-            if let ExecutingJobState::Nominal {
-                timer_handle: Some(timer_handle),
-                ..
-            } = mem::replace(state, ExecutingJobState::Canceled)
-            {
-                self.deps.cancel_timer(timer_handle)
-            }
+            *state = ExecutingJobState::Canceled;
         } else {
             // It may be the queue.
             self.available.retain_mut(|entry| {
@@ -449,18 +440,17 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_job_completed(&mut self, jid: JobId, result: JobResult<JobCompleted, String>) {
-        let Some(job) = self.executing.remove(&jid) else {
+        let Some(ExecutingJob {
+            state,
+            cache_keys,
+            fuse_handle,
+        }) = self.executing.remove(&jid)
+        else {
             panic!("missing entry for {jid:?}");
         };
 
-        match job.state {
-            ExecutingJobState::Nominal {
-                _job_handle: _,
-                timer_handle,
-            } => {
-                if let Some(timer_handle) = timer_handle {
-                    self.deps.cancel_timer(timer_handle)
-                }
+        match state {
+            ExecutingJobState::Nominal { .. } => {
                 self.deps
                     .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
@@ -470,10 +460,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 result.map(|c| JobOutcome::TimedOut(c.effects)),
             )),
         }
-        for CacheKey { kind, digest } in job.cache_keys {
+
+        for CacheKey { kind, digest } in cache_keys {
             self.cache.decrement_ref_count(kind, &digest);
         }
-        self.deps.clean_up_fuse_handle_on_task(job.fuse_handle);
+        self.deps.clean_up_fuse_handle_on_task(fuse_handle);
         self.possibly_start_job();
     }
 
@@ -675,7 +666,7 @@ mod tests {
         CacheDecrementRefCount(CacheEntryKind, Sha256Digest),
         JobHandleDropped(JobId),
         StartTimer(JobId, Duration),
-        CancelTimer(JobId),
+        TimerHandleDropped(JobId),
     }
 
     use TestMessage::*;
@@ -687,16 +678,16 @@ mod tests {
         got_artifact_failure_returns: HashMap<CacheKey, Vec<JobId>>,
     }
 
-    struct TestJobHandle(JobId, Rc<RefCell<TestState>>);
+    struct TestHandle(TestMessage, Rc<RefCell<TestState>>);
 
-    impl Drop for TestJobHandle {
+    impl Drop for TestHandle {
         fn drop(&mut self) {
-            self.1.borrow_mut().messages.push(JobHandleDropped(self.0));
+            self.1.borrow_mut().messages.push(self.0.clone());
         }
     }
 
     impl DispatcherDeps for Rc<RefCell<TestState>> {
-        type JobHandle = TestJobHandle;
+        type JobHandle = TestHandle;
         type FuseHandle = JobId;
 
         fn start_job(
@@ -707,20 +698,19 @@ mod tests {
         ) -> (Self::JobHandle, Self::FuseHandle) {
             let mut mut_ref = self.borrow_mut();
             mut_ref.messages.push(StartJob(jid, spec, path));
-            (TestJobHandle(jid, self.clone()), jid)
+            (
+                TestHandle(TestMessage::JobHandleDropped(jid), self.clone()),
+                jid,
+            )
         }
 
         fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {}
 
-        type TimerHandle = JobId;
+        type TimerHandle = TestHandle;
 
         fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
             self.borrow_mut().messages.push(StartTimer(jid, duration));
-            jid
-        }
-
-        fn cancel_timer(&mut self, handle: Self::TimerHandle) {
-            self.borrow_mut().messages.push(CancelTimer(handle));
+            TestHandle(TestMessage::TimerHandleDropped(jid), self.clone())
         }
 
         fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
@@ -1297,7 +1287,8 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
         JobTimer(jid!(1)) => {
-            JobHandleDropped(jid!(1))
+            JobHandleDropped(jid!(1)),
+            TimerHandleDropped(jid!(1)),
         };
         Broker(CancelJob(jid!(1))) => {};
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
@@ -1451,7 +1442,7 @@ mod tests {
             })))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            CancelTimer(jid!(1)),
+            TimerHandleDropped(jid!(1)),
             JobHandleDropped(jid!(1)),
         };
     }
@@ -1470,7 +1461,7 @@ mod tests {
         };
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
-            CancelTimer(jid!(1)),
+            TimerHandleDropped(jid!(1)),
         };
     }
 
@@ -1494,6 +1485,7 @@ mod tests {
         };
         JobTimer(jid!(1)) => {
             JobHandleDropped(jid!(1)),
+            TimerHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
             status: JobStatus::Exited(0),
@@ -1539,7 +1531,7 @@ mod tests {
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            CancelTimer(jid!(1)),
+            TimerHandleDropped(jid!(1)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed(base::JobCompleted {
                 status: JobStatus::Exited(0),
                 effects: JobEffects {
@@ -1573,7 +1565,7 @@ mod tests {
         };
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
-            CancelTimer(jid!(1)),
+            TimerHandleDropped(jid!(1)),
         };
         JobTimer(jid!(1)) => {};
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {

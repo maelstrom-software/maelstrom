@@ -176,6 +176,14 @@ impl FuseHandle {
     }
 }
 
+struct TimerHandle(JoinHandle<()>);
+
+impl Drop for TimerHandle {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 impl DispatcherDeps for DispatcherAdapter {
     type JobHandle = JobHandleSender;
     type FuseHandle = FuseHandle;
@@ -210,18 +218,14 @@ impl DispatcherDeps for DispatcherAdapter {
         });
     }
 
-    type TimerHandle = JoinHandle<()>;
+    type TimerHandle = TimerHandle;
 
     fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle {
         let sender = self.dispatcher_sender.clone();
-        task::spawn(async move {
+        TimerHandle(task::spawn(async move {
             time::sleep(duration).await;
             sender.send(Message::JobTimer(jid)).ok();
-        })
-    }
-
-    fn cancel_timer(&mut self, handle: Self::TimerHandle) {
-        handle.abort()
+        }))
     }
 
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
