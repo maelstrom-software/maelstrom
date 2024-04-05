@@ -5,16 +5,19 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
-use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use std::path::Path;
-use std::{io, ops::DerefMut};
-use tokio::task::JoinHandle;
-
 use crate::fuser::ll::fuse_abi as abi;
 use crate::fuser::request::Request;
 use crate::fuser::Filesystem;
 use crate::fuser::MountOption;
 use crate::fuser::{channel::Channel, mnt::Mount};
+use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
+use std::path::Path;
+use std::sync::Arc;
+use std::{io, ops::DerefMut};
+use tokio::{
+    io::{unix::AsyncFd, Interest},
+    task::JoinHandle,
+};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -26,7 +29,7 @@ pub const MAX_WRITE_SIZE: usize = 16 * 1024 * 1024;
 const BUFFER_SIZE: usize = MAX_WRITE_SIZE + 4096;
 
 #[derive(Debug, Eq, PartialEq)]
-pub(crate) enum SessionACL {
+pub enum SessionACL {
     All,
     RootAndOwner,
     Owner,
@@ -91,6 +94,30 @@ impl<FS: Filesystem> Session<FS> {
             filesystem,
             ch,
             mount: Some(mount),
+            allowed,
+            session_owner: unsafe { libc::geteuid() },
+            proto_major: 0,
+            proto_minor: 0,
+            initialized: false,
+            destroyed: false,
+        })
+    }
+
+    pub fn from_fd(
+        filesystem: FS,
+        fd: std::os::fd::OwnedFd,
+        allowed: SessionACL,
+    ) -> io::Result<Self> {
+        let file = Arc::new(AsyncFd::with_interest(
+            fd.into(),
+            Interest::READABLE | Interest::WRITABLE | Interest::ERROR,
+        )?);
+        let ch = Channel::new(file);
+
+        Ok(Session {
+            filesystem,
+            ch,
+            mount: None,
             allowed,
             session_owner: unsafe { libc::geteuid() },
             proto_major: 0,
