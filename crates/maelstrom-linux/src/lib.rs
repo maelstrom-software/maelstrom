@@ -1,7 +1,7 @@
 //! Function wrappers for Linux syscalls.
 #![no_std]
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 extern crate std;
 
 use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
@@ -11,7 +11,7 @@ use libc::{
     pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, socklen_t, uid_t,
 };
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 use std::os::fd;
 
 extern "C" {
@@ -182,7 +182,7 @@ impl fmt::Display for Errno {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl std::error::Error for Errno {}
 
 /// The sentinel value indicates that a function failed and more detailed
@@ -331,14 +331,14 @@ impl OwnedFd {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl fd::AsRawFd for OwnedFd {
     fn as_raw_fd(&self) -> fd::RawFd {
         self.0 .0
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(any(test, feature = "std"))]
 impl From<OwnedFd> for fd::OwnedFd {
     fn from(owned_fd: OwnedFd) -> Self {
         let raw_fd = owned_fd.into_fd();
@@ -725,6 +725,146 @@ pub fn write(fd: Fd, buf: &[u8]) -> Result<usize, Errno> {
     Errno::result(unsafe { libc::write(fd.0, buf_ptr, buf_len) }).map(|ret| ret as usize)
 }
 
+fn with_iovec<RetT>(buffer: &[u8], body: impl FnOnce(&libc::iovec) -> RetT) -> RetT {
+    let io_vec = libc::iovec {
+        iov_base: buffer.as_ptr() as *mut libc::c_void,
+        iov_len: buffer.len(),
+    };
+    body(&io_vec)
+}
+
+fn with_iovec_mut<RetT>(buffer: &mut [u8], body: impl FnOnce(&mut libc::iovec) -> RetT) -> RetT {
+    let mut io_vec = libc::iovec {
+        iov_base: buffer.as_mut_ptr() as *mut libc::c_void,
+        iov_len: buffer.len(),
+    };
+    body(&mut io_vec)
+}
+
+// prepare message with enough cmsg space for a file descriptor
+const CMSG_BUFFER_LEN: c_uint = unsafe { libc::CMSG_SPACE(mem::size_of::<c_int>() as c_uint) };
+
+fn with_msghdr<RetT>(buffer: &[u8], body: impl FnOnce(&mut libc::msghdr) -> RetT) -> RetT {
+    let mut cmsg_buffer = [0u8; CMSG_BUFFER_LEN as usize];
+
+    with_iovec(buffer, |io_vec| {
+        let mut message = libc::msghdr {
+            msg_name: ptr::null_mut(),
+            msg_namelen: 0,
+            msg_iov: io_vec as *const _ as *mut _,
+            msg_iovlen: 1,
+            msg_control: cmsg_buffer.as_mut_ptr() as *mut libc::c_void,
+            msg_controllen: cmsg_buffer.len(),
+            msg_flags: 0,
+        };
+        body(&mut message)
+    })
+}
+
+fn with_msghdr_mut<RetT>(buffer: &mut [u8], body: impl FnOnce(&mut libc::msghdr) -> RetT) -> RetT {
+    let mut cmsg_buffer = [0u8; CMSG_BUFFER_LEN as usize];
+
+    with_iovec_mut(buffer, |io_vec| {
+        let mut message = libc::msghdr {
+            msg_name: ptr::null_mut(),
+            msg_namelen: 0,
+            msg_iov: io_vec,
+            msg_iovlen: 1,
+            msg_control: cmsg_buffer.as_mut_ptr() as *mut libc::c_void,
+            msg_controllen: cmsg_buffer.len(),
+            msg_flags: 0,
+        };
+        body(&mut message)
+    })
+}
+
+pub struct UnixStream {
+    fd: OwnedFd,
+}
+
+#[cfg(any(test, feature = "std"))]
+impl fd::AsRawFd for UnixStream {
+    fn as_raw_fd(&self) -> fd::RawFd {
+        self.fd.as_raw_fd()
+    }
+}
+
+impl From<OwnedFd> for UnixStream {
+    fn from(fd: OwnedFd) -> Self {
+        Self { fd }
+    }
+}
+
+impl UnixStream {
+    pub fn pair() -> Result<(Self, Self), Errno> {
+        let mut fds = [0, 0];
+
+        Errno::result(unsafe {
+            libc::socketpair(
+                libc::AF_UNIX,
+                libc::SOCK_STREAM | libc::SOCK_CLOEXEC,
+                0,
+                fds.as_mut_ptr(),
+            )
+        })?;
+
+        Ok((
+            OwnedFd::from_fd(Fd(fds[0])).into(),
+            OwnedFd::from_fd(Fd(fds[1])).into(),
+        ))
+    }
+
+    pub fn as_fd(&self) -> Fd {
+        self.fd.as_fd()
+    }
+
+    pub fn recv_with_fd(&self, buffer: &mut [u8]) -> Result<(usize, Option<OwnedFd>), Errno> {
+        with_msghdr_mut(buffer, |message| {
+            let count = Errno::result(unsafe {
+                libc::recvmsg(self.fd.as_fd().0, message, 0 /* flags */)
+            })? as usize;
+
+            // See if we got a file descriptor, only checking the first message
+            let mut fd_out = None;
+            let control_msg = unsafe { libc::CMSG_FIRSTHDR(message) };
+            if !control_msg.is_null() && unsafe { (*control_msg).cmsg_type == libc::SCM_RIGHTS } {
+                let fd_data = unsafe { libc::CMSG_DATA(control_msg) };
+
+                let fd = unsafe { *(fd_data as *const c_int) };
+                fd_out = Some(OwnedFd(Fd(fd)));
+            }
+
+            Ok((count, fd_out))
+        })
+    }
+
+    pub fn send(&self, buffer: &[u8]) -> Result<usize, Errno> {
+        Ok(Errno::result(unsafe {
+            libc::send(
+                self.fd.as_fd().0,
+                buffer.as_ptr() as *const c_void,
+                buffer.len(),
+                0, /* flags */
+            )
+        })? as usize)
+    }
+
+    pub fn send_with_fd(&self, buffer: &[u8], fd: Fd) -> Result<usize, Errno> {
+        with_msghdr(buffer, |message| {
+            let control_msg = unsafe { &mut *libc::CMSG_FIRSTHDR(message) };
+            control_msg.cmsg_level = libc::SOL_SOCKET;
+            control_msg.cmsg_type = libc::SCM_RIGHTS;
+            control_msg.cmsg_len =
+                unsafe { libc::CMSG_LEN(mem::size_of::<c_int>() as libc::c_uint) } as libc::size_t;
+
+            let fd_data = unsafe { &mut *(libc::CMSG_DATA(control_msg) as *mut c_int) };
+            *fd_data = fd.0;
+
+            Ok(Errno::result(unsafe { libc::sendmsg(self.fd.as_fd().0, message, 0) })? as usize)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -781,5 +921,74 @@ mod tests {
     #[test]
     fn invalid_errno_debug() {
         assert_eq!(std::format!("{:?}", Errno(1234)).as_str(), "UNKNOWN(1234)");
+    }
+
+    #[test]
+    fn unix_stream_send_recv() {
+        let (a, b) = UnixStream::pair().unwrap();
+
+        let count = a.send(b"abcdefg").unwrap();
+        assert_eq!(count, 7);
+
+        let mut buf = [0; 7];
+        let (count, fd) = b.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 7);
+        assert_eq!(&buf, b"abcdefg");
+        assert!(fd.is_none());
+    }
+
+    #[test]
+    fn unix_stream_send_recv_with_fd() {
+        let (a1, a2) = UnixStream::pair().unwrap();
+
+        if clone3(&mut CloneArgs::default()).unwrap().is_none() {
+            let (b1, b2) = UnixStream::pair().unwrap();
+            a2.send_with_fd(b"boop", b1.as_fd()).unwrap();
+            b2.send(b"bop").unwrap();
+            return;
+        }
+
+        let mut buf = [0; 4];
+        let (count, fd) = a1.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 4);
+        assert_eq!(&buf, b"boop");
+
+        let b1 = UnixStream::from(fd.unwrap());
+        let mut buf = [0; 3];
+        let (count, fd) = b1.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(&buf, b"bop");
+        assert!(fd.is_none());
+    }
+
+    #[test]
+    fn unix_stream_send_message_without_then_with_fd() {
+        let (a1, a2) = UnixStream::pair().unwrap();
+
+        if clone3(&mut CloneArgs::default()).unwrap().is_none() {
+            let (b1, b2) = UnixStream::pair().unwrap();
+            a2.send(b"boop").unwrap();
+            a2.send_with_fd(b"bing", b1.as_fd()).unwrap();
+            b2.send(b"bop").unwrap();
+            return;
+        }
+
+        let mut buf = [0; 4];
+        let (count, fd) = a1.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 4);
+        assert_eq!(&buf, b"boop");
+        assert!(fd.is_none());
+
+        let mut buf = [0; 4];
+        let (count, fd) = a1.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 4);
+        assert_eq!(&buf, b"bing");
+
+        let b1 = UnixStream::from(fd.unwrap());
+        let mut buf = [0; 3];
+        let (count, fd) = b1.recv_with_fd(&mut buf).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(&buf, b"bop");
+        assert!(fd.is_none());
     }
 }
