@@ -154,20 +154,13 @@ impl DispatcherAdapterFuseHandle {
     }
 }
 
-#[derive(Clone)]
 struct JobHandle {
-    handle_receiver:
-        Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>>>>,
     signal_sender: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
 impl JobHandle {
-    fn new(
-        handle_receiver: tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>,
-        signal_sender: tokio::sync::oneshot::Sender<()>,
-    ) -> Self {
+    fn new(signal_sender: tokio::sync::oneshot::Sender<()>) -> Self {
         Self {
-            handle_receiver: Arc::new(std::sync::Mutex::new(Some(handle_receiver))),
             signal_sender: Arc::new(std::sync::Mutex::new(Some(signal_sender))),
         }
     }
@@ -175,6 +168,19 @@ impl JobHandle {
     fn kill(&self) {
         if let Some(sender) = self.signal_sender.lock().unwrap().take() {
             let _ = sender.send(());
+        }
+    }
+}
+
+struct FuseHandle {
+    handle_receiver:
+        Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>>>>,
+}
+
+impl FuseHandle {
+    fn new(handle_receiver: tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>) -> Self {
+        Self {
+            handle_receiver: Arc::new(std::sync::Mutex::new(Some(handle_receiver))),
         }
     }
 
@@ -190,8 +196,14 @@ impl JobHandle {
 
 impl DispatcherDeps for DispatcherAdapter {
     type JobHandle = JobHandle;
+    type FuseHandle = FuseHandle;
 
-    fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
+    fn start_job(
+        &mut self,
+        jid: JobId,
+        spec: JobSpec,
+        layer_fs_path: PathBuf,
+    ) -> (Self::JobHandle, Self::FuseHandle) {
         let (handle_sender, handler_receiver) = tokio::sync::oneshot::channel();
         let (signal_sender, signal_receiver) = tokio::sync::oneshot::channel();
         if let Err(e) =
@@ -202,14 +214,17 @@ impl DispatcherDeps for DispatcherAdapter {
                 Err(JobError::System(e.to_string())),
             ));
         }
-        JobHandle::new(handler_receiver, signal_sender)
+        (
+            JobHandle::new(signal_sender),
+            FuseHandle::new(handler_receiver),
+        )
     }
 
     fn cancel_job(&mut self, handle: Self::JobHandle) {
         handle.kill();
     }
 
-    fn clean_up_fuse_handle_on_task(&mut self, mut handle: Self::JobHandle) {
+    fn clean_up_fuse_handle_on_task(&mut self, mut handle: Self::FuseHandle) {
         let log = self.log.clone();
         task::spawn(async move {
             if let Some(fuse_handle) = handle.fuse_handle().await {

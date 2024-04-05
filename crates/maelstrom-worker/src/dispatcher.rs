@@ -33,11 +33,17 @@ use tracker::{FetcherResult, LayerTracker};
 /// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
-    type JobHandle: Clone;
+    type JobHandle;
+    type FuseHandle;
 
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
     /// completes. The dispatcher can call [`cancel_job`] if it wants the job to stop immediately.
-    fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
+    fn start_job(
+        &mut self,
+        jid: JobId,
+        spec: JobSpec,
+        path: PathBuf,
+    ) -> (Self::JobHandle, Self::FuseHandle);
 
     /// Cancel a running job using the [`JobHandle`] obtained from [`start_job`]. This must be
     /// resilient in the case where the process has already completed. There must always be a
@@ -46,7 +52,7 @@ pub trait DispatcherDeps {
     fn cancel_job(&mut self, handle: Self::JobHandle);
 
     /// Start a task to unmount the fuse mount.
-    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::JobHandle);
+    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle);
 
     /// A handle used to cancel a timer.
     type TimerHandle;
@@ -235,6 +241,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// is canceled in the meantime.
     Nominal {
         job_handle: DepsT::JobHandle,
+        fuse_handle: DepsT::FuseHandle,
         timer_handle: Option<DepsT::TimerHandle>,
     },
 
@@ -370,10 +377,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let timer_handle = spec
             .timeout
             .map(|timeout| self.deps.start_timer(jid, Duration::from(timeout)));
-        let job_handle = self.deps.start_job(jid, spec, path);
+        let (job_handle, fuse_handle) = self.deps.start_job(jid, spec, path);
         let executing_job = ExecutingJob {
             state: ExecutingJobState::Nominal {
                 job_handle,
+                fuse_handle,
                 timer_handle,
             },
             cache_keys,
@@ -422,14 +430,15 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // that was still in use, which would fail.
             if let ExecutingJobState::Nominal {
                 job_handle,
+                fuse_handle,
                 timer_handle,
             } = mem::replace(state, ExecutingJobState::Canceled)
             {
-                self.deps.cancel_job(job_handle.clone());
+                self.deps.cancel_job(job_handle);
                 if let Some(timer_handle) = timer_handle {
                     self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(job_handle);
+                self.deps.clean_up_fuse_handle_on_task(fuse_handle);
             }
         } else {
             // It may be the queue.
@@ -453,13 +462,14 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
         match job.state {
             ExecutingJobState::Nominal {
-                job_handle,
+                job_handle: _,
+                fuse_handle,
                 timer_handle,
             } => {
                 if let Some(timer_handle) = timer_handle {
                     self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(job_handle);
+                self.deps.clean_up_fuse_handle_on_task(fuse_handle);
                 self.deps
                     .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
@@ -488,12 +498,16 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         // didn't it would be possible for us to try to remove a directory that was still in
         // use, which would fail.
         match state {
-            ExecutingJobState::Nominal {
-                job_handle,
-                timer_handle: _,
-            } => {
-                self.deps.cancel_job(job_handle.clone());
-                *state = ExecutingJobState::TimedOut;
+            ExecutingJobState::Nominal { .. } => {
+                let ExecutingJobState::Nominal {
+                    job_handle,
+                    fuse_handle: _,
+                    timer_handle: _,
+                } = mem::replace(state, ExecutingJobState::TimedOut)
+                else {
+                    panic!();
+                };
+                self.deps.cancel_job(job_handle);
             }
             ExecutingJobState::TimedOut => {
                 panic!("two timer expirations for job {jid:?}");
@@ -690,14 +704,20 @@ mod tests {
 
     impl DispatcherDeps for Rc<RefCell<TestState>> {
         type JobHandle = JobId;
+        type FuseHandle = JobId;
 
-        fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle {
+        fn start_job(
+            &mut self,
+            jid: JobId,
+            spec: JobSpec,
+            path: PathBuf,
+        ) -> (Self::JobHandle, Self::FuseHandle) {
             let mut mut_ref = self.borrow_mut();
             mut_ref.messages.push(StartJob(jid, spec, path));
-            jid
+            (jid, jid)
         }
 
-        fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::JobHandle) {}
+        fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {}
 
         fn cancel_job(&mut self, handle: Self::JobHandle) {
             self.borrow_mut().messages.push(Kill(handle));
