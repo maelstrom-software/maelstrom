@@ -7,7 +7,7 @@ mod executor;
 mod fetcher;
 mod layer_fs;
 
-use anyhow::{Error, Result};
+use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
@@ -15,7 +15,7 @@ use executor::Executor;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
-    ArtifactType, JobCompleted, JobError, JobId, JobResult, JobSpec, Sha256Digest,
+    ArtifactType, JobError, JobId, JobSpec, Sha256Digest,
 };
 use maelstrom_util::{
     async_fs,
@@ -95,6 +95,50 @@ impl DispatcherAdapter {
             )),
         })
     }
+
+    fn start_job_inner(
+        &mut self,
+        jid: JobId,
+        spec: JobSpec,
+        layer_fs_path: PathBuf,
+        handle_sender: tokio::sync::oneshot::Sender<DispatcherAdapterFuseHandle>,
+        signal_receiver: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<()> {
+        let log = self
+            .log
+            .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
+        debug!(log, "job starting");
+
+        let mount_path = self
+            .tmpfs_dir
+            .join(format!("fuse_mount.{}.{}", jid.cid, jid.cjid));
+        Fs::new().create_dir_all(&mount_path)?;
+
+        let cache_dir = self.cache_dir.join("blob/sha256");
+        let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)?;
+        let fuse_handle = layer_fs.mount(log.clone(), self.layer_fs_cache.clone(), &mount_path)?;
+        let _ = handle_sender.send(DispatcherAdapterFuseHandle {
+            inner: fuse_handle,
+            mount_path: mount_path.clone(),
+        });
+
+        let executor = self.executor.clone();
+        let spec = executor::JobSpec::from_spec_and_path(spec, mount_path);
+        let inline_limit = self.inline_limit;
+        let dispatcher_sender = self.dispatcher_sender.clone();
+        let runtime = tokio::runtime::Handle::current();
+        task::spawn_blocking(move || {
+            dispatcher_sender
+                .send(Message::JobCompleted(
+                    jid,
+                    executor
+                        .run_job(&spec, inline_limit, signal_receiver, runtime)
+                        .map_err(|e| e.map(|inner| inner.to_string())),
+                ))
+                .ok()
+        });
+        Ok(())
+    }
 }
 
 struct DispatcherAdapterFuseHandle {
@@ -144,88 +188,20 @@ impl JobHandle {
     }
 }
 
-// XXX
-#[allow(clippy::too_many_arguments)]
-fn job_task_main(
-    jid: JobId,
-    spec: JobSpec,
-    layer_fs_path: PathBuf,
-    log: Logger,
-    tmpfs_dir: PathBuf,
-    cache_dir: PathBuf,
-    layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
-    executor: Arc<Executor>,
-    inline_limit: InlineLimit,
-    handle_sender: tokio::sync::oneshot::Sender<DispatcherAdapterFuseHandle>,
-    killer: tokio::sync::oneshot::Receiver<()>,
-    runtime: tokio::runtime::Handle,
-) -> JobResult<JobCompleted, Error> {
-    let log = log.new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
-    debug!(log, "job starting");
-
-    let mount_path = tmpfs_dir.join(format!(
-        "fuse_mount.{}.{}",
-        jid.cid.as_u32(),
-        jid.cjid.as_u32()
-    ));
-    let fs = Fs::new();
-    fs.create_dir_all(&mount_path).map_err(JobError::System)?;
-    let spec = executor::JobSpec::from_spec_and_path(spec, mount_path.clone());
-
-    let cache_dir = cache_dir.join("blob/sha256");
-    let mount_path2 = mount_path.clone();
-    let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)
-        .map_err(JobError::System)?;
-
-    let fuse_handle = layer_fs
-        .mount(log.clone(), layer_fs_cache.clone(), &mount_path2)
-        .map_err(JobError::System)?;
-    let fuse_handle = DispatcherAdapterFuseHandle {
-        inner: fuse_handle,
-        mount_path,
-    };
-
-    let _ = handle_sender.send(fuse_handle);
-
-    executor.run_job(&spec, inline_limit, killer, runtime)
-}
-
 impl DispatcherDeps for DispatcherAdapter {
     type JobHandle = JobHandle;
 
     fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
         let (handle_sender, handler_receiver) = tokio::sync::oneshot::channel();
         let (signal_sender, signal_receiver) = tokio::sync::oneshot::channel();
-        let log = self.log.clone();
-        let tmpfs_dir = self.tmpfs_dir.clone();
-        let cache_dir = self.cache_dir.clone();
-        let layer_fs_cache = self.layer_fs_cache.clone();
-        let executor = self.executor.clone();
-        let inline_limit = self.inline_limit;
-        let dispatcher_sender = self.dispatcher_sender.clone();
-        let runtime = tokio::runtime::Handle::current();
-        task::spawn_blocking(move || {
-            let result = job_task_main(
+        if let Err(e) =
+            self.start_job_inner(jid, spec, layer_fs_path, handle_sender, signal_receiver)
+        {
+            let _ = self.dispatcher_sender.send(Message::JobCompleted(
                 jid,
-                spec,
-                layer_fs_path,
-                log,
-                tmpfs_dir,
-                cache_dir,
-                layer_fs_cache,
-                executor,
-                inline_limit,
-                handle_sender,
-                signal_receiver,
-                runtime,
-            );
-            dispatcher_sender
-                .send(Message::JobCompleted(
-                    jid,
-                    result.map_err(|e| e.map(|inner| inner.to_string())),
-                ))
-                .ok()
-        });
+                Err(JobError::System(e.to_string())),
+            ));
+        }
         JobHandle::new(handler_receiver, signal_sender)
     }
 
