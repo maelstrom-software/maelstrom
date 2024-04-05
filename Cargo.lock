@@ -2999,7 +2999,6 @@ dependencies = [
  "anyhow",
  "anyhow_trace",
  "async-trait",
- "clap",
  "derive_more",
  "futures",
  "libc",

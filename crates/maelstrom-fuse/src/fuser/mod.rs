@@ -19,6 +19,7 @@ pub use ll::{
     fuse_abi::{consts, FUSE_ROOT_ID},
     TimeOrNow,
 };
+pub use mnt::fuse_mount_pure;
 use mnt::mount_options::check_option_conflicts;
 pub use mnt::mount_options::MountOption;
 pub use reply::ReplyPoll;
@@ -30,7 +31,7 @@ pub use reply::{
 };
 pub use request::Request;
 use session::MAX_WRITE_SIZE;
-pub use session::{BackgroundSession, Session};
+pub use session::{BackgroundSession, Session, SessionACL};
 use std::cmp::max;
 use std::cmp::min;
 

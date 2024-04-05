@@ -17,7 +17,7 @@ derive_more.workspace = true
 futures.workspace = true
 libc.workspace = true
 maelstrom-base.workspace = true
-maelstrom-linux.workspace = true
+maelstrom-linux = { workspace = true, features = ["std"] }
 maelstrom-util.workspace = true
 memchr.workspace = true
 page_size.workspace = true
@@ -33,5 +33,4 @@ tokio-tar.workspace = true
 zerocopy.workspace = true
 
 [dev-dependencies]
-clap.workspace = true
 tempfile.workspace = true

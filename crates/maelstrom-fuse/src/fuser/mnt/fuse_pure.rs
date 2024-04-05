@@ -80,7 +80,7 @@ impl Drop for Mount {
     }
 }
 
-fn fuse_mount_pure(
+pub fn fuse_mount_pure(
     mountpoint: &OsStr,
     options: &[MountOption],
 ) -> Result<(File, Option<UnixStream>), io::Error> {

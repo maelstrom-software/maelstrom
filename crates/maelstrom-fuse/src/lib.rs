@@ -5,14 +5,16 @@ use async_trait::async_trait;
 pub use fuser::{FileAttr, FileType};
 use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
-use maelstrom_linux::Errno;
+use maelstrom_linux::{self as linux, Errno};
 use std::ffi::OsStr;
 use std::future::Future;
+use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+use tokio::task::{self, JoinHandle};
 
 const MAX_INFLIGHT: usize = 1000;
 
@@ -38,6 +40,90 @@ pub fn fuse_mount(
     let fuser_session = fuse_mount_dispatcher(handler, mount_point, name)?;
 
     Ok(FuseHandle { fuser_session })
+}
+
+pub struct FuseNamespaceHandle {
+    stream: linux::UnixStream,
+    handle: JoinHandle<std::io::Result<()>>,
+    mount_path: PathBuf,
+}
+
+impl FuseNamespaceHandle {
+    pub async fn umount_and_join(self) -> Result<()> {
+        drop(self.stream);
+        self.handle.await.unwrap()?;
+        Ok(())
+    }
+
+    pub fn mount_path(&self) -> &Path {
+        &self.mount_path
+    }
+}
+
+fn run_fuse_child(b: linux::UnixStream, fsname: String, uid: linux::Uid, gid: linux::Gid) -> ! {
+    let fs = maelstrom_util::fs::Fs::new();
+    fs.write("/proc/self/setgroups", b"deny").unwrap();
+    fs.write("/proc/self/uid_map", format!("0 {} 1", uid.as_u32()))
+        .unwrap();
+    fs.write("/proc/self/gid_map", format!("0 {} 1", gid.as_u32()))
+        .unwrap();
+
+    let (file, _) = crate::fuser::fuse_mount_pure(
+        Path::new("/mnt").as_os_str(),
+        &[MountOption::RO, MountOption::FSName(fsname)],
+    )
+    .unwrap();
+
+    let fd = linux::Fd::from_raw(file.as_raw_fd());
+    b.send_with_fd(b"a", fd).unwrap();
+
+    let mut buf = [0; 1];
+    b.recv_with_fd(&mut buf).unwrap();
+
+    std::process::exit(0)
+}
+
+pub async fn fuse_mount_namespace(
+    handler: impl FuseFileSystem + Send + Sync + 'static,
+    name: &str,
+) -> Result<FuseNamespaceHandle> {
+    let name = name.to_owned();
+    let (a, child, fd) = task::spawn_blocking(move || -> Result<_> {
+        let (a, b) = linux::UnixStream::pair()?;
+        let uid = linux::getuid();
+        let gid = linux::getgid();
+        let mut clone_args = linux::CloneArgs::default().flags(
+            linux::CloneFlags::NEWCGROUP
+                | linux::CloneFlags::NEWIPC
+                | linux::CloneFlags::NEWNET
+                | linux::CloneFlags::NEWNS
+                | linux::CloneFlags::NEWPID
+                | linux::CloneFlags::NEWUSER,
+        );
+        let Some(child) = linux::clone3(&mut clone_args)? else {
+            drop(a);
+            run_fuse_child(b, name, uid, gid);
+        };
+
+        let mut buf = [0; 1];
+        let (_, fd) = a.recv_with_fd(&mut buf)?;
+        Ok((a, child, fd))
+    })
+    .await??;
+
+    let handle = task::spawn(async move {
+        let mut session = crate::fuser::Session::from_fd(
+            DispatchingFs::new(handler),
+            fd.unwrap().into(),
+            crate::fuser::SessionACL::All,
+        )?;
+        session.run().await
+    });
+    Ok(FuseNamespaceHandle {
+        stream: a,
+        handle,
+        mount_path: format!("/proc/{}/root/mnt", child.as_i32()).into(),
+    })
 }
 
 fn fuse_mount_dispatcher(

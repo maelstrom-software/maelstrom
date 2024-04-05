@@ -1,14 +1,12 @@
 ///! This example is taken from the fuser project
 use anyhow::Result;
 use async_trait::async_trait;
-use clap::Parser;
 use maelstrom_fuse::{
     AttrResponse, DirEntry, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem,
     ReadResponse, Request,
 };
 use maelstrom_linux::Errno;
 use std::ffi::OsStr;
-use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::io::AsyncBufReadExt as _;
 
@@ -135,15 +133,10 @@ impl FuseFileSystem for HelloFs {
     }
 }
 
-#[derive(Parser)]
-struct CliOptions {
-    mount_path: PathBuf,
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = CliOptions::parse();
-    let handle = maelstrom_fuse::fuse_mount(HelloFs, &args.mount_path, "hello")?;
+    let handle = maelstrom_fuse::fuse_mount_namespace(HelloFs, "hello").await?;
+    println!("mounted at {}", handle.mount_path().display());
 
     // wait for newline on stdin
     println!("press enter to exit");

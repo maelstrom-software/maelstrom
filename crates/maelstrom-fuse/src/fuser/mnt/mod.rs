@@ -8,6 +8,7 @@ pub mod mount_options;
 use std::fs::File;
 use std::io;
 
+pub use fuse_pure::fuse_mount_pure;
 pub use fuse_pure::Mount;
 use std::ffi::CStr;
 

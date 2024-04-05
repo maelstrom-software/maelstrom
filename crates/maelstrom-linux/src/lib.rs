@@ -238,6 +238,10 @@ impl Fd {
     fn as_c_uint(self) -> c_uint {
         self.0.try_into().unwrap()
     }
+
+    pub fn from_raw(raw: c_int) -> Self {
+        Self(raw)
+    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -346,6 +350,14 @@ impl From<OwnedFd> for fd::OwnedFd {
     }
 }
 
+#[cfg(any(test, feature = "std"))]
+impl From<fd::OwnedFd> for OwnedFd {
+    fn from(owned_fd: fd::OwnedFd) -> Self {
+        let raw_fd = fd::IntoRawFd::into_raw_fd(owned_fd);
+        Self(Fd(raw_fd))
+    }
+}
+
 impl Drop for OwnedFd {
     fn drop(&mut self) {
         // Just ignore the return value from close.
@@ -364,6 +376,10 @@ impl Pid {
     #[cfg(feature = "test")]
     pub fn new_for_test(pid: pid_t) -> Self {
         Self(pid)
+    }
+
+    pub fn as_i32(self) -> i32 {
+        self.0
     }
 }
 
