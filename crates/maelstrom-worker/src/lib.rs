@@ -187,7 +187,7 @@ fn job_task_main(
 
     let _ = handle_sender.send(fuse_handle);
 
-    executor.start(&spec, inline_limit, killer, runtime)
+    executor.run_job(&spec, inline_limit, killer, runtime)
 }
 
 impl DispatcherDeps for DispatcherAdapter {

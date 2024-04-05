@@ -176,33 +176,30 @@ impl Executor {
 }
 
 impl Executor {
-    /// Start a process (i.e. job).
+    /// Run a process (i.e. job).
     ///
-    /// Two callbacks are provided: one for stdout and one for stderr. These will be called on a
-    /// separate task (they should not block) when the job has closed its stdout/stderr. This will
-    /// likely happen when the job completes.
+    /// On success, this function returns when the process has completed, with a [`JobCompleted`].
+    /// This includes the exit status, stdout, and stderr.
     ///
-    /// No callback is called when the process actually terminates. For that, the caller should use
-    /// waitid(2) or something similar to wait on the pid returned from this function. In
-    /// production, that role will be filled by [`crate::reaper::main`].
+    /// On failure, this function will return immediately. If a child process was started, it will
+    /// be waited for in the background and the zombie process will be reaped.
     ///
-    /// This function is designed to be callable in an async context, even though it temporarily
-    /// blocks the calling thread while the child is starting up.
+    /// This function expects a Tokio runtime, which it uses to start a few tasks.
     ///
-    /// If this function returns [`JobResult::Ok`], then the child process obviously will be
-    /// started and the caller will need to waitid(2) on the child eventually. However, if this
-    /// function returns an error result, it's still possible that a child was spawned (and has now
-    /// terminated). It is assumed that the caller will be reaping all children, not just those
-    /// positively identified by this function. If that assumption proves invalid, the return
-    /// values of this function should be adjusted to return optional pids in error cases.
-    pub fn start(
+    /// The `killer` receiver is used to kill the child process. If a message is ever sent over the
+    /// channel, the child will be immediately killed with a SIGTERM.
+    ///
+    /// This function should be run in a `spawn_blocking` context. Ideally, this function would be
+    /// async, but that doesn't work because we rely on [`bumpalo::Bump`] as a fast arena
+    /// allocator, and it's not `Sync`.
+    pub fn run_job(
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
         killer: oneshot::Receiver<()>,
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
-        self.start_inner(spec, inline_limit, killer, runtime)
+        self.run_job_inner(spec, inline_limit, killer, runtime)
     }
 }
 
@@ -343,7 +340,7 @@ fn bump_c_str_from_bytes<'bump>(bump: &'bump Bump, bytes: &[u8]) -> Result<&'bum
 }
 
 impl Executor {
-    fn start_inner(
+    fn run_job_inner(
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
@@ -363,12 +360,12 @@ impl Executor {
             .map_err(Error::from)
             .map_err(JobError::System)?;
 
-        // Now we set up the script. This will be run in the child where we have to follow some
-        // very stringent rules to avoid deadlocking. This comes about because we're going to clone
-        // in a multi-threaded program. The child program will only have one thread: this one. The
-        // other threads will just not exist in the child process. If any of those threads held a
-        // lock at the time of the clone, those locks will be locked forever in the child. Any
-        // attempt to acquire those locks in the child would deadlock.
+        // Set up the script. This will be run in the child where we have to follow some very
+        // stringent rules to avoid deadlocking. This comes about because we're going to clone in a
+        // multi-threaded program. The child program will only have one thread: this one. The other
+        // threads will just not exist in the child process. If any of those threads held a lock at
+        // the time of the clone, those locks will be locked forever in the child. Any attempt to
+        // acquire those locks in the child would deadlock.
         //
         // The most burdensome result of this is that we can't allocate memory using the global
         // allocator in the child.
@@ -923,7 +920,7 @@ mod tests {
                     tempfile::tempdir().unwrap().into_path(),
                 )
                 .unwrap()
-                .start(
+                .run_job(
                     &self.spec,
                     self.inline_limit,
                     signal_rx,
@@ -1537,7 +1534,7 @@ mod tests {
                     tempfile::tempdir().unwrap().into_path(),
                 )
                 .unwrap()
-                .start(
+                .run_job(
                     &spec,
                     ByteSize::b(0).into(),
                     signal_rx,
