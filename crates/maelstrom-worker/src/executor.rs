@@ -96,6 +96,18 @@ impl JobSpec {
     }
 }
 
+// This type can never be instantiated. We use oneshot senders and receivers as job handles, but we
+// only want to send a message when the sender is dropped.
+enum JobHandlePayload {}
+
+pub struct JobHandleSender(oneshot::Sender<JobHandlePayload>);
+pub struct JobHandleReceiver(oneshot::Receiver<JobHandlePayload>);
+
+pub fn job_handle() -> (JobHandleSender, JobHandleReceiver) {
+    let (sender, receiver) = oneshot::channel();
+    (JobHandleSender(sender), JobHandleReceiver(receiver))
+}
+
 pub struct Executor {
     user: UserId,
     group: GroupId,
@@ -186,8 +198,8 @@ impl Executor {
     ///
     /// This function expects a Tokio runtime, which it uses to start a few tasks.
     ///
-    /// The `killer` receiver is used to kill the child process. If a message is ever sent over the
-    /// channel, the child will be immediately killed with a SIGTERM.
+    /// The `job_handle_receiver` is used to kill the child process. If the attached sender is ever
+    /// closed, the child will be immediately killed with a SIGTERM.
     ///
     /// This function should be run in a `spawn_blocking` context. Ideally, this function would be
     /// async, but that doesn't work because we rely on [`bumpalo::Bump`] as a fast arena
@@ -196,10 +208,10 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        killer: oneshot::Receiver<()>,
+        job_handle_receiver: JobHandleReceiver,
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
-        self.run_job_inner(spec, inline_limit, killer, runtime)
+        self.run_job_inner(spec, inline_limit, job_handle_receiver, runtime)
     }
 }
 
@@ -214,18 +226,16 @@ impl Executor {
 
 async fn wait_for_child(
     child_pidfd: OwnedFd,
-    mut killer: oneshot::Receiver<()>,
+    mut job_handle_receiver: JobHandleReceiver,
 ) -> Result<JobStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
     let mut listen_for_killer = true;
     loop {
         select! {
-            res = &mut killer, if listen_for_killer => {
-                // We could kill when the sender is dropped, but that seems a little too magical.
-                // It also makes tests a little trickier.
-                if res.is_ok() {
-                    linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
-                }
+            _ = &mut job_handle_receiver.0, if listen_for_killer => {
+                // We kill when the sender is dropped. No message can actually be sent because the
+                // message type can't be instantiated.
+                linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
                 listen_for_killer = false;
             },
             res = async_fd.readable() => {
@@ -333,7 +343,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        killer: oneshot::Receiver<()>,
+        job_handle_receiver: JobHandleReceiver,
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
         fn syserr<E>(err: E) -> JobError<Error>
@@ -706,7 +716,7 @@ impl Executor {
         // An alternative would be to panic and send a plain JobStatus back.
         let (status_sender, status_receiver) = oneshot::channel();
         runtime.spawn(async move {
-            let _ = status_sender.send(wait_for_child(child_pidfd, killer).await);
+            let _ = status_sender.send(wait_for_child(child_pidfd, job_handle_receiver).await);
         });
 
         // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
@@ -785,7 +795,7 @@ mod tests {
     use maelstrom_util::async_fs;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio::sync::{oneshot, Mutex};
+    use tokio::sync::Mutex;
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -901,7 +911,7 @@ mod tests {
                 status,
                 effects: JobEffects { stdout, stderr },
             } = tokio::task::spawn_blocking(move || {
-                let (_, signal_rx) = oneshot::channel();
+                let (_job_handle_sender, job_handle_receiver) = job_handle();
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
@@ -910,7 +920,7 @@ mod tests {
                 .run_job(
                     &self.spec,
                     self.inline_limit,
-                    signal_rx,
+                    job_handle_receiver,
                     runtime::Handle::current(),
                 )
             })
@@ -1513,7 +1523,7 @@ mod tests {
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let mount = TarMount::new().await;
         let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
-        let (_, signal_rx) = oneshot::channel();
+        let (_job_handle_sender, job_handle_receiver) = job_handle();
         assert_matches!(
             tokio::task::spawn_blocking(move || {
                 Executor::new(
@@ -1524,7 +1534,7 @@ mod tests {
                 .run_job(
                     &spec,
                     ByteSize::b(0).into(),
-                    signal_rx,
+                    job_handle_receiver,
                     runtime::Handle::current(),
                 )
             })

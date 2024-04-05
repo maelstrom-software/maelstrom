@@ -33,7 +33,11 @@ use tracker::{FetcherResult, LayerTracker};
 /// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
 pub trait DispatcherDeps {
+    /// The job handle should kill an outstanding job when it is dropped. Even if the job is
+    /// killed, the `Dispatcher` should always be called with [`Message::JobCompleted`]. It must be
+    /// safe to drop this handle after the job has completed.
     type JobHandle;
+
     type FuseHandle;
 
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
@@ -44,12 +48,6 @@ pub trait DispatcherDeps {
         spec: JobSpec,
         path: PathBuf,
     ) -> (Self::JobHandle, Self::FuseHandle);
-
-    /// Cancel a running job using the [`JobHandle`] obtained from [`start_job`]. This must be
-    /// resilient in the case where the process has already completed. There must always be a
-    /// [`Message::JobCompleted`] message delivered for every job, regardless of whether it was
-    /// canceled or not.
-    fn cancel_job(&mut self, handle: Self::JobHandle);
 
     /// Start a task to unmount the fuse mount.
     fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle);
@@ -240,7 +238,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// we're going to send a `JobOutcome::Completed` result to the broker, unless it times out or
     /// is canceled in the meantime.
     Nominal {
-        job_handle: DepsT::JobHandle,
+        _job_handle: DepsT::JobHandle,
         timer_handle: Option<DepsT::TimerHandle>,
     },
 
@@ -380,7 +378,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let (job_handle, fuse_handle) = self.deps.start_job(jid, spec, path);
         let executing_job = ExecutingJob {
             state: ExecutingJobState::Nominal {
-                job_handle,
+                _job_handle: job_handle,
                 timer_handle,
             },
             cache_keys,
@@ -429,14 +427,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // until then. If we didn't it would be possible for us to try to remove a directory
             // that was still in use, which would fail.
             if let ExecutingJobState::Nominal {
-                job_handle,
-                timer_handle,
+                timer_handle: Some(timer_handle),
+                ..
             } = mem::replace(state, ExecutingJobState::Canceled)
             {
-                self.deps.cancel_job(job_handle);
-                if let Some(timer_handle) = timer_handle {
-                    self.deps.cancel_timer(timer_handle)
-                }
+                self.deps.cancel_timer(timer_handle)
             }
         } else {
             // It may be the queue.
@@ -460,7 +455,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
 
         match job.state {
             ExecutingJobState::Nominal {
-                job_handle: _,
+                _job_handle: _,
                 timer_handle,
             } => {
                 if let Some(timer_handle) = timer_handle {
@@ -497,14 +492,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         // use, which would fail.
         match state {
             ExecutingJobState::Nominal { .. } => {
-                let ExecutingJobState::Nominal {
-                    job_handle,
-                    timer_handle: _,
-                } = mem::replace(state, ExecutingJobState::TimedOut)
-                else {
-                    panic!();
-                };
-                self.deps.cancel_job(job_handle);
+                *state = ExecutingJobState::TimedOut;
             }
             ExecutingJobState::TimedOut => {
                 panic!("two timer expirations for job {jid:?}");
@@ -685,7 +673,7 @@ mod tests {
         CacheGotArtifactSuccess(CacheEntryKind, Sha256Digest, u64),
         CacheGotArtifactFailure(CacheEntryKind, Sha256Digest),
         CacheDecrementRefCount(CacheEntryKind, Sha256Digest),
-        Kill(JobId),
+        JobHandleDropped(JobId),
         StartTimer(JobId, Duration),
         CancelTimer(JobId),
     }
@@ -699,8 +687,16 @@ mod tests {
         got_artifact_failure_returns: HashMap<CacheKey, Vec<JobId>>,
     }
 
+    struct TestJobHandle(JobId, Rc<RefCell<TestState>>);
+
+    impl Drop for TestJobHandle {
+        fn drop(&mut self) {
+            self.1.borrow_mut().messages.push(JobHandleDropped(self.0));
+        }
+    }
+
     impl DispatcherDeps for Rc<RefCell<TestState>> {
-        type JobHandle = JobId;
+        type JobHandle = TestJobHandle;
         type FuseHandle = JobId;
 
         fn start_job(
@@ -711,14 +707,10 @@ mod tests {
         ) -> (Self::JobHandle, Self::FuseHandle) {
             let mut mut_ref = self.borrow_mut();
             mut_ref.messages.push(StartJob(jid, spec, path));
-            (jid, jid)
+            (TestJobHandle(jid, self.clone()), jid)
         }
 
         fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {}
-
-        fn cancel_job(&mut self, handle: Self::JobHandle) {
-            self.borrow_mut().messages.push(Kill(handle));
-        }
 
         type TimerHandle = JobId;
 
@@ -927,7 +919,7 @@ mod tests {
             StartJob(jid!(1), spec!(1, Tar), path_buf!("/a")),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
     }
 
@@ -949,7 +941,7 @@ mod tests {
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf!("/a"))
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
     }
 
@@ -1074,7 +1066,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(5), jid!(5)),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
             status: JobStatus::Exited(0),
@@ -1185,7 +1177,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(43), jid!(2)),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
             status: JobStatus::Exited(0),
@@ -1259,6 +1251,7 @@ mod tests {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
+            JobHandleDropped(jid!(1)),
             StartJob(jid!(4), spec!(4, Tar), path_buf!("/4")),
         };
     }
@@ -1280,7 +1273,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(1), jid!(1)),
             StartJob(jid!(1), spec!(1, Tar), path_buf!("/a")),
         };
-        Broker(CancelJob(jid!(1))) => { Kill(jid!(1)) };
+        Broker(CancelJob(jid!(1))) => { JobHandleDropped(jid!(1)) };
         Broker(CancelJob(jid!(1))) => {};
         Broker(CancelJob(jid!(1))) => {};
     }
@@ -1304,7 +1297,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
         JobTimer(jid!(1)) => {
-            Kill(jid!(1))
+            JobHandleDropped(jid!(1))
         };
         Broker(CancelJob(jid!(1))) => {};
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
@@ -1347,6 +1340,7 @@ mod tests {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
+            JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
         };
     }
@@ -1373,6 +1367,7 @@ mod tests {
                 jid!(1), Err(JobError::System(string!("job error"))))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
+            JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
         };
     }
@@ -1395,7 +1390,7 @@ mod tests {
             StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf!("/a")),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
             status: JobStatus::Signaled(9),
@@ -1457,6 +1452,7 @@ mod tests {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             CancelTimer(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
     }
 
@@ -1473,7 +1469,7 @@ mod tests {
             StartTimer(jid!(1), Duration::from_secs(33)),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
             CancelTimer(jid!(1)),
         };
     }
@@ -1497,7 +1493,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
         JobTimer(jid!(1)) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
         };
         Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
             status: JobStatus::Exited(0),
@@ -1551,6 +1547,7 @@ mod tests {
                     stderr: JobOutputResult::None,
                 }
             })))),
+            JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
         };
         JobTimer(jid!(1)) => {};
@@ -1575,7 +1572,7 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
         Broker(CancelJob(jid!(1))) => {
-            Kill(jid!(1)),
+            JobHandleDropped(jid!(1)),
             CancelTimer(jid!(1)),
         };
         JobTimer(jid!(1)) => {};
@@ -1691,6 +1688,7 @@ mod tests {
                     stderr: JobOutputResult::None,
                 },
             })))),
+            JobHandleDropped(jid!(1)),
         };
     }
 }

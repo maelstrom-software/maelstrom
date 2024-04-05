@@ -11,7 +11,7 @@ use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
-use executor::Executor;
+use executor::{Executor, JobHandleReceiver, JobHandleSender};
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
@@ -102,7 +102,7 @@ impl DispatcherAdapter {
         spec: JobSpec,
         layer_fs_path: PathBuf,
         handle_sender: tokio::sync::oneshot::Sender<DispatcherAdapterFuseHandle>,
-        signal_receiver: tokio::sync::oneshot::Receiver<()>,
+        job_handle_receiver: JobHandleReceiver,
     ) -> Result<()> {
         let log = self
             .log
@@ -132,7 +132,7 @@ impl DispatcherAdapter {
                 .send(Message::JobCompleted(
                     jid,
                     executor
-                        .run_job(&spec, inline_limit, signal_receiver, runtime)
+                        .run_job(&spec, inline_limit, job_handle_receiver, runtime)
                         .map_err(|e| e.map(|inner| inner.to_string())),
                 ))
                 .ok()
@@ -151,24 +151,6 @@ impl DispatcherAdapterFuseHandle {
         self.inner.umount_and_join().await?;
         let fs = async_fs::Fs::new();
         fs.remove_dir(self.mount_path).await
-    }
-}
-
-struct JobHandle {
-    signal_sender: Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
-}
-
-impl JobHandle {
-    fn new(signal_sender: tokio::sync::oneshot::Sender<()>) -> Self {
-        Self {
-            signal_sender: Arc::new(std::sync::Mutex::new(Some(signal_sender))),
-        }
-    }
-
-    fn kill(&self) {
-        if let Some(sender) = self.signal_sender.lock().unwrap().take() {
-            let _ = sender.send(());
-        }
     }
 }
 
@@ -195,7 +177,7 @@ impl FuseHandle {
 }
 
 impl DispatcherDeps for DispatcherAdapter {
-    type JobHandle = JobHandle;
+    type JobHandle = JobHandleSender;
     type FuseHandle = FuseHandle;
 
     fn start_job(
@@ -205,23 +187,16 @@ impl DispatcherDeps for DispatcherAdapter {
         layer_fs_path: PathBuf,
     ) -> (Self::JobHandle, Self::FuseHandle) {
         let (handle_sender, handler_receiver) = tokio::sync::oneshot::channel();
-        let (signal_sender, signal_receiver) = tokio::sync::oneshot::channel();
+        let (job_handle_sender, job_handle_receiver) = executor::job_handle();
         if let Err(e) =
-            self.start_job_inner(jid, spec, layer_fs_path, handle_sender, signal_receiver)
+            self.start_job_inner(jid, spec, layer_fs_path, handle_sender, job_handle_receiver)
         {
             let _ = self.dispatcher_sender.send(Message::JobCompleted(
                 jid,
                 Err(JobError::System(e.to_string())),
             ));
         }
-        (
-            JobHandle::new(signal_sender),
-            FuseHandle::new(handler_receiver),
-        )
-    }
-
-    fn cancel_job(&mut self, handle: Self::JobHandle) {
-        handle.kill();
+        (job_handle_sender, FuseHandle::new(handler_receiver))
     }
 
     fn clean_up_fuse_handle_on_task(&mut self, mut handle: Self::FuseHandle) {
