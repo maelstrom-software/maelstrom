@@ -6,9 +6,7 @@
 //! for filesystem operations under its mount point.
 
 use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
-use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::path::Path;
 use std::{io, ops::DerefMut};
 use tokio::task::JoinHandle;
 
@@ -42,9 +40,7 @@ pub struct Session<FS: Filesystem> {
     /// Communication channel to the kernel driver
     ch: Channel,
     /// Handle to the mount.  Dropping this unmounts.
-    mount: Arc<Mutex<Option<Mount>>>,
-    /// Mount point
-    mountpoint: PathBuf,
+    mount: Option<Mount>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement allow_root and auto_unmount
     pub(crate) allowed: SessionACL,
@@ -94,8 +90,7 @@ impl<FS: Filesystem> Session<FS> {
         Ok(Session {
             filesystem,
             ch,
-            mount: Arc::new(Mutex::new(Some(mount))),
-            mountpoint: mountpoint.to_owned(),
+            mount: Some(mount),
             allowed,
             session_owner: unsafe { libc::geteuid() },
             proto_major: 0,
@@ -103,11 +98,6 @@ impl<FS: Filesystem> Session<FS> {
             initialized: false,
             destroyed: false,
         })
-    }
-
-    /// Return path of the mounted filesystem
-    pub fn mountpoint(&self) -> &Path {
-        &self.mountpoint
     }
 
     /// Run the session loop that receives kernel requests and dispatches them to method
@@ -153,32 +143,6 @@ impl<FS: Filesystem> Session<FS> {
 
         Ok(())
     }
-
-    /// Unmount the filesystem
-    pub fn unmount(&mut self) {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
-    }
-
-    /// Returns a thread-safe object that can be used to unmount the Filesystem
-    pub fn unmount_callable(&mut self) -> SessionUnmounter {
-        SessionUnmounter {
-            mount: self.mount.clone(),
-        }
-    }
-}
-
-#[derive(Debug)]
-/// A thread-safe object that can be used to unmount a Filesystem
-pub struct SessionUnmounter {
-    mount: Arc<Mutex<Option<Mount>>>,
-}
-
-impl SessionUnmounter {
-    /// Unmount the filesystem
-    pub fn unmount(&mut self) -> io::Result<()> {
-        drop(std::mem::take(&mut *self.mount.lock().unwrap()));
-        Ok(())
-    }
 }
 
 fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
@@ -199,8 +163,6 @@ impl<FS: 'static + Filesystem + Send> Session<FS> {
 
 /// The background session data structure
 pub struct BackgroundSession {
-    /// Path of the mounted filesystem
-    pub mountpoint: PathBuf,
     /// Thread guard of the background session
     pub guard: JoinHandle<io::Result<()>>,
     /// Ensures the filesystem is unmounted when the session ends
@@ -211,41 +173,25 @@ impl BackgroundSession {
     /// Create a new background session for the given session by running its
     /// session loop in a background thread. If the returned handle is dropped,
     /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(se: Session<FS>) -> io::Result<BackgroundSession> {
-        let mountpoint = se.mountpoint().to_path_buf();
+    pub fn new<FS: Filesystem + Send + 'static>(
+        mut se: Session<FS>,
+    ) -> io::Result<BackgroundSession> {
         // Take the fuse_session, so that we can unmount it
-        let mount = std::mem::take(&mut *se.mount.lock().unwrap());
+        let mount = se.mount.take();
         let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
         let guard = tokio::task::spawn(async move {
             let mut se = se;
             se.run().await
         });
         Ok(BackgroundSession {
-            mountpoint,
             guard,
             _mount: mount,
         })
     }
     /// Unmount the filesystem and join the background thread.
     pub async fn join(self) {
-        let Self {
-            mountpoint: _,
-            guard,
-            _mount,
-        } = self;
+        let Self { guard, _mount } = self;
         drop(_mount);
         guard.await.unwrap().unwrap();
-    }
-}
-
-// replace with #[derive(Debug)] if Debug ever gets implemented for
-// thread_scoped::JoinGuard
-impl fmt::Debug for BackgroundSession {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        write!(
-            f,
-            "BackgroundSession {{ mountpoint: {:?}, guard: JoinGuard<()> }}",
-            self.mountpoint
-        )
     }
 }
