@@ -241,7 +241,6 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
     /// is canceled in the meantime.
     Nominal {
         job_handle: DepsT::JobHandle,
-        fuse_handle: DepsT::FuseHandle,
         timer_handle: Option<DepsT::TimerHandle>,
     },
 
@@ -263,6 +262,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
 struct ExecutingJob<DepsT: DispatcherDeps> {
     state: ExecutingJobState<DepsT>,
     cache_keys: HashSet<CacheKey>,
+    fuse_handle: DepsT::FuseHandle,
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
@@ -381,10 +381,10 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let executing_job = ExecutingJob {
             state: ExecutingJobState::Nominal {
                 job_handle,
-                fuse_handle,
                 timer_handle,
             },
             cache_keys,
+            fuse_handle,
         };
         self.executing.insert(jid, executing_job).assert_is_none();
     }
@@ -430,7 +430,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             // that was still in use, which would fail.
             if let ExecutingJobState::Nominal {
                 job_handle,
-                fuse_handle,
                 timer_handle,
             } = mem::replace(state, ExecutingJobState::Canceled)
             {
@@ -438,7 +437,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
                 if let Some(timer_handle) = timer_handle {
                     self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(fuse_handle);
             }
         } else {
             // It may be the queue.
@@ -463,13 +461,11 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         match job.state {
             ExecutingJobState::Nominal {
                 job_handle: _,
-                fuse_handle,
                 timer_handle,
             } => {
                 if let Some(timer_handle) = timer_handle {
                     self.deps.cancel_timer(timer_handle)
                 }
-                self.deps.clean_up_fuse_handle_on_task(fuse_handle);
                 self.deps
                     .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
@@ -482,6 +478,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         for CacheKey { kind, digest } in job.cache_keys {
             self.cache.decrement_ref_count(kind, &digest);
         }
+        self.deps.clean_up_fuse_handle_on_task(job.fuse_handle);
         self.possibly_start_job();
     }
 
@@ -489,6 +486,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let Some(&mut ExecutingJob {
             ref mut state,
             cache_keys: _,
+            fuse_handle: _,
         }) = self.executing.get_mut(&jid)
         else {
             return;
@@ -501,7 +499,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
             ExecutingJobState::Nominal { .. } => {
                 let ExecutingJobState::Nominal {
                     job_handle,
-                    fuse_handle: _,
                     timer_handle: _,
                 } = mem::replace(state, ExecutingJobState::TimedOut)
                 else {
