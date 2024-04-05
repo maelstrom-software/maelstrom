@@ -212,7 +212,7 @@ impl Executor {
  *  FIGLET: private
  */
 
-async fn process_waiter(
+async fn wait_for_child(
     child_pidfd: OwnedFd,
     mut killer: oneshot::Receiver<()>,
 ) -> Result<JobStatus> {
@@ -238,17 +238,6 @@ async fn process_waiter(
         WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
         WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
     })
-}
-
-async fn process_waiter_task_main(
-    child_pidfd: OwnedFd,
-    killer: oneshot::Receiver<()>,
-    sender: oneshot::Sender<Result<JobStatus>>,
-) {
-    // It's not clear what to do if we get an error waiting. In theory, that should never happen.
-    // What we do is return the error so that the client can get back a system error. An
-    // alternative would be to panic and send a plain JobStatus back.
-    let _ = sender.send(process_waiter(child_pidfd, killer).await);
 }
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
@@ -347,18 +336,19 @@ impl Executor {
         killer: oneshot::Receiver<()>,
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
+        fn syserr<E>(err: E) -> JobError<Error>
+        where
+            Error: From<E>,
+        {
+            JobError::System(Error::from(err))
+        }
+
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
-        let (stdout_read_fd, stdout_write_fd) = linux::pipe()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let (stderr_read_fd, stderr_write_fd) = linux::pipe()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
-        let (exec_result_read_fd, exec_result_write_fd) = linux::pipe()
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
+        let (stdout_read_fd, stdout_write_fd) = linux::pipe().map_err(syserr)?;
+        let (stderr_read_fd, stderr_write_fd) = linux::pipe().map_err(syserr)?;
+        let (exec_result_read_fd, exec_result_write_fd) = linux::pipe().map_err(syserr)?;
 
         // Set up the script. This will be run in the child where we have to follow some very
         // stringent rules to avoid deadlocking. This comes about because we're going to clone in a
@@ -388,23 +378,23 @@ impl Executor {
                     SocketType::RAW,
                     SocketProtocol::NETLINK_ROUTE,
                 ),
-                &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
+                &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
             );
             // This binds the socket.
             builder.push(
                 Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
-                &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
+                &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
             );
             // This sends the message to the kernel.
             builder.push(
                 Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
-                &|err| JobError::System(anyhow!("writing rtnetlink message: {err}")),
+                &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
             );
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
             let rtnetlink_response = bump.alloc_slice_fill_default(1024);
             builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
-                JobError::System(anyhow!("receiving rtnetlink message: {err}"))
+                syserr(anyhow!("receiving rtnetlink message: {err}"))
             });
             // We don't need to close the socket because that will happen automatically for us when we
             // exec.
@@ -413,20 +403,18 @@ impl Executor {
         // We now need to set up the new user namespace. This first set of syscalls sets up the
         // uid mapping.
         let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
-        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user)
-            .map_err(Error::new)
-            .map_err(JobError::System)?;
+        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
         builder.push(
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/uid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
+            &|err| syserr(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
         builder.push(
             Syscall::WriteUsingSavedFd(uid_map_contents.into_bump_str().as_bytes()),
-            &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
+            &|err| syserr(anyhow!("writing to /proc/self/uid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
@@ -439,30 +427,28 @@ impl Executor {
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
+            &|err| syserr(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
         builder.push(Syscall::WriteUsingSavedFd(b"deny\n"), &|err| {
-            JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
+            syserr(anyhow!("writing to /proc/self/setgroups: {err}"))
         });
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
         // Finally, we set up the gid mapping.
         let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
-        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group)
-            .map_err(Error::new)
-            .map_err(JobError::System)?;
+        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
         builder.push(
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/gid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
+            &|err| syserr(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
         builder.push(
             Syscall::WriteUsingSavedFd(gid_map_contents.into_bump_str().as_bytes()),
-            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
+            &|err| syserr(anyhow!("writing to /proc/self/setgroups: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
@@ -470,17 +456,15 @@ impl Executor {
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
         // process outside of the pid namespace, which would be confusing.
-        builder.push(Syscall::SetSid, &|err| {
-            JobError::System(anyhow!("setsid: {err}"))
-        });
+        builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
         builder.push(Syscall::Dup2(stdout_write_fd.as_fd(), Fd::STDOUT), &|err| {
-            JobError::System(anyhow!("dup2-ing to stdout: {err}"))
+            syserr(anyhow!("dup2-ing to stdout: {err}"))
         });
         builder.push(Syscall::Dup2(stderr_write_fd.as_fd(), Fd::STDERR), &|err| {
-            JobError::System(anyhow!("dup2-ing to stderr: {err}"))
+            syserr(anyhow!("dup2-ing to stderr: {err}"))
         });
 
         // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
@@ -491,7 +475,7 @@ impl Executor {
                 CloseRangeFlags::CLOEXEC,
             ),
             &|err| {
-                JobError::System(anyhow!(
+                syserr(anyhow!(
                     "setting CLOEXEC on range of open file descriptors: {err}"
                 ))
             },
@@ -499,9 +483,8 @@ impl Executor {
 
         let new_root_path = self.mount_dir.as_c_str();
         if !spec.enable_writable_file_system {
-            let layer0_path = bump_c_str_from_bytes(&bump, spec.path.as_os_str().as_bytes())
-                .map_err(Error::from)
-                .map_err(JobError::System)?;
+            let layer0_path =
+                bump_c_str_from_bytes(&bump, spec.path.as_os_str().as_bytes()).map_err(syserr)?;
 
             // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
             // pivot_root to it later.
@@ -513,7 +496,7 @@ impl Executor {
                     MountFlags::BIND,
                     None,
                 ),
-                &|err| JobError::System(anyhow!("bind mounting target root directory: {err}")),
+                &|err| syserr(anyhow!("bind mounting target root directory: {err}")),
             );
         } else {
             // Use overlayfs.
@@ -524,7 +507,7 @@ impl Executor {
                     .as_os_str()
                     .to_str()
                     .ok_or_else(|| anyhow!("could not convert path to string"))
-                    .map_err(JobError::System)?,
+                    .map_err(syserr)?,
             );
             // We need to create an upperdir and workdir. Create a temporary file system to contain
             // both of them.
@@ -537,18 +520,18 @@ impl Executor {
                     None,
                 ),
                 &|err| {
-                    JobError::System(anyhow!(
+                    syserr(anyhow!(
                         "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"
                     ))
                 },
             );
             builder.push(
                 Syscall::Mkdir(self.upper_dir.as_c_str(), FileMode::RWXU),
-                &|err| JobError::System(anyhow!("making uppderdir for overlayfs: {err}")),
+                &|err| syserr(anyhow!("making uppderdir for overlayfs: {err}")),
             );
             builder.push(
                 Syscall::Mkdir(self.work_dir.as_c_str(), FileMode::RWXU),
-                &|err| JobError::System(anyhow!("making workdir for overlayfs: {err}")),
+                &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
             );
             options.push_str(self.comma_upperdir_comma_workdir.as_str());
             options.push('\0');
@@ -560,13 +543,13 @@ impl Executor {
                     MountFlags::default(),
                     Some(options.into_bytes().into_bump_slice()),
                 ),
-                &|err| JobError::System(anyhow!("mounting overlayfs: {err}")),
+                &|err| syserr(anyhow!("mounting overlayfs: {err}")),
             );
         }
 
         // Chdir to what will be the new root.
         builder.push(Syscall::Chdir(new_root_path), &|err| {
-            JobError::System(anyhow!("chdir to target root directory: {err}"))
+            syserr(anyhow!("chdir to target root directory: {err}"))
         });
 
         // Create all of the supported devices by bind mounting them from the host's /dev
@@ -600,7 +583,7 @@ impl Executor {
 
         // Pivot root to be the new root. See man 2 pivot_root.
         builder.push(Syscall::PivotRoot(c_str!("."), c_str!(".")), &|err| {
-            JobError::System(anyhow!("pivot_root: {err}"))
+            syserr(anyhow!("pivot_root: {err}"))
         });
 
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
@@ -614,7 +597,7 @@ impl Executor {
             .iter()
             .map(|m| bump_c_str(&bump, m.mount_point.as_str()));
         for (mount, mount_point) in iter::zip(spec.mounts.iter(), child_mount_points) {
-            let mount_point_cstr = mount_point.map_err(Error::from).map_err(JobError::System)?;
+            let mount_point_cstr = mount_point.map_err(syserr)?;
 
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
@@ -642,34 +625,33 @@ impl Executor {
 
         // Unmount the old root. See man 2 pivot_root.
         builder.push(Syscall::Umount2(c_str!("."), UmountFlags::DETACH), &|err| {
-            JobError::System(anyhow!("umount of old root: {err}"))
+            syserr(anyhow!("umount of old root: {err}"))
         });
 
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
             let working_directory =
                 bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
-                    .map_err(Error::from)
-                    .map_err(JobError::System)?;
+                    .map_err(syserr)?;
             builder.push(Syscall::Chdir(working_directory), &|err| {
                 JobError::Execution(anyhow!("chdir: {err}"))
             });
         }
 
         // Finally, do the exec.
-        let program = bump_c_str(&bump, spec.program.as_str()).map_err(JobError::System)?;
+        let program = bump_c_str(&bump, spec.program.as_str()).map_err(syserr)?;
         let mut arguments =
             BumpVec::with_capacity_in(spec.arguments.len().checked_add(2).unwrap(), &bump);
         arguments.push(Some(&program.to_bytes_with_nul()[0]));
         for argument in &spec.arguments {
-            let argument_cstr = bump_c_str(&bump, argument.as_str()).map_err(JobError::System)?;
+            let argument_cstr = bump_c_str(&bump, argument.as_str()).map_err(syserr)?;
             arguments.push(Some(&argument_cstr.to_bytes_with_nul()[0]));
         }
         arguments.push(None);
         let mut environment =
             BumpVec::with_capacity_in(spec.environment.len().checked_add(1).unwrap(), &bump);
         for var in &spec.environment {
-            let var_cstr = bump_c_str(&bump, var.as_str()).map_err(JobError::System)?;
+            let var_cstr = bump_c_str(&bump, var.as_str()).map_err(syserr)?;
             environment.push(Some(&var_cstr.to_bytes_with_nul()[0]));
         }
         environment.push(None);
@@ -703,39 +685,39 @@ impl Executor {
                 );
             }
             Err(err) => {
-                return Err(JobError::System(err.into()));
+                return Err(syserr(err));
             }
         };
 
-        let (status_sender, status_receiver) = oneshot::channel();
         let (stdout_sender, stdout_receiver) = oneshot::channel();
         let (stderr_sender, stderr_receiver) = oneshot::channel();
 
         // Spawn a waiter task to wait on child to terminate. We do this immediately after the
         // clone so that even if this functions returns early, we will make sure that we wait on
         // the child.
-        runtime.spawn(process_waiter_task_main(child_pidfd, killer, status_sender));
-
-        // At this point, it's still okay to return early in the parent. The child will continue to
-        // execute, but that's okay.
-
-        // Drop the write sides of the pipes in the parent. It's important that we drop
-        // exec_result_write_fd before reading from that pipe next.
-        drop(stdout_write_fd);
-        drop(stderr_write_fd);
-        drop(exec_result_write_fd);
+        //
+        // It's not clear what to do if we get an error waiting, which, in theory, should never
+        // happen. What we do is return the error so that the client can get back a system error.
+        // An alternative would be to panic and send a plain JobStatus back.
+        let (status_sender, status_receiver) = oneshot::channel();
+        runtime.spawn(async move {
+            let _ = status_sender.send(wait_for_child(child_pidfd, killer).await);
+        });
 
         // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
+        //
+        // It's important to drop our copy of the write side of the pipe first. Otherwise, we'd
+        // deadlock on ourselves!
+        drop(exec_result_write_fd);
         let mut exec_result_buf = vec![];
         File::from(fd::OwnedFd::from(exec_result_read_fd))
             .read_to_end(&mut exec_result_buf)
-            .map_err(Error::from)
-            .map_err(JobError::System)?;
+            .map_err(syserr)?;
         if !exec_result_buf.is_empty() {
             if exec_result_buf.len() != 8 {
-                return Err(JobError::System(anyhow!(
+                return Err(syserr(anyhow!(
                     "couldn't parse exec result pipe's contents: {exec_result_buf:?}"
                 )));
             }
@@ -751,6 +733,9 @@ impl Executor {
         // that we don't cause a deadlock on one while we're reading the other one.
         //
         // We put these in a JoinSet so that they will be canceled if we return early.
+        //
+        // We have to drop our own copies of the write side of the pipe. If we didn't, these tasks
+        // would never complete.
         let mut joinset = JoinSet::new();
         joinset.spawn_on(
             output_reader_task_main(stdout_read_fd, inline_limit, stdout_sender),
@@ -760,21 +745,18 @@ impl Executor {
             output_reader_task_main(stderr_read_fd, inline_limit, stderr_sender),
             &runtime,
         );
+        drop(stdout_write_fd);
+        drop(stderr_write_fd);
 
+        // Wait for everything and return the result.
+        fn read_from_receiver<T>(receiver: oneshot::Receiver<Result<T>>) -> JobResult<T, Error> {
+            receiver.blocking_recv().unwrap().map_err(syserr)
+        }
         Ok(JobCompleted {
-            status: status_receiver
-                .blocking_recv()
-                .unwrap()
-                .map_err(JobError::System)?,
+            status: read_from_receiver(status_receiver)?,
             effects: JobEffects {
-                stdout: stdout_receiver
-                    .blocking_recv()
-                    .unwrap()
-                    .map_err(JobError::System)?,
-                stderr: stderr_receiver
-                    .blocking_recv()
-                    .unwrap()
-                    .map_err(JobError::System)?,
+                stdout: read_from_receiver(stdout_receiver)?,
+                stderr: read_from_receiver(stderr_receiver)?,
             },
         })
     }
