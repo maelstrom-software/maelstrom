@@ -595,7 +595,7 @@ pub fn pidfd_open(pid: Pid) -> Result<OwnedFd, Errno> {
 }
 
 pub fn pidfd_send_signal(pidfd: Fd, signal: Signal) -> Result<(), Errno> {
-    let info = ptr::null() as *const siginfo_t;
+    let info: *const siginfo_t = ptr::null();
     let flags = 0 as c_uint;
     Errno::result(unsafe {
         libc::syscall(libc::SYS_pidfd_send_signal, pidfd.0, signal.0, info, flags)
