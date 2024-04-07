@@ -50,6 +50,7 @@ pub struct FuseNamespaceHandle {
 
 impl FuseNamespaceHandle {
     pub async fn umount_and_join(self) -> Result<()> {
+        let _ = self.stream.shutdown();
         drop(self.stream);
         self.handle.await.unwrap()?;
         Ok(())
@@ -60,7 +61,13 @@ impl FuseNamespaceHandle {
     }
 }
 
-fn run_fuse_child(b: linux::UnixStream, fsname: String, uid: linux::Uid, gid: linux::Gid) -> ! {
+fn run_fuse_child(
+    b: linux::UnixStream,
+    mount_path: &Path,
+    fsname: String,
+    uid: linux::Uid,
+    gid: linux::Gid,
+) -> ! {
     let fs = maelstrom_util::fs::Fs::new();
     fs.write("/proc/self/setgroups", b"deny").unwrap();
     fs.write("/proc/self/uid_map", format!("0 {} 1", uid.as_u32()))
@@ -69,7 +76,7 @@ fn run_fuse_child(b: linux::UnixStream, fsname: String, uid: linux::Uid, gid: li
         .unwrap();
 
     let (file, _) = crate::fuser::fuse_mount_pure(
-        Path::new("/mnt").as_os_str(),
+        mount_path.as_os_str(),
         &[MountOption::RO, MountOption::FSName(fsname)],
     )
     .unwrap();
@@ -87,7 +94,9 @@ pub async fn fuse_mount_namespace(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     name: &str,
 ) -> Result<FuseNamespaceHandle> {
+    let mount_path = std::env::current_dir()?;
     let name = name.to_owned();
+    let mount_path2 = mount_path.clone();
     let (a, child, fd) = task::spawn_blocking(move || -> Result<_> {
         let (a, b) = linux::UnixStream::pair()?;
         let uid = linux::getuid();
@@ -102,7 +111,7 @@ pub async fn fuse_mount_namespace(
         );
         let Some(child) = linux::clone3(&mut clone_args)? else {
             drop(a);
-            run_fuse_child(b, name, uid, gid);
+            run_fuse_child(b, &mount_path2, name, uid, gid);
         };
 
         let mut buf = [0; 1];
@@ -122,7 +131,7 @@ pub async fn fuse_mount_namespace(
     Ok(FuseNamespaceHandle {
         stream: a,
         handle,
-        mount_path: format!("/proc/{}/root/mnt", child.as_i32()).into(),
+        mount_path: format!("/proc/{}/root{}", child.as_i32(), mount_path.display()).into(),
     })
 }
 

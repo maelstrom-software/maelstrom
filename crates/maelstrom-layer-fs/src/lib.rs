@@ -168,15 +168,14 @@ impl LayerFs {
         self.cache_path.join(digest.to_string())
     }
 
-    pub fn mount(
+    pub async fn mount(
         self,
         log: slog::Logger,
         cache: Arc<Mutex<ReaderCache>>,
-        mount_path: &Path,
-    ) -> Result<maelstrom_fuse::FuseHandle> {
-        slog::debug!(log, "mounting FUSE file-system"; "path" => ?mount_path);
+    ) -> Result<maelstrom_fuse::FuseNamespaceHandle> {
+        slog::debug!(log, "mounting FUSE file-system in namespace");
         let adapter = LayerFsFuseAdapter::new(self, log, cache);
-        maelstrom_fuse::fuse_mount(adapter, mount_path, "Maelstrom LayerFS")
+        maelstrom_fuse::fuse_mount_namespace(adapter, "Maelstrom LayerFS").await
     }
 
     pub async fn run_fuse(
@@ -674,12 +673,10 @@ mod tests {
     #[tokio::test]
     async fn read_dir_and_look_up() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -696,13 +693,14 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        assert_entries(&fs, &mount_point, vec!["Bar", "Baz", "Foo"]).await;
+        assert_entries(&fs, &mount_path, vec!["Bar", "Baz", "Foo"]).await;
 
-        fs.metadata(mount_point.join("Bar")).await.unwrap();
-        fs.metadata(mount_point.join("Baz")).await.unwrap();
-        fs.metadata(mount_point.join("Foo")).await.unwrap();
+        fs.metadata(mount_path.join("Bar")).await.unwrap();
+        fs.metadata(mount_path.join("Baz")).await.unwrap();
+        fs.metadata(mount_path.join("Foo")).await.unwrap();
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -710,12 +708,12 @@ mod tests {
     #[tokio::test]
     async fn read_dir_multi_level() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -732,11 +730,12 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        assert_entries(&fs, &mount_point, vec!["Foo/"]).await;
-        assert_entries(&fs, &mount_point.join("Foo"), vec!["Bar/", "Bin"]).await;
-        assert_entries(&fs, &mount_point.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
+        assert_entries(&fs, &mount_path, vec!["Foo/"]).await;
+        assert_entries(&fs, &mount_path.join("Foo"), vec!["Bar/", "Bin"]).await;
+        assert_entries(&fs, &mount_path.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -744,12 +743,12 @@ mod tests {
     #[tokio::test]
     async fn get_attr() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -766,10 +765,11 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
         for name in ["Foo", "Bar", "Baz"] {
-            let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+            let attrs = fs.metadata(mount_path.join(name)).await.unwrap();
             assert_eq!(attrs.len(), 0);
             assert_eq!(Mode(attrs.mode()), Mode(0o100555));
             assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
@@ -781,12 +781,12 @@ mod tests {
     #[tokio::test]
     async fn hard_link() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -803,12 +803,13 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        let foo_attrs = fs.metadata(mount_point.join("Foo")).await.unwrap();
+        let foo_attrs = fs.metadata(mount_path.join("Foo")).await.unwrap();
 
         for name in ["Foo", "Bar", "Baz"] {
-            let attrs = fs.metadata(mount_point.join(name)).await.unwrap();
+            let attrs = fs.metadata(mount_path.join(name)).await.unwrap();
             assert_eq!(attrs.len(), 0);
             assert_eq!(Mode(attrs.mode()), Mode(0o100555));
             assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
@@ -821,12 +822,12 @@ mod tests {
     #[tokio::test]
     async fn read_inline() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -843,12 +844,13 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
-        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Bar")).await.unwrap();
         assert_eq!(contents, "");
 
         mount_handle.umount_and_join().await.unwrap();
@@ -857,12 +859,12 @@ mod tests {
     #[tokio::test]
     async fn read_link() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -878,17 +880,18 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
         assert!(fs
-            .symlink_metadata(mount_point.join("Bar"))
+            .symlink_metadata(mount_path.join("Bar"))
             .await
             .unwrap()
             .is_symlink());
-        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Bar")).await.unwrap();
         assert_eq!(contents, "hello world");
 
         mount_handle.umount_and_join().await.unwrap();
@@ -897,12 +900,12 @@ mod tests {
     #[tokio::test]
     async fn read_digest() {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
+        let mount_path = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
+        fs.create_dir(&mount_path).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -927,12 +930,13 @@ mod tests {
         .await;
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello");
 
-        let contents = fs.read_to_string(mount_point.join("Bar")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Bar")).await.unwrap();
         assert_eq!(contents, "world");
 
         mount_handle.umount_and_join().await.unwrap();
@@ -1105,12 +1109,10 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     ) {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
         let data_dir = temp.path().join("data");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
         fs.create_dir(&data_dir).await.unwrap();
         fs.create_dir(&cache_dir).await.unwrap();
 
@@ -1136,45 +1138,43 @@ mod tests {
         let layer_fs = builder.finish().await.unwrap();
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
-        let contents = fs.read_to_string(mount_point.join("Foo")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
-        let contents = fs.read_to_string(mount_point.join("Thud")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Thud")).await.unwrap();
         assert_eq!(contents, "hello world");
 
         assert!(fs
-            .symlink_metadata(mount_point.join("Waldo"))
+            .symlink_metadata(mount_path.join("Waldo"))
             .await
             .unwrap()
             .is_symlink());
-        let contents = fs.read_to_string(mount_point.join("Waldo")).await.unwrap();
+        let contents = fs.read_to_string(mount_path.join("Waldo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
-        let contents = fs
-            .read_to_string(mount_point.join("Bar/Baz"))
-            .await
-            .unwrap();
+        let contents = fs.read_to_string(mount_path.join("Bar/Baz")).await.unwrap();
         assert_eq!(contents, "");
 
         assert_entries(
             &fs,
-            &mount_point,
+            &mount_path,
             vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
         )
         .await;
-        assert_entries(&fs, &mount_point.join("Bar"), vec!["Baz", "Bin"]).await;
-        assert_entries(&fs, &mount_point.join("Qux"), vec!["Fred"]).await;
+        assert_entries(&fs, &mount_path.join("Bar"), vec!["Baz", "Bin"]).await;
+        assert_entries(&fs, &mount_path.join("Qux"), vec!["Fred"]).await;
 
         for p in [
             "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
         ] {
-            let mode = fs.metadata(mount_point.join(p)).await.unwrap().mode();
+            let mode = fs.metadata(mount_path.join(p)).await.unwrap().mode();
             assert_eq!(Mode(mode & 0o777), Mode(0o555));
         }
 
-        let mode = fs.metadata(mount_point.join("Bar")).await.unwrap().mode();
+        let mode = fs.metadata(mount_path.join("Bar")).await.unwrap().mode();
         assert_eq!(Mode(mode & 0o777), Mode(0o666));
 
         mount_handle.umount_and_join().await.unwrap();
@@ -1212,14 +1212,12 @@ mod tests {
 
     async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
         let data_dir1 = temp.path().join("data1");
         let data_dir2 = temp.path().join("data2");
         let data_dir3 = temp.path().join("data3");
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
         fs.create_dir(&data_dir1).await.unwrap();
         fs.create_dir(&data_dir2).await.unwrap();
         fs.create_dir(&data_dir3).await.unwrap();
@@ -1249,10 +1247,11 @@ mod tests {
         let layer_fs = builder.finish().await.unwrap();
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
         for (d, entries) in expected {
-            assert_entries(&fs, &mount_point.join(d), entries).await;
+            assert_entries(&fs, &mount_path.join(d), entries).await;
         }
 
         mount_handle.umount_and_join().await.unwrap();
@@ -1265,7 +1264,6 @@ mod tests {
         expected: Vec<(&str, Vec<&str>)>,
     ) {
         let temp = tempfile::tempdir().unwrap();
-        let mount_point = temp.path().join("mount");
         let data_dir1 = temp.path().join("data1");
         let data_dir2 = temp.path().join("data2");
         let data_dir3 = temp.path().join("data3");
@@ -1274,7 +1272,6 @@ mod tests {
         let cache_dir = temp.path().join("cache");
 
         let fs = Fs::new();
-        fs.create_dir(&mount_point).await.unwrap();
         fs.create_dir(&data_dir1).await.unwrap();
         fs.create_dir(&data_dir2).await.unwrap();
         fs.create_dir(&data_dir3).await.unwrap();
@@ -1322,63 +1319,14 @@ mod tests {
         let layer_fs = builder.finish().await.unwrap();
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(log, cache, &mount_point).unwrap();
+        let mount_handle = layer_fs.mount(log, cache).await.unwrap();
+        let mount_path = mount_handle.mount_path();
 
         for (d, entries) in expected {
-            assert_entries(&fs, &mount_point.join(d), entries).await;
+            assert_entries(&fs, &mount_path.join(d), entries).await;
         }
 
         mount_handle.umount_and_join().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn two_mounts_test() {
-        let temp = tempfile::tempdir().unwrap();
-        let mount_point1 = temp.path().join("mount1");
-        let mount_point2 = temp.path().join("mount2");
-
-        let data_dir1 = temp.path().join("data1");
-        let data_dir2 = temp.path().join("data2");
-        let cache_dir = temp.path().join("cache");
-
-        let fs = Fs::new();
-        fs.create_dir(&mount_point1).await.unwrap();
-        fs.create_dir(&mount_point2).await.unwrap();
-        fs.create_dir(&data_dir1).await.unwrap();
-        fs.create_dir(&data_dir2).await.unwrap();
-        fs.create_dir(&cache_dir).await.unwrap();
-
-        let layer_fs1 = build_fs(
-            &fs,
-            &data_dir1,
-            &cache_dir,
-            ["/Apple"].into_iter().map(BuildEntry::from_str).collect(),
-        )
-        .await;
-
-        let layer_fs2 = build_fs(
-            &fs,
-            &data_dir2,
-            &cache_dir,
-            ["/Birthday"]
-                .into_iter()
-                .map(BuildEntry::from_str)
-                .collect(),
-        )
-        .await;
-
-        let log = test_logger();
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle1 = layer_fs1
-            .mount(log.clone(), cache.clone(), &mount_point1)
-            .unwrap();
-        let mount_handle2 = layer_fs2.mount(log, cache, &mount_point2).unwrap();
-
-        assert_entries(&fs, &mount_point1, vec!["Apple"]).await;
-        assert_entries(&fs, &mount_point2, vec!["Birthday"]).await;
-
-        mount_handle1.umount_and_join().await.unwrap();
-        mount_handle2.umount_and_join().await.unwrap();
     }
 
     #[tokio::test]

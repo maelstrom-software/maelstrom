@@ -893,6 +893,10 @@ impl UnixStream {
             Ok(Errno::result(unsafe { libc::sendmsg(self.fd.as_fd().0, message, 0) })? as usize)
         })
     }
+
+    pub fn shutdown(&self) -> Result<(), Errno> {
+        Errno::result(unsafe { libc::shutdown(self.fd.as_fd().0, libc::SHUT_RDWR) }).map(drop)
+    }
 }
 
 #[cfg(test)]
