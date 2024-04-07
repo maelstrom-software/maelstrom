@@ -9,34 +9,35 @@ use bumpalo::{
 use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
-    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobMountFsType,
-    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobError, JobMount, JobMountFsType, JobOutputResult, JobResult,
+    Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags, WaitStatus,
+    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Pid, Signal, SocketDomain,
+    SocketProtocol, SocketType, UmountFlags,
 };
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
+use std::os::unix::fs::MetadataExt as _;
 use std::{
     ffi::{CStr, CString},
     fmt::Write as _,
     fs::File,
     io::Read as _,
     iter, mem,
-    os::{fd, unix::ffi::OsStrExt as _},
+    os::fd::RawFd,
+    os::unix::ffi::OsStrExt as _,
     path::{Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
 };
 use tokio::{
-    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, Interest, ReadBuf},
-    runtime, select,
-    sync::oneshot,
-    task::JoinSet,
+    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, ReadBuf},
+    task,
 };
+use tuple::Map as _;
 
 /*              _     _ _
  *  _ __  _   _| |__ | (_) ___
@@ -52,7 +53,7 @@ pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
-    pub path: PathBuf,
+    pub fuse_fd: RawFd,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
@@ -64,7 +65,7 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn from_spec_and_path(spec: maelstrom_base::JobSpec, path: PathBuf) -> Self {
+    pub fn from_spec_and_fuse_fd(spec: maelstrom_base::JobSpec, fuse_fd: RawFd) -> Self {
         let maelstrom_base::JobSpec {
             program,
             arguments,
@@ -83,7 +84,7 @@ impl JobSpec {
             program,
             arguments,
             environment,
-            path,
+            fuse_fd,
             devices,
             mounts,
             enable_loopback,
@@ -96,36 +97,28 @@ impl JobSpec {
     }
 }
 
-// This type can never be instantiated. We use oneshot senders and receivers as job handles, but we
-// only want to send a message when the sender is dropped.
-enum JobHandlePayload {}
-
-pub struct JobHandleSender(oneshot::Sender<JobHandlePayload>);
-pub struct JobHandleReceiver(oneshot::Receiver<JobHandlePayload>);
-
-pub fn job_handle() -> (JobHandleSender, JobHandleReceiver) {
-    let (sender, receiver) = oneshot::channel();
-    (JobHandleSender(sender), JobHandleReceiver(receiver))
-}
-
 pub struct Executor {
     user: UserId,
     group: GroupId,
     mount_dir: CString,
     tmpfs_dir: CString,
+    lower_dir: CString,
     upper_dir: CString,
     work_dir: CString,
-    comma_upperdir_comma_workdir: String,
+    lowerdir_comma_upperdir_comma_workdir: String,
     netlink_socket_addr: NetlinkSocketAddr,
     netlink_message: Box<[u8]>,
+    root_mode: u32,
 }
 
 impl Executor {
     pub fn new(mount_dir: PathBuf, tmpfs_dir: PathBuf) -> Result<Self> {
+        let root_mode = std::fs::metadata(&mount_dir)?.mode();
+
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
-        let (stdin_read_fd, stdin_write_fd) = linux::pipe()?;
+        let (stdin_read_fd, stdin_write_fd) = linux::pipe()?.map(OwnedFd::from_fd);
         if stdin_read_fd.as_fd() == Fd::STDIN {
             // On the off chance that stdin was already closed, we may have already opened our read
             // fd onto stdin.
@@ -145,11 +138,16 @@ impl Executor {
         let user = UserId::from(linux::getuid().as_u32());
         let group = GroupId::from(linux::getgid().as_u32());
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
+        let lower_dir = tmpfs_dir.join("lower");
         let upper_dir = tmpfs_dir.join("upper");
         let work_dir = tmpfs_dir.join("work");
         let tmpfs_dir = CString::new(tmpfs_dir.as_os_str().as_bytes())?;
-        let comma_upperdir_comma_workdir = format!(
-            ",upperdir={},workdir={}",
+        let lowerdir_comma_upperdir_comma_workdir = format!(
+            "lowerdir={},upperdir={},workdir={}",
+            lower_dir
+                .as_os_str()
+                .to_str()
+                .ok_or_else(|| anyhow!("could not convert upper_dir path to string"))?,
             upper_dir
                 .as_os_str()
                 .to_str()
@@ -159,6 +157,7 @@ impl Executor {
                 .to_str()
                 .ok_or_else(|| anyhow!("could not convert work_dir path to string"))?
         );
+        let lower_dir = CString::new(lower_dir.as_os_str().as_bytes())?;
         let upper_dir = CString::new(upper_dir.as_os_str().as_bytes())?;
         let work_dir = CString::new(work_dir.as_os_str().as_bytes())?;
         let netlink_socket_addr = NetlinkSocketAddr::default();
@@ -178,40 +177,45 @@ impl Executor {
             group,
             mount_dir,
             tmpfs_dir,
+            lower_dir,
             upper_dir,
             work_dir,
-            comma_upperdir_comma_workdir,
+            lowerdir_comma_upperdir_comma_workdir,
             netlink_socket_addr,
             netlink_message: buffer,
+            root_mode,
         })
     }
 }
 
 impl Executor {
-    /// Run a process (i.e. job).
+    /// Start a process (i.e. job).
     ///
-    /// On success, this function returns when the process has completed, with a [`JobCompleted`].
-    /// This includes the exit status, stdout, and stderr.
+    /// Two callbacks are provided: one for stdout and one for stderr. These will be called on a
+    /// separate task (they should not block) when the job has closed its stdout/stderr. This will
+    /// likely happen when the job completes.
     ///
-    /// On failure, this function will return immediately. If a child process was started, it will
-    /// be waited for in the background and the zombie process will be reaped.
+    /// No callback is called when the process actually terminates. For that, the caller should use
+    /// waitid(2) or something similar to wait on the pid returned from this function. In
+    /// production, that role will be filled by [`crate::reaper::main`].
     ///
-    /// This function expects a Tokio runtime, which it uses to start a few tasks.
+    /// This function is designed to be callable in an async context, even though it temporarily
+    /// blocks the calling thread while the child is starting up.
     ///
-    /// The `job_handle_receiver` is used to kill the child process. If the attached sender is ever
-    /// closed, the child will be immediately killed with a SIGTERM.
-    ///
-    /// This function should be run in a `spawn_blocking` context. Ideally, this function would be
-    /// async, but that doesn't work because we rely on [`bumpalo::Bump`] as a fast arena
-    /// allocator, and it's not `Sync`.
-    pub fn run_job(
+    /// If this function returns [`JobResult::Ok`], then the child process obviously will be
+    /// started and the caller will need to waitid(2) on the child eventually. However, if this
+    /// function returns an error result, it's still possible that a child was spawned (and has now
+    /// terminated). It is assumed that the caller will be reaping all children, not just those
+    /// positively identified by this function. If that assumption proves invalid, the return
+    /// values of this function should be adjusted to return optional pids in error cases.
+    pub fn start(
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        job_handle_receiver: JobHandleReceiver,
-        runtime: runtime::Handle,
-    ) -> JobResult<JobCompleted, Error> {
-        self.run_job_inner(spec, inline_limit, job_handle_receiver, runtime)
+        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+    ) -> JobResult<Pid, Error> {
+        self.start_inner(spec, inline_limit, stdout_done, stderr_done)
     }
 }
 
@@ -223,32 +227,6 @@ impl Executor {
  * |_|
  *  FIGLET: private
  */
-
-async fn wait_for_child(
-    child_pidfd: OwnedFd,
-    mut job_handle_receiver: JobHandleReceiver,
-) -> Result<JobStatus> {
-    let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
-    let mut listen_for_killer = true;
-    loop {
-        select! {
-            _ = &mut job_handle_receiver.0, if listen_for_killer => {
-                // We kill when the sender is dropped. No message can actually be sent because the
-                // message type can't be instantiated.
-                linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
-                listen_for_killer = false;
-            },
-            res = async_fd.readable() => {
-                let _ = res?;
-                break;
-            },
-        }
-    }
-    Ok(match linux::waitid(async_fd.into_inner().as_fd())? {
-        WaitStatus::Exited(code) => JobStatus::Exited(code.as_u8()),
-        WaitStatus::Signaled(signo) => JobStatus::Signaled(signo.as_u8()),
-    })
-}
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
 struct AsyncFile(AsyncFd<File>);
@@ -276,11 +254,11 @@ impl AsyncRead for AsyncFile {
 }
 
 /// Read all of the contents of `stream` and return the appropriate [`JobOutputResult`].
-async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutputResult> {
+async fn output_reader(
+    inline_limit: InlineLimit,
+    stream: impl AsyncRead + std::marker::Unpin,
+) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
-    // Make the read side of the pipe non-blocking so that we can use it with Tokio.
-    linux::fcntl_setfl(fd.as_fd(), OpenFlags::NONBLOCK).map_err(Error::from)?;
-    let stream = AsyncFile(AsyncFd::new(File::from(fd::OwnedFd::from(fd))).map_err(Error::from)?);
     let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
@@ -297,11 +275,11 @@ async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutp
 
 /// Task main for the output reader: Read the output and then call the callback.
 async fn output_reader_task_main(
-    fd: OwnedFd,
     inline_limit: InlineLimit,
-    sender: oneshot::Sender<Result<JobOutputResult>>,
+    stream: impl AsyncRead + std::marker::Unpin,
+    done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
 ) {
-    let _ = sender.send(output_reader(fd, inline_limit).await);
+    done(output_reader(inline_limit, stream).await);
 }
 
 struct ScriptBuilder<'a> {
@@ -339,33 +317,35 @@ fn bump_c_str_from_bytes<'bump>(bump: &'bump Bump, bytes: &[u8]) -> Result<&'bum
 }
 
 impl Executor {
-    fn run_job_inner(
+    fn start_inner(
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        job_handle_receiver: JobHandleReceiver,
-        runtime: runtime::Handle,
-    ) -> JobResult<JobCompleted, Error> {
-        fn syserr<E>(err: E) -> JobError<Error>
-        where
-            Error: From<E>,
-        {
-            JobError::System(Error::from(err))
-        }
-
+        stdout_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+        stderr_done: impl FnOnce(Result<JobOutputResult>) + Send + 'static,
+    ) -> JobResult<Pid, Error> {
         // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
         // error that occurs in the child before it execs. It's easiest to create the pipes in the
         // parent before cloning and then closing the unnecessary ends in the parent and child.
-        let (stdout_read_fd, stdout_write_fd) = linux::pipe().map_err(syserr)?;
-        let (stderr_read_fd, stderr_write_fd) = linux::pipe().map_err(syserr)?;
-        let (read_sock, write_sock) = linux::UnixStream::pair().map_err(syserr)?;
+        let (stdout_read_fd, stdout_write_fd) = linux::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(OwnedFd::from_fd);
+        let (stderr_read_fd, stderr_write_fd) = linux::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(OwnedFd::from_fd);
+        let (exec_result_read_fd, exec_result_write_fd) = linux::pipe()
+            .map_err(Error::from)
+            .map_err(JobError::System)?
+            .map(OwnedFd::from_fd);
 
-        // Set up the script. This will be run in the child where we have to follow some very
-        // stringent rules to avoid deadlocking. This comes about because we're going to clone in a
-        // multi-threaded program. The child program will only have one thread: this one. The other
-        // threads will just not exist in the child process. If any of those threads held a lock at
-        // the time of the clone, those locks will be locked forever in the child. Any attempt to
-        // acquire those locks in the child would deadlock.
+        // Now we set up the script. This will be run in the child where we have to follow some
+        // very stringent rules to avoid deadlocking. This comes about because we're going to clone
+        // in a multi-threaded program. The child program will only have one thread: this one. The
+        // other threads will just not exist in the child process. If any of those threads held a
+        // lock at the time of the clone, those locks will be locked forever in the child. Any
+        // attempt to acquire those locks in the child would deadlock.
         //
         // The most burdensome result of this is that we can't allocate memory using the global
         // allocator in the child.
@@ -388,23 +368,23 @@ impl Executor {
                     SocketType::RAW,
                     SocketProtocol::NETLINK_ROUTE,
                 ),
-                &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
+                &|err| JobError::System(anyhow!("opening rtnetlink socket: {err}")),
             );
             // This binds the socket.
             builder.push(
                 Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
-                &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
+                &|err| JobError::System(anyhow!("binding rtnetlink socket: {err}")),
             );
             // This sends the message to the kernel.
             builder.push(
                 Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
-                &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
+                &|err| JobError::System(anyhow!("writing rtnetlink message: {err}")),
             );
             // This receives the reply from the kernel.
             // TODO: actually parse the reply to validate that we set up the loopback interface.
             let rtnetlink_response = bump.alloc_slice_fill_default(1024);
             builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
-                syserr(anyhow!("receiving rtnetlink message: {err}"))
+                JobError::System(anyhow!("receiving rtnetlink message: {err}"))
             });
             // We don't need to close the socket because that will happen automatically for us when we
             // exec.
@@ -413,18 +393,20 @@ impl Executor {
         // We now need to set up the new user namespace. This first set of syscalls sets up the
         // uid mapping.
         let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
-        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
+        writeln!(uid_map_contents, "{} {} 1", spec.user, self.user)
+            .map_err(Error::new)
+            .map_err(JobError::System)?;
         builder.push(
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/uid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| syserr(anyhow!("opening /proc/self/uid_map for writing: {err}")),
+            &|err| JobError::System(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
         builder.push(
             Syscall::WriteUsingSavedFd(uid_map_contents.into_bump_str().as_bytes()),
-            &|err| syserr(anyhow!("writing to /proc/self/uid_map: {err}")),
+            &|err| JobError::System(anyhow!("writing to /proc/self/uid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
@@ -437,28 +419,30 @@ impl Executor {
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| syserr(anyhow!("opening /proc/self/setgroups for writing: {err}")),
+            &|err| JobError::System(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
         builder.push(Syscall::WriteUsingSavedFd(b"deny\n"), &|err| {
-            syserr(anyhow!("writing to /proc/self/setgroups: {err}"))
+            JobError::System(anyhow!("writing to /proc/self/setgroups: {err}"))
         });
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
 
         // Finally, we set up the gid mapping.
         let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
-        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
+        writeln!(gid_map_contents, "{} {} 1", spec.group, self.group)
+            .map_err(Error::new)
+            .map_err(JobError::System)?;
         builder.push(
             Syscall::OpenAndSaveFd(
                 c_str!("/proc/self/gid_map"),
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
-            &|err| syserr(anyhow!("opening /proc/self/gid_map for writing: {err}")),
+            &|err| JobError::System(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
         builder.push(
             Syscall::WriteUsingSavedFd(gid_map_contents.into_bump_str().as_bytes()),
-            &|err| syserr(anyhow!("writing to /proc/self/setgroups: {err}")),
+            &|err| JobError::System(anyhow!("writing to /proc/self/setgroups: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
@@ -466,59 +450,39 @@ impl Executor {
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
         // process outside of the pid namespace, which would be confusing.
-        builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
+        builder.push(Syscall::SetSid, &|err| {
+            JobError::System(anyhow!("setsid: {err}"))
+        });
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
         builder.push(Syscall::Dup2(stdout_write_fd.as_fd(), Fd::STDOUT), &|err| {
-            syserr(anyhow!("dup2-ing to stdout: {err}"))
+            JobError::System(anyhow!("dup2-ing to stdout: {err}"))
         });
         builder.push(Syscall::Dup2(stderr_write_fd.as_fd(), Fd::STDERR), &|err| {
-            syserr(anyhow!("dup2-ing to stderr: {err}"))
+            JobError::System(anyhow!("dup2-ing to stderr: {err}"))
         });
-
-        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
-        builder.push(
-            Syscall::CloseRange(
-                CloseRangeFirst::AfterStderr,
-                CloseRangeLast::Max,
-                CloseRangeFlags::CLOEXEC,
-            ),
-            &|err| {
-                syserr(anyhow!(
-                    "setting CLOEXEC on range of open file descriptors: {err}"
-                ))
-            },
-        );
 
         let new_root_path = self.mount_dir.as_c_str();
         if !spec.enable_writable_file_system {
-            let layer0_path =
-                bump_c_str_from_bytes(&bump, spec.path.as_os_str().as_bytes()).map_err(syserr)?;
-
-            // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
-            // pivot_root to it later.
+            let options = bumpalo::format!(
+                in &bump, "fd={},rootmode={:o},user_id=0,group_id=0\0", spec.fuse_fd, self.root_mode
+            );
             builder.push(
                 Syscall::Mount(
-                    Some(layer0_path),
+                    Some(c_str!("Maelstrom LayerFS")),
                     new_root_path,
-                    None,
-                    MountFlags::BIND,
-                    None,
+                    Some(c_str!("fuse")),
+                    MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
+                    Some(options.into_bytes().into_bump_slice()),
                 ),
-                &|err| syserr(anyhow!("bind mounting target root directory: {err}")),
+                &|err| JobError::System(anyhow!("fuse mount: {err}")),
             );
         } else {
+            if true {
+                panic!()
+            }
             // Use overlayfs.
-            let mut options = BumpString::with_capacity_in(1000, &bump);
-            options.push_str("lowerdir=");
-            options.push_str(
-                spec.path
-                    .as_os_str()
-                    .to_str()
-                    .ok_or_else(|| anyhow!("could not convert path to string"))
-                    .map_err(syserr)?,
-            );
             // We need to create an upperdir and workdir. Create a temporary file system to contain
             // both of them.
             builder.push(
@@ -530,20 +494,38 @@ impl Executor {
                     None,
                 ),
                 &|err| {
-                    syserr(anyhow!(
+                    JobError::System(anyhow!(
                         "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"
                     ))
                 },
             );
             builder.push(
+                Syscall::Mkdir(self.lower_dir.as_c_str(), FileMode::RWXU),
+                &|err| JobError::System(anyhow!("making lowerdir for overlayfs: {err}")),
+            );
+            builder.push(
                 Syscall::Mkdir(self.upper_dir.as_c_str(), FileMode::RWXU),
-                &|err| syserr(anyhow!("making uppderdir for overlayfs: {err}")),
+                &|err| JobError::System(anyhow!("making uppderdir for overlayfs: {err}")),
             );
             builder.push(
                 Syscall::Mkdir(self.work_dir.as_c_str(), FileMode::RWXU),
-                &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
+                &|err| JobError::System(anyhow!("making workdir for overlayfs: {err}")),
             );
-            options.push_str(self.comma_upperdir_comma_workdir.as_str());
+            let options = bumpalo::format!(
+                in &bump, "fd={},rootmode=775,user_id=0,group_id=0\0", spec.fuse_fd
+            );
+            builder.push(
+                Syscall::Mount(
+                    Some(unsafe { CStr::from_ptr("Maelstrom LayerFS\0".as_ptr() as *const i8) }),
+                    self.lower_dir.as_c_str(),
+                    Some(unsafe { CStr::from_ptr("fuse\0".as_ptr() as *const i8) }),
+                    MountFlags::NODEV | MountFlags::NOSUID,
+                    Some(options.into_bytes().into_bump_slice()),
+                ),
+                &|err| JobError::System(anyhow!("fuse mount: {err}")),
+            );
+            let mut options = BumpString::with_capacity_in(1000, &bump);
+            options.push_str(self.lowerdir_comma_upperdir_comma_workdir.as_str());
             options.push('\0');
             builder.push(
                 Syscall::Mount(
@@ -553,36 +535,45 @@ impl Executor {
                     MountFlags::default(),
                     Some(options.into_bytes().into_bump_slice()),
                 ),
-                &|err| syserr(anyhow!("mounting overlayfs: {err}")),
+                &|err| JobError::System(anyhow!("mounting overlayfs: {err}")),
             );
         }
 
+        // Set close-on-exec for all file descriptors excecpt stdin, stdout, and stederr.
+        builder.push(
+            Syscall::CloseRange(
+                CloseRangeFirst::AfterStderr,
+                CloseRangeLast::Max,
+                CloseRangeFlags::CLOEXEC,
+            ),
+            &|err| {
+                JobError::System(anyhow!(
+                    "setting CLOEXEC on range of open file descriptors: {err}"
+                ))
+            },
+        );
+
         // Chdir to what will be the new root.
         builder.push(Syscall::Chdir(new_root_path), &|err| {
-            syserr(anyhow!("chdir to target root directory: {err}"))
+            JobError::System(anyhow!("chdir to target root directory: {err}"))
         });
 
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
         // files. However, we can bind mount them.
         for device in spec.devices.iter() {
-            macro_rules! dev {
-                ($dev:literal) => {
-                    (
-                        c_str!(concat!("/dev/", $dev)),
-                        c_str!(concat!("./dev/", $dev)),
-                        concat!("/dev/", $dev),
-                    )
-                };
-            }
             let (source, target, device_name) = match device {
-                JobDevice::Full => dev!("full"),
-                JobDevice::Fuse => dev!("fuse"),
-                JobDevice::Null => dev!("null"),
-                JobDevice::Random => dev!("random"),
-                JobDevice::Tty => dev!("tty"),
-                JobDevice::Urandom => dev!("urandom"),
-                JobDevice::Zero => dev!("zero"),
+                JobDevice::Full => (c_str!("/dev/full"), c_str!("./dev/full"), "/dev/full"),
+                JobDevice::Fuse => (c_str!("/dev/fuse"), c_str!("./dev/fuse"), "/dev/fuse"),
+                JobDevice::Null => (c_str!("/dev/null"), c_str!("./dev/null"), "/dev/null"),
+                JobDevice::Random => (c_str!("/dev/random"), c_str!("./dev/random"), "/dev/random"),
+                JobDevice::Tty => (c_str!("/dev/tty"), c_str!("./dev/tty"), "/dev/tty"),
+                JobDevice::Urandom => (
+                    c_str!("/dev/urandom"),
+                    c_str!("./dev/urandom"),
+                    "/dev/urandom",
+                ),
+                JobDevice::Zero => (c_str!("/dev/zero"), c_str!("./dev/zero"), "/dev/zero"),
             };
             builder.push(
                 Syscall::Mount(Some(source), target, None, MountFlags::BIND, None),
@@ -598,7 +589,7 @@ impl Executor {
 
         // Pivot root to be the new root. See man 2 pivot_root.
         builder.push(Syscall::PivotRoot(c_str!("."), c_str!(".")), &|err| {
-            syserr(anyhow!("pivot_root: {err}"))
+            JobError::System(anyhow!("pivot_root: {err}"))
         });
 
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
@@ -612,7 +603,7 @@ impl Executor {
             .iter()
             .map(|m| bump_c_str(&bump, m.mount_point.as_str()));
         for (mount, mount_point) in iter::zip(spec.mounts.iter(), child_mount_points) {
-            let mount_point_cstr = mount_point.map_err(syserr)?;
+            let mount_point_cstr = mount_point.map_err(Error::from).map_err(JobError::System)?;
 
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
@@ -640,33 +631,34 @@ impl Executor {
 
         // Unmount the old root. See man 2 pivot_root.
         builder.push(Syscall::Umount2(c_str!("."), UmountFlags::DETACH), &|err| {
-            syserr(anyhow!("umount of old root: {err}"))
+            JobError::System(anyhow!("umount of old root: {err}"))
         });
 
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
             let working_directory =
                 bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
-                    .map_err(syserr)?;
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?;
             builder.push(Syscall::Chdir(working_directory), &|err| {
                 JobError::Execution(anyhow!("chdir: {err}"))
             });
         }
 
         // Finally, do the exec.
-        let program = bump_c_str(&bump, spec.program.as_str()).map_err(syserr)?;
+        let program = bump_c_str(&bump, spec.program.as_str()).map_err(JobError::System)?;
         let mut arguments =
             BumpVec::with_capacity_in(spec.arguments.len().checked_add(2).unwrap(), &bump);
         arguments.push(Some(&program.to_bytes_with_nul()[0]));
         for argument in &spec.arguments {
-            let argument_cstr = bump_c_str(&bump, argument.as_str()).map_err(syserr)?;
+            let argument_cstr = bump_c_str(&bump, argument.as_str()).map_err(JobError::System)?;
             arguments.push(Some(&argument_cstr.to_bytes_with_nul()[0]));
         }
         arguments.push(None);
         let mut environment =
             BumpVec::with_capacity_in(spec.environment.len().checked_add(1).unwrap(), &bump);
         for var in &spec.environment {
-            let var_cstr = bump_c_str(&bump, var.as_str()).map_err(syserr)?;
+            let var_cstr = bump_c_str(&bump, var.as_str()).map_err(JobError::System)?;
             environment.push(Some(&var_cstr.to_bytes_with_nul()[0]));
         }
         environment.push(None);
@@ -679,7 +671,7 @@ impl Executor {
             &|err| JobError::Execution(anyhow!("execvc: {err}")),
         );
 
-        // We're finally ready to actually clone the child.
+        // Do the clone.
         let mut clone_args = CloneArgs::default()
             .flags(
                 CloneFlags::NEWCGROUP
@@ -690,57 +682,47 @@ impl Executor {
                     | CloneFlags::NEWUSER,
             )
             .exit_signal(Signal::CHLD);
-        let child_pidfd = match linux::clone3_with_child_pidfd(&mut clone_args) {
-            Ok(Some((_, child_pidfd))) => child_pidfd,
+        let child_pid = match linux::clone3(&mut clone_args) {
+            Ok(Some(child_pid)) => child_pid,
             Ok(None) => {
-                // This is the child process. The following function will never return.
+                // This is the child process.
                 maelstrom_worker_child::start_and_exec_in_child(
-                    write_sock,
+                    exec_result_write_fd.as_fd(),
                     builder.syscalls.as_mut_slice(),
                 );
             }
             Err(err) => {
-                return Err(syserr(err));
+                return Err(JobError::System(err.into()));
             }
         };
 
-        let (stdout_sender, stdout_receiver) = oneshot::channel();
-        let (stderr_sender, stderr_receiver) = oneshot::channel();
+        // At this point, it's still okay to return early in the parent. The child will continue to
+        // execute, but that's okay. If it writes to one of the pipes, it will receive a SIGPIPE.
+        // Otherwise, it will continue until it's done, and then we'll reap the zombie. Since we won't
+        // have any jid->pid association, we'll just ignore the result.
 
-        // Spawn a waiter task to wait on child to terminate. We do this immediately after the
-        // clone so that even if this functions returns early, we will make sure that we wait on
-        // the child.
-        //
-        // It's not clear what to do if we get an error waiting, which, in theory, should never
-        // happen. What we do is return the error so that the client can get back a system error.
-        // An alternative would be to panic and send a plain JobStatus back.
-        let (status_sender, status_receiver) = oneshot::channel();
-        runtime.spawn(async move {
-            let _ = status_sender.send(wait_for_child(child_pidfd, job_handle_receiver).await);
-        });
+        // Drop the write sides of the pipes in the parent. It's important that we drop
+        // exec_result_write_fd before reading from that pipe next.
+        drop(stdout_write_fd);
+        drop(stderr_write_fd);
+        drop(exec_result_write_fd);
 
         // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
         // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
         // we'll read an immediate EOF if the exec is successful.
-        //
-        // It's important to drop our copy of the write side of the pipe first. Otherwise, we'd
-        // deadlock on ourselves!
-        drop(write_sock);
-        let mut exec_result_buf = [0; mem::size_of::<u64>()];
-        let (count, fd) = read_sock
-            .recv_with_fd(&mut exec_result_buf)
-            .map_err(syserr)?;
-        if count > 0 {
-            if fd.is_some() {
-                return Err(syserr(anyhow!("unexpected fd sent")));
-            }
-            if count != exec_result_buf.len() {
-                return Err(syserr(anyhow!(
-                    "couldn't parse exec result pipe's contents: {:?}",
-                    &exec_result_buf[..count]
+        let mut exec_result_buf = vec![];
+        exec_result_read_fd
+            .into_file()
+            .read_to_end(&mut exec_result_buf)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        if !exec_result_buf.is_empty() {
+            if exec_result_buf.len() != 8 {
+                return Err(JobError::System(anyhow!(
+                    "couldn't parse exec result pipe's contents: {exec_result_buf:?}"
                 )));
             }
-            let result = u64::from_ne_bytes(exec_result_buf);
+            let result = u64::from_ne_bytes(exec_result_buf.try_into().unwrap());
             let index = (result >> 32) as usize;
             let errno = result & 0xffffffff;
             return Err(builder.error_transformers[index](
@@ -748,36 +730,36 @@ impl Executor {
             ));
         }
 
-        // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
-        // that we don't cause a deadlock on one while we're reading the other one.
-        //
-        // We put these in a JoinSet so that they will be canceled if we return early.
-        //
-        // We have to drop our own copies of the write side of the pipe. If we didn't, these tasks
-        // would never complete.
-        let mut joinset = JoinSet::new();
-        joinset.spawn_on(
-            output_reader_task_main(stdout_read_fd, inline_limit, stdout_sender),
-            &runtime,
-        );
-        joinset.spawn_on(
-            output_reader_task_main(stderr_read_fd, inline_limit, stderr_sender),
-            &runtime,
-        );
-        drop(stdout_write_fd);
-        drop(stderr_write_fd);
+        // Make the read side of the stdout and stderr pipes non-blocking so that we can use them with
+        // Tokio.
+        linux::fcntl_setfl(stdout_read_fd.as_fd(), OpenFlags::NONBLOCK)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
+        linux::fcntl_setfl(stderr_read_fd.as_fd(), OpenFlags::NONBLOCK)
+            .map_err(Error::from)
+            .map_err(JobError::System)?;
 
-        // Wait for everything and return the result.
-        fn read_from_receiver<T>(receiver: oneshot::Receiver<Result<T>>) -> JobResult<T, Error> {
-            receiver.blocking_recv().unwrap().map_err(syserr)
-        }
-        Ok(JobCompleted {
-            status: read_from_receiver(status_receiver)?,
-            effects: JobEffects {
-                stdout: read_from_receiver(stdout_receiver)?,
-                stderr: read_from_receiver(stderr_receiver)?,
-            },
-        })
+        // Spawn reader tasks to consume stdout and stderr.
+        task::spawn(output_reader_task_main(
+            inline_limit,
+            AsyncFile(
+                AsyncFd::new(stdout_read_fd.into_file())
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?,
+            ),
+            stdout_done,
+        ));
+        task::spawn(output_reader_task_main(
+            inline_limit,
+            AsyncFile(
+                AsyncFd::new(stderr_read_fd.into_file())
+                    .map_err(Error::from)
+                    .map_err(JobError::System)?,
+            ),
+            stderr_done,
+        ));
+
+        Ok(child_pid)
     }
 }
 
@@ -792,14 +774,45 @@ impl Executor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::reaper::{self, ReaperDeps};
     use assert_matches::*;
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::async_fs;
+    use serial_test::serial;
+    use std::ops::ControlFlow;
     use std::sync::Arc;
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
+    use tokio::sync::{oneshot, Mutex};
+
+    struct ReaperAdapter {
+        pid: Pid,
+        result: Option<JobStatus>,
+    }
+
+    impl ReaperAdapter {
+        fn new(pid: Pid) -> Self {
+            ReaperAdapter { pid, result: None }
+        }
+    }
+
+    impl ReaperDeps for &mut ReaperAdapter {
+        fn on_wait_error(&mut self, err: Errno) -> ControlFlow<()> {
+            panic!("waitid error: {err}");
+        }
+        fn on_dummy_child_termination(&mut self) -> ControlFlow<()> {
+            panic!("dummy child panicked");
+        }
+        fn on_child_termination(&mut self, pid: Pid, status: JobStatus) -> ControlFlow<()> {
+            if self.pid == pid {
+                self.result = Some(status);
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        }
+    }
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -815,7 +828,6 @@ mod tests {
 
     struct TarMount {
         temp_dir: PathBuf,
-        mount_path: PathBuf,
         handle: maelstrom_fuse::FuseHandle,
     }
 
@@ -849,17 +861,17 @@ mod tests {
             let layer_fs = builder.finish().await.unwrap();
             let cache = Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new()));
             let handle = layer_fs.mount(log, cache, &mount_path).unwrap();
-            Self {
-                temp_dir,
-                mount_path,
-                handle,
-            }
+            Self { temp_dir, handle }
         }
 
         async fn umount_and_join(self) {
             self.handle.umount_and_join().await.unwrap();
             let fs = async_fs::Fs::new();
             fs.remove_dir_all(&self.temp_dir).await.unwrap();
+        }
+
+        fn fuse_fd(&self) -> RawFd {
+            self.handle.fuse_fd()
         }
     }
 
@@ -886,7 +898,7 @@ mod tests {
 
         async fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
             let mount = TarMount::new().await;
-            let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
+            let spec = JobSpec::from_spec_and_fuse_fd(spec, mount.fuse_fd());
             Self::new(spec, mount)
         }
 
@@ -911,30 +923,38 @@ mod tests {
         }
 
         async fn run(self) {
-            let JobCompleted {
-                status,
-                effects: JobEffects { stdout, stderr },
-            } = tokio::task::spawn_blocking(move || {
-                let (_job_handle_sender, job_handle_receiver) = job_handle();
+            let dummy_child_pid = reaper::clone_dummy_child().unwrap();
+            let (stdout_tx, stdout_rx) = oneshot::channel();
+            let (stderr_tx, stderr_rx) = oneshot::channel();
+            let start_result = tokio::task::block_in_place(|| {
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
                 )
                 .unwrap()
-                .run_job(
+                .start(
                     &self.spec,
                     self.inline_limit,
-                    job_handle_receiver,
-                    runtime::Handle::current(),
+                    |stdout| stdout_tx.send(stdout.unwrap()).unwrap(),
+                    |stderr| stderr_tx.send(stderr.unwrap()).unwrap(),
                 )
-            })
-            .await
-            .unwrap()
-            .unwrap();
-
-            assert_eq!(status, self.expected_status);
-            assert_eq!(stdout, self.expected_stdout);
-            assert_eq!(stderr, self.expected_stderr);
+            });
+            assert_matches!(start_result, Ok(_));
+            let Ok(pid) = start_result else {
+                unreachable!();
+            };
+            let reaper = task::spawn_blocking(move || {
+                let mut adapter = ReaperAdapter::new(pid);
+                reaper::main(&mut adapter, dummy_child_pid);
+                let result = adapter.result.unwrap();
+                linux::kill(dummy_child_pid, Signal::KILL).ok();
+                let mut adapter = ReaperAdapter::new(dummy_child_pid);
+                reaper::main(&mut adapter, Pid::new_for_test(0));
+                result
+            });
+            assert_eq!(reaper.await.unwrap(), self.expected_status);
+            assert_eq!(stdout_rx.await.unwrap(), self.expected_stdout);
+            assert_eq!(stderr_rx.await.unwrap(), self.expected_stderr);
 
             self.mount.umount_and_join().await;
         }
@@ -953,11 +973,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn exited_0() {
         Test::from_spec(bash_spec("exit 0")).await.run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn exited_1() {
         Test::from_spec(bash_spec("exit 1"))
             .await
@@ -970,6 +992,7 @@ mod tests {
     // our executor. We should probably rewrite these tests to run python or something, and take
     // input from stdin.
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn signaled_11() {
         Test::from_spec(python_spec(concat!(
             "import os;",
@@ -989,6 +1012,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stdout_inline_limit_0() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1002,6 +1026,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stdout_inline_limit_1() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1015,6 +1040,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stdout_inline_limit_2() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1025,6 +1051,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stdout_inline_limit_3() {
         Test::from_spec(bash_spec("echo a"))
             .await
@@ -1035,6 +1062,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stderr_inline_limit_0() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1048,6 +1076,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stderr_inline_limit_1() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1061,6 +1090,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stderr_inline_limit_2() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1071,6 +1101,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stderr_inline_limit_3() {
         Test::from_spec(bash_spec("echo a >&2"))
             .await
@@ -1081,6 +1112,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn environment() {
         Test::from_spec(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
             .await
@@ -1090,11 +1122,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn stdin_empty() {
         Test::from_spec(test_spec("/bin/cat")).await.run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn pid_ppid_pgid_and_sid() {
         // We should be pid 1, that is, init for our namespace).
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
@@ -1116,6 +1150,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_loopback() {
         Test::from_spec(
             test_spec("/bin/cat")
@@ -1135,6 +1170,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn loopback() {
         Test::from_spec(
             test_spec("/bin/cat")
@@ -1152,6 +1188,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn user_and_group_0() {
         Test::from_spec(python_spec(concat!(
             "import os;",
@@ -1165,6 +1202,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn user_and_group_nonzero() {
         Test::from_spec(
             python_spec(concat!(
@@ -1182,6 +1220,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn close_range() {
         Test::from_spec(
             test_spec("/bin/ls")
@@ -1198,6 +1237,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn one_layer_is_read_only() {
         Test::from_spec(test_spec("/bin/touch").arguments(["/foo"]))
             .await
@@ -1210,6 +1250,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn one_layer_with_writable_file_system_is_writable() {
         Test::from_spec(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
             .await
@@ -1227,11 +1268,12 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn multiple_layers_with_writable_file_system_is_writable() {
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(
+        let spec = JobSpec::from_spec_and_fuse_fd(
             bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true),
-            mount.mount_path.clone(),
+            mount.fuse_fd(),
         );
         Test::new(spec, mount)
             .expected_status(JobStatus::Exited(0))
@@ -1241,9 +1283,9 @@ mod tests {
 
         // Run another job to ensure that the file doesn't persist.
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(
+        let spec = JobSpec::from_spec_and_fuse_fd(
             bash_spec("test -e /foo").enable_writable_file_system(true),
-            mount.mount_path.clone(),
+            mount.fuse_fd(),
         );
         Test::new(spec, mount)
             .expected_status(JobStatus::Exited(1))
@@ -1252,6 +1294,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_full() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
             .await
@@ -1261,6 +1304,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_full() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
@@ -1273,6 +1317,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_null() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
             .await
@@ -1282,6 +1327,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_null() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
@@ -1294,6 +1340,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_null_write() {
         Test::from_spec(
             bash_spec("echo foo > /dev/null && cat /dev/null")
@@ -1305,6 +1352,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_random() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .await
@@ -1314,6 +1362,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_random() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
@@ -1326,6 +1375,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_tty() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
             .await
@@ -1335,6 +1385,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_tty() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
@@ -1347,6 +1398,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_urandom() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
             .await
@@ -1356,6 +1408,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_urandom() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
@@ -1368,6 +1421,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_dev_zero() {
         Test::from_spec(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
             .await
@@ -1377,6 +1431,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn dev_zero() {
         Test::from_spec(
             bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
@@ -1389,6 +1444,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_tmpfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1405,6 +1461,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn tmpfs() {
         Test::from_spec(
             test_spec("/bin/awk")
@@ -1427,6 +1484,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_sysfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1443,6 +1501,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn sysfs() {
         Test::from_spec(
             test_spec("/bin/awk")
@@ -1465,6 +1524,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn no_procfs() {
         Test::from_spec(test_spec("/bin/ls").arguments(["/proc"]))
             .await
@@ -1473,6 +1533,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn procfs() {
         Test::from_spec(
             test_spec("/bin/grep")
@@ -1491,6 +1552,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn old_mounts_are_unmounted() {
         Test::from_spec(
             test_spec("/bin/wc")
@@ -1507,6 +1569,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn working_directory_root() {
         Test::from_spec(bash_spec("pwd"))
             .await
@@ -1516,6 +1579,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn working_directory_not_root() {
         Test::from_spec(bash_spec("pwd").working_directory("/usr/bin"))
             .await
@@ -1526,36 +1590,32 @@ mod tests {
 
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
-        let (_job_handle_sender, job_handle_receiver) = job_handle();
+        let spec = JobSpec::from_spec_and_fuse_fd(spec, mount.fuse_fd());
         assert_matches!(
-            tokio::task::spawn_blocking(move || {
-                Executor::new(
-                    tempfile::tempdir().unwrap().into_path(),
-                    tempfile::tempdir().unwrap().into_path(),
-                )
-                .unwrap()
-                .run_job(
-                    &spec,
-                    ByteSize::b(0).into(),
-                    job_handle_receiver,
-                    runtime::Handle::current(),
-                )
-            })
-            .await
-            .unwrap(),
+            Executor::new(
+                tempfile::tempdir().unwrap().into_path(),
+                tempfile::tempdir().unwrap().into_path()
+            )
+            .unwrap()
+            .start(
+                &spec,
+                ByteSize::b(0).into(),
+                |_| unreachable!(),
+                |_| unreachable!()
+            ),
             Err(JobError::Execution(_))
         );
-
-        mount.umount_and_join().await;
+        mount.umount_and_join().await
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn execution_error() {
         assert_execution_error(test_spec("a_program_that_does_not_exist")).await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
     }

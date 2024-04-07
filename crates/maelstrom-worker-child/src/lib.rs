@@ -86,18 +86,18 @@ fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
 /// Run the provided syscall script in `syscalls`.
 ///
 /// It is assumed that the last syscall won't return (i.e. will be `execve`). If there is an error,
-/// write an 8-byte value to `exec_result_write_fd` describing the error in little-endian format.
+/// write an 8-byte value to `write_sock` describing the error in little-endian format.
 /// The upper 32 bits will be the index in the script of the syscall that errored, and the lower 32
 /// bits will be the errno value.
 ///
-/// The caller should ensure that `exec_result_write_fd` is marked close-on-exec. This way, upon
+/// The caller should ensure that `write_sock` is marked close-on-exec. This way, upon
 /// normal completion, no bytes will be written to the file descriptor and the worker can
 /// distinguish between an error and no error.
-pub fn start_and_exec_in_child(exec_result_write_fd: Fd, syscalls: &mut [Syscall]) -> ! {
+pub fn start_and_exec_in_child(write_sock: linux::UnixStream, syscalls: &mut [Syscall]) -> ! {
     let (index, errno) = start_and_exec_in_child_inner(syscalls);
     let result = (index as u64) << 32 | errno.as_u64();
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.
-    let _ = linux::write(exec_result_write_fd, result.to_ne_bytes().as_slice());
+    let _ = write_sock.send(result.to_ne_bytes().as_slice());
     linux::_exit(linux::ExitCode::from_u8(1));
 }
