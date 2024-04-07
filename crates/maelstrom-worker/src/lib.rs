@@ -152,14 +152,8 @@ impl Drop for TimerHandle {
 
 impl DispatcherDeps for DispatcherAdapter {
     type JobHandle = JobHandleSender;
-    type FuseHandle = ();
 
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        spec: JobSpec,
-        layer_fs_path: PathBuf,
-    ) -> (Self::JobHandle, Self::FuseHandle) {
+    fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
         let (job_handle_sender, job_handle_receiver) = executor::job_handle();
         if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, job_handle_receiver) {
             let _ = self.dispatcher_sender.send(Message::JobCompleted(
@@ -167,11 +161,7 @@ impl DispatcherDeps for DispatcherAdapter {
                 Err(JobError::System(e.to_string())),
             ));
         }
-        (job_handle_sender, ())
-    }
-
-    fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {
-        // remove
+        job_handle_sender
     }
 
     type TimerHandle = TimerHandle;

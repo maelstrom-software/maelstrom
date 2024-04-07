@@ -37,19 +37,9 @@ pub trait DispatcherDeps {
     /// safe to drop this handle after the job has completed.
     type JobHandle;
 
-    type FuseHandle;
-
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
     /// completes. The dispatcher can call [`cancel_job`] if it wants the job to stop immediately.
-    fn start_job(
-        &mut self,
-        jid: JobId,
-        spec: JobSpec,
-        path: PathBuf,
-    ) -> (Self::JobHandle, Self::FuseHandle);
-
-    /// Start a task to unmount the fuse mount.
-    fn clean_up_fuse_handle_on_task(&mut self, handle: Self::FuseHandle);
+    fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
 
     /// The timer handle should cancel an outstanding timer when it is dropped. It must be safe to
     /// drop this handle after the timer has completed. Dropping this handle may or may not result
@@ -257,7 +247,6 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
 struct ExecutingJob<DepsT: DispatcherDeps> {
     state: ExecutingJobState<DepsT>,
     cache_keys: HashSet<CacheKey>,
-    fuse_handle: DepsT::FuseHandle,
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
@@ -372,14 +361,13 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let timer_handle = spec
             .timeout
             .map(|timeout| self.deps.start_timer(jid, Duration::from(timeout)));
-        let (job_handle, fuse_handle) = self.deps.start_job(jid, spec, path);
+        let job_handle = self.deps.start_job(jid, spec, path);
         let executing_job = ExecutingJob {
             state: ExecutingJobState::Nominal {
                 _job_handle: job_handle,
                 _timer_handle: timer_handle,
             },
             cache_keys,
-            fuse_handle,
         };
         self.executing.insert(jid, executing_job).assert_is_none();
     }
@@ -440,12 +428,7 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     }
 
     fn receive_job_completed(&mut self, jid: JobId, result: JobResult<JobCompleted, String>) {
-        let Some(ExecutingJob {
-            state,
-            cache_keys,
-            fuse_handle,
-        }) = self.executing.remove(&jid)
-        else {
+        let Some(ExecutingJob { state, cache_keys }) = self.executing.remove(&jid) else {
             panic!("missing entry for {jid:?}");
         };
 
@@ -464,7 +447,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         for CacheKey { kind, digest } in cache_keys {
             self.cache.decrement_ref_count(kind, &digest);
         }
-        self.deps.clean_up_fuse_handle_on_task(fuse_handle);
         self.possibly_start_job();
     }
 
@@ -472,7 +454,6 @@ impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
         let Some(&mut ExecutingJob {
             ref mut state,
             cache_keys: _,
-            fuse_handle: _,
         }) = self.executing.get_mut(&jid)
         else {
             return;
@@ -688,23 +669,12 @@ mod tests {
 
     impl DispatcherDeps for Rc<RefCell<TestState>> {
         type JobHandle = TestHandle;
-        type FuseHandle = JobId;
 
-        fn start_job(
-            &mut self,
-            jid: JobId,
-            spec: JobSpec,
-            path: PathBuf,
-        ) -> (Self::JobHandle, Self::FuseHandle) {
+        fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle {
             let mut mut_ref = self.borrow_mut();
             mut_ref.messages.push(StartJob(jid, spec, path));
-            (
-                TestHandle(TestMessage::JobHandleDropped(jid), self.clone()),
-                jid,
-            )
+            TestHandle(TestMessage::JobHandleDropped(jid), self.clone())
         }
-
-        fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {}
 
         type TimerHandle = TestHandle;
 
