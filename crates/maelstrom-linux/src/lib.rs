@@ -242,6 +242,10 @@ impl Fd {
     pub fn from_raw(raw: c_int) -> Self {
         Self(raw)
     }
+
+    pub fn as_c_int(self) -> c_int {
+        self.0
+    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -274,6 +278,10 @@ pub struct Gid(gid_t);
 impl Gid {
     pub fn as_u32(&self) -> u32 {
         self.0
+    }
+
+    pub fn from_u32(v: u32) -> Self {
+        Self(v)
     }
 }
 
@@ -312,6 +320,7 @@ impl Default for NetlinkSocketAddr {
 pub struct OpenFlags(c_int);
 
 impl OpenFlags {
+    pub const RDWR: Self = Self(libc::O_RDWR);
     pub const WRONLY: Self = Self(libc::O_WRONLY);
     pub const TRUNC: Self = Self(libc::O_TRUNC);
     pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
@@ -463,6 +472,10 @@ impl Uid {
     pub fn as_u32(&self) -> u32 {
         self.0
     }
+
+    pub fn from_u32(v: u32) -> Self {
+        Self(v)
+    }
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -594,9 +607,10 @@ pub fn mount(
 
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<OwnedFd, Errno> {
     let path_ptr = path.as_ptr();
-    Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) })
+    let fd = Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) })
         .map(Fd)
-        .map(OwnedFd)
+        .map(OwnedFd)?;
+    Ok(fd)
 }
 
 pub fn pause() {

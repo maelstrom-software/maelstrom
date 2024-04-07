@@ -126,6 +126,19 @@ pub async fn fuse_mount_namespace(
     })
 }
 
+pub async fn run_fuse(
+    handler: impl FuseFileSystem + Send + Sync + 'static,
+    fd: linux::OwnedFd,
+) -> Result<()> {
+    let mut session = crate::fuser::Session::from_fd(
+        DispatchingFs::new(handler),
+        fd.into(),
+        crate::fuser::SessionACL::All,
+    )?;
+    session.run().await?;
+    Ok(())
+}
+
 fn fuse_mount_dispatcher(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     mount_point: PathBuf,

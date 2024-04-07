@@ -178,6 +178,17 @@ impl LayerFs {
         let adapter = LayerFsFuseAdapter::new(self, log, cache);
         maelstrom_fuse::fuse_mount(adapter, mount_path, "Maelstrom LayerFS")
     }
+
+    pub async fn run_fuse(
+        self,
+        log: slog::Logger,
+        cache: Arc<Mutex<ReaderCache>>,
+        fd: maelstrom_linux::OwnedFd,
+    ) -> Result<()> {
+        slog::debug!(log, "running FUSE file-system");
+        let adapter = LayerFsFuseAdapter::new(self, log, cache);
+        maelstrom_fuse::run_fuse(adapter, fd).await
+    }
 }
 
 pub struct ReaderCache {

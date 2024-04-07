@@ -62,7 +62,6 @@ struct DispatcherAdapter {
     log: Logger,
     executor: Arc<Executor>,
     cache_dir: PathBuf,
-    tmpfs_dir: PathBuf,
     layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
 }
 
@@ -89,7 +88,6 @@ impl DispatcherAdapter {
             log,
             executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
             cache_dir,
-            tmpfs_dir,
             layer_fs_cache: Arc::new(tokio::sync::Mutex::new(
                 maelstrom_layer_fs::ReaderCache::new(),
             )),
@@ -101,7 +99,6 @@ impl DispatcherAdapter {
         jid: JobId,
         spec: JobSpec,
         layer_fs_path: PathBuf,
-        handle_sender: tokio::sync::oneshot::Sender<DispatcherAdapterFuseHandle>,
         job_handle_receiver: JobHandleReceiver,
     ) -> Result<()> {
         let log = self
@@ -109,21 +106,19 @@ impl DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
 
-        let mount_path = self
-            .tmpfs_dir
-            .join(format!("fuse_mount.{}.{}", jid.cid, jid.cjid));
-        Fs::new().create_dir_all(&mount_path)?;
-
         let cache_dir = self.cache_dir.join("blob/sha256");
         let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)?;
-        let fuse_handle = layer_fs.mount(log.clone(), self.layer_fs_cache.clone(), &mount_path)?;
-        let _ = handle_sender.send(DispatcherAdapterFuseHandle {
-            inner: fuse_handle,
-            mount_path: mount_path.clone(),
-        });
+        let layer_fs_cache = self.layer_fs_cache.clone();
+        let fuse_spawn = move |fd| {
+            tokio::spawn(async move {
+                if let Err(e) = layer_fs.run_fuse(log.clone(), layer_fs_cache, fd).await {
+                    slog::error!(log, "FUSE handling got error {e:?}");
+                }
+            });
+        };
 
         let executor = self.executor.clone();
-        let spec = executor::JobSpec::from_spec_and_path(spec, mount_path);
+        let spec = executor::JobSpec::from_spec(spec);
         let inline_limit = self.inline_limit;
         let dispatcher_sender = self.dispatcher_sender.clone();
         let runtime = tokio::runtime::Handle::current();
@@ -132,47 +127,18 @@ impl DispatcherAdapter {
                 .send(Message::JobCompleted(
                     jid,
                     executor
-                        .run_job(&spec, inline_limit, job_handle_receiver, runtime)
+                        .run_job(
+                            &spec,
+                            inline_limit,
+                            job_handle_receiver,
+                            fuse_spawn,
+                            runtime,
+                        )
                         .map_err(|e| e.map(|inner| inner.to_string())),
                 ))
                 .ok()
         });
         Ok(())
-    }
-}
-
-struct DispatcherAdapterFuseHandle {
-    inner: maelstrom_fuse::FuseHandle,
-    mount_path: PathBuf,
-}
-
-impl DispatcherAdapterFuseHandle {
-    async fn clean_up(self) -> Result<()> {
-        self.inner.umount_and_join().await?;
-        let fs = async_fs::Fs::new();
-        fs.remove_dir(self.mount_path).await
-    }
-}
-
-struct FuseHandle {
-    handle_receiver:
-        Arc<std::sync::Mutex<Option<tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>>>>,
-}
-
-impl FuseHandle {
-    fn new(handle_receiver: tokio::sync::oneshot::Receiver<DispatcherAdapterFuseHandle>) -> Self {
-        Self {
-            handle_receiver: Arc::new(std::sync::Mutex::new(Some(handle_receiver))),
-        }
-    }
-
-    async fn fuse_handle(&mut self) -> Option<DispatcherAdapterFuseHandle> {
-        let receiver = self.handle_receiver.lock().unwrap().take();
-        if let Some(receiver) = receiver {
-            receiver.await.ok()
-        } else {
-            None
-        }
     }
 }
 
@@ -186,7 +152,7 @@ impl Drop for TimerHandle {
 
 impl DispatcherDeps for DispatcherAdapter {
     type JobHandle = JobHandleSender;
-    type FuseHandle = FuseHandle;
+    type FuseHandle = ();
 
     fn start_job(
         &mut self,
@@ -194,28 +160,18 @@ impl DispatcherDeps for DispatcherAdapter {
         spec: JobSpec,
         layer_fs_path: PathBuf,
     ) -> (Self::JobHandle, Self::FuseHandle) {
-        let (handle_sender, handler_receiver) = tokio::sync::oneshot::channel();
         let (job_handle_sender, job_handle_receiver) = executor::job_handle();
-        if let Err(e) =
-            self.start_job_inner(jid, spec, layer_fs_path, handle_sender, job_handle_receiver)
-        {
+        if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, job_handle_receiver) {
             let _ = self.dispatcher_sender.send(Message::JobCompleted(
                 jid,
                 Err(JobError::System(e.to_string())),
             ));
         }
-        (job_handle_sender, FuseHandle::new(handler_receiver))
+        (job_handle_sender, ())
     }
 
-    fn clean_up_fuse_handle_on_task(&mut self, mut handle: Self::FuseHandle) {
-        let log = self.log.clone();
-        task::spawn(async move {
-            if let Some(fuse_handle) = handle.fuse_handle().await {
-                if let Err(e) = fuse_handle.clean_up().await {
-                    error!(log, "error unmounting fuse: {e}")
-                }
-            }
-        });
+    fn clean_up_fuse_handle_on_task(&mut self, _handle: Self::FuseHandle) {
+        // remove
     }
 
     type TimerHandle = TimerHandle;

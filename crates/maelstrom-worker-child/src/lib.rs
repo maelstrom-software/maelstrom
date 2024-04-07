@@ -6,12 +6,37 @@
 //! its dependencies carefully.
 #![no_std]
 
-use core::{ffi::CStr, result};
+use core::{ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
     self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
     MountFlags, NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType,
     UmountFlags,
 };
+
+struct SliceFmt<'a> {
+    slice: &'a mut [u8],
+    offset: usize,
+}
+
+impl<'a> SliceFmt<'a> {
+    fn new(slice: &'a mut [u8]) -> Self {
+        Self { slice, offset: 0 }
+    }
+}
+
+impl<'a> core::fmt::Write for SliceFmt<'a> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let bytes = s.as_bytes();
+        if self.slice.len() - self.offset < bytes.len() {
+            return Err(core::fmt::Error);
+        }
+
+        self.slice[self.offset..(self.offset + bytes.len())].copy_from_slice(bytes);
+        self.offset += bytes.len();
+
+        Ok(())
+    }
+}
 
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
@@ -36,10 +61,16 @@ pub enum Syscall<'a> {
     PivotRoot(&'a CStr, &'a CStr),
     Umount2(&'a CStr, UmountFlags),
     Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
+    FuseMountUsingSavedFd(&'a CStr, &'a CStr, MountFlags, u32, linux::Uid, linux::Gid),
+    SendMsgSavedFd(&'a [u8]),
 }
 
 impl<'a> Syscall<'a> {
-    fn call(&mut self, saved_fd: &mut Fd) -> result::Result<(), Errno> {
+    fn call(
+        &mut self,
+        write_sock: &linux::UnixStream,
+        saved_fd: &mut Fd,
+    ) -> result::Result<(), Errno> {
         match self {
             Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
                 linux::socket(*domain, *sock_type, *protocol).map(|fd| {
@@ -66,6 +97,26 @@ impl<'a> Syscall<'a> {
             Syscall::Execve(program, arguments, environment) => {
                 linux::execve(program, arguments, environment)
             }
+            Syscall::FuseMountUsingSavedFd(source, target, flags, root_mode, uid, gid) => {
+                let mut options = [0; 100];
+                write!(
+                    SliceFmt::new(&mut options),
+                    "fd={},rootmode={:o},user_id={},group_id={}\0",
+                    saved_fd.as_c_int(),
+                    root_mode,
+                    uid.as_u32(),
+                    gid.as_u32()
+                )
+                .unwrap();
+                let source = Some(*source);
+                let fstype = Some(unsafe { CStr::from_ptr("fuse\0".as_ptr() as *const i8) });
+                linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
+            }
+            Syscall::SendMsgSavedFd(buffer) => {
+                let count = write_sock.send_with_fd(buffer, *saved_fd)?;
+                assert_eq!(count, buffer.len());
+                Ok(())
+            }
         }
     }
 }
@@ -73,10 +124,13 @@ impl<'a> Syscall<'a> {
 /// The guts of the child code. This function shouldn't return on success, because in that case,
 /// the last syscall should be an execve. If this function returns, than an error was encountered.
 /// In that case, the script item index and the errno will be returned.
-fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
+fn start_and_exec_in_child_inner(
+    write_sock: &linux::UnixStream,
+    syscalls: &mut [Syscall],
+) -> (usize, Errno) {
     let mut saved_fd = Fd::STDIN; // STDIN is arbitrary.
     for (index, syscall) in syscalls.iter_mut().enumerate() {
-        if let Err(errno) = syscall.call(&mut saved_fd) {
+        if let Err(errno) = syscall.call(write_sock, &mut saved_fd) {
             return (index, errno);
         }
     }
@@ -94,7 +148,7 @@ fn start_and_exec_in_child_inner(syscalls: &mut [Syscall]) -> (usize, Errno) {
 /// normal completion, no bytes will be written to the file descriptor and the worker can
 /// distinguish between an error and no error.
 pub fn start_and_exec_in_child(write_sock: linux::UnixStream, syscalls: &mut [Syscall]) -> ! {
-    let (index, errno) = start_and_exec_in_child_inner(syscalls);
+    let (index, errno) = start_and_exec_in_child_inner(&write_sock, syscalls);
     let result = (index as u64) << 32 | errno.as_u64();
     // There's not really much to do if this write fails. Therefore, we just ignore the result.
     // However, it's hard to imagine any case where this could fail and we'd actually care.

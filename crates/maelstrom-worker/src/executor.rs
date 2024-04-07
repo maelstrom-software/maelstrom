@@ -20,6 +20,7 @@ use maelstrom_linux::{
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
+use std::os::unix::fs::MetadataExt;
 use std::{
     ffi::{CStr, CString},
     fmt::Write as _,
@@ -52,7 +53,6 @@ pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
-    pub path: PathBuf,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
@@ -64,7 +64,7 @@ pub struct JobSpec {
 }
 
 impl JobSpec {
-    pub fn from_spec_and_path(spec: maelstrom_base::JobSpec, path: PathBuf) -> Self {
+    pub fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
         let maelstrom_base::JobSpec {
             program,
             arguments,
@@ -83,7 +83,6 @@ impl JobSpec {
             program,
             arguments,
             environment,
-            path,
             devices,
             mounts,
             enable_loopback,
@@ -115,6 +114,7 @@ pub struct Executor {
     tmpfs_dir: CString,
     upper_dir: CString,
     work_dir: CString,
+    root_mode: u32,
     comma_upperdir_comma_workdir: String,
     netlink_socket_addr: NetlinkSocketAddr,
     netlink_message: Box<[u8]>,
@@ -144,6 +144,7 @@ impl Executor {
 
         let user = UserId::from(linux::getuid().as_u32());
         let group = GroupId::from(linux::getgid().as_u32());
+        let root_mode = std::fs::metadata(&mount_dir)?.mode();
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
         let upper_dir = tmpfs_dir.join("upper");
         let work_dir = tmpfs_dir.join("work");
@@ -180,6 +181,7 @@ impl Executor {
             tmpfs_dir,
             upper_dir,
             work_dir,
+            root_mode,
             comma_upperdir_comma_workdir,
             netlink_socket_addr,
             netlink_message: buffer,
@@ -209,9 +211,10 @@ impl Executor {
         spec: &JobSpec,
         inline_limit: InlineLimit,
         job_handle_receiver: JobHandleReceiver,
+        fuse_spawn: impl FnOnce(OwnedFd),
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
-        self.run_job_inner(spec, inline_limit, job_handle_receiver, runtime)
+        self.run_job_inner(spec, inline_limit, job_handle_receiver, fuse_spawn, runtime)
     }
 }
 
@@ -344,8 +347,11 @@ impl Executor {
         spec: &JobSpec,
         inline_limit: InlineLimit,
         job_handle_receiver: JobHandleReceiver,
+        fuse_spawn: impl FnOnce(OwnedFd),
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
+        let mut fuse_spawn = Some(fuse_spawn);
+
         fn syserr<E>(err: E) -> JobError<Error>
         where
             Error: From<E>,
@@ -458,7 +464,7 @@ impl Executor {
         );
         builder.push(
             Syscall::WriteUsingSavedFd(gid_map_contents.into_bump_str().as_bytes()),
-            &|err| syserr(anyhow!("writing to /proc/self/setgroups: {err}")),
+            &|err| syserr(anyhow!("writing to /proc/self/gid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
         // exec.
@@ -477,6 +483,32 @@ impl Executor {
             syserr(anyhow!("dup2-ing to stderr: {err}"))
         });
 
+        builder.push(
+            Syscall::OpenAndSaveFd(
+                c_str!("/dev/fuse"),
+                OpenFlags::RDWR | OpenFlags::NONBLOCK,
+                FileMode::default(),
+            ),
+            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
+        );
+
+        let new_root_path = self.mount_dir.as_c_str();
+        builder.push(
+            Syscall::FuseMountUsingSavedFd(
+                c_str!("Maelstrom LayerFS"),
+                new_root_path,
+                MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
+                self.root_mode,
+                linux::Uid::from_u32(spec.user.as_u32()),
+                linux::Gid::from_u32(spec.group.as_u32()),
+            ),
+            &|err| JobError::System(anyhow!("fuse mount: {err}")),
+        );
+
+        builder.push(Syscall::SendMsgSavedFd(&[0xFF; 8]), &|err| {
+            JobError::System(anyhow!("sendmsg: {err}"))
+        });
+
         // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
         builder.push(
             Syscall::CloseRange(
@@ -491,33 +523,14 @@ impl Executor {
             },
         );
 
-        let new_root_path = self.mount_dir.as_c_str();
-        if !spec.enable_writable_file_system {
-            let layer0_path =
-                bump_c_str_from_bytes(&bump, spec.path.as_os_str().as_bytes()).map_err(syserr)?;
-
-            // Bind mount the directory onto our mount dir. This ensures it's a mount point so we can
-            // pivot_root to it later.
-            builder.push(
-                Syscall::Mount(
-                    Some(layer0_path),
-                    new_root_path,
-                    None,
-                    MountFlags::BIND,
-                    None,
-                ),
-                &|err| syserr(anyhow!("bind mounting target root directory: {err}")),
-            );
-        } else {
+        if spec.enable_writable_file_system {
             // Use overlayfs.
             let mut options = BumpString::with_capacity_in(1000, &bump);
             options.push_str("lowerdir=");
             options.push_str(
-                spec.path
-                    .as_os_str()
+                new_root_path
                     .to_str()
-                    .ok_or_else(|| anyhow!("could not convert path to string"))
-                    .map_err(syserr)?,
+                    .map_err(|_| syserr(anyhow!("could not convert path to string")))?,
             );
             // We need to create an upperdir and workdir. Create a temporary file system to contain
             // both of them.
@@ -726,20 +739,35 @@ impl Executor {
         // It's important to drop our copy of the write side of the pipe first. Otherwise, we'd
         // deadlock on ourselves!
         drop(write_sock);
+
         let mut exec_result_buf = [0; mem::size_of::<u64>()];
-        let (count, fd) = read_sock
-            .recv_with_fd(&mut exec_result_buf)
-            .map_err(syserr)?;
-        if count > 0 {
-            if fd.is_some() {
-                return Err(syserr(anyhow!("unexpected fd sent")));
+        loop {
+            let (count, fd) = read_sock
+                .recv_with_fd(&mut exec_result_buf)
+                .map_err(syserr)?;
+            if count == 0 {
+                // If we get EOF, the child successfully exec'd
+                break;
             }
+
+            // We don't expect to get a truncated message in this case
             if count != exec_result_buf.len() {
                 return Err(syserr(anyhow!(
                     "couldn't parse exec result pipe's contents: {:?}",
                     &exec_result_buf[..count]
                 )));
             }
+
+            // If we get an file-descriptor, we pass it to the FUSE callback
+            if let Some(fd) = fd {
+                let fuse_spawn = fuse_spawn
+                    .take()
+                    .ok_or(syserr(anyhow!("multiple FUSE fds")))?;
+                fuse_spawn(fd);
+                continue;
+            }
+
+            // Otherwise it should be an error we got back from exec
             let result = u64::from_ne_bytes(exec_result_buf);
             let index = (result >> 32) as usize;
             let errno = result & 0xffffffff;
@@ -814,27 +842,26 @@ mod tests {
     }
 
     struct TarMount {
-        temp_dir: PathBuf,
-        mount_path: PathBuf,
-        handle: maelstrom_fuse::FuseHandle,
+        _temp_dir: TempDir,
+        data_path: PathBuf,
+        cache_path: PathBuf,
+        cache: Arc<Mutex<maelstrom_layer_fs::ReaderCache>>,
     }
 
     impl TarMount {
         async fn new() -> Self {
             let fs = async_fs::Fs::new();
-            let temp_dir = TempDir::new().unwrap().into_path();
-            let data_path = temp_dir.join("data");
-            let mount_path = temp_dir.join("mount");
-            let cache_path = temp_dir.join("cache");
-            for p in [&data_path, &mount_path, &cache_path] {
+            let temp_dir = TempDir::new().unwrap();
+            let data_path = temp_dir.path().join("data");
+            let cache_path = temp_dir.path().join("cache");
+            for p in [&data_path, &cache_path] {
                 fs.create_dir(p).await.unwrap();
             }
             let tar_bytes = include_bytes!("executor-test-deps.tar");
             let tar_path = cache_path.join(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
-            let log = test_logger();
             let mut builder = maelstrom_layer_fs::BottomLayerBuilder::new(
-                log.clone(),
+                test_logger(),
                 &fs,
                 &data_path,
                 &cache_path,
@@ -846,20 +873,23 @@ mod tests {
                 .add_from_tar(digest!(42), fs.open_file(&tar_path).await.unwrap())
                 .await
                 .unwrap();
-            let layer_fs = builder.finish().await.unwrap();
+            let _ = builder.finish().await.unwrap();
             let cache = Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new()));
-            let handle = layer_fs.mount(log, cache, &mount_path).unwrap();
             Self {
-                temp_dir,
-                mount_path,
-                handle,
+                _temp_dir: temp_dir,
+                cache,
+                data_path,
+                cache_path,
             }
         }
 
-        async fn umount_and_join(self) {
-            self.handle.umount_and_join().await.unwrap();
-            let fs = async_fs::Fs::new();
-            fs.remove_dir_all(&self.temp_dir).await.unwrap();
+        fn spawn(&self, fd: linux::OwnedFd) {
+            let layer_fs =
+                maelstrom_layer_fs::LayerFs::from_path(&self.data_path, &self.cache_path).unwrap();
+            let cache = self.cache.clone();
+            tokio::task::spawn(async move {
+                layer_fs.run_fuse(test_logger(), cache, fd).await.unwrap()
+            });
         }
     }
 
@@ -886,7 +916,7 @@ mod tests {
 
         async fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
             let mount = TarMount::new().await;
-            let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
+            let spec = JobSpec::from_spec(spec);
             Self::new(spec, mount)
         }
 
@@ -925,6 +955,7 @@ mod tests {
                     &self.spec,
                     self.inline_limit,
                     job_handle_receiver,
+                    |fd| self.mount.spawn(fd),
                     runtime::Handle::current(),
                 )
             })
@@ -935,8 +966,6 @@ mod tests {
             assert_eq!(status, self.expected_status);
             assert_eq!(stdout, self.expected_stdout);
             assert_eq!(stderr, self.expected_stderr);
-
-            self.mount.umount_and_join().await;
         }
     }
 
@@ -1229,9 +1258,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn multiple_layers_with_writable_file_system_is_writable() {
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(
+        let spec = JobSpec::from_spec(
             bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true),
-            mount.mount_path.clone(),
         );
         Test::new(spec, mount)
             .expected_status(JobStatus::Exited(0))
@@ -1241,10 +1269,7 @@ mod tests {
 
         // Run another job to ensure that the file doesn't persist.
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(
-            bash_spec("test -e /foo").enable_writable_file_system(true),
-            mount.mount_path.clone(),
-        );
+        let spec = JobSpec::from_spec(bash_spec("test -e /foo").enable_writable_file_system(true));
         Test::new(spec, mount)
             .expected_status(JobStatus::Exited(1))
             .run()
@@ -1526,7 +1551,7 @@ mod tests {
 
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec_and_path(spec, mount.mount_path.clone());
+        let spec = JobSpec::from_spec(spec);
         let (_job_handle_sender, job_handle_receiver) = job_handle();
         assert_matches!(
             tokio::task::spawn_blocking(move || {
@@ -1539,6 +1564,7 @@ mod tests {
                     &spec,
                     ByteSize::b(0).into(),
                     job_handle_receiver,
+                    |fd| mount.spawn(fd),
                     runtime::Handle::current(),
                 )
             })
@@ -1546,8 +1572,6 @@ mod tests {
             .unwrap(),
             Err(JobError::Execution(_))
         );
-
-        mount.umount_and_join().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

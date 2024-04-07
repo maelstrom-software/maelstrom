@@ -10,7 +10,7 @@ use crate::fuser::request::Request;
 use crate::fuser::Filesystem;
 use crate::fuser::MountOption;
 use crate::fuser::{channel::Channel, mnt::Mount};
-use libc::{EAGAIN, EINTR, ENODEV, ENOENT};
+use libc::{EAGAIN, ECONNABORTED, EINTR, ENODEV, ENOENT};
 use std::path::Path;
 use std::sync::Arc;
 use std::{io, ops::DerefMut};
@@ -158,6 +158,7 @@ impl<FS: Filesystem> Session<FS> {
                     Some(EAGAIN) => continue,
                     // Filesystem was unmounted, quit the loop
                     Some(ENODEV) => break,
+                    Some(ECONNABORTED) => break,
                     // Unhandled error
                     _ => return Err(err),
                 },
