@@ -854,6 +854,9 @@ impl UnixStream {
                 libc::recvmsg(self.fd.as_fd().0, message, 0 /* flags */)
             })? as usize;
 
+            assert_eq!(message.msg_flags & libc::MSG_TRUNC, 0);
+            assert_eq!(message.msg_flags & libc::MSG_CTRUNC, 0);
+
             // See if we got a file descriptor, only checking the first message
             let mut fd_out = None;
             let control_msg = unsafe { libc::CMSG_FIRSTHDR(message) };
