@@ -38,26 +38,19 @@ package.equals(maelstrom-client) ||
 package.equals(maelstrom-client-process) ||
 package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||
-package.equals(maelstrom-layer-fs) ||
 package.equals(maelstrom-util)"""
 layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
-filter = "package.equals(maelstrom-fuse) && name.equals(fuser::mnt::test::mount_unmount)"
-image.name = "alpine"
-image.use = ["layers", "environment"]
+filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "proc", mount_point = "/proc" },
 ]
-added_layers = [{ stubs = [ "dev/null" ] }]
-added_devices = ["null"]
-
-[[directives]]
-filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
-added_layers = [{ stubs = [ "dev/fuse" ] }]
-added_devices = ["fuse"]
+working_directory = "/root"
+added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }]
+added_devices = ["null", "fuse"]
 
 [[directives]]
 filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
