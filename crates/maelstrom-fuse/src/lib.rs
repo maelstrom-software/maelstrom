@@ -18,30 +18,6 @@ use tokio::task::{self, JoinHandle};
 
 const MAX_INFLIGHT: usize = 1000;
 
-pub struct FuseHandle {
-    fuser_session: fuser::BackgroundSession,
-}
-
-impl FuseHandle {
-    pub async fn umount_and_join(self) -> Result<()> {
-        self.fuser_session.join().await;
-        Ok(())
-    }
-}
-
-pub fn fuse_mount(
-    handler: impl FuseFileSystem + Send + Sync + 'static,
-    mount_point: &Path,
-    name: &str,
-) -> Result<FuseHandle> {
-    let mount_point = mount_point.to_owned();
-    let name = name.into();
-
-    let fuser_session = fuse_mount_dispatcher(handler, mount_point, name)?;
-
-    Ok(FuseHandle { fuser_session })
-}
-
 pub struct FuseNamespaceHandle {
     stream: linux::UnixStream,
     handle: JoinHandle<std::io::Result<()>>,
@@ -75,7 +51,7 @@ fn run_fuse_child(
     fs.write("/proc/self/gid_map", format!("0 {} 1", gid.as_u32()))
         .unwrap();
 
-    let (file, _) = crate::fuser::fuse_mount_pure(
+    let file = crate::fuser::fuse_mount_sys(
         mount_path.as_os_str(),
         &[MountOption::RO, MountOption::FSName(fsname)],
     )
@@ -146,19 +122,6 @@ pub async fn run_fuse(
     )?;
     session.run().await?;
     Ok(())
-}
-
-fn fuse_mount_dispatcher(
-    handler: impl FuseFileSystem + Send + Sync + 'static,
-    mount_point: PathBuf,
-    name: String,
-) -> Result<fuser::BackgroundSession> {
-    let options = vec![MountOption::RO, MountOption::FSName(name)];
-    Ok(fuser::spawn_mount2(
-        DispatchingFs::new(handler),
-        mount_point,
-        &options,
-    )?)
 }
 
 trait ErrorResponse {

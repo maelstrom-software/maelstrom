@@ -5,19 +5,14 @@
 //! filesystem is mounted, the session loop receives, dispatches and replies to kernel requests
 //! for filesystem operations under its mount point.
 
+use crate::fuser::channel::Channel;
 use crate::fuser::ll::fuse_abi as abi;
 use crate::fuser::request::Request;
 use crate::fuser::Filesystem;
-use crate::fuser::MountOption;
-use crate::fuser::{channel::Channel, mnt::Mount};
 use libc::{EAGAIN, ECONNABORTED, EINTR, ENODEV, ENOENT};
-use std::path::Path;
 use std::sync::Arc;
 use std::{io, ops::DerefMut};
-use tokio::{
-    io::{unix::AsyncFd, Interest},
-    task::JoinHandle,
-};
+use tokio::io::{unix::AsyncFd, Interest};
 
 /// The max size of write requests from the kernel. The absolute minimum is 4k,
 /// FUSE recommends at least 128k, max 16M. The FUSE default is 16M on macOS
@@ -42,8 +37,6 @@ pub struct Session<FS: Filesystem> {
     pub(crate) filesystem: FS,
     /// Communication channel to the kernel driver
     ch: Channel,
-    /// Handle to the mount.  Dropping this unmounts.
-    mount: Option<Mount>,
     /// Whether to restrict access to owner, root + owner, or unrestricted
     /// Used to implement allow_root and auto_unmount
     pub(crate) allowed: SessionACL,
@@ -60,49 +53,6 @@ pub struct Session<FS: Filesystem> {
 }
 
 impl<FS: Filesystem> Session<FS> {
-    /// Create a new session by mounting the given filesystem to the given mountpoint
-    pub fn new<P: AsRef<Path>>(
-        filesystem: FS,
-        mountpoint: P,
-        options: &[MountOption],
-    ) -> io::Result<Session<FS>> {
-        let mountpoint = mountpoint.as_ref();
-        // If AutoUnmount is requested, but not AllowRoot or AllowOther we enforce the ACL
-        // ourself and implicitly set AllowOther because fusermount needs allow_root or allow_other
-        // to handle the auto_unmount option
-        let (file, mount) = if options.contains(&MountOption::AutoUnmount)
-            && !(options.contains(&MountOption::AllowRoot)
-                || options.contains(&MountOption::AllowOther))
-        {
-            let mut modified_options = options.to_vec();
-            modified_options.push(MountOption::AllowOther);
-            Mount::new(mountpoint, &modified_options)?
-        } else {
-            Mount::new(mountpoint, options)?
-        };
-
-        let ch = Channel::new(file);
-        let allowed = if options.contains(&MountOption::AllowRoot) {
-            SessionACL::RootAndOwner
-        } else if options.contains(&MountOption::AllowOther) {
-            SessionACL::All
-        } else {
-            SessionACL::Owner
-        };
-
-        Ok(Session {
-            filesystem,
-            ch,
-            mount: Some(mount),
-            allowed,
-            session_owner: unsafe { libc::geteuid() },
-            proto_major: 0,
-            proto_minor: 0,
-            initialized: false,
-            destroyed: false,
-        })
-    }
-
     pub fn from_fd(
         filesystem: FS,
         fd: std::os::fd::OwnedFd,
@@ -117,7 +67,6 @@ impl<FS: Filesystem> Session<FS> {
         Ok(Session {
             filesystem,
             ch,
-            mount: None,
             allowed,
             session_owner: unsafe { libc::geteuid() },
             proto_major: 0,
@@ -179,47 +128,5 @@ fn aligned_sub_buf(buf: &mut [u8], alignment: usize) -> &mut [u8] {
         buf
     } else {
         &mut buf[off..]
-    }
-}
-
-impl<FS: 'static + Filesystem + Send> Session<FS> {
-    /// Run the session loop in a background thread
-    pub fn spawn(self) -> io::Result<BackgroundSession> {
-        BackgroundSession::new(self)
-    }
-}
-
-/// The background session data structure
-pub struct BackgroundSession {
-    /// Thread guard of the background session
-    pub guard: JoinHandle<io::Result<()>>,
-    /// Ensures the filesystem is unmounted when the session ends
-    _mount: Mount,
-}
-
-impl BackgroundSession {
-    /// Create a new background session for the given session by running its
-    /// session loop in a background thread. If the returned handle is dropped,
-    /// the filesystem is unmounted and the given session ends.
-    pub fn new<FS: Filesystem + Send + 'static>(
-        mut se: Session<FS>,
-    ) -> io::Result<BackgroundSession> {
-        // Take the fuse_session, so that we can unmount it
-        let mount = se.mount.take();
-        let mount = mount.ok_or_else(|| io::Error::from_raw_os_error(libc::ENODEV))?;
-        let guard = tokio::task::spawn(async move {
-            let mut se = se;
-            se.run().await
-        });
-        Ok(BackgroundSession {
-            guard,
-            _mount: mount,
-        })
-    }
-    /// Unmount the filesystem and join the background thread.
-    pub async fn join(self) {
-        let Self { guard, _mount } = self;
-        drop(_mount);
-        guard.await.unwrap().unwrap();
     }
 }

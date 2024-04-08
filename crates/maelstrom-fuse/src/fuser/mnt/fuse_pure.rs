@@ -6,275 +6,16 @@
 #![warn(missing_debug_implementations)]
 #![allow(missing_docs)]
 
-use super::is_mounted;
 use super::mount_options::{option_to_string, MountOption};
-use libc::c_int;
-use std::ffi::{CStr, CString, OsStr};
+use std::ffi::{CString, OsStr};
 use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::{Error, ErrorKind, Read};
+use std::io::Error;
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::io::{AsRawFd, FromRawFd};
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::process::{Command, Stdio};
-use std::sync::Arc;
-use std::{mem, ptr};
-use tokio::io::unix::AsyncFd;
-use tokio::io::Interest;
-
-const FUSERMOUNT_BIN: &str = "fusermount";
-const FUSERMOUNT3_BIN: &str = "fusermount3";
-const FUSERMOUNT_COMM_ENV: &str = "_FUSE_COMMFD";
-
-#[derive(Debug)]
-pub struct Mount {
-    mountpoint: CString,
-    auto_unmount_socket: Option<UnixStream>,
-    fuse_device: Arc<AsyncFd<File>>,
-}
-impl Mount {
-    pub fn new(
-        mountpoint: &Path,
-        options: &[MountOption],
-    ) -> io::Result<(Arc<AsyncFd<File>>, Mount)> {
-        let mountpoint = mountpoint.canonicalize()?;
-        let (file, sock) = fuse_mount_pure(mountpoint.as_os_str(), options)?;
-        let file = Arc::new(AsyncFd::with_interest(
-            file,
-            Interest::READABLE | Interest::WRITABLE | Interest::ERROR,
-        )?);
-        Ok((
-            file.clone(),
-            Mount {
-                mountpoint: CString::new(mountpoint.as_os_str().as_bytes())?,
-                auto_unmount_socket: sock,
-                fuse_device: file,
-            },
-        ))
-    }
-}
-
-impl Drop for Mount {
-    fn drop(&mut self) {
-        use std::io::ErrorKind::PermissionDenied;
-        if !is_mounted(self.fuse_device.get_ref()) {
-            // If the filesystem has already been unmounted, avoid unmounting it again.
-            // Unmounting it a second time could cause a race with a newly mounted filesystem
-            // living at the same mountpoint
-            return;
-        }
-        if let Some(sock) = mem::take(&mut self.auto_unmount_socket) {
-            drop(sock);
-            // fusermount in auto-unmount mode, no more work to do.
-            return;
-        }
-        if let Err(err) = super::libc_umount(&self.mountpoint) {
-            if err.kind() == PermissionDenied {
-                // Linux always returns EPERM for non-root users.  We have to let the
-                // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint)
-            }
-        }
-    }
-}
-
-pub fn fuse_mount_pure(
-    mountpoint: &OsStr,
-    options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), io::Error> {
-    if options.contains(&MountOption::AutoUnmount) {
-        // Auto unmount is only supported via fusermount
-        return fuse_mount_fusermount(mountpoint, options);
-    }
-
-    let res = fuse_mount_sys(mountpoint, options)?;
-    if let Some(file) = res {
-        Ok((file, None))
-    } else {
-        // Retry
-        fuse_mount_fusermount(mountpoint, options)
-    }
-}
-
-fn fuse_unmount_pure(mountpoint: &CStr) {
-    unsafe {
-        let result = libc::umount2(mountpoint.as_ptr(), libc::MNT_DETACH);
-        if result == 0 {
-            return;
-        }
-    }
-
-    let mut builder = Command::new(detect_fusermount_bin());
-    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    builder
-        .arg("-u")
-        .arg("-q")
-        .arg("-z")
-        .arg("--")
-        .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
-
-    builder.output().ok();
-}
-
-fn detect_fusermount_bin() -> String {
-    for name in [
-        FUSERMOUNT3_BIN.to_string(),
-        FUSERMOUNT_BIN.to_string(),
-        format!("/bin/{FUSERMOUNT3_BIN}"),
-        format!("/bin/{FUSERMOUNT_BIN}"),
-    ]
-    .iter()
-    {
-        if Command::new(name).arg("-h").output().is_ok() {
-            return name.to_string();
-        }
-    }
-    // Default to fusermount3
-    FUSERMOUNT3_BIN.to_string()
-}
-
-fn receive_fusermount_message(socket: &UnixStream) -> Result<File, Error> {
-    let mut io_vec_buf = [0u8];
-    let mut io_vec = libc::iovec {
-        iov_base: io_vec_buf.as_mut_ptr() as *mut libc::c_void,
-        iov_len: io_vec_buf.len(),
-    };
-    let cmsg_buffer_len = unsafe { libc::CMSG_SPACE(mem::size_of::<c_int>() as libc::c_uint) };
-    let mut cmsg_buffer = vec![0u8; cmsg_buffer_len as usize];
-    let mut message: libc::msghdr;
-    message = libc::msghdr {
-        msg_name: ptr::null_mut(),
-        msg_namelen: 0,
-        msg_iov: &mut io_vec,
-        msg_iovlen: 1,
-        msg_control: cmsg_buffer.as_mut_ptr() as *mut libc::c_void,
-        msg_controllen: cmsg_buffer.len(),
-        msg_flags: 0,
-    };
-    let mut result;
-    loop {
-        unsafe {
-            result = libc::recvmsg(socket.as_raw_fd(), &mut message, 0);
-        }
-        if result != -1 {
-            break;
-        }
-        let err = Error::last_os_error();
-        if err.kind() != ErrorKind::Interrupted {
-            return Err(err);
-        }
-    }
-    if result == 0 {
-        return Err(Error::new(
-            ErrorKind::UnexpectedEof,
-            "Unexpected EOF reading from fusermount",
-        ));
-    }
-
-    unsafe {
-        let control_msg = libc::CMSG_FIRSTHDR(&message);
-        if (*control_msg).cmsg_type != libc::SCM_RIGHTS {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Unknown control message from fusermount: {}",
-                    (*control_msg).cmsg_type
-                ),
-            ));
-        }
-        let fd_data = libc::CMSG_DATA(control_msg);
-
-        let fd = *(fd_data as *const c_int);
-        if fd < 0 {
-            Err(ErrorKind::InvalidData.into())
-        } else {
-            Ok(File::from_raw_fd(fd))
-        }
-    }
-}
-
-fn fuse_mount_fusermount(
-    mountpoint: &OsStr,
-    options: &[MountOption],
-) -> Result<(File, Option<UnixStream>), Error> {
-    let (child_socket, receive_socket) = UnixStream::pair()?;
-
-    unsafe {
-        libc::fcntl(child_socket.as_raw_fd(), libc::F_SETFD, 0);
-    }
-
-    let mut builder = Command::new(detect_fusermount_bin());
-    builder.stdout(Stdio::piped()).stderr(Stdio::piped());
-    if !options.is_empty() {
-        builder.arg("-o");
-        let options_strs: Vec<String> = options.iter().map(option_to_string).collect();
-        builder.arg(options_strs.join(","));
-    }
-    builder
-        .arg("--")
-        .arg(mountpoint)
-        .env(FUSERMOUNT_COMM_ENV, child_socket.as_raw_fd().to_string());
-
-    let fusermount_child = builder.spawn()?;
-
-    drop(child_socket); // close socket in parent
-
-    let file = match receive_fusermount_message(&receive_socket) {
-        Ok(f) => f,
-        Err(_) => {
-            // Drop receive socket, since fusermount has exited with an error
-            drop(receive_socket);
-            let output = fusermount_child.wait_with_output().unwrap();
-            let stderr_string = String::from_utf8_lossy(&output.stderr).to_string();
-            return if stderr_string.contains("only allowed if 'user_allow_other' is set") {
-                Err(io::Error::new(ErrorKind::PermissionDenied, stderr_string))
-            } else {
-                Err(io::Error::new(ErrorKind::Other, stderr_string))
-            };
-        }
-    };
-    let mut receive_socket = Some(receive_socket);
-
-    if !options.contains(&MountOption::AutoUnmount) {
-        // Only close the socket, if auto unmount is not set.
-        // fusermount will keep running until the socket is closed, if auto unmount is set
-        drop(mem::take(&mut receive_socket));
-        fusermount_child.wait_with_output()?;
-    } else {
-        if let Some(mut stdout) = fusermount_child.stdout {
-            let stdout_fd = stdout.as_raw_fd();
-            unsafe {
-                let mut flags = libc::fcntl(stdout_fd, libc::F_GETFL, 0);
-                flags |= libc::O_NONBLOCK;
-                libc::fcntl(stdout_fd, libc::F_SETFL, flags);
-            }
-            let mut buf = vec![0; 64 * 1024];
-            stdout.read(&mut buf).ok();
-        }
-        if let Some(mut stderr) = fusermount_child.stderr {
-            let stderr_fd = stderr.as_raw_fd();
-            unsafe {
-                let mut flags = libc::fcntl(stderr_fd, libc::F_GETFL, 0);
-                flags |= libc::O_NONBLOCK;
-                libc::fcntl(stderr_fd, libc::F_SETFL, flags);
-            }
-            let mut buf = vec![0; 64 * 1024];
-            stderr.read(&mut buf).ok();
-        }
-    }
-
-    unsafe {
-        libc::fcntl(file.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
-        libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
-    }
-
-    Ok((file, receive_socket))
-}
+use std::os::unix::io::AsRawFd;
 
 // If returned option is none. Then fusermount binary should be tried
-fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<File>, Error> {
+pub fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<File, Error> {
     let fuse_device_name = "/dev/fuse";
 
     let mountpoint_mode = File::open(mountpoint)?.metadata()?.permissions().mode();
@@ -361,21 +102,17 @@ fn fuse_mount_sys(mountpoint: &OsStr, options: &[MountOption]) -> Result<Option<
     };
     if result == -1 {
         let err = Error::last_os_error();
-        if err.kind() == ErrorKind::PermissionDenied {
-            return Ok(None); // Retry with fusermount
-        } else {
-            return Err(Error::new(
-                err.kind(),
-                format!("Error calling mount() at {mountpoint:?}: {err}"),
-            ));
-        }
+        return Err(Error::new(
+            err.kind(),
+            format!("Error calling mount() at {mountpoint:?}: {err}"),
+        ));
     }
 
     unsafe {
         libc::fcntl(file.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
     }
 
-    Ok(Some(file))
+    Ok(file)
 }
 
 #[derive(PartialEq)]
