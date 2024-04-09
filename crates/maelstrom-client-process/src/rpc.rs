@@ -142,10 +142,10 @@ impl ClientProcess for Handler {
         run_handler(async {
             let request = request.into_inner();
             let path = PathBuf::try_from_proto_buf(request.path)?;
-            let digest =
-                with_client_async!(self, |client| { client.add_artifact(&path).await }).await?;
             Ok(proto::AddArtifactResponse {
-                digest: digest.into_proto_buf(),
+                digest: with_client_async!(self, |client| { client.add_artifact(&path).await })
+                    .await?
+                    .into_proto_buf(),
             })
         })
         .await
@@ -158,9 +158,12 @@ impl ClientProcess for Handler {
         run_handler(async {
             let layer = request.into_inner().into_result()?;
             let layer = TryFromProtoBuf::try_from_proto_buf(layer)?;
-            let spec = with_client_async!(self, |client| { client.add_layer(layer).await }).await?;
             Ok(proto::AddLayerResponse {
-                spec: Some(spec.into_proto_buf()),
+                spec: Some(
+                    with_client_async!(self, |client| { client.add_layer(layer).await })
+                        .await?
+                        .into_proto_buf(),
+                ),
             })
         })
         .await
@@ -198,8 +201,11 @@ impl ClientProcess for Handler {
 
     async fn stop_accepting(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
         run_handler(async {
-            with_client_async!(self, |client| { client.stop_accepting().await }).await?;
-            Ok(proto::Void {})
+            Ok(
+                with_client_async!(self, |client| { client.stop_accepting().await })
+                    .await?
+                    .into_proto_buf(),
+            )
         })
         .await
     }
@@ -251,10 +257,12 @@ impl ClientProcess for Handler {
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
         run_handler(async {
-            let res =
-                with_client_async!(self, |client| { client.get_job_state_counts().await }).await?;
             Ok(proto::GetJobStateCountsResponse {
-                counts: Some(res.into_proto_buf()),
+                counts: Some(
+                    with_client_async!(self, |client| { client.get_job_state_counts().await })
+                        .await?
+                        .into_proto_buf(),
+                ),
             })
         })
         .await
@@ -265,12 +273,12 @@ impl ClientProcess for Handler {
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
         run_handler(async {
-            let res = with_client_async!(self, |client| {
-                Ok(client.get_artifact_upload_progress().await)
-            })
-            .await?;
             Ok(proto::GetArtifactUploadProgressResponse {
-                progress: res.into_proto_buf(),
+                progress: with_client_async!(self, |client| {
+                    Ok(client.get_artifact_upload_progress().await)
+                })
+                .await?
+                .into_proto_buf(),
             })
         })
         .await
@@ -282,13 +290,13 @@ impl ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
-            with_client_async!(self, |client| {
+            Ok(with_client_async!(self, |client| {
                 Ok(client
                     .process_broker_msg_single_threaded(request.count as usize)
                     .await)
             })
-            .await?;
-            Ok(proto::Void {})
+            .await?
+            .into_proto_buf())
         })
         .await
     }
@@ -299,11 +307,11 @@ impl ClientProcess for Handler {
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
-            with_client_async!(self, |client| {
+            Ok(with_client_async!(self, |client| {
                 Ok(client.process_client_messages_single_threaded(wanted).await)
             })
-            .await?;
-            Ok(proto::Void {})
+            .await?
+            .into_proto_buf())
         })
         .await
     }
@@ -313,11 +321,11 @@ impl ClientProcess for Handler {
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
-            with_client_async!(self, |client| {
+            Ok(with_client_async!(self, |client| {
                 Ok(client.process_artifact_single_threaded().await)
             })
-            .await?;
-            Ok(proto::Void {})
+            .await?
+            .into_proto_buf())
         })
         .await
     }
