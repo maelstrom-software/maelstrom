@@ -24,16 +24,11 @@ fn mimic_child_death(status: WaitStatus) -> ! {
     }
 }
 
-/// Create a grandchild process in its own pid, user, and mount namespaces
+/// Create a grandchild process in its own pid and user namespaces.
 ///
-/// There are two reasons to do this.
-///
-/// First, we want to run the worker in its own pid namespace so that when it terminates, all
-/// descendant processes also terminate. We don't want the worker to ever leak jobs, no matter how
-/// it terminates.
-///
-/// Second, we want to run the worker in its own mount namespace so that it can create FUSE mounts
-/// that will be inherited by children. We expect this use to eventually go away.
+/// We want to run the worker in its own pid namespace so that when it terminates, all descendant
+/// processes also terminate. We don't want the worker to ever leak jobs, no matter how it
+/// terminates.
 ///
 /// We have to create a user namespace so that we can create the pid namespace.
 ///
