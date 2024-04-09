@@ -4,6 +4,7 @@
   craneLib,
   binaryen,
   pkg-config,
+  protobuf,
   llvmPackages,
   openssl,
   libiconv,
@@ -14,13 +15,13 @@ let
   inherit (lib) cleanSourceWith optionals;
   inherit (lib.strings) match;
 
-  # Only keeps markdown files
-  tarFilter = path: _type: match ".*tar$" path != null;
-  tarOrCargo = path: type: (tarFilter path type) || (filterCargoSources path type);
+  # Only keeps `.tar` and `.proto` files
+  allowList = path: _type: match ".*\.(tar|proto)$" path != null;
+  srcFilter = path: type: (allowList path type) || (filterCargoSources path type);
 
   src = cleanSourceWith {
     src = path ./.;
-    filter = tarOrCargo;
+    filter = srcFilter;
   };
 in
 
@@ -37,6 +38,7 @@ buildPackage {
     binaryen
     pkg-config
     llvmPackages.bintools
+    protobuf
   ];
 
   buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
