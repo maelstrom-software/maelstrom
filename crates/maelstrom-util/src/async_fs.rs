@@ -411,6 +411,10 @@ impl File {
         self.inner
     }
 
+    pub async fn into_std(self) -> std::fs::File {
+        self.inner.into_std().await
+    }
+
     pub async fn try_clone(&self) -> Result<Self> {
         Ok(Self {
             inner: self.inner.try_clone().await?,

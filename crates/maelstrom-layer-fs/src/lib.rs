@@ -17,16 +17,11 @@ use maelstrom_fuse::{
     ReadResponse, Request,
 };
 use maelstrom_linux::Errno;
-use maelstrom_util::{
-    async_fs::{File, Fs},
-    io::BufferedStream,
-};
+use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
-use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
 pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
 
@@ -193,7 +188,7 @@ impl LayerFs {
 pub struct ReaderCache {
     dir_readers: LruCache<PathBuf, Arc<Mutex<DirectoryDataReader>>>,
     file_readers: LruCache<PathBuf, Arc<Mutex<FileMetadataReader>>>,
-    data_readers: LruCache<Sha256Digest, Arc<Mutex<BufferedStream<File>>>>,
+    data_files: LruCache<Sha256Digest, Arc<std::fs::File>>,
 }
 
 impl Default for ReaderCache {
@@ -207,7 +202,7 @@ impl ReaderCache {
         Self {
             dir_readers: LruCache::new(300.try_into().unwrap()),
             file_readers: LruCache::new(300.try_into().unwrap()),
-            data_readers: LruCache::new(200.try_into().unwrap()),
+            data_files: LruCache::new(200.try_into().unwrap()),
         }
     }
 
@@ -245,23 +240,21 @@ impl ReaderCache {
         }
     }
 
-    async fn file_data(
+    async fn data_file(
         &mut self,
         layer_fs: &LayerFs,
         digest: &Sha256Digest,
-    ) -> Result<Arc<Mutex<BufferedStream<File>>>> {
-        if let Some(reader) = self.data_readers.get(digest) {
-            Ok(reader.clone())
+    ) -> Result<Arc<std::fs::File>> {
+        if let Some(file) = self.data_files.get(digest) {
+            Ok(file.clone())
         } else {
             let file = layer_fs
                 .data_fs
                 .open_file(layer_fs.cache_entry(digest))
                 .await?;
-            let reader = Arc::new(Mutex::new(
-                BufferedStream::new(4096, 10_000.try_into().unwrap(), file).await?,
-            ));
-            self.data_readers.push(digest.clone(), reader.clone());
-            Ok(reader)
+            let file = Arc::new(file.into_std().await);
+            self.data_files.push(digest.clone(), file.clone());
+            Ok(file)
         }
     }
 }
@@ -360,7 +353,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
             return Err(Errno::EINVAL);
         }
         match data {
-            FileData::Empty => Ok(ReadResponse { data: vec![] }),
+            FileData::Empty => Ok(ReadResponse::Buffer { data: vec![] }),
             FileData::Inline(inline) => {
                 let offset = to_einval(self.log.clone(), usize::try_from(offset))?;
                 if offset >= inline.len() {
@@ -368,7 +361,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
                 }
                 let size = std::cmp::min(size as usize, inline.len() - offset);
 
-                Ok(ReadResponse {
+                Ok(ReadResponse::Buffer {
                     data: inline[offset..(offset + size)].to_vec(),
                 })
             }
@@ -387,22 +380,19 @@ impl FuseFileSystem for LayerFsFuseAdapter {
                 let read_end = std::cmp::min(read_start + size as u64, file_end);
                 let read_length = read_end - read_start;
 
-                let mut buffer = vec![0; read_length as usize];
                 let file = to_eio(
                     self.log.clone(),
                     self.cache
                         .lock()
                         .await
-                        .file_data(&self.layer_fs, &digest)
+                        .data_file(&self.layer_fs, &digest)
                         .await,
                 )?;
-                let mut file_locked = file.lock().await;
-                to_eio(
-                    self.log.clone(),
-                    file_locked.seek(SeekFrom::Start(read_start)).await,
-                )?;
-                to_eio(self.log.clone(), file_locked.read_exact(&mut buffer).await)?;
-                Ok(ReadResponse { data: buffer })
+                Ok(ReadResponse::Splice {
+                    file,
+                    offset: read_start,
+                    length: read_length as usize,
+                })
             }
         }
     }

@@ -11,6 +11,7 @@ use crate::FileType;
 
 use super::{fuse_abi as abi, Errno, FileHandle, Generation, INodeNo};
 use super::{Lock, RequestId};
+use maelstrom_linux::Fd;
 use smallvec::{smallvec, SmallVec};
 use zerocopy::AsBytes;
 
@@ -22,14 +23,16 @@ pub enum Response<'a> {
     Error(i32),
     Data(ResponseBuf),
     Slice(&'a [u8]),
+    Splice { fd: Fd, offset: u64, length: usize },
 }
 
 impl<'a> Response<'a> {
-    pub(crate) fn header(&self, unique: RequestId) -> abi::fuse_out_header {
+    fn header(&self, unique: RequestId) -> abi::fuse_out_header {
         let datalen = match &self {
             Response::Error(_) => 0,
             Response::Data(v) => v.len(),
             Response::Slice(d) => d.len(),
+            Response::Splice { length, .. } => *length,
         };
         abi::fuse_out_header {
             unique: unique.0,
@@ -44,17 +47,30 @@ impl<'a> Response<'a> {
         }
     }
 
-    pub(crate) fn as_iovec<'b>(
-        &'b self,
-        header: &'b abi::fuse_out_header,
-    ) -> SmallVec<[IoSlice<'b>; 3]> {
+    fn as_iovec<'b>(&'b self, header: &'b abi::fuse_out_header) -> SmallVec<[IoSlice<'b>; 3]> {
         let mut v: SmallVec<[IoSlice<'_>; 3]> = smallvec![IoSlice::new(header.as_bytes())];
         match &self {
             Response::Error(_) => {}
             Response::Data(d) => v.push(IoSlice::new(d)),
             Response::Slice(d) => v.push(IoSlice::new(d)),
+            Response::Splice { .. } => unimplemented!(),
         }
         v
+    }
+
+    pub(crate) async fn send(
+        &self,
+        unique: RequestId,
+        sender: &(impl crate::fuser::reply::ReplySender + ?Sized),
+    ) -> std::io::Result<()> {
+        let header = self.header(unique);
+
+        if let Self::Splice { fd, offset, length } = self {
+            sender.send_splice(*fd, header, *offset, *length).await
+        } else {
+            let iov = self.as_iovec(&header);
+            sender.send(&iov).await
+        }
     }
 
     // Constructors
@@ -76,6 +92,10 @@ impl<'a> Response<'a> {
 
     pub(crate) fn new_slice(data: &'a [u8]) -> Self {
         Self::Slice(data)
+    }
+
+    pub(crate) fn new_splice(fd: Fd, offset: u64, length: usize) -> Self {
+        Self::Splice { fd, offset, length }
     }
 
     pub(crate) fn new_entry(

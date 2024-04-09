@@ -185,6 +185,13 @@ impl fmt::Display for Errno {
 #[cfg(any(test, feature = "std"))]
 impl std::error::Error for Errno {}
 
+#[cfg(any(test, feature = "std"))]
+impl From<Errno> for std::io::Error {
+    fn from(e: Errno) -> Self {
+        std::io::Error::from_raw_os_error(e.0)
+    }
+}
+
 /// The sentinel value indicates that a function failed and more detailed
 /// information about the error can be found in `errno`
 pub trait ErrnoSentinel: Sized {
@@ -223,7 +230,7 @@ impl ExitCode {
     }
 }
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Fd(c_int);
 
 impl Fd {
@@ -900,6 +907,38 @@ impl UnixStream {
     pub fn shutdown(&self) -> Result<(), Errno> {
         Errno::result(unsafe { libc::shutdown(self.fd.as_fd().0, libc::SHUT_RDWR) }).map(drop)
     }
+}
+
+pub fn splice(
+    fd_in: Fd,
+    off_in: Option<u64>,
+    fd_out: Fd,
+    off_out: Option<u64>,
+    length: usize,
+) -> Result<usize, Errno> {
+    let off_in = off_in.map(|v| i64::try_from(v).unwrap());
+    let off_out = off_out.map(|v| i64::try_from(v).unwrap());
+
+    let inner = |off_in: &Option<i64>, off_out: &Option<i64>| {
+        let off_in = off_in
+            .as_ref()
+            .map(|v| v as *const i64 as *mut _)
+            .unwrap_or(core::ptr::null_mut());
+        let off_out = off_out
+            .as_ref()
+            .map(|v| v as *const i64 as *mut _)
+            .unwrap_or(core::ptr::null_mut());
+        Ok(
+            Errno::result(unsafe { libc::splice(fd_in.0, off_in, fd_out.0, off_out, length, 0) })?
+                as usize,
+        )
+    };
+    inner(&off_in, &off_out)
+}
+
+pub fn set_pipe_size(fd: Fd, size: usize) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETPIPE_SZ, i32::try_from(size).unwrap()) })
+        .map(drop)
 }
 
 #[cfg(test)]

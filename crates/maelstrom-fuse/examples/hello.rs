@@ -92,7 +92,7 @@ impl FuseFileSystem for HelloFs {
         _lock: Option<u64>,
     ) -> ErrnoResult<ReadResponse> {
         if ino == 2 {
-            Ok(ReadResponse {
+            Ok(ReadResponse::Buffer {
                 data: HELLO_TXT_CONTENT.as_bytes()[offset as usize..].to_owned(),
             })
         } else {

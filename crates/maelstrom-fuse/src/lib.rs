@@ -7,6 +7,7 @@ use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::{self as linux, Errno};
 use std::ffi::OsStr;
+use std::fs::File;
 use std::future::Future;
 use std::os::fd::AsRawFd as _;
 use std::path::{Path, PathBuf};
@@ -345,15 +346,32 @@ impl Response for AttrResponse {
 }
 
 #[derive(Debug)]
-pub struct ReadResponse {
-    pub data: Vec<u8>,
+pub enum ReadResponse {
+    Buffer {
+        data: Vec<u8>,
+    },
+    Splice {
+        file: Arc<File>,
+        offset: u64,
+        length: usize,
+    },
 }
 
 impl Response for ReadResponse {
     type Reply = ReplyData;
 
     async fn send(self, reply: ReplyData) {
-        reply.data(&self.data).await
+        match self {
+            Self::Buffer { data } => reply.data(&data).await,
+            Self::Splice {
+                file,
+                offset,
+                length,
+            } => {
+                let fd = linux::Fd::from_raw(file.as_raw_fd());
+                reply.data_splice(fd, offset, length).await
+            }
+        }
     }
 }
 

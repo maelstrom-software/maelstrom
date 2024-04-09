@@ -13,7 +13,7 @@ use std::path::Path;
 use crate::fuser::channel::ChannelSender;
 use crate::fuser::ll::Request as _;
 use crate::fuser::reply::ReplyDirectoryPlus;
-use crate::fuser::reply::{Reply, ReplyDirectory, ReplySender};
+use crate::fuser::reply::{Reply, ReplyDirectory};
 use crate::fuser::session::{Session, SessionACL};
 use crate::fuser::Filesystem;
 use crate::fuser::{ll, KernelConfig};
@@ -54,9 +54,7 @@ impl<'a> Request<'a> {
             Ok(None) => return,
             Err(errno) => self.request.reply_err(errno),
         };
-        let header = resp.header(unique);
-        let iov = resp.as_iovec(&header);
-        self.ch.send(&iov).await.ok();
+        resp.send(unique, &self.ch).await.ok();
     }
 
     async fn dispatch_req<FS: Filesystem>(

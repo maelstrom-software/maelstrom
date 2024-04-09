@@ -6,6 +6,7 @@
 //! data without cloning the data. A reply *must always* be used (by calling either ok() or
 //! error() exactly once).
 
+use crate::fuser::ll::fuse_abi as abi;
 use crate::fuser::ll::{
     self,
     reply::{DirEntPlusList, DirEntryPlus},
@@ -15,21 +16,30 @@ use crate::fuser::ll::{
     reply::{DirEntList, DirEntOffset, DirEntry},
     INodeNo,
 };
+use crate::fuser::{FileAttr, FileType};
 use async_trait::async_trait;
 use libc::c_int;
+use maelstrom_linux::Fd;
 use std::convert::AsRef;
 use std::ffi::OsStr;
 use std::fmt;
 use std::io::IoSlice;
 use std::time::Duration;
 
-use crate::fuser::{FileAttr, FileType};
-
 /// Generic reply callback to send data
 #[async_trait]
 pub trait ReplySender: Send + Sync + Unpin + 'static {
     /// Send data.
     async fn send(&self, data: &[IoSlice<'_>]) -> std::io::Result<()>;
+
+    /// Send data using splice
+    async fn send_splice(
+        &self,
+        fd: Fd,
+        header: abi::fuse_out_header,
+        offset: u64,
+        length: usize,
+    ) -> std::io::Result<()>;
 }
 
 impl fmt::Debug for Box<dyn ReplySender> {
@@ -70,10 +80,10 @@ impl ReplyRaw {
     /// only once (the `ok` and `error` methods ensure this by consuming `self`)
     async fn send_ll_mut(&mut self, response: &ll::Response<'_>) {
         assert!(self.sender.is_some());
-        let sender = self.sender.take().unwrap();
-        let header = response.header(self.unique);
-        let iov = response.as_iovec(&header);
-        sender.send(&iov).await.ok();
+        response
+            .send(self.unique, &*self.sender.take().unwrap())
+            .await
+            .ok();
     }
     async fn send_ll(mut self, response: &ll::Response<'_>) {
         self.send_ll_mut(response).await
@@ -94,9 +104,7 @@ impl Drop for ReplyRaw {
 
             tokio::task::spawn(async move {
                 let response = ll::Response::new_error(ll::Errno::EIO);
-                let header = response.header(unique);
-                let iov = response.as_iovec(&header);
-                sender.send(&iov).await.ok();
+                response.send(unique, &*sender).await.ok();
             });
         }
     }
@@ -150,6 +158,13 @@ impl ReplyData {
     /// Reply to a request with the given data
     pub async fn data(self, data: &[u8]) {
         self.reply.send_ll(&ll::Response::new_slice(data)).await;
+    }
+
+    /// Reply to a request by splicing data from the given fd
+    pub async fn data_splice(self, fd: Fd, offset: u64, length: usize) {
+        self.reply
+            .send_ll(&ll::Response::new_splice(fd, offset, length))
+            .await;
     }
 
     /// Reply to a request with the given error code
@@ -699,6 +714,16 @@ mod test {
             assert_eq!(self.expected, v);
             Ok(())
         }
+
+        async fn send_splice(
+            &self,
+            _fd: Fd,
+            _header: abi::fuse_out_header,
+            _offset: u64,
+            _length: usize,
+        ) -> std::io::Result<()> {
+            Ok(())
+        }
     }
 
     #[tokio::test]
@@ -994,6 +1019,16 @@ mod test {
     impl super::ReplySender for Sender<()> {
         async fn send(&self, _: &[IoSlice<'_>]) -> std::io::Result<()> {
             self.send(()).await.unwrap();
+            Ok(())
+        }
+
+        async fn send_splice(
+            &self,
+            _fd: Fd,
+            _header: abi::fuse_out_header,
+            _offset: u64,
+            _length: usize,
+        ) -> std::io::Result<()> {
             Ok(())
         }
     }
