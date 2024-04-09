@@ -1,18 +1,29 @@
 use crate::Client as ProcessClient;
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
-use maelstrom_client_base::{proto, IntoProtoBuf, IntoResult, TryFromProtoBuf};
+use maelstrom_client_base::{
+    proto::{
+        self,
+        client_process_server::{ClientProcess, ClientProcessServer},
+    },
+    IntoProtoBuf, IntoResult, TryFromProtoBuf,
+};
 use maelstrom_container::ProgressTracker;
-use std::future::Future;
-use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
-use std::pin::Pin;
-use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use std::{
+    error, future::Future, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
+    result, sync::Arc,
+};
+use tokio::{
+    io::Interest,
+    net::UnixStream as TokioUnixStream,
+    sync::{mpsc, RwLock},
+    task,
+};
 use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
+use tonic::{transport::Server, Code, Request, Response, Status};
 
-type TonicResult<T> = std::result::Result<T, tonic::Status>;
-type TonicResponse<T> = TonicResult<tonic::Response<T>>;
+type TonicResult<T> = result::Result<T, Status>;
+type TonicResponse<T> = TonicResult<Response<T>>;
 
 #[derive(Clone)]
 struct Handler {
@@ -49,14 +60,14 @@ macro_rules! with_client_async {
 
 async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
     match body.await {
-        Ok(v) => Ok(tonic::Response::new(v)),
-        Err(e) => Err(tonic::Status::new(tonic::Code::Unknown, e.to_string())),
+        Ok(v) => Ok(Response::new(v)),
+        Err(e) => Err(Status::new(Code::Unknown, e.to_string())),
     }
 }
 
 async fn map_err<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResult<RetT> {
     body.await
-        .map_err(|e| tonic::Status::new(tonic::Code::Unknown, e.to_string()))
+        .map_err(|e| Status::new(Code::Unknown, e.to_string()))
 }
 
 #[derive(Clone)]
@@ -103,14 +114,11 @@ impl ProgressTracker for ChannelProgressTracker {
 
 #[allow(clippy::unit_arg)]
 #[tonic::async_trait]
-impl proto::client_process_server::ClientProcess for Handler {
+impl ClientProcess for Handler {
     type GetContainerImageStream =
         Pin<Box<dyn Stream<Item = TonicResult<proto::GetContainerImageProgressResponse>> + Send>>;
 
-    async fn start(
-        &self,
-        request: tonic::Request<proto::StartRequest>,
-    ) -> TonicResponse<proto::Void> {
+    async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
             let client = ProcessClient::new(
@@ -129,7 +137,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn add_artifact(
         &self,
-        request: tonic::Request<proto::AddArtifactRequest>,
+        request: Request<proto::AddArtifactRequest>,
     ) -> TonicResponse<proto::AddArtifactResponse> {
         run_handler(async {
             let request = request.into_inner();
@@ -145,7 +153,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn add_layer(
         &self,
-        request: tonic::Request<proto::AddLayerRequest>,
+        request: Request<proto::AddLayerRequest>,
     ) -> TonicResponse<proto::AddLayerResponse> {
         run_handler(async {
             let layer = request.into_inner().into_result()?;
@@ -160,7 +168,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn get_container_image(
         &self,
-        request: tonic::Request<proto::GetContainerImageRequest>,
+        request: Request<proto::GetContainerImageRequest>,
     ) -> TonicResponse<Self::GetContainerImageStream> {
         run_handler(async {
             let (sender, receiver) = mpsc::unbounded_channel();
@@ -168,7 +176,7 @@ impl proto::client_process_server::ClientProcess for Handler {
             let proto::GetContainerImageRequest { name, tag } = request.into_inner();
 
             let self_clone = self.clone();
-            tokio::task::spawn(async move {
+            task::spawn(async move {
                 let result = map_err(async {
                     let image = with_client_async!(self_clone, |client| {
                         client
@@ -188,10 +196,7 @@ impl proto::client_process_server::ClientProcess for Handler {
         .await
     }
 
-    async fn stop_accepting(
-        &self,
-        _request: tonic::Request<proto::Void>,
-    ) -> TonicResponse<proto::Void> {
+    async fn stop_accepting(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
         run_handler(async {
             with_client_async!(self, |client| { client.stop_accepting().await }).await?;
             Ok(proto::Void {})
@@ -201,7 +206,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn add_job(
         &self,
-        request: tonic::Request<proto::AddJobRequest>,
+        request: Request<proto::AddJobRequest>,
     ) -> TonicResponse<proto::AddJobResponse> {
         run_handler(async {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
@@ -228,7 +233,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn wait_for_outstanding_jobs(
         &self,
-        _request: tonic::Request<proto::Void>,
+        _request: Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let client = self.take_client().await?;
@@ -240,7 +245,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn get_job_state_counts(
         &self,
-        _request: tonic::Request<proto::Void>,
+        _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
         run_handler(async {
             let res =
@@ -254,7 +259,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn get_artifact_upload_progress(
         &self,
-        _request: tonic::Request<proto::Void>,
+        _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
         run_handler(async {
             let res = with_client_async!(self, |client| {
@@ -270,7 +275,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn process_broker_msg_single_threaded(
         &self,
-        request: tonic::Request<proto::ProcessBrokerMsgSingleThreadedRequest>,
+        request: Request<proto::ProcessBrokerMsgSingleThreadedRequest>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
@@ -287,7 +292,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn process_client_messages_single_threaded(
         &self,
-        request: tonic::Request<proto::ProcessClientMessagesSingleThreadedRequest>,
+        request: Request<proto::ProcessClientMessagesSingleThreadedRequest>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
@@ -302,7 +307,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 
     async fn process_artifact_single_threaded(
         &self,
-        _request: tonic::Request<proto::Void>,
+        _request: Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
         run_handler(async {
             with_client_async!(self, |client| {
@@ -315,28 +320,26 @@ impl proto::client_process_server::ClientProcess for Handler {
     }
 }
 
-type TokioError<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn client_process_main(sock: UnixStream, log: Option<slog::Logger>) -> Result<()> {
+pub async fn client_process_main(sock: StdUnixStream, log: Option<slog::Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
-    let sock1 = tokio::net::UnixStream::from_std(sock.try_clone()?)?;
-    let sock2 = tokio::net::UnixStream::from_std(sock)?;
-    tonic::transport::Server::builder()
-        .add_service(proto::client_process_server::ClientProcessServer::new(
-            Handler::new(log),
-        ))
+    let sock1 = TokioUnixStream::from_std(sock.try_clone()?)?;
+    let sock2 = TokioUnixStream::from_std(sock)?;
+    Server::builder()
+        .add_service(ClientProcessServer::new(Handler::new(log)))
         .serve_with_incoming_shutdown(
             tokio_stream::once(TokioError::<_>::Ok(sock1)).chain(tokio_stream::pending()),
             async move {
                 loop {
-                    let Ok(v) = sock2.ready(tokio::io::Interest::READABLE).await else {
+                    let Ok(v) = sock2.ready(Interest::READABLE).await else {
                         continue;
                     };
                     if v.is_read_closed() {
                         break;
                     }
-                    tokio::task::yield_now().await
+                    task::yield_now().await
                 }
             },
         )
