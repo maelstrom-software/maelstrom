@@ -61,7 +61,7 @@ struct DispatcherAdapter {
     inline_limit: InlineLimit,
     log: Logger,
     executor: Arc<Executor>,
-    cache_dir: PathBuf,
+    blob_cache_dir: PathBuf,
     layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
 }
 
@@ -75,7 +75,7 @@ impl DispatcherAdapter {
         log: Logger,
         mount_dir: PathBuf,
         tmpfs_dir: PathBuf,
-        cache_dir: PathBuf,
+        blob_cache_dir: PathBuf,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
@@ -87,7 +87,7 @@ impl DispatcherAdapter {
             inline_limit,
             log,
             executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
-            cache_dir,
+            blob_cache_dir,
             layer_fs_cache: Arc::new(tokio::sync::Mutex::new(
                 maelstrom_layer_fs::ReaderCache::new(),
             )),
@@ -106,8 +106,8 @@ impl DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
 
-        let cache_dir = self.cache_dir.join("blob/sha256");
-        let layer_fs = maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &cache_dir)?;
+        let layer_fs =
+            maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &self.blob_cache_dir)?;
         let layer_fs_cache = self.layer_fs_cache.clone();
         let fuse_spawn = move |fd| {
             tokio::spawn(async move {
@@ -198,13 +198,13 @@ impl DispatcherDeps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let cache_path = self.cache_dir.join("blob/sha256");
+        let blob_cache_dir = self.blob_cache_dir.clone();
         task::spawn(async move {
             debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
                 log.clone(),
                 layer_path.clone(),
-                cache_path,
+                &blob_cache_dir,
                 digest.clone(),
                 artifact_type,
                 artifact_path,
@@ -226,13 +226,13 @@ impl DispatcherDeps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let cache_path = self.cache_dir.join("blob/sha256");
+        let blob_cache_dir = self.blob_cache_dir.clone();
         task::spawn(async move {
             debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
                 log.clone(),
                 layer_path.clone(),
-                cache_path,
+                &blob_cache_dir,
                 lower_layer_path,
                 upper_layer_path,
             )
@@ -270,10 +270,11 @@ async fn dispatcher_main(
     let mount_dir = config.cache_root.inner().join("mount");
     let tmpfs_dir = config.cache_root.inner().join("upper");
     let cache_root = config.cache_root.inner().join("artifacts");
+    let blob_cache_dir = cache_root.join("blob/sha256");
 
     let cache = Cache::new(
         StdCacheFs,
-        CacheRoot::from(cache_root.clone()),
+        CacheRoot::from(cache_root),
         config.cache_size,
         log.clone(),
     );
@@ -285,7 +286,7 @@ async fn dispatcher_main(
         log.clone(),
         mount_dir,
         tmpfs_dir,
-        cache_root,
+        blob_cache_dir,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);
