@@ -9,6 +9,7 @@ use maelstrom_client_base::{
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_container::ProgressTracker;
+use slog::Logger;
 use std::{
     error, future::Future, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
     result, sync::Arc,
@@ -28,11 +29,11 @@ type TonicResponse<T> = TonicResult<Response<T>>;
 #[derive(Clone)]
 struct Handler {
     client: Arc<RwLock<Option<Client>>>,
-    log: Option<slog::Logger>,
+    log: Option<Logger>,
 }
 
 impl Handler {
-    fn new(log: Option<slog::Logger>) -> Self {
+    fn new(log: Option<Logger>) -> Self {
         Self {
             client: Arc::new(RwLock::new(None)),
             log,
@@ -334,7 +335,7 @@ impl ClientProcess for Handler {
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn client_process_main(sock: StdUnixStream, log: Option<slog::Logger>) -> Result<()> {
+pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let sock1 = TokioUnixStream::from_std(sock.try_clone()?)?;
     let sock2 = TokioUnixStream::from_std(sock)?;
