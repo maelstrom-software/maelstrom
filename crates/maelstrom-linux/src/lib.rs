@@ -55,6 +55,7 @@ impl CloneFlags {
     pub const NEWNS: Self = Self(libc::CLONE_NEWNS);
     pub const NEWPID: Self = Self(libc::CLONE_NEWPID);
     pub const NEWUSER: Self = Self(libc::CLONE_NEWUSER);
+    pub const VM: Self = Self(libc::CLONE_VM);
 
     fn as_u64(&self) -> u64 {
         self.0.try_into().unwrap()
@@ -516,6 +517,7 @@ pub fn chdir(path: &CStr) -> Result<(), Errno> {
 }
 
 pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
+    assert_eq!(args.0.flags & libc::CLONE_VM as c_ulong, 0);
     let args_ptr = args as *mut CloneArgs;
     let size = mem::size_of::<CloneArgs>() as size_t;
     let ret = Errno::result(unsafe { libc::syscall(libc::SYS_clone3, args_ptr, size) })?;
@@ -527,6 +529,7 @@ pub fn clone3(args: &mut CloneArgs) -> Result<Option<Pid>, Errno> {
 }
 
 pub fn clone3_with_child_pidfd(args: &mut CloneArgs) -> Result<Option<(Pid, OwnedFd)>, Errno> {
+    assert_eq!(args.0.flags & libc::CLONE_VM as c_ulong, 0);
     let inner = |args: &mut CloneArgs, child_pidfd: &mut Fd| {
         assert_eq!(args.0.flags & (libc::CLONE_PIDFD as c_ulong), 0);
         args.0.flags |= libc::CLONE_PIDFD as c_ulong;
@@ -542,6 +545,28 @@ pub fn clone3_with_child_pidfd(args: &mut CloneArgs) -> Result<Option<(Pid, Owne
     } else {
         Some((Pid::from_c_long(ret), OwnedFd(child_pidfd)))
     })
+}
+
+/// # Safety
+///
+/// stack and arg pointers must point to memory the child can access while it is around
+pub unsafe fn clone_with_child_pidfd(
+    func: extern "C" fn(*mut c_void) -> i32,
+    stack: *mut c_void,
+    arg: *mut c_void,
+    args: &mut CloneArgs,
+) -> Result<(Pid, OwnedFd), Errno> {
+    let inner = |args: &mut CloneArgs, child_pidfd: &mut Fd| {
+        assert_eq!(args.0.flags & (libc::CLONE_PIDFD as c_ulong), 0);
+        args.0.flags |= libc::CLONE_PIDFD as c_ulong;
+        args.0.pidfd = child_pidfd as *mut Fd as u64;
+
+        let flags = args.0.flags as i32 | (args.0.exit_signal & 0xFF) as i32;
+        unsafe { libc::clone(func, stack, flags, arg, args.0.pidfd) }
+    };
+    let mut child_pidfd = Fd(0);
+    let ret = Errno::result(inner(args, &mut child_pidfd))?;
+    Ok((Pid(ret), OwnedFd(child_pidfd)))
 }
 
 pub fn close_range(

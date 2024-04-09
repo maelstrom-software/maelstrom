@@ -155,3 +155,16 @@ pub fn start_and_exec_in_child(write_sock: linux::UnixStream, syscalls: &mut [Sy
     let _ = write_sock.send(result.to_ne_bytes().as_slice());
     linux::_exit(linux::ExitCode::from_u8(1));
 }
+
+pub struct ChildArgs<'a, 'b> {
+    pub write_sock: linux::Fd,
+    pub syscalls: &'a mut [Syscall<'b>],
+}
+
+pub extern "C" fn start_and_exec_in_child_trampoline(arg: *mut core::ffi::c_void) -> i32 {
+    let args = unsafe { &mut *(arg as *mut ChildArgs<'_, '_>) };
+    start_and_exec_in_child(
+        linux::OwnedFd::from_fd(args.write_sock).into(),
+        args.syscalls,
+    )
+}

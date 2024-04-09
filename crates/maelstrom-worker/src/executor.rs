@@ -700,18 +700,26 @@ impl Executor {
                     | CloneFlags::NEWNET
                     | CloneFlags::NEWNS
                     | CloneFlags::NEWPID
-                    | CloneFlags::NEWUSER,
+                    | CloneFlags::NEWUSER
+                    | CloneFlags::VM,
             )
             .exit_signal(Signal::CHLD);
-        let child_pidfd = match linux::clone3_with_child_pidfd(&mut clone_args) {
-            Ok(Some((_, child_pidfd))) => child_pidfd,
-            Ok(None) => {
-                // This is the child process. The following function will never return.
-                maelstrom_worker_child::start_and_exec_in_child(
-                    write_sock,
-                    builder.syscalls.as_mut_slice(),
-                );
-            }
+        let mut args = maelstrom_worker_child::ChildArgs {
+            write_sock: write_sock.as_fd(),
+            syscalls: builder.syscalls.as_mut_slice(),
+        };
+        const CHILD_STACK_SIZE: usize = 1024;
+        let mut stack = bumpalo::vec![in &bump; 0; CHILD_STACK_SIZE];
+        let clone_res = unsafe {
+            linux::clone_with_child_pidfd(
+                maelstrom_worker_child::start_and_exec_in_child_trampoline,
+                stack.as_mut_ptr().wrapping_add(CHILD_STACK_SIZE) as *mut _,
+                &mut args as *mut _ as *mut _,
+                &mut clone_args,
+            )
+        };
+        let child_pidfd = match clone_res {
+            Ok((_, child_pidfd)) => child_pidfd,
             Err(err) => {
                 return Err(syserr(err));
             }
