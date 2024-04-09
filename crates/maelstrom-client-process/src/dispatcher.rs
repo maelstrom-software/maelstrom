@@ -2,9 +2,9 @@ use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::JobStateCounts,
-    ClientJobId, JobSpec, Sha256Digest,
+    ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
-use maelstrom_client_base::{ClientMessageKind, JobResponseHandler};
+use maelstrom_client_base::ClientMessageKind;
 use maelstrom_util::{ext::OptionExt as _, net};
 use std::{
     collections::{HashMap, VecDeque},
@@ -13,10 +13,15 @@ use std::{
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-pub enum Message {
+pub trait Deps {
+    type JobHandle;
+    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult);
+}
+
+pub enum Message<DepsT: Deps> {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
-    AddJob(JobSpec, JobResponseHandler),
+    AddJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(Sender<JobStateCounts>),
     Stop,
 }
@@ -26,31 +31,34 @@ pub struct ArtifactPushRequest {
     pub digest: Sha256Digest,
 }
 
-pub struct Dispatcher {
-    receiver: Receiver<Message>,
+pub struct Dispatcher<DepsT: Deps> {
+    deps: DepsT,
+    receiver: Receiver<Message<DepsT>>,
     pub stream: tcp::OwnedWriteHalf,
     artifact_pusher: Sender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
-    handlers: HashMap<ClientJobId, JobResponseHandler>,
+    job_handles: HashMap<ClientJobId, DepsT::JobHandle>,
     stats_reqs: VecDeque<Sender<JobStateCounts>>,
 }
 
-impl Dispatcher {
+impl<DepsT: Deps> Dispatcher<DepsT> {
     pub fn new(
-        receiver: Receiver<Message>,
+        deps: DepsT,
+        receiver: Receiver<Message<DepsT>>,
         stream: tcp::OwnedWriteHalf,
         artifact_pusher: Sender<ArtifactPushRequest>,
     ) -> Self {
         Self {
+            deps,
             receiver,
             stream,
             artifact_pusher,
             stop_when_all_completed: false,
             next_client_job_id: 0u32,
             artifacts: Default::default(),
-            handlers: Default::default(),
+            job_handles: Default::default(),
             stats_reqs: Default::default(),
         }
     }
@@ -73,12 +81,13 @@ impl Dispatcher {
         Some(kind)
     }
 
-    async fn handle_message(&mut self, msg: Message) -> Result<(bool, ClientMessageKind)> {
+    async fn handle_message(&mut self, msg: Message<DepsT>) -> Result<(bool, ClientMessageKind)> {
         let mut kind = ClientMessageKind::Other;
         match msg {
             Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
-                self.handlers.remove(&cjid).unwrap()(cjid, result);
-                if self.stop_when_all_completed && self.handlers.is_empty() {
+                let handle = self.job_handles.remove(&cjid).unwrap();
+                self.deps.job_done(handle, cjid, result);
+                if self.stop_when_all_completed && self.job_handles.is_empty() {
                     return Ok((false, kind));
                 }
             }
@@ -103,9 +112,9 @@ impl Dispatcher {
             Message::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
             }
-            Message::AddJob(spec, handler) => {
+            Message::AddJob(spec, handle) => {
                 let cjid = self.next_client_job_id.into();
-                self.handlers.insert(cjid, handler).assert_is_none();
+                self.job_handles.insert(cjid, handle).assert_is_none();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
                 net::write_message_to_async_socket(
                     &mut self.stream,
@@ -116,7 +125,7 @@ impl Dispatcher {
             }
             Message::Stop => {
                 kind = ClientMessageKind::Stop;
-                if self.handlers.is_empty() {
+                if self.job_handles.is_empty() {
                     return Ok((false, kind));
                 }
                 self.stop_when_all_completed = true;

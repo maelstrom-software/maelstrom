@@ -89,7 +89,7 @@ fn basic_job_test(
     client
         .add_job(
             spec,
-            Box::new(move |id, result| send.send((id, result)).unwrap()),
+            move |id, result| send.send((id, result)).unwrap(),
         )
         .unwrap();
 

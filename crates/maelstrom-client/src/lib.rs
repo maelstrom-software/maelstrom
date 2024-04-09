@@ -1,13 +1,14 @@
 pub mod test;
 
 pub use maelstrom_client_base::{
-    spec, ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, JobResponseHandler,
-    MANIFEST_DIR,
+    spec, ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, MANIFEST_DIR,
 };
 
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
-use maelstrom_base::{stats::JobStateCounts, ArtifactType, JobSpec, Sha256Digest};
+use maelstrom_base::{
+    stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
+};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
@@ -278,7 +279,11 @@ impl Client {
         TryFromProtoBuf::try_from_proto_buf(img)
     }
 
-    pub fn add_job(&self, spec: JobSpec, handler: JobResponseHandler) -> Result<()> {
+    pub fn add_job(
+        &self,
+        spec: JobSpec,
+        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+    ) -> Result<()> {
         let msg = proto::AddJobRequest {
             spec: Some(spec.into_proto_buf()),
         };

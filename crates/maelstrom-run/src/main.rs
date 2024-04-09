@@ -140,7 +140,7 @@ fn main() -> Result<ExitCode> {
         let accum_clone = accum.clone();
         client.add_job(
             job_spec?,
-            Box::new(move |cjid, result| visitor(cjid, result, accum_clone)),
+            move |cjid, result| visitor(cjid, result, accum_clone),
         )?;
     }
     client.wait_for_outstanding_jobs()?;

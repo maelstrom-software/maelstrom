@@ -1,15 +1,25 @@
 use crate::artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
-use crate::dispatcher::{Dispatcher, Message};
+use crate::dispatcher::{self, Dispatcher};
 use crate::test::client_driver::SingleThreadedClientDriver;
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use maelstrom_base::proto::Hello;
+use maelstrom_base::{proto::Hello, ClientJobId, JobOutcomeResult};
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
 use tokio::net::{tcp, TcpStream};
 use tokio::sync::mpsc::Sender;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::{self, JoinHandle};
+
+pub struct DispatcherAdapter;
+
+impl dispatcher::Deps for DispatcherAdapter {
+    type JobHandle = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
+
+    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
+        handle(cjid, result)
+    }
+}
 
 pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
     match mode {
@@ -20,11 +30,14 @@ pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync>
 
 pub struct SocketReader {
     stream: tcp::OwnedReadHalf,
-    channel: Sender<Message>,
+    channel: Sender<dispatcher::Message<DispatcherAdapter>>,
 }
 
 impl SocketReader {
-    fn new(stream: tcp::OwnedReadHalf, channel: Sender<Message>) -> Self {
+    fn new(
+        stream: tcp::OwnedReadHalf,
+        channel: Sender<dispatcher::Message<DispatcherAdapter>>,
+    ) -> Self {
         Self { stream, channel }
     }
 
@@ -33,17 +46,17 @@ impl SocketReader {
             return false;
         };
         self.channel
-            .send(Message::BrokerToClient(msg))
+            .send(dispatcher::Message::BrokerToClient(msg))
             .await
             .is_ok()
     }
 }
 
 pub struct ClientDeps {
-    pub dispatcher: Dispatcher,
+    pub dispatcher: Dispatcher<DispatcherAdapter>,
     pub artifact_pusher: ArtifactPusher,
     pub socket_reader: SocketReader,
-    pub dispatcher_sender: Sender<Message>,
+    pub dispatcher_sender: Sender<dispatcher::Message<DispatcherAdapter>>,
 }
 
 impl ClientDeps {
@@ -60,7 +73,12 @@ impl ClientDeps {
         let (artifact_send, artifact_recv) = mpsc::channel(1000);
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
-            dispatcher: Dispatcher::new(dispatcher_receiver, write_half, artifact_send),
+            dispatcher: Dispatcher::new(
+                DispatcherAdapter,
+                dispatcher_receiver,
+                write_half,
+                artifact_send,
+            ),
             artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
             socket_reader: SocketReader::new(read_half, dispatcher_sender.clone()),
             dispatcher_sender,

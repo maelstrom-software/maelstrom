@@ -11,12 +11,9 @@ pub mod proto {
 extern crate self as maelstrom_client;
 
 use anyhow::{anyhow, Result};
-use maelstrom_base::{ClientJobId, JobOutcomeResult};
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 use serde::{Deserialize, Serialize};
-
-pub type JobResponseHandler = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";

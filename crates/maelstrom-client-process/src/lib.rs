@@ -10,7 +10,7 @@ use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use dispatcher::{ArtifactPushRequest, Message};
-use driver::{new_driver, ClientDeps, ClientDriver};
+use driver::{new_driver, ClientDeps, ClientDriver, DispatcherAdapter};
 use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
@@ -136,7 +136,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: Sender<Message>,
+    dispatcher_sender: Sender<Message<DispatcherAdapter>>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -418,9 +418,10 @@ impl Client {
         self.dispatcher_sender
             .send(Message::AddJob(
                 spec,
-                Box::new(move |cjid, res| {
+                Box::new(move |cjid: ClientJobId, res: JobOutcomeResult| {
                     let _ = sender.send((cjid, res));
-                }),
+                })
+                    as Box<(dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static)>,
             ))
             .await?;
 
