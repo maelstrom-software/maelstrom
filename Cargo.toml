@@ -14,7 +14,7 @@ edition = "2021"
 homepage = "https://github.com/maelstrom-software/maelstrom"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/maelstrom-software/maelstrom"
-rust-version = "1.75"
+rust-version = "1.75.0"
 version = "0.7.0-dev"
 
 [workspace.dependencies]
