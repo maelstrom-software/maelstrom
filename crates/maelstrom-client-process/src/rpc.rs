@@ -1,4 +1,4 @@
-use crate::Client as ProcessClient;
+use crate::Client;
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
@@ -27,7 +27,7 @@ type TonicResponse<T> = TonicResult<Response<T>>;
 
 #[derive(Clone)]
 struct Handler {
-    client: Arc<RwLock<Option<ProcessClient>>>,
+    client: Arc<RwLock<Option<Client>>>,
     log: Option<slog::Logger>,
 }
 
@@ -39,7 +39,7 @@ impl Handler {
         }
     }
 
-    async fn take_client(&self) -> Result<ProcessClient> {
+    async fn take_client(&self) -> Result<Client> {
         let mut guard = self.client.write().await;
         guard.take().ok_or(anyhow!("must call start first"))
     }
@@ -121,7 +121,7 @@ impl ClientProcess for Handler {
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
-            let client = ProcessClient::new(
+            let client = Client::new(
                 TryFromProtoBuf::try_from_proto_buf(request.driver_mode)?,
                 TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
                 PathBuf::try_from_proto_buf(request.project_dir)?,
