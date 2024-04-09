@@ -77,7 +77,7 @@ fn clone_into_pid_and_user_namespace() -> Result<()> {
 
     // Clone a new process into new user, pid, and mount namespaces.
     let mut clone_args = CloneArgs::default()
-        .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID | CloneFlags::NEWNS)
+        .flags(CloneFlags::NEWUSER | CloneFlags::NEWPID)
         .exit_signal(Signal::CHLD);
     match linux::clone3(&mut clone_args).context("cloning the second-generation process")? {
         Some(gen_1_pid) => {
