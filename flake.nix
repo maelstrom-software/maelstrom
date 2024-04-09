@@ -19,10 +19,10 @@
   outputs =
     inputs:
     let
-      inherit (inputs) nixpkgs crane rust-overlay;
+      inherit (inputs) self nixpkgs rust-overlay;
+      inherit (inputs.crane) mkLib;
       inherit (inputs.flake-utils.lib) eachDefaultSystem;
       inherit (inputs.nixpkgs.lib) importTOML;
-      inherit (inputs.nixpkgs.lib.strings) match;
 
       cargoToml = importTOML ./Cargo.toml;
 
@@ -31,80 +31,28 @@
     eachDefaultSystem (
       system:
       let
-        pkgs = import nixpkgs {
-          inherit system;
-          overlays = [ (import rust-overlay) ];
-        };
+        pkgs = self.legacyPackages.${system};
 
+        # Use the Rust toolchain from Cargo.toml
         rustToolchain = pkgs.rust-bin.stable.${rust-version}.default.override {
           extensions = [ "rust-src" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
-        craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain);
-        all = craneLib.buildPackage {
-          # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
 
-          pname = "all";
-          src =
-            let
-              # Only keeps markdown files
-              tarFilter = path: _type: match ".*tar$" path != null;
-              tarOrCargo = path: type: (tarFilter path type) || (craneLib.filterCargoSources path type);
-            in
-            nixpkgs.lib.cleanSourceWith {
-              src = craneLib.path ./.;
-              filter = tarOrCargo;
-            };
-          strictDeps = true;
-
-          nativeBuildInputs = [
-            pkgs.binaryen
-            pkgs.pkg-config
-            pkgs.llvmPackages.bintools
-          ];
-
-          buildInputs =
-            [
-              pkgs.openssl
-              # Add additional build inputs here
-            ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-              # Additional darwin specific inputs can be set here
-              pkgs.libiconv
-            ];
-
-          doCheck = false;
-
-          # Additional environment variables can be set directly
-          # MY_CUSTOM_VAR = "some value";
-        };
+        craneLib = ((mkLib pkgs).overrideToolchain rustToolchain);
       in
       {
-        packages.default = all;
+        # Import nixpkgs once
+        legacyPackages = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
 
-        devShells.default = craneLib.devShell {
-          # Automatically inherit any build inputs from `my-crate`
-          inputsFrom = [ all ];
+        packages.default = pkgs.callPackage ./package.nix { inherit craneLib; };
 
-          # Extra inputs (only used for interactive development)
-          # can be added here; cargo and rustc are provided by default.
-          packages = [
-            pkgs.gh
-            pkgs.mdbook
-            pkgs.bat
-            pkgs.cargo-audit
-            pkgs.cargo-binstall
-            pkgs.cargo-edit
-            pkgs.cargo-nextest
-            pkgs.cargo-watch
-            pkgs.protobuf3_20
-            pkgs.ripgrep
-            pkgs.rust-analyzer
-            pkgs.stgit
-          ];
-
-          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
+        devShells.default = pkgs.callPackage ./shell.nix {
+          inherit craneLib;
+          maelstrom = self.packages.${system}.default;
         };
       }
     );
