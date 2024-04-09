@@ -1,4 +1,6 @@
 {
+  description = "Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner.";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
