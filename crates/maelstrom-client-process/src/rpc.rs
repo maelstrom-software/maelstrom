@@ -52,7 +52,7 @@ macro_rules! with_client_async {
             let $client = client_guard
                 .as_ref()
                 .ok_or_else(|| anyhow!("must call start first"))?;
-            let res: Result::<_, anyhow::Error> = { $($body);* };
+            let res: Result<_> = { $($body);* };
             res
         }
     };
