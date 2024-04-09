@@ -1,53 +1,45 @@
-{ lib
-, stdenv
-, binaryen
-, openssl
-, pkg-config
-, rustPlatform
-, rustc-wasm32
+{
+  lib,
+  stdenv,
+  craneLib,
+  binaryen,
+  pkg-config,
+  llvmPackages,
+  openssl,
+  libiconv,
 }:
 
 let
-  cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+  inherit (craneLib) buildPackage filterCargoSources path;
+  inherit (lib) cleanSourceWith optionals;
+  inherit (lib.strings) match;
+
+  # Only keeps markdown files
+  tarFilter = path: _type: match ".*tar$" path != null;
+  tarOrCargo = path: type: (tarFilter path type) || (filterCargoSources path type);
+
+  src = cleanSourceWith {
+    src = path ./.;
+    filter = tarOrCargo;
+  };
 in
 
-rustPlatform.buildRustPackage {
-  pname = "maelstrom";
-  version = cargoToml.workspace.package.version;
-
-  src = ./.;
-
-  cargoLock = {
-    lockFile = ./Cargo.lock;
-  };
-
-  prePatch = ''
-    patchShebangs crates/maelstrom-web/build.sh
-  '';
-
+buildPackage {
   # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
   env.CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
+
+  pname = "all";
+  inherit src;
+
+  strictDeps = true;
 
   nativeBuildInputs = [
     binaryen
     pkg-config
-    rustc-wasm32
-    rustc-wasm32.llvmPackages.lld
+    llvmPackages.bintools
   ];
 
-  buildInputs = [ openssl ];
-
-  postInstall = ''
-    rm $out/lib/libmaelstrom_web.so
-    rmdir $out/lib
-  '';
+  buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
 
   doCheck = false;
-
-  meta = with lib; {
-    description = "Maelstrom clustered job runner";
-    homepage = "https://github.com/maelstrom-software/maelstrom";
-    license = [licenses.mit licenses.asl20];
-    maintainers = with maintainers; [ philiptaron ];
-  };
 }
