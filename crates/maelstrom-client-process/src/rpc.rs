@@ -217,26 +217,12 @@ impl ClientProcess for Handler {
     ) -> TonicResponse<proto::AddJobResponse> {
         run_handler(async {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
-            let (send, mut recv) = mpsc::unbounded_channel();
-            with_client_async!(self, |client| {
-                Ok(client
-                    .add_job(
-                        spec,
-                        Box::new(move |cjid, res| {
-                            let _ = send.send((cjid, res));
-                        }),
-                    )
-                    .await)
-            })
-            .await?;
-            let (cjid, res) = recv
-                .recv()
+            with_client_async!(self, |client| { client.run_job(spec).await })
                 .await
-                .ok_or_else(|| anyhow!("client shutdown"))?;
-            Ok(proto::AddJobResponse {
-                client_job_id: cjid.into_proto_buf(),
-                result: Some(res.into_proto_buf()),
-            })
+                .map(|(cjid, res)| proto::AddJobResponse {
+                    client_job_id: cjid.into_proto_buf(),
+                    result: Some(res.into_proto_buf()),
+                })
         })
         .await
     }

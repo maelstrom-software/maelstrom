@@ -1,5 +1,5 @@
 use crate::artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
-use crate::dispatcher::{Dispatcher, DispatcherMessage};
+use crate::dispatcher::{Dispatcher, Message};
 use crate::test::client_driver::SingleThreadedClientDriver;
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
@@ -20,11 +20,11 @@ pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync>
 
 pub struct SocketReader {
     stream: tcp::OwnedReadHalf,
-    channel: Sender<DispatcherMessage>,
+    channel: Sender<Message>,
 }
 
 impl SocketReader {
-    fn new(stream: tcp::OwnedReadHalf, channel: Sender<DispatcherMessage>) -> Self {
+    fn new(stream: tcp::OwnedReadHalf, channel: Sender<Message>) -> Self {
         Self { stream, channel }
     }
 
@@ -33,7 +33,7 @@ impl SocketReader {
             return false;
         };
         self.channel
-            .send(DispatcherMessage::BrokerToClient(msg))
+            .send(Message::BrokerToClient(msg))
             .await
             .is_ok()
     }
@@ -43,7 +43,7 @@ pub struct ClientDeps {
     pub dispatcher: Dispatcher,
     pub artifact_pusher: ArtifactPusher,
     pub socket_reader: SocketReader,
-    pub dispatcher_sender: Sender<DispatcherMessage>,
+    pub dispatcher_sender: Sender<Message>,
 }
 
 impl ClientDeps {

@@ -5,23 +5,23 @@ mod driver;
 mod rpc;
 mod test;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
-use dispatcher::{ArtifactPushRequest, DispatcherMessage};
+use dispatcher::{ArtifactPushRequest, Message};
 use driver::{new_driver, ClientDeps, ClientDriver};
 use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
     stats::JobStateCounts,
-    ArtifactType, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
+    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, JobResponseHandler, MANIFEST_DIR,
-    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, MANIFEST_DIR, STUB_MANIFEST_DIR,
+    SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
@@ -40,7 +40,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tokio::sync::{mpsc::Sender, Mutex};
+use tokio::sync::{mpsc::Sender, oneshot, Mutex};
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = async_fs::Fs::new();
@@ -136,7 +136,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: Sender<DispatcherMessage>,
+    dispatcher_sender: Sender<Message>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -209,7 +209,7 @@ impl Client {
         if !state.processed_artifact_paths.contains(&path) {
             state.processed_artifact_paths.insert(path.clone());
             self.dispatcher_sender
-                .send(DispatcherMessage::AddArtifact(path, digest.clone()))
+                .send(Message::AddArtifact(path, digest.clone()))
                 .await?;
         }
         Ok(digest)
@@ -410,21 +410,26 @@ impl Client {
             .await
     }
 
-    async fn add_job(&self, spec: JobSpec, handler: JobResponseHandler) {
-        slog::debug!(self.log, "add_job"; "spec" => ?spec);
+    async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
+        slog::debug!(self.log, "run_job"; "spec" => ?spec);
 
-        // We will only get an error if the dispatcher has closed its receiver, which will only
-        // happen if it ran into an error. We'll get that error when we wait in
-        // `wait_for_oustanding_job`.
+        let (sender, receiver) = oneshot::channel();
+
         self.dispatcher_sender
-            .send(DispatcherMessage::AddJob(spec, handler))
-            .await
-            .ok();
+            .send(Message::AddJob(
+                spec,
+                Box::new(move |cjid, res| {
+                    let _ = sender.send((cjid, res));
+                }),
+            ))
+            .await?;
+
+        receiver.await.map_err(Error::new)
     }
 
     async fn stop_accepting(&self) -> Result<()> {
         slog::debug!(self.log, "stop_accepting");
-        self.dispatcher_sender.send(DispatcherMessage::Stop).await?;
+        self.dispatcher_sender.send(Message::Stop).await?;
         Ok(())
     }
 
@@ -438,7 +443,7 @@ impl Client {
     async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
         let (sender, mut recv) = tokio::sync::mpsc::channel(1);
         self.dispatcher_sender
-            .send(DispatcherMessage::GetJobStateCounts(sender))
+            .send(Message::GetJobStateCounts(sender))
             .await?;
         recv.recv().await.ok_or(anyhow!("client shutdown"))
     }

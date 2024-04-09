@@ -13,7 +13,7 @@ use std::{
 use tokio::net::tcp;
 use tokio::sync::mpsc::{Receiver, Sender};
 
-pub enum DispatcherMessage {
+pub enum Message {
     BrokerToClient(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, JobResponseHandler),
@@ -27,7 +27,7 @@ pub struct ArtifactPushRequest {
 }
 
 pub struct Dispatcher {
-    receiver: Receiver<DispatcherMessage>,
+    receiver: Receiver<Message>,
     pub stream: tcp::OwnedWriteHalf,
     artifact_pusher: Sender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
@@ -39,7 +39,7 @@ pub struct Dispatcher {
 
 impl Dispatcher {
     pub fn new(
-        receiver: Receiver<DispatcherMessage>,
+        receiver: Receiver<Message>,
         stream: tcp::OwnedWriteHalf,
         artifact_pusher: Sender<ArtifactPushRequest>,
     ) -> Self {
@@ -73,19 +73,16 @@ impl Dispatcher {
         Some(kind)
     }
 
-    async fn handle_message(
-        &mut self,
-        msg: DispatcherMessage,
-    ) -> Result<(bool, ClientMessageKind)> {
+    async fn handle_message(&mut self, msg: Message) -> Result<(bool, ClientMessageKind)> {
         let mut kind = ClientMessageKind::Other;
         match msg {
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
+            Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 self.handlers.remove(&cjid).unwrap()(cjid, result);
                 if self.stop_when_all_completed && self.handlers.is_empty() {
                     return Ok((false, kind));
                 }
             }
-            DispatcherMessage::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
+            Message::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
                 let path = self
                     .artifacts
                     .get(&digest)
@@ -97,16 +94,16 @@ impl Dispatcher {
                     .send(ArtifactPushRequest { path, digest })
                     .await?;
             }
-            DispatcherMessage::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+            Message::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
             }
-            DispatcherMessage::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
+            Message::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
                 self.stats_reqs.pop_front().unwrap().send(res).await.ok();
             }
-            DispatcherMessage::AddArtifact(path, digest) => {
+            Message::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
             }
-            DispatcherMessage::AddJob(spec, handler) => {
+            Message::AddJob(spec, handler) => {
                 let cjid = self.next_client_job_id.into();
                 self.handlers.insert(cjid, handler).assert_is_none();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
@@ -117,14 +114,14 @@ impl Dispatcher {
                 .await?;
                 kind = ClientMessageKind::AddJob;
             }
-            DispatcherMessage::Stop => {
+            Message::Stop => {
                 kind = ClientMessageKind::Stop;
                 if self.handlers.is_empty() {
                     return Ok((false, kind));
                 }
                 self.stop_when_all_completed = true;
             }
-            DispatcherMessage::GetJobStateCounts(sender) => {
+            Message::GetJobStateCounts(sender) => {
                 net::write_message_to_async_socket(
                     &mut self.stream,
                     ClientToBroker::JobStateCountsRequest,
