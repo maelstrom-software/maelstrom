@@ -30,7 +30,7 @@ use maelstrom_util::{
     io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
 };
-pub use rpc::run_process_client;
+pub use rpc::client_process_main;
 use sha2::{Digest as _, Sha256};
 use slog::Drain as _;
 use std::pin::pin;

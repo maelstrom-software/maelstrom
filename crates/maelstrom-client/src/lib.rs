@@ -93,7 +93,7 @@ impl ClientBgProcess {
                 sock: Some(sock1),
             })
         } else {
-            maelstrom_client_process::run_process_client(sock2, None).unwrap();
+            maelstrom_client_process::client_process_main(sock2, None).unwrap();
             std::process::exit(0)
         }
     }
@@ -101,7 +101,7 @@ impl ClientBgProcess {
     pub fn new_from_thread() -> Result<Self> {
         let (sock1, sock2) = UnixStream::pair()?;
         let handle =
-            thread::spawn(move || maelstrom_client_process::run_process_client(sock1, None));
+            thread::spawn(move || maelstrom_client_process::client_process_main(sock1, None));
         Ok(Self {
             handle: ClientBgHandle::Thread(Some(handle)),
             sock: Some(sock2),

@@ -318,7 +318,7 @@ impl proto::client_process_server::ClientProcess for Handler {
 type TokioError<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn run_process_client(sock: UnixStream, log: Option<slog::Logger>) -> Result<()> {
+pub async fn client_process_main(sock: UnixStream, log: Option<slog::Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let sock1 = tokio::net::UnixStream::from_std(sock.try_clone()?)?;
     let sock2 = tokio::net::UnixStream::from_std(sock)?;
