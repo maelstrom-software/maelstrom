@@ -3,6 +3,7 @@ use fs2::FileExt as _;
 use std::{
     fmt,
     io::{self},
+    os::fd::{AsRawFd, RawFd},
     path::{Path, PathBuf},
 };
 
@@ -450,6 +451,12 @@ pub struct File<'fs> {
 impl GetPath for File<'_> {
     fn path(&self) -> &Path {
         self.path()
+    }
+}
+
+impl AsRawFd for File<'_> {
+    fn as_raw_fd(&self) -> RawFd {
+        self.inner.as_raw_fd()
     }
 }
 
