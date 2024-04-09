@@ -20,8 +20,17 @@
     };
   };
 
-  outputs = { self, nixpkgs, crane, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      crane,
+      flake-utils,
+      rust-overlay,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = import nixpkgs {
           inherit system;
@@ -29,7 +38,7 @@
         };
 
         rustToolchain = pkgs.rust-bin.stable."1.75.0".default.override {
-	  extensions = [ "rust-src" ];
+          extensions = [ "rust-src" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
         craneLib = ((crane.mkLib pkgs).overrideToolchain rustToolchain);
@@ -38,30 +47,33 @@
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
 
           pname = "all";
-          src = let
-	    # Only keeps markdown files
-	    tarFilter = path: _type: builtins.match ".*tar$" path != null;
-	    tarOrCargo = path: type:
-	      (tarFilter path type) || (craneLib.filterCargoSources path type);
-	  in nixpkgs.lib.cleanSourceWith {
-	    src = craneLib.path ./.;
-	    filter = tarOrCargo;
-	  };
+          src =
+            let
+              # Only keeps markdown files
+              tarFilter = path: _type: builtins.match ".*tar$" path != null;
+              tarOrCargo = path: type: (tarFilter path type) || (craneLib.filterCargoSources path type);
+            in
+            nixpkgs.lib.cleanSourceWith {
+              src = craneLib.path ./.;
+              filter = tarOrCargo;
+            };
           strictDeps = true;
 
-	  nativeBuildInputs = [
-	    pkgs.binaryen
-	    pkgs.pkg-config
+          nativeBuildInputs = [
+            pkgs.binaryen
+            pkgs.pkg-config
             pkgs.llvmPackages.bintools
-	  ];
-
-          buildInputs = [
-	    pkgs.openssl
-            # Add additional build inputs here
-          ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
-            # Additional darwin specific inputs can be set here
-            pkgs.libiconv
           ];
+
+          buildInputs =
+            [
+              pkgs.openssl
+              # Add additional build inputs here
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isDarwin [
+              # Additional darwin specific inputs can be set here
+              pkgs.libiconv
+            ];
 
           doCheck = false;
 
@@ -79,8 +91,8 @@
           # Extra inputs (only used for interactive development)
           # can be added here; cargo and rustc are provided by default.
           packages = [
-	    pkgs.gh
-	    pkgs.mdbook
+            pkgs.gh
+            pkgs.mdbook
             pkgs.bat
             pkgs.cargo-audit
             pkgs.cargo-binstall
@@ -95,5 +107,6 @@
 
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
         };
-      });
+      }
+    );
 }
