@@ -17,15 +17,18 @@
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      crane,
-      flake-utils,
-      rust-overlay,
-      ...
-    }:
-    flake-utils.lib.eachDefaultSystem (
+    inputs:
+    let
+      inherit (inputs) nixpkgs crane rust-overlay;
+      inherit (inputs.flake-utils.lib) eachDefaultSystem;
+      inherit (inputs.nixpkgs.lib) importTOML;
+      inherit (inputs.nixpkgs.lib.strings) match;
+
+      cargoToml = importTOML ./Cargo.toml;
+
+      inherit (cargoToml.workspace.package) rust-version;
+    in
+    eachDefaultSystem (
       system:
       let
         pkgs = import nixpkgs {
@@ -33,7 +36,7 @@
           overlays = [ (import rust-overlay) ];
         };
 
-        rustToolchain = pkgs.rust-bin.stable."1.75.0".default.override {
+        rustToolchain = pkgs.rust-bin.stable.${rust-version}.default.override {
           extensions = [ "rust-src" ];
           targets = [ "wasm32-unknown-unknown" ];
         };
@@ -46,7 +49,7 @@
           src =
             let
               # Only keeps markdown files
-              tarFilter = path: _type: builtins.match ".*tar$" path != null;
+              tarFilter = path: _type: match ".*tar$" path != null;
               tarOrCargo = path: type: (tarFilter path type) || (craneLib.filterCargoSources path type);
             in
             nixpkgs.lib.cleanSourceWith {
