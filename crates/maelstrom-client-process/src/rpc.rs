@@ -41,7 +41,7 @@ impl Handler {
 
     async fn take_client(&self) -> Result<Client> {
         let mut guard = self.client.write().await;
-        guard.take().ok_or(anyhow!("must call start first"))
+        guard.take().ok_or_else(|| anyhow!("must call start first"))
     }
 }
 
@@ -51,7 +51,7 @@ macro_rules! with_client_async {
             let client_guard = $s.client.read().await;
             let $client = client_guard
                 .as_ref()
-                .ok_or(anyhow!("must call start first"))?;
+                .ok_or_else(|| anyhow!("must call start first"))?;
             let res: Result::<_, anyhow::Error> = { $($body);* };
             res
         }
@@ -222,7 +222,10 @@ impl ClientProcess for Handler {
                     .await)
             })
             .await?;
-            let (cjid, res) = recv.recv().await.ok_or(anyhow!("client shutdown"))?;
+            let (cjid, res) = recv
+                .recv()
+                .await
+                .ok_or_else(|| anyhow!("client shutdown"))?;
             Ok(proto::AddJobResponse {
                 client_job_id: cjid.into_proto_buf(),
                 result: Some(res.into_proto_buf()),
