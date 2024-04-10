@@ -21,7 +21,7 @@ pub trait Deps {
 }
 
 pub enum Message<DepsT: Deps> {
-    BrokerToClient(BrokerToClient),
+    Broker(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(Sender<JobStateCounts>),
@@ -62,14 +62,14 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
 
     pub async fn receive_message(&mut self, msg: Message<DepsT>) -> Result<ControlFlow<()>> {
         match msg {
-            Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
+            Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
                 let handle = self.job_handles.remove(&cjid).unwrap();
                 self.deps.job_done(handle, cjid, result);
                 if self.stop_when_all_completed && self.job_handles.is_empty() {
                     return Ok(ControlFlow::Break(()));
                 }
             }
-            Message::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
+            Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
                 let path = self.artifacts.get(&digest).unwrap_or_else(|| {
                     panic!("got request for unknown artifact with digest {digest}")
                 });
@@ -77,10 +77,10 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                     .send_artifact_to_broker(digest, path.clone())
                     .await?;
             }
-            Message::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
+            Message::Broker(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
             }
-            Message::BrokerToClient(BrokerToClient::JobStateCountsResponse(res)) => {
+            Message::Broker(BrokerToClient::JobStateCountsResponse(res)) => {
                 self.stats_reqs.pop_front().unwrap().send(res).await.ok();
             }
             Message::AddArtifact(path, digest) => {

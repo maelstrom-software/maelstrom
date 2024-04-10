@@ -82,7 +82,7 @@ impl SocketReader {
             return false;
         };
         self.channel
-            .send(dispatcher::Message::BrokerToClient(msg))
+            .send(dispatcher::Message::Broker(msg))
             .await
             .is_ok()
     }
