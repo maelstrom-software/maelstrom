@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use maelstrom_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::JobStateCounts,
@@ -11,7 +11,7 @@ use std::{
     ops::ControlFlow,
     path::PathBuf,
 };
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
 pub trait Deps {
     type JobHandle;
@@ -41,7 +41,6 @@ impl<DepsT: Deps> Message<DepsT> {
 
 pub struct Dispatcher<DepsT: Deps> {
     deps: DepsT,
-    receiver: Receiver<Message<DepsT>>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
@@ -50,10 +49,9 @@ pub struct Dispatcher<DepsT: Deps> {
 }
 
 impl<DepsT: Deps> Dispatcher<DepsT> {
-    pub fn new(deps: DepsT, receiver: Receiver<Message<DepsT>>) -> Self {
+    pub fn new(deps: DepsT) -> Self {
         Self {
             deps,
-            receiver,
             stop_when_all_completed: false,
             next_client_job_id: 0u32,
             artifacts: Default::default(),
@@ -62,25 +60,7 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
         }
     }
 
-    /// Processes one request. In order to drive the dispatcher, this should be called in a loop
-    /// until the function return false
-    pub async fn process_one(&mut self) -> Result<ControlFlow<()>> {
-        let msg = self
-            .receiver
-            .recv()
-            .await
-            .ok_or(anyhow!("dispatcher hangup"))?;
-        self.receive_message(msg).await
-    }
-
-    pub async fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
-        let msg = self.receiver.try_recv().ok()?;
-        let kind = msg.kind();
-        self.receive_message(msg).await.ok()?;
-        Some(kind)
-    }
-
-    async fn receive_message(&mut self, msg: Message<DepsT>) -> Result<ControlFlow<()>> {
+    pub async fn receive_message(&mut self, msg: Message<DepsT>) -> Result<ControlFlow<()>> {
         match msg {
             Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 let handle = self.job_handles.remove(&cjid).unwrap();

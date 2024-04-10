@@ -25,7 +25,10 @@ impl ClientDriver for SingleThreadedClientDriver {
 
         for _ in 0..count {
             deps.socket_reader.process_one().await;
-            deps.dispatcher.process_one().await.unwrap();
+            deps.dispatcher
+                .receive_message(deps.dispatcher_receiver.recv().await.unwrap())
+                .await
+                .unwrap();
         }
     }
 
@@ -33,9 +36,12 @@ impl ClientDriver for SingleThreadedClientDriver {
         loop {
             let mut locked_deps = self.deps.lock().await;
             let deps = locked_deps.as_mut().unwrap();
-            let kind = deps.dispatcher.process_one_and_tell().await;
-            if kind.is_some_and(|k| k == wanted) {
-                break;
+            let msg = deps.dispatcher_receiver.recv().await;
+            if let Some(msg) = msg {
+                let kind = msg.kind();
+                if deps.dispatcher.receive_message(msg).await.is_ok() && kind == wanted {
+                    break;
+                }
             }
         }
     }

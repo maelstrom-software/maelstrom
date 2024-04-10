@@ -1,7 +1,7 @@
 use crate::artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
 use crate::dispatcher::{self, Dispatcher};
 use crate::test::client_driver::SingleThreadedClientDriver;
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
@@ -9,11 +9,11 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
-use std::path::PathBuf;
+use std::{ops::ControlFlow, path::PathBuf};
 use tokio::{
     net::{tcp, TcpStream},
     sync::{
-        mpsc::{self, Sender},
+        mpsc::{self, Receiver, Sender},
         Mutex,
     },
     task::{self, JoinHandle},
@@ -90,9 +90,10 @@ impl SocketReader {
 
 pub struct ClientDeps {
     pub dispatcher: Dispatcher<DispatcherAdapter>,
+    pub dispatcher_receiver: Receiver<dispatcher::Message<DispatcherAdapter>>,
+    pub dispatcher_sender: Sender<dispatcher::Message<DispatcherAdapter>>,
     pub artifact_pusher: ArtifactPusher,
     pub socket_reader: SocketReader,
-    pub dispatcher_sender: Sender<dispatcher::Message<DispatcherAdapter>>,
 }
 
 impl ClientDeps {
@@ -109,13 +110,11 @@ impl ClientDeps {
         let (artifact_send, artifact_recv) = mpsc::channel(1000);
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
-            dispatcher: Dispatcher::new(
-                DispatcherAdapter::new(write_half, artifact_send),
-                dispatcher_receiver,
-            ),
+            dispatcher: Dispatcher::new(DispatcherAdapter::new(write_half, artifact_send)),
             artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
             socket_reader: SocketReader::new(read_half, dispatcher_sender.clone()),
             dispatcher_sender,
+            dispatcher_receiver,
         })
     }
 }
@@ -150,7 +149,15 @@ impl ClientDriver for MultiThreadedClientDriver {
         assert!(locked_handle.is_none());
         *locked_handle = Some(task::spawn(async move {
             let dispatcher_handle = task::spawn(async move {
-                while deps.dispatcher.process_one().await?.is_continue() {}
+                let mut cf = ControlFlow::Continue(());
+                while cf.is_continue() {
+                    let msg = deps
+                        .dispatcher_receiver
+                        .recv()
+                        .await
+                        .ok_or_else(|| anyhow!("dispatcher hangup"))?;
+                    cf = deps.dispatcher.receive_message(msg).await?;
+                }
                 Ok(())
             });
             let pusher_handle = task::spawn(async move {
