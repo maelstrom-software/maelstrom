@@ -8,6 +8,7 @@ use maelstrom_client_base::ClientMessageKind;
 use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{HashMap, VecDeque},
+    ops::ControlFlow,
     path::PathBuf,
 };
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -52,14 +53,13 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
 
     /// Processes one request. In order to drive the dispatcher, this should be called in a loop
     /// until the function return false
-    pub async fn process_one(&mut self) -> Result<bool> {
+    pub async fn process_one(&mut self) -> Result<ControlFlow<()>> {
         let msg = self
             .receiver
             .recv()
             .await
             .ok_or(anyhow!("dispatcher hangup"))?;
-        let (cont, _) = self.handle_message(msg).await?;
-        Ok(cont)
+        self.handle_message(msg).await.map(|(cont, _)| cont)
     }
 
     pub async fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
@@ -68,14 +68,17 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
         Some(kind)
     }
 
-    async fn handle_message(&mut self, msg: Message<DepsT>) -> Result<(bool, ClientMessageKind)> {
+    async fn handle_message(
+        &mut self,
+        msg: Message<DepsT>,
+    ) -> Result<(ControlFlow<()>, ClientMessageKind)> {
         let mut kind = ClientMessageKind::Other;
         match msg {
             Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 let handle = self.job_handles.remove(&cjid).unwrap();
                 self.deps.job_done(handle, cjid, result);
                 if self.stop_when_all_completed && self.job_handles.is_empty() {
-                    return Ok((false, kind));
+                    return Ok((ControlFlow::Break(()), kind));
                 }
             }
             Message::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -107,7 +110,7 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
             Message::Stop => {
                 kind = ClientMessageKind::Stop;
                 if self.job_handles.is_empty() {
-                    return Ok((false, kind));
+                    return Ok((ControlFlow::Break(()), kind));
                 }
                 self.stop_when_all_completed = true;
             }
@@ -119,6 +122,6 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 kind = ClientMessageKind::GetJobStateCounts;
             }
         }
-        Ok((true, kind))
+        Ok((ControlFlow::Continue(()), kind))
     }
 }

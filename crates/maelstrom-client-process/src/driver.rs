@@ -150,7 +150,7 @@ impl ClientDriver for MultiThreadedClientDriver {
         assert!(locked_handle.is_none());
         *locked_handle = Some(task::spawn(async move {
             let dispatcher_handle = task::spawn(async move {
-                while deps.dispatcher.process_one().await? {}
+                while deps.dispatcher.process_one().await?.is_continue() {}
                 Ok(())
             });
             let pusher_handle = task::spawn(async move {
