@@ -15,21 +15,16 @@ let
   inherit (lib) cleanSourceWith optionals;
   inherit (lib.strings) match;
 
-  # Only keeps `.tar` and `.proto` files
-  allowList = path: _type: match ".*\.(tar|proto)$" path != null;
-  srcFilter = path: type: (allowList path type) || (filterCargoSources path type);
-
-  src = cleanSourceWith {
-    src = path ./.;
-    filter = srcFilter;
-  };
+  # Only keeps `.tar` and `.proto` files, plus normal Rust files.
+  srcFilter = path: type: (match ".*\.(tar|proto)$" path != null) || (filterCargoSources path type);
 
   self = buildPackage {
-    # NOTE: we need to force lld otherwise rust-lld is not found for wasm32 target
-    env.CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_LINKER = "lld";
+    pname = "maelstrom";
 
-    pname = "all";
-    inherit src;
+    src = cleanSourceWith {
+      src = path ./.;
+      filter = srcFilter;
+    };
 
     strictDeps = true;
 
@@ -49,6 +44,7 @@ let
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
 
+    # Don't run the unit tests inside Nix build.
     doCheck = false;
   };
 in
