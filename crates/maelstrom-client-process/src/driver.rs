@@ -5,6 +5,7 @@ use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
+    stats::JobStateCounts,
     ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
@@ -14,6 +15,7 @@ use tokio::{
     net::{tcp, TcpStream},
     sync::{
         mpsc::{self, Receiver, Sender},
+        oneshot::Sender as OneShotSender,
         Mutex,
     },
     task::{self, JoinHandle},
@@ -43,6 +45,12 @@ impl dispatcher::Deps for DispatcherAdapter {
 
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
         handle(cjid, result)
+    }
+
+    type JobStateCountsHandle = OneShotSender<JobStateCounts>;
+
+    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
+        handle.send(counts).ok();
     }
 
     async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {

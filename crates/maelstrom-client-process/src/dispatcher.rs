@@ -11,11 +11,12 @@ use std::{
     ops::ControlFlow,
     path::PathBuf,
 };
-use tokio::sync::mpsc::Sender;
 
 pub trait Deps {
     type JobHandle;
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult);
+    type JobStateCountsHandle;
+    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts);
     async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()>;
     async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()>;
 }
@@ -24,7 +25,7 @@ pub enum Message<DepsT: Deps> {
     Broker(BrokerToClient),
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, DepsT::JobHandle),
-    GetJobStateCounts(Sender<JobStateCounts>),
+    GetJobStateCounts(DepsT::JobStateCountsHandle),
     Stop,
 }
 
@@ -45,7 +46,7 @@ pub struct Dispatcher<DepsT: Deps> {
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
     job_handles: HashMap<ClientJobId, DepsT::JobHandle>,
-    stats_reqs: VecDeque<Sender<JobStateCounts>>,
+    stats_reqs: VecDeque<DepsT::JobStateCountsHandle>,
 }
 
 impl<DepsT: Deps> Dispatcher<DepsT> {
@@ -80,8 +81,9 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
             Message::Broker(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests")
             }
-            Message::Broker(BrokerToClient::JobStateCountsResponse(res)) => {
-                self.stats_reqs.pop_front().unwrap().send(res).await.ok();
+            Message::Broker(BrokerToClient::JobStateCountsResponse(counts)) => {
+                self.deps
+                    .job_state_counts(self.stats_reqs.pop_front().unwrap(), counts);
             }
             Message::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
@@ -100,11 +102,11 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 }
                 self.stop_when_all_completed = true;
             }
-            Message::GetJobStateCounts(sender) => {
+            Message::GetJobStateCounts(handle) => {
                 self.deps
                     .send_message_to_broker(ClientToBroker::JobStateCountsRequest)
                     .await?;
-                self.stats_reqs.push_back(sender);
+                self.stats_reqs.push_back(handle);
             }
         }
         Ok(ControlFlow::Continue(()))

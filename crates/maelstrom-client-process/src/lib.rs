@@ -442,11 +442,11 @@ impl Client {
     }
 
     async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
-        let (sender, mut recv) = tokio::sync::mpsc::channel(1);
+        let (sender, receiver) = tokio::sync::oneshot::channel();
         self.dispatcher_sender
             .send(Message::GetJobStateCounts(sender))
             .await?;
-        recv.recv().await.ok_or(anyhow!("client shutdown"))
+        receiver.await.map_err(Error::new)
     }
 
     async fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
