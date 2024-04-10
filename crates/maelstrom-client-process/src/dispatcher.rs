@@ -5,17 +5,17 @@ use maelstrom_base::{
     ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::ClientMessageKind;
-use maelstrom_util::{ext::OptionExt as _, net};
+use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
 };
-use tokio::net::tcp;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub trait Deps {
     type JobHandle;
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult);
+    async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()>;
 }
 
 pub enum Message<DepsT: Deps> {
@@ -34,7 +34,6 @@ pub struct ArtifactPushRequest {
 pub struct Dispatcher<DepsT: Deps> {
     deps: DepsT,
     receiver: Receiver<Message<DepsT>>,
-    pub stream: tcp::OwnedWriteHalf,
     artifact_pusher: Sender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
@@ -47,13 +46,11 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
     pub fn new(
         deps: DepsT,
         receiver: Receiver<Message<DepsT>>,
-        stream: tcp::OwnedWriteHalf,
         artifact_pusher: Sender<ArtifactPushRequest>,
     ) -> Self {
         Self {
             deps,
             receiver,
-            stream,
             artifact_pusher,
             stop_when_all_completed: false,
             next_client_job_id: 0u32,
@@ -116,11 +113,9 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 let cjid = self.next_client_job_id.into();
                 self.job_handles.insert(cjid, handle).assert_is_none();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
-                net::write_message_to_async_socket(
-                    &mut self.stream,
-                    ClientToBroker::JobRequest(cjid, spec),
-                )
-                .await?;
+                self.deps
+                    .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec))
+                    .await?;
                 kind = ClientMessageKind::AddJob;
             }
             Message::Stop => {
@@ -131,11 +126,9 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 self.stop_when_all_completed = true;
             }
             Message::GetJobStateCounts(sender) => {
-                net::write_message_to_async_socket(
-                    &mut self.stream,
-                    ClientToBroker::JobStateCountsRequest,
-                )
-                .await?;
+                self.deps
+                    .send_message_to_broker(ClientToBroker::JobStateCountsRequest)
+                    .await?;
                 self.stats_reqs.push_back(sender);
                 kind = ClientMessageKind::GetJobStateCounts;
             }

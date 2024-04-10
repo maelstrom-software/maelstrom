@@ -87,10 +87,7 @@ fn basic_job_test(
     };
     let (send, recv) = mpsc::channel();
     client
-        .add_job(
-            spec,
-            move |id, result| send.send((id, result)).unwrap(),
-        )
+        .add_job(spec, move |id, result| send.send((id, result)).unwrap())
         .unwrap();
 
     client.process_client_messages_single_threaded(ClientMessageKind::AddJob);

@@ -3,21 +3,40 @@ use crate::dispatcher::{self, Dispatcher};
 use crate::test::client_driver::SingleThreadedClientDriver;
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
-use maelstrom_base::{proto::Hello, ClientJobId, JobOutcomeResult};
+use maelstrom_base::{
+    proto::{ClientToBroker, Hello},
+    ClientJobId, JobOutcomeResult,
+};
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
-use tokio::net::{tcp, TcpStream};
-use tokio::sync::mpsc::Sender;
-use tokio::sync::{mpsc, Mutex};
-use tokio::task::{self, JoinHandle};
+use tokio::{
+    net::{tcp, TcpStream},
+    sync::{
+        mpsc::{self, Sender},
+        Mutex,
+    },
+    task::{self, JoinHandle},
+};
 
-pub struct DispatcherAdapter;
+pub struct DispatcherAdapter {
+    stream: tcp::OwnedWriteHalf,
+}
+
+impl DispatcherAdapter {
+    pub fn new(stream: tcp::OwnedWriteHalf) -> Self {
+        Self { stream }
+    }
+}
 
 impl dispatcher::Deps for DispatcherAdapter {
     type JobHandle = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
 
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
         handle(cjid, result)
+    }
+
+    async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {
+        net::write_message_to_async_socket(&mut self.stream, message).await
     }
 }
 
@@ -74,9 +93,8 @@ impl ClientDeps {
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
             dispatcher: Dispatcher::new(
-                DispatcherAdapter,
+                DispatcherAdapter::new(write_half),
                 dispatcher_receiver,
-                write_half,
                 artifact_send,
             ),
             artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),

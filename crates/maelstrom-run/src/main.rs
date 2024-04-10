@@ -138,10 +138,9 @@ fn main() -> Result<ExitCode> {
     );
     for job_spec in job_specs {
         let accum_clone = accum.clone();
-        client.add_job(
-            job_spec?,
-            move |cjid, result| visitor(cjid, result, accum_clone),
-        )?;
+        client.add_job(job_spec?, move |cjid, result| {
+            visitor(cjid, result, accum_clone)
+        })?;
     }
     client.wait_for_outstanding_jobs()?;
     Ok(accum.get())
