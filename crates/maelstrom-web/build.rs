@@ -129,6 +129,7 @@ fn build_wasm(target: &str, profile: &str, workspace_root: &Path) {
             [
                 "cargo",
                 "build",
+                "--offline",
                 "--lib",
                 "--target",
                 target,
