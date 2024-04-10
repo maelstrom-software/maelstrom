@@ -70,26 +70,23 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
             .recv()
             .await
             .ok_or(anyhow!("dispatcher hangup"))?;
-        self.receive_message(msg).await.map(|(cont, _)| cont)
+        self.receive_message(msg).await
     }
 
     pub async fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
         let msg = self.receiver.try_recv().ok()?;
-        let (_, kind) = self.receive_message(msg).await.ok()?;
+        let kind = msg.kind();
+        self.receive_message(msg).await.ok()?;
         Some(kind)
     }
 
-    async fn receive_message(
-        &mut self,
-        msg: Message<DepsT>,
-    ) -> Result<(ControlFlow<()>, ClientMessageKind)> {
-        let kind = msg.kind();
+    async fn receive_message(&mut self, msg: Message<DepsT>) -> Result<ControlFlow<()>> {
         match msg {
             Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 let handle = self.job_handles.remove(&cjid).unwrap();
                 self.deps.job_done(handle, cjid, result);
                 if self.stop_when_all_completed && self.job_handles.is_empty() {
-                    return Ok((ControlFlow::Break(()), kind));
+                    return Ok(ControlFlow::Break(()));
                 }
             }
             Message::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
@@ -119,7 +116,7 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
             }
             Message::Stop => {
                 if self.job_handles.is_empty() {
-                    return Ok((ControlFlow::Break(()), kind));
+                    return Ok(ControlFlow::Break(()));
                 }
                 self.stop_when_all_completed = true;
             }
@@ -130,6 +127,6 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 self.stats_reqs.push_back(sender);
             }
         }
-        Ok((ControlFlow::Continue(()), kind))
+        Ok(ControlFlow::Continue(()))
     }
 }
