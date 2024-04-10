@@ -9,7 +9,7 @@ use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
-use dispatcher::{ArtifactPushRequest, Message};
+use dispatcher::Message;
 use driver::{new_driver, ClientDeps, ClientDriver, DispatcherAdapter};
 use futures::StreamExt;
 use itertools::Itertools as _;

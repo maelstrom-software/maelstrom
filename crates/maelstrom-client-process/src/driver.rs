@@ -5,10 +5,11 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use maelstrom_base::{
     proto::{ClientToBroker, Hello},
-    ClientJobId, JobOutcomeResult,
+    ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
+use std::path::PathBuf;
 use tokio::{
     net::{tcp, TcpStream},
     sync::{
@@ -18,13 +19,22 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
+pub struct ArtifactPushRequest {
+    pub path: PathBuf,
+    pub digest: Sha256Digest,
+}
+
 pub struct DispatcherAdapter {
     stream: tcp::OwnedWriteHalf,
+    artifact_pusher: Sender<ArtifactPushRequest>,
 }
 
 impl DispatcherAdapter {
-    pub fn new(stream: tcp::OwnedWriteHalf) -> Self {
-        Self { stream }
+    pub fn new(stream: tcp::OwnedWriteHalf, artifact_pusher: Sender<ArtifactPushRequest>) -> Self {
+        Self {
+            stream,
+            artifact_pusher,
+        }
     }
 }
 
@@ -37,6 +47,13 @@ impl dispatcher::Deps for DispatcherAdapter {
 
     async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {
         net::write_message_to_async_socket(&mut self.stream, message).await
+    }
+
+    async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()> {
+        Ok(self
+            .artifact_pusher
+            .send(ArtifactPushRequest { path, digest })
+            .await?)
     }
 }
 
@@ -93,9 +110,8 @@ impl ClientDeps {
         let (read_half, write_half) = stream.into_split();
         Ok(Self {
             dispatcher: Dispatcher::new(
-                DispatcherAdapter::new(write_half),
+                DispatcherAdapter::new(write_half, artifact_send),
                 dispatcher_receiver,
-                artifact_send,
             ),
             artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
             socket_reader: SocketReader::new(read_half, dispatcher_sender.clone()),

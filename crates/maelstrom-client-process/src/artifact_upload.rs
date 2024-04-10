@@ -1,4 +1,4 @@
-use crate::ArtifactPushRequest;
+use crate::driver::ArtifactPushRequest;
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},

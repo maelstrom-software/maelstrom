@@ -16,6 +16,7 @@ pub trait Deps {
     type JobHandle;
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult);
     async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()>;
+    async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()>;
 }
 
 pub enum Message<DepsT: Deps> {
@@ -26,15 +27,9 @@ pub enum Message<DepsT: Deps> {
     Stop,
 }
 
-pub struct ArtifactPushRequest {
-    pub path: PathBuf,
-    pub digest: Sha256Digest,
-}
-
 pub struct Dispatcher<DepsT: Deps> {
     deps: DepsT,
     receiver: Receiver<Message<DepsT>>,
-    artifact_pusher: Sender<ArtifactPushRequest>,
     stop_when_all_completed: bool,
     next_client_job_id: u32,
     artifacts: HashMap<Sha256Digest, PathBuf>,
@@ -43,15 +38,10 @@ pub struct Dispatcher<DepsT: Deps> {
 }
 
 impl<DepsT: Deps> Dispatcher<DepsT> {
-    pub fn new(
-        deps: DepsT,
-        receiver: Receiver<Message<DepsT>>,
-        artifact_pusher: Sender<ArtifactPushRequest>,
-    ) -> Self {
+    pub fn new(deps: DepsT, receiver: Receiver<Message<DepsT>>) -> Self {
         Self {
             deps,
             receiver,
-            artifact_pusher,
             stop_when_all_completed: false,
             next_client_job_id: 0u32,
             artifacts: Default::default(),
@@ -89,15 +79,11 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 }
             }
             Message::BrokerToClient(BrokerToClient::TransferArtifact(digest)) => {
-                let path = self
-                    .artifacts
-                    .get(&digest)
-                    .unwrap_or_else(|| {
-                        panic!("got request for unknown artifact with digest {digest}")
-                    })
-                    .clone();
-                self.artifact_pusher
-                    .send(ArtifactPushRequest { path, digest })
+                let path = self.artifacts.get(&digest).unwrap_or_else(|| {
+                    panic!("got request for unknown artifact with digest {digest}")
+                });
+                self.deps
+                    .send_artifact_to_broker(digest, path.clone())
                     .await?;
             }
             Message::BrokerToClient(BrokerToClient::StatisticsResponse(_)) => {
