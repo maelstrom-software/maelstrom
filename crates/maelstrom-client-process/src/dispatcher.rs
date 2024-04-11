@@ -28,6 +28,17 @@ pub enum Message<DepsT: Deps> {
     Stop,
 }
 
+impl<DepsT: Deps> Message<DepsT> {
+    pub fn kind(&self) -> ClientMessageKind {
+        match self {
+            Message::AddJob(_, _) => ClientMessageKind::AddJob,
+            Message::GetJobStateCounts(_) => ClientMessageKind::GetJobStateCounts,
+            Message::Stop => ClientMessageKind::Stop,
+            _ => ClientMessageKind::Other,
+        }
+    }
+}
+
 pub struct Dispatcher<DepsT: Deps> {
     deps: DepsT,
     receiver: Receiver<Message<DepsT>>,
@@ -72,7 +83,7 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
         &mut self,
         msg: Message<DepsT>,
     ) -> Result<(ControlFlow<()>, ClientMessageKind)> {
-        let mut kind = ClientMessageKind::Other;
+        let kind = msg.kind();
         match msg {
             Message::BrokerToClient(BrokerToClient::JobResponse(cjid, result)) => {
                 let handle = self.job_handles.remove(&cjid).unwrap();
@@ -105,10 +116,8 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 self.deps
                     .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec))
                     .await?;
-                kind = ClientMessageKind::AddJob;
             }
             Message::Stop => {
-                kind = ClientMessageKind::Stop;
                 if self.job_handles.is_empty() {
                     return Ok((ControlFlow::Break(()), kind));
                 }
@@ -119,7 +128,6 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                     .send_message_to_broker(ClientToBroker::JobStateCountsRequest)
                     .await?;
                 self.stats_reqs.push_back(sender);
-                kind = ClientMessageKind::GetJobStateCounts;
             }
         }
         Ok((ControlFlow::Continue(()), kind))
