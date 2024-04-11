@@ -9,9 +9,9 @@ panic = "abort"
 panic = "abort"
 
 [workspace.package]
-documentation = "https://maelstrom-software.github.io/maelstrom/"
+documentation = "https://maelstrom-software.com/book/"
 edition = "2021"
-homepage = "https://github.com/maelstrom-software/maelstrom"
+homepage = "https://maelstrom-software.com"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/maelstrom-software/maelstrom"
 rust-version = "1.75.0"

@@ -15,4 +15,4 @@ eliminating confusing test errors caused by inter-test dependencies or by
 hidden test-environment dependencies.
 
 See the book for more information about how it works and how to install it
-[Maelstrom Book](https://maelstrom-software.github.io/maelstrom/)
+[Maelstrom Book](https://maelstrom-software.com/book/)
