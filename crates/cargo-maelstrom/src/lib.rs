@@ -700,7 +700,6 @@ where
             .update_length(self.deps.queuing_deps.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
-        self.deps.client.stop_accepting()?;
         Ok(())
     }
 

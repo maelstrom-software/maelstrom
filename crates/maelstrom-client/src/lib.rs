@@ -304,13 +304,6 @@ impl Client {
         Ok(())
     }
 
-    pub fn stop_accepting(&self) -> Result<()> {
-        self.send_sync(
-            move |mut client| async move { client.stop_accepting(proto::Void {}).await },
-        )?;
-        Ok(())
-    }
-
     pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.send_sync(move |mut client| async move {
             client.wait_for_outstanding_jobs(proto::Void {}).await

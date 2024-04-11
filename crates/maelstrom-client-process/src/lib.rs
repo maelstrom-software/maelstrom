@@ -9,7 +9,7 @@ use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
-use driver::{new_driver, ClientDeps, ClientDriver};
+use driver::{client_main, ClientDeps};
 use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
@@ -39,7 +39,10 @@ use std::{
     pin::pin,
     time::SystemTime,
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
+use tokio::{
+    sync::{mpsc::UnboundedSender, oneshot, Mutex},
+    task,
+};
 
 struct DispatcherAdapter {
     local_broker_sender: UnboundedSender<local_broker::Message>,
@@ -60,6 +63,11 @@ impl dispatcher::Deps for DispatcherAdapter {
 
     fn send_message_to_local_broker(&mut self, message: local_broker::Message) {
         self.local_broker_sender.send(message).ok();
+    }
+
+    type AllJobsCompleteHandle = oneshot::Sender<()>;
+    fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle) {
+        handle.send(()).ok();
     }
 }
 
@@ -200,7 +208,6 @@ struct Client {
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
     container_image_depot: ContainerImageDepot,
-    driver: Box<dyn ClientDriver + Send + Sync>,
     log: slog::Logger,
     state: Mutex<ClientState>,
 }
@@ -223,11 +230,11 @@ impl Client {
         };
 
         slog::debug!(log, "client starting");
-        let driver = new_driver();
         let upload_tracker = ArtifactUploadTracker::default();
         let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
-        driver.drive(deps).await;
+        let log_clone = log.clone();
+        task::spawn(client_main(log_clone, deps));
 
         slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
@@ -237,7 +244,6 @@ impl Client {
             project_dir: project_dir.as_ref().to_owned(),
             upload_tracker,
             container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
-            driver,
             log,
             state: Mutex::new(ClientState {
                 digest_repo: DigestRepository::new(cache_dir.as_ref()),
@@ -478,17 +484,12 @@ impl Client {
         receiver.await.map_err(Error::new)
     }
 
-    async fn stop_accepting(&self) -> Result<()> {
-        slog::debug!(self.log, "stop_accepting");
-        self.dispatcher_sender.send(dispatcher::Message::Stop)?;
-        Ok(())
-    }
-
     async fn wait_for_outstanding_jobs(&self) -> Result<()> {
         slog::debug!(self.log, "wait_for_outstanding_jobs");
-        self.stop_accepting().await.ok();
-        self.driver.stop().await?;
-        Ok(())
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        self.dispatcher_sender
+            .send(dispatcher::Message::NotifyWhenAllJobsComplete(sender))?;
+        receiver.await.map_err(Error::new)
     }
 
     async fn get_job_state_counts(&self) -> Result<JobStateCounts> {

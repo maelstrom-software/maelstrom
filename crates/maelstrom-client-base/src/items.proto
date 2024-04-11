@@ -256,7 +256,6 @@ service ClientProcess {
     rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
     rpc GetContainerImage(GetContainerImageRequest) returns (stream GetContainerImageProgressResponse);
-    rpc StopAccepting(Void) returns (Void);
     rpc AddJob(AddJobRequest) returns (AddJobResponse);
     rpc WaitForOutstandingJobs(Void) returns (Void);
     rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);

@@ -4,26 +4,18 @@ use crate::{
     local_broker::{self, LocalBroker},
     DispatcherAdapter, LocalBrokerAdapter,
 };
-use anyhow::{anyhow, Context as _, Result};
-use async_trait::async_trait;
+use anyhow::{Context as _, Result};
 use maelstrom_base::proto::{ClientToBroker, Hello};
 use maelstrom_util::{config::common::BrokerAddr, net, sync};
-use std::ops::ControlFlow;
+use slog::{debug, Logger};
 use tokio::{
     net::{
         tcp::{self, OwnedWriteHalf},
         TcpStream,
     },
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
-    },
-    task::{self, JoinHandle},
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
+    task::JoinSet,
 };
-
-pub fn new_driver() -> Box<dyn ClientDriver + Send + Sync> {
-    Box::<MultiThreadedClientDriver>::default()
-}
 
 pub struct SocketReader {
     stream: tcp::OwnedReadHalf,
@@ -102,62 +94,32 @@ impl ClientDeps {
     }
 }
 
-#[async_trait]
-pub trait ClientDriver {
-    async fn drive(&self, deps: ClientDeps);
-    async fn stop(&self) -> Result<()>;
-}
+pub async fn client_main(log: Logger, mut deps: ClientDeps) {
+    let mut join_set = JoinSet::new();
 
-#[derive(Default)]
-struct MultiThreadedClientDriver {
-    handle: Mutex<Option<JoinHandle<Result<()>>>>,
-}
+    join_set.spawn(sync::channel_reader(deps.dispatcher_receiver, move |msg| {
+        deps.dispatcher.receive_message(msg)
+    }));
 
-#[async_trait]
-impl ClientDriver for MultiThreadedClientDriver {
-    async fn drive(&self, mut deps: ClientDeps) {
-        let mut locked_handle = self.handle.lock().await;
-        assert!(locked_handle.is_none());
-        *locked_handle = Some(task::spawn(async move {
-            let dispatcher_handle = task::spawn(async move {
-                let mut cf = ControlFlow::Continue(());
-                while cf.is_continue() {
-                    let message = deps
-                        .dispatcher_receiver
-                        .recv()
-                        .await
-                        .ok_or_else(|| anyhow!("dispatcher hangup"))?;
-                    cf = deps.dispatcher.receive_message(message);
-                }
-                Ok(())
-            });
-            let pusher_handle = task::spawn(async move {
-                while deps.artifact_pusher.process_one().await {}
-                deps.artifact_pusher.wait().await
-            });
-            let reader_handle =
-                task::spawn(async move { while deps.socket_reader.process_one().await {} });
-            let local_broker_handle = task::spawn(sync::channel_reader(
-                deps.local_broker_receiver,
-                move |msg| deps.local_broker.receive_message(msg),
-            ));
-            let socket_writer_handle = task::spawn(net::async_socket_writer(
-                deps.broker_receiver,
-                deps.broker_socket_writer,
-                |_| {},
-            ));
+    join_set.spawn(async move {
+        while deps.artifact_pusher.process_one().await {}
+        deps.artifact_pusher.wait().await
+    });
 
-            let res = dispatcher_handle.await;
-            reader_handle.abort();
-            reader_handle.await.ok();
-            pusher_handle.await.ok();
-            socket_writer_handle.await.ok();
-            local_broker_handle.await.ok();
-            res?
-        }));
-    }
+    join_set.spawn(async move { while deps.socket_reader.process_one().await {} });
 
-    async fn stop(&self) -> Result<()> {
-        self.handle.lock().await.take().unwrap().await?
-    }
+    join_set.spawn(sync::channel_reader(
+        deps.local_broker_receiver,
+        move |msg| deps.local_broker.receive_message(msg),
+    ));
+
+    join_set.spawn(net::async_socket_writer(
+        deps.broker_receiver,
+        deps.broker_socket_writer,
+        move |msg| {
+            debug!(log, "sending broker message"; "msg" => ?msg);
+        },
+    ));
+
+    join_set.join_next().await;
 }

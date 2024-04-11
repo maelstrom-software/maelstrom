@@ -199,17 +199,6 @@ impl ClientProcess for Handler {
         .await
     }
 
-    async fn stop_accepting(&self, _request: Request<proto::Void>) -> TonicResponse<proto::Void> {
-        run_handler(async {
-            Ok(
-                with_client_async!(self, |client| { client.stop_accepting().await })
-                    .await?
-                    .into_proto_buf(),
-            )
-        })
-        .await
-    }
-
     async fn add_job(
         &self,
         request: Request<proto::AddJobRequest>,
