@@ -59,16 +59,16 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
             .recv()
             .await
             .ok_or(anyhow!("dispatcher hangup"))?;
-        self.handle_message(msg).await.map(|(cont, _)| cont)
+        self.receive_message(msg).await.map(|(cont, _)| cont)
     }
 
     pub async fn process_one_and_tell(&mut self) -> Option<ClientMessageKind> {
         let msg = self.receiver.try_recv().ok()?;
-        let (_, kind) = self.handle_message(msg).await.ok()?;
+        let (_, kind) = self.receive_message(msg).await.ok()?;
         Some(kind)
     }
 
-    async fn handle_message(
+    async fn receive_message(
         &mut self,
         msg: Message<DepsT>,
     ) -> Result<(ControlFlow<()>, ClientMessageKind)> {
