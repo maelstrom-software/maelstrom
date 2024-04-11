@@ -332,12 +332,12 @@ pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Re
             async move {
                 loop {
                     let Ok(v) = sock2.ready(Interest::READABLE).await else {
-                        continue;
+                        break;
                     };
                     if v.is_read_closed() {
                         break;
                     }
-                    task::yield_now().await
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             },
         )
