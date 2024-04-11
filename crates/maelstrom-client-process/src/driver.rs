@@ -1,69 +1,23 @@
-use crate::artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
-use crate::dispatcher::{self, Dispatcher};
-use crate::test::client_driver::SingleThreadedClientDriver;
+use crate::{
+    artifact_upload::{ArtifactPusher, ArtifactUploadTracker},
+    dispatcher::{self, Dispatcher},
+    test::client_driver::SingleThreadedClientDriver,
+    DispatcherAdapter,
+};
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
-use maelstrom_base::{
-    proto::{ClientToBroker, Hello},
-    stats::JobStateCounts,
-    ClientJobId, JobOutcomeResult, Sha256Digest,
-};
+use maelstrom_base::proto::Hello;
 use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
-use std::{ops::ControlFlow, path::PathBuf};
+use std::ops::ControlFlow;
 use tokio::{
     net::{tcp, TcpStream},
     sync::{
         mpsc::{self, Receiver, Sender},
-        oneshot::Sender as OneShotSender,
         Mutex,
     },
     task::{self, JoinHandle},
 };
-
-pub struct ArtifactPushRequest {
-    pub path: PathBuf,
-    pub digest: Sha256Digest,
-}
-
-pub struct DispatcherAdapter {
-    stream: tcp::OwnedWriteHalf,
-    artifact_pusher: Sender<ArtifactPushRequest>,
-}
-
-impl DispatcherAdapter {
-    pub fn new(stream: tcp::OwnedWriteHalf, artifact_pusher: Sender<ArtifactPushRequest>) -> Self {
-        Self {
-            stream,
-            artifact_pusher,
-        }
-    }
-}
-
-impl dispatcher::Deps for DispatcherAdapter {
-    type JobHandle = OneShotSender<(ClientJobId, JobOutcomeResult)>;
-
-    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
-        handle.send((cjid, result)).ok();
-    }
-
-    type JobStateCountsHandle = OneShotSender<JobStateCounts>;
-
-    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
-        handle.send(counts).ok();
-    }
-
-    async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {
-        net::write_message_to_async_socket(&mut self.stream, message).await
-    }
-
-    async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()> {
-        Ok(self
-            .artifact_pusher
-            .send(ArtifactPushRequest { path, digest })
-            .await?)
-    }
-}
 
 pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
     match mode {

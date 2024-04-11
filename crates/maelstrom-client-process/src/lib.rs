@@ -10,11 +10,12 @@ use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use dispatcher::Message;
-use driver::{new_driver, ClientDeps, ClientDriver, DispatcherAdapter};
+use driver::{new_driver, ClientDeps, ClientDriver};
 use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
+    proto::ClientToBroker,
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -29,6 +30,7 @@ use maelstrom_util::{
     config::common::BrokerAddr,
     io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
+    net,
 };
 pub use rpc::client_process_main;
 use sha2::{Digest as _, Sha256};
@@ -40,7 +42,58 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tokio::sync::{mpsc::Sender, oneshot, Mutex};
+use tokio::{
+    net::tcp,
+    sync::{
+        mpsc::Sender,
+        oneshot::{self, Sender as OneShotSender},
+        Mutex,
+    },
+};
+
+pub struct ArtifactPushRequest {
+    pub path: PathBuf,
+    pub digest: Sha256Digest,
+}
+
+pub struct DispatcherAdapter {
+    stream: tcp::OwnedWriteHalf,
+    artifact_pusher: Sender<ArtifactPushRequest>,
+}
+
+impl DispatcherAdapter {
+    pub fn new(stream: tcp::OwnedWriteHalf, artifact_pusher: Sender<ArtifactPushRequest>) -> Self {
+        Self {
+            stream,
+            artifact_pusher,
+        }
+    }
+}
+
+impl dispatcher::Deps for DispatcherAdapter {
+    type JobHandle = OneShotSender<(ClientJobId, JobOutcomeResult)>;
+
+    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
+        handle.send((cjid, result)).ok();
+    }
+
+    type JobStateCountsHandle = OneShotSender<JobStateCounts>;
+
+    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
+        handle.send(counts).ok();
+    }
+
+    async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {
+        net::write_message_to_async_socket(&mut self.stream, message).await
+    }
+
+    async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()> {
+        Ok(self
+            .artifact_pusher
+            .send(ArtifactPushRequest { path, digest })
+            .await?)
+    }
+}
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = async_fs::Fs::new();
