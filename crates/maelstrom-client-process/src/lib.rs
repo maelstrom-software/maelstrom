@@ -2,13 +2,13 @@ mod artifact_upload;
 mod digest_repo;
 mod dispatcher;
 mod driver;
+mod local_broker;
 mod rpc;
 
 use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
-use dispatcher::Message;
 use driver::{new_driver, ClientDeps, ClientDriver};
 use futures::StreamExt;
 use itertools::Itertools as _;
@@ -28,69 +28,77 @@ use maelstrom_util::{
     config::common::BrokerAddr,
     io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
-    net,
 };
 pub use rpc::client_process_main;
 use sha2::{Digest as _, Sha256};
 use slog::Drain as _;
-use std::pin::pin;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
+    pin::pin,
     time::SystemTime,
 };
-use tokio::{
-    net::tcp,
-    sync::{
-        mpsc::Sender,
-        oneshot::{self, Sender as OneShotSender},
-        Mutex,
-    },
-};
+use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
 
-pub struct ArtifactPushRequest {
-    pub path: PathBuf,
-    pub digest: Sha256Digest,
-}
-
-pub struct DispatcherAdapter {
-    stream: tcp::OwnedWriteHalf,
-    artifact_pusher: Sender<ArtifactPushRequest>,
-}
-
-impl DispatcherAdapter {
-    pub fn new(stream: tcp::OwnedWriteHalf, artifact_pusher: Sender<ArtifactPushRequest>) -> Self {
-        Self {
-            stream,
-            artifact_pusher,
-        }
-    }
+struct DispatcherAdapter {
+    local_broker_sender: UnboundedSender<local_broker::Message>,
 }
 
 impl dispatcher::Deps for DispatcherAdapter {
-    type JobHandle = OneShotSender<(ClientJobId, JobOutcomeResult)>;
+    type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
 
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
         handle.send((cjid, result)).ok();
     }
 
-    type JobStateCountsHandle = OneShotSender<JobStateCounts>;
+    type JobStateCountsHandle = oneshot::Sender<JobStateCounts>;
 
     fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
         handle.send(counts).ok();
     }
 
-    async fn send_message_to_broker(&mut self, message: ClientToBroker) -> Result<()> {
-        net::write_message_to_async_socket(&mut self.stream, message).await
+    fn send_message_to_local_broker(&mut self, message: local_broker::Message) {
+        self.local_broker_sender.send(message).ok();
+    }
+}
+
+struct LocalBrokerAdapter {
+    dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+    broker_sender: UnboundedSender<ClientToBroker>,
+    artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
+}
+
+impl local_broker::Deps for LocalBrokerAdapter {
+    fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
+        self.dispatcher_sender
+            .send(dispatcher::Message::JobResponse(cjid, result))
+            .ok();
     }
 
-    async fn send_artifact_to_broker(&mut self, digest: Sha256Digest, path: PathBuf) -> Result<()> {
-        Ok(self
-            .artifact_pusher
-            .send(ArtifactPushRequest { path, digest })
-            .await?)
+    fn send_job_state_counts_response_to_dispatcher(&mut self, counts: JobStateCounts) {
+        self.dispatcher_sender
+            .send(dispatcher::Message::JobStateCountsResponse(counts))
+            .ok();
     }
+
+    fn send_message_to_broker(&mut self, message: ClientToBroker) {
+        self.broker_sender.send(message).ok();
+    }
+
+    fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path) {
+        self.artifact_pusher_sender
+            .send(ArtifactPushRequest {
+                digest,
+                path: path.to_owned(),
+            })
+            .ok();
+    }
+}
+
+pub struct ArtifactPushRequest {
+    pub path: PathBuf,
+    pub digest: Sha256Digest,
 }
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
@@ -187,7 +195,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: Sender<Message<DispatcherAdapter>>,
+    dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -259,8 +267,7 @@ impl Client {
         if !state.processed_artifact_paths.contains(&path) {
             state.processed_artifact_paths.insert(path.clone());
             self.dispatcher_sender
-                .send(Message::AddArtifact(path, digest.clone()))
-                .await?;
+                .send(dispatcher::Message::AddArtifact(path, digest.clone()))?;
         }
         Ok(digest)
     }
@@ -466,15 +473,14 @@ impl Client {
         let (sender, receiver) = oneshot::channel();
 
         self.dispatcher_sender
-            .send(Message::AddJob(spec, sender))
-            .await?;
+            .send(dispatcher::Message::AddJob(spec, sender))?;
 
         receiver.await.map_err(Error::new)
     }
 
     async fn stop_accepting(&self) -> Result<()> {
         slog::debug!(self.log, "stop_accepting");
-        self.dispatcher_sender.send(Message::Stop).await?;
+        self.dispatcher_sender.send(dispatcher::Message::Stop)?;
         Ok(())
     }
 
@@ -488,8 +494,7 @@ impl Client {
     async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         self.dispatcher_sender
-            .send(Message::GetJobStateCounts(sender))
-            .await?;
+            .send(dispatcher::Message::GetJobStateCounts(sender))?;
         receiver.await.map_err(Error::new)
     }
 

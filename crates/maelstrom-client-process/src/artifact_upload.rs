@@ -17,7 +17,7 @@ use std::{
 };
 use tokio::io::{self, AsyncRead, AsyncReadExt as _};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{Mutex, Semaphore};
 
 struct UploadProgress {
@@ -124,7 +124,7 @@ async fn push_one_artifact(
 
 pub struct ArtifactPusher {
     broker_addr: BrokerAddr,
-    receiver: Receiver<ArtifactPushRequest>,
+    receiver: UnboundedReceiver<ArtifactPushRequest>,
     upload_tracker: ArtifactUploadTracker,
     pending_uploads: u32,
     sem: Arc<Semaphore>,
@@ -133,7 +133,7 @@ pub struct ArtifactPusher {
 impl ArtifactPusher {
     pub fn new(
         broker_addr: BrokerAddr,
-        receiver: Receiver<ArtifactPushRequest>,
+        receiver: UnboundedReceiver<ArtifactPushRequest>,
         upload_tracker: ArtifactUploadTracker,
     ) -> Self {
         Self {

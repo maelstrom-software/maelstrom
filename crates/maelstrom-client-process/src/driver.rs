@@ -1,17 +1,21 @@
 use crate::{
     artifact_upload::{ArtifactPusher, ArtifactUploadTracker},
     dispatcher::{self, Dispatcher},
-    DispatcherAdapter,
+    local_broker::{self, LocalBroker},
+    DispatcherAdapter, LocalBrokerAdapter,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
-use maelstrom_base::proto::Hello;
-use maelstrom_util::{config::common::BrokerAddr, net};
+use maelstrom_base::proto::{ClientToBroker, Hello};
+use maelstrom_util::{config::common::BrokerAddr, net, sync};
 use std::ops::ControlFlow;
 use tokio::{
-    net::{tcp, TcpStream},
+    net::{
+        tcp::{self, OwnedWriteHalf},
+        TcpStream,
+    },
     sync::{
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
         Mutex,
     },
     task::{self, JoinHandle},
@@ -23,34 +27,34 @@ pub fn new_driver() -> Box<dyn ClientDriver + Send + Sync> {
 
 pub struct SocketReader {
     stream: tcp::OwnedReadHalf,
-    channel: Sender<dispatcher::Message<DispatcherAdapter>>,
+    channel: UnboundedSender<local_broker::Message>,
 }
 
 impl SocketReader {
-    fn new(
-        stream: tcp::OwnedReadHalf,
-        channel: Sender<dispatcher::Message<DispatcherAdapter>>,
-    ) -> Self {
+    fn new(stream: tcp::OwnedReadHalf, channel: UnboundedSender<local_broker::Message>) -> Self {
         Self { stream, channel }
     }
 
     pub async fn process_one(&mut self) -> bool {
-        let Ok(msg) = net::read_message_from_async_socket(&mut self.stream).await else {
+        let Ok(message) = net::read_message_from_async_socket(&mut self.stream).await else {
             return false;
         };
         self.channel
-            .send(dispatcher::Message::Broker(msg))
-            .await
+            .send(local_broker::Message::Broker(message))
             .is_ok()
     }
 }
 
 pub struct ClientDeps {
-    pub dispatcher: Dispatcher<DispatcherAdapter>,
-    pub dispatcher_receiver: Receiver<dispatcher::Message<DispatcherAdapter>>,
-    pub dispatcher_sender: Sender<dispatcher::Message<DispatcherAdapter>>,
-    pub artifact_pusher: ArtifactPusher,
-    pub socket_reader: SocketReader,
+    dispatcher: Dispatcher<DispatcherAdapter>,
+    local_broker: LocalBroker<LocalBrokerAdapter>,
+    artifact_pusher: ArtifactPusher,
+    socket_reader: SocketReader,
+    pub dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<DispatcherAdapter>>,
+    local_broker_receiver: UnboundedReceiver<local_broker::Message>,
+    broker_socket_writer: OwnedWriteHalf,
+    broker_receiver: UnboundedReceiver<ClientToBroker>,
 }
 
 impl ClientDeps {
@@ -58,20 +62,42 @@ impl ClientDeps {
         broker_addr: BrokerAddr,
         upload_tracker: ArtifactUploadTracker,
     ) -> Result<Self> {
-        let mut stream = TcpStream::connect(broker_addr.inner())
+        let mut broker_socket = TcpStream::connect(broker_addr.inner())
             .await
             .with_context(|| format!("failed to connect to {broker_addr}"))?;
-        net::write_message_to_async_socket(&mut stream, Hello::Client).await?;
+        net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
 
-        let (dispatcher_sender, dispatcher_receiver) = mpsc::channel(1000);
-        let (artifact_send, artifact_recv) = mpsc::channel(1000);
-        let (read_half, write_half) = stream.into_split();
+        let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
+        let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
+
+        let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
+        let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+        let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
+
+        let dispatcher_adapter = DispatcherAdapter {
+            local_broker_sender: local_broker_sender.clone(),
+        };
+        let dispatcher = Dispatcher::new(dispatcher_adapter);
+        let local_broker_adapter = LocalBrokerAdapter {
+            dispatcher_sender: dispatcher_sender.clone(),
+            broker_sender,
+            artifact_pusher_sender,
+        };
+        let local_broker = LocalBroker::new(local_broker_adapter);
+        let socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
+        let artifact_pusher =
+            ArtifactPusher::new(broker_addr, artifact_pusher_receiver, upload_tracker);
+
         Ok(Self {
-            dispatcher: Dispatcher::new(DispatcherAdapter::new(write_half, artifact_send)),
-            artifact_pusher: ArtifactPusher::new(broker_addr, artifact_recv, upload_tracker),
-            socket_reader: SocketReader::new(read_half, dispatcher_sender.clone()),
+            artifact_pusher,
+            socket_reader,
+            dispatcher,
+            local_broker,
+            local_broker_receiver,
             dispatcher_sender,
             dispatcher_receiver,
+            broker_socket_writer,
+            broker_receiver,
         })
     }
 }
@@ -96,12 +122,12 @@ impl ClientDriver for MultiThreadedClientDriver {
             let dispatcher_handle = task::spawn(async move {
                 let mut cf = ControlFlow::Continue(());
                 while cf.is_continue() {
-                    let msg = deps
+                    let message = deps
                         .dispatcher_receiver
                         .recv()
                         .await
                         .ok_or_else(|| anyhow!("dispatcher hangup"))?;
-                    cf = deps.dispatcher.receive_message(msg).await?;
+                    cf = deps.dispatcher.receive_message(message);
                 }
                 Ok(())
             });
@@ -111,11 +137,22 @@ impl ClientDriver for MultiThreadedClientDriver {
             });
             let reader_handle =
                 task::spawn(async move { while deps.socket_reader.process_one().await {} });
+            let local_broker_handle = task::spawn(sync::channel_reader(
+                deps.local_broker_receiver,
+                move |msg| deps.local_broker.receive_message(msg),
+            ));
+            let socket_writer_handle = task::spawn(net::async_socket_writer(
+                deps.broker_receiver,
+                deps.broker_socket_writer,
+                |_| {},
+            ));
 
             let res = dispatcher_handle.await;
             reader_handle.abort();
             reader_handle.await.ok();
             pusher_handle.await.ok();
+            socket_writer_handle.await.ok();
+            local_broker_handle.await.ok();
             res?
         }));
     }
