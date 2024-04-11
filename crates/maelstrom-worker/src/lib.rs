@@ -12,6 +12,7 @@ use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
 use executor::{Executor, JobHandleReceiver, JobHandleSender};
+use lru::LruCache;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
@@ -25,7 +26,8 @@ use maelstrom_util::{
     net, sync,
 };
 use slog::{debug, error, info, o, Logger};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::path::Path;
 use std::sync::Arc;
 use std::{path::PathBuf, process, thread, time::Duration};
@@ -50,6 +52,89 @@ async fn read_manifest(path: &Path) -> Result<HashSet<Sha256Digest>> {
     Ok(digests)
 }
 
+struct ManifestDigestCacheInner {
+    pending: HashMap<PathBuf, Vec<(Sha256Digest, JobId)>>,
+    cached: LruCache<PathBuf, HashSet<Sha256Digest>>,
+}
+
+impl ManifestDigestCacheInner {
+    fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            pending: HashMap::new(),
+            cached: LruCache::new(capacity),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct ManifestDigestCache {
+    sender: DispatcherSender,
+    log: slog::Logger,
+    cache: Arc<std::sync::Mutex<ManifestDigestCacheInner>>,
+}
+
+impl ManifestDigestCache {
+    fn new(sender: DispatcherSender, log: slog::Logger, capacity: NonZeroUsize) -> Self {
+        Self {
+            sender,
+            log,
+            cache: Arc::new(std::sync::Mutex::new(ManifestDigestCacheInner::new(
+                capacity,
+            ))),
+        }
+    }
+
+    fn get(&self, digest: Sha256Digest, path: PathBuf, jid: JobId) {
+        let mut locked_cache = self.cache.lock().unwrap();
+        if let Some(waiting) = locked_cache.pending.get_mut(&path) {
+            waiting.push((digest, jid));
+        } else if let Some(cached) = locked_cache.cached.get(&path) {
+            self.sender
+                .send(Message::ReadManifestDigests(
+                    digest,
+                    jid,
+                    Ok(cached.clone()),
+                ))
+                .ok();
+        } else {
+            locked_cache
+                .pending
+                .insert(path.clone(), vec![(digest, jid)]);
+
+            let self_clone = self.clone();
+            task::spawn(async move {
+                self_clone.fill_cache(path).await;
+            });
+        }
+    }
+
+    async fn fill_cache(&self, path: PathBuf) {
+        debug!(self.log, "reading digests from manifest"; "manifest_path" => ?path);
+        let result = read_manifest(&path).await;
+        debug!(self.log, "read digests from manifest"; "result" => ?result);
+
+        let mut locked_cache = self.cache.lock().unwrap();
+        let waiting = locked_cache.pending.remove(&path).unwrap();
+        for (digest, jid) in waiting {
+            self.sender
+                .send(Message::ReadManifestDigests(
+                    digest,
+                    jid,
+                    result
+                        .as_ref()
+                        .map(|v| v.clone())
+                        .map_err(|e| anyhow::Error::msg(e.to_string())),
+                ))
+                .ok();
+        }
+        if let Ok(digests) = result {
+            locked_cache.cached.push(path, digests);
+        }
+    }
+}
+
+const MANIFEST_DIGEST_CACHE_SIZE: usize = 10_000;
+
 type DispatcherReceiver = UnboundedReceiver<Message>;
 type DispatcherSender = UnboundedSender<Message>;
 type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
@@ -63,6 +148,7 @@ struct DispatcherAdapter {
     executor: Arc<Executor>,
     blob_cache_dir: PathBuf,
     layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
+    manifest_digest_cache: ManifestDigestCache,
 }
 
 impl DispatcherAdapter {
@@ -81,16 +167,21 @@ impl DispatcherAdapter {
         fs.create_dir_all(&mount_dir)?;
         fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
-            dispatcher_sender,
             broker_socket_sender,
             broker_addr,
             inline_limit,
-            log,
             executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
             blob_cache_dir,
             layer_fs_cache: Arc::new(tokio::sync::Mutex::new(
                 maelstrom_layer_fs::ReaderCache::new(),
             )),
+            manifest_digest_cache: ManifestDigestCache::new(
+                dispatcher_sender.clone(),
+                log.clone(),
+                MANIFEST_DIGEST_CACHE_SIZE.try_into().unwrap(),
+            ),
+            dispatcher_sender,
+            log,
         })
     }
 
@@ -243,16 +334,7 @@ impl DispatcherDeps for DispatcherAdapter {
     }
 
     fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId) {
-        let sender = self.dispatcher_sender.clone();
-        let log = self.log.clone();
-        task::spawn(async move {
-            debug!(log, "reading digests from manifest"; "manifest_path" => ?path);
-            let result = read_manifest(&path).await;
-            debug!(log, "read digests from manifest"; "result" => ?result);
-            sender
-                .send(Message::ReadManifestDigests(digest, jid, result))
-                .ok();
-        });
+        self.manifest_digest_cache.get(digest, path, jid);
     }
 
     fn send_message_to_broker(&mut self, message: WorkerToBroker) {

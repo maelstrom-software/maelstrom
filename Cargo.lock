@@ -3186,6 +3186,7 @@ dependencies = [
  "futures",
  "gethostname",
  "itertools 0.10.5",
+ "lru",
  "maelstrom-base",
  "maelstrom-fuse",
  "maelstrom-layer-fs",

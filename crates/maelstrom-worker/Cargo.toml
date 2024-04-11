@@ -21,6 +21,7 @@ clap.workspace = true
 derive_more.workspace = true
 futures.workspace = true
 gethostname.workspace = true
+lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-fuse.workspace = true
 maelstrom-layer-fs.workspace = true
