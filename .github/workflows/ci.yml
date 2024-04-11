@@ -80,17 +80,13 @@ jobs:
           echo `pwd`/mdbook >> $GITHUB_PATH
       - name: Build Documentation
         run: |
-          cd site
-          mdbook build
+          mdbook build --dest-dir ../website/book site
       - name: Set up Pages
         uses: actions/configure-pages@v4
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-pages-artifact@v2
         with:
-          name: 'github-pages'
-          path: |
-            site/
-            website/
+          path: 'website'
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v1
