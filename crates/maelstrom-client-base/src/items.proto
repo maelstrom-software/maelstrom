@@ -2,20 +2,7 @@ syntax = "proto3";
 
 package maelstrom_client_base.items;
 
-enum ClientDriverMode {
-    MultiThreaded = 0;
-    SingleThreaded = 1;
-}
-
-enum ClientMessageKind {
-    AddJob = 0;
-    GetJobStateCounts = 1;
-    Stop = 2;
-    Other = 3;
-}
-
 message StartRequest {
-    ClientDriverMode driver_mode = 1;
     string broker_addr = 2;
     bytes project_dir = 3;
     bytes cache_dir = 4;
@@ -254,10 +241,6 @@ message GetJobStateCountsResponse {
     JobStateCounts counts = 1;
 }
 
-message ProcessClientMessagesSingleThreadedRequest {
-    ClientMessageKind kind = 1;
-}
-
 message ArtifactUploadProgress {
     string name = 1;
     uint64 size = 2;
@@ -278,7 +261,4 @@ service ClientProcess {
     rpc WaitForOutstandingJobs(Void) returns (Void);
     rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);
     rpc GetArtifactUploadProgress(Void) returns (GetArtifactUploadProgressResponse);
-    rpc ProcessBrokerMsgSingleThreaded(ProcessBrokerMsgSingleThreadedRequest) returns (Void);
-    rpc ProcessClientMessagesSingleThreaded(ProcessClientMessagesSingleThreadedRequest) returns (Void);
-    rpc ProcessArtifactSingleThreaded(Void) returns(Void);
 }

@@ -115,7 +115,6 @@ pub fn main() -> Result<ExitCode> {
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
         config.broker,
-        Default::default(),
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,
         config.cargo_manifest_options,

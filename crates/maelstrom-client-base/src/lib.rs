@@ -13,7 +13,6 @@ extern crate self as maelstrom_client;
 use anyhow::{anyhow, Result};
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
-use serde::{Deserialize, Serialize};
 
 pub const MANIFEST_DIR: &str = "maelstrom-manifests";
 pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
@@ -63,23 +62,6 @@ impl<V> IntoResult for Vec<V> {
     fn into_result(self) -> Result<Self::Output> {
         Ok(self)
     }
-}
-
-#[derive(IntoProtoBuf, TryFromProtoBuf, Default, Debug, Serialize, Deserialize)]
-#[proto(other_type = "proto::ClientDriverMode")]
-pub enum ClientDriverMode {
-    #[default]
-    MultiThreaded,
-    SingleThreaded,
-}
-
-#[derive(IntoProtoBuf, TryFromProtoBuf, PartialEq, Eq, Debug, Serialize, Deserialize)]
-#[proto(other_type = "proto::ClientMessageKind")]
-pub enum ClientMessageKind {
-    AddJob,
-    GetJobStateCounts,
-    Stop,
-    Other,
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]

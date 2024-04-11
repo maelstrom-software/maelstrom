@@ -123,7 +123,6 @@ impl ClientProcess for Handler {
         run_handler(async {
             let request = request.into_inner();
             let client = Client::new(
-                TryFromProtoBuf::try_from_proto_buf(request.driver_mode)?,
                 TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
                 PathBuf::try_from_proto_buf(request.project_dir)?,
                 PathBuf::try_from_proto_buf(request.cache_dir)?,
@@ -267,52 +266,6 @@ impl ClientProcess for Handler {
                 .await?
                 .into_proto_buf(),
             })
-        })
-        .await
-    }
-
-    async fn process_broker_msg_single_threaded(
-        &self,
-        request: Request<proto::ProcessBrokerMsgSingleThreadedRequest>,
-    ) -> TonicResponse<proto::Void> {
-        run_handler(async {
-            let request = request.into_inner();
-            Ok(with_client_async!(self, |client| {
-                Ok(client
-                    .process_broker_msg_single_threaded(request.count as usize)
-                    .await)
-            })
-            .await?
-            .into_proto_buf())
-        })
-        .await
-    }
-
-    async fn process_client_messages_single_threaded(
-        &self,
-        request: Request<proto::ProcessClientMessagesSingleThreadedRequest>,
-    ) -> TonicResponse<proto::Void> {
-        run_handler(async {
-            let wanted = TryFromProtoBuf::try_from_proto_buf(request.into_inner().kind)?;
-            Ok(with_client_async!(self, |client| {
-                Ok(client.process_client_messages_single_threaded(wanted).await)
-            })
-            .await?
-            .into_proto_buf())
-        })
-        .await
-    }
-
-    async fn process_artifact_single_threaded(
-        &self,
-        _request: Request<proto::Void>,
-    ) -> TonicResponse<proto::Void> {
-        run_handler(async {
-            Ok(with_client_async!(self, |client| {
-                Ok(client.process_artifact_single_threaded().await)
-            })
-            .await?
-            .into_proto_buf())
         })
         .await
     }

@@ -1,13 +1,11 @@
 use crate::{
     artifact_upload::{ArtifactPusher, ArtifactUploadTracker},
     dispatcher::{self, Dispatcher},
-    test::client_driver::SingleThreadedClientDriver,
     DispatcherAdapter,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use maelstrom_base::proto::Hello;
-use maelstrom_client_base::{ClientDriverMode, ClientMessageKind};
 use maelstrom_util::{config::common::BrokerAddr, net};
 use std::ops::ControlFlow;
 use tokio::{
@@ -19,11 +17,8 @@ use tokio::{
     task::{self, JoinHandle},
 };
 
-pub fn new_driver(mode: ClientDriverMode) -> Box<dyn ClientDriver + Send + Sync> {
-    match mode {
-        ClientDriverMode::MultiThreaded => Box::<MultiThreadedClientDriver>::default(),
-        ClientDriverMode::SingleThreaded => Box::<SingleThreadedClientDriver>::default(),
-    }
+pub fn new_driver() -> Box<dyn ClientDriver + Send + Sync> {
+    Box::<MultiThreadedClientDriver>::default()
 }
 
 pub struct SocketReader {
@@ -85,18 +80,6 @@ impl ClientDeps {
 pub trait ClientDriver {
     async fn drive(&self, deps: ClientDeps);
     async fn stop(&self) -> Result<()>;
-
-    async fn process_broker_msg_single_threaded(&self, _count: usize) {
-        unimplemented!()
-    }
-
-    async fn process_client_messages_single_threaded(&self, _wanted: ClientMessageKind) {
-        unimplemented!()
-    }
-
-    async fn process_artifact_single_threaded(&self) {
-        unimplemented!()
-    }
 }
 
 #[derive(Default)]

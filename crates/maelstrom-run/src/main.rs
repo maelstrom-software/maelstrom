@@ -111,14 +111,7 @@ fn main() -> Result<ExitCode> {
     let log = slog::Logger::root(drain, slog::o!());
 
     let accum = Arc::new(ExitCodeAccumulator::default());
-    let client = Client::new(
-        bg_proc,
-        Default::default(),
-        config.broker,
-        ".",
-        cache_dir(),
-        log,
-    )?;
+    let client = Client::new(bg_proc, config.broker, ".", cache_dir(), log)?;
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let image_lookup = |image: &str| {
         let (image, version) = image.split_once(':').unwrap_or((image, "latest"));

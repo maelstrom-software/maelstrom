@@ -17,7 +17,7 @@ use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Package
 use config::Quiet;
 use indicatif::{ProgressBar, TermLike};
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
-use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess, ClientDriverMode};
+use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
 use maelstrom_util::{
     config::common::{BrokerAddr, LogLevel},
     process::ExitCode,
@@ -553,7 +553,6 @@ impl MainAppDeps {
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
         broker_addr: BrokerAddr,
-        driver_mode: ClientDriverMode,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
@@ -572,7 +571,6 @@ impl MainAppDeps {
         let cache_dir = workspace_root.as_ref().join("target");
         let client = Client::new(
             bg_proc,
-            driver_mode,
             broker_addr,
             workspace_root,
             cache_dir.clone(),

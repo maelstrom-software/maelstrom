@@ -4,7 +4,6 @@ use maelstrom_base::{
     stats::JobStateCounts,
     ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
-use maelstrom_client_base::ClientMessageKind;
 use maelstrom_util::ext::OptionExt as _;
 use std::{
     collections::{HashMap, VecDeque},
@@ -27,17 +26,6 @@ pub enum Message<DepsT: Deps> {
     AddJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(DepsT::JobStateCountsHandle),
     Stop,
-}
-
-impl<DepsT: Deps> Message<DepsT> {
-    pub fn kind(&self) -> ClientMessageKind {
-        match self {
-            Message::AddJob(_, _) => ClientMessageKind::AddJob,
-            Message::GetJobStateCounts(_) => ClientMessageKind::GetJobStateCounts,
-            Message::Stop => ClientMessageKind::Stop,
-            _ => ClientMessageKind::Other,
-        }
-    }
 }
 
 pub struct Dispatcher<DepsT: Deps> {

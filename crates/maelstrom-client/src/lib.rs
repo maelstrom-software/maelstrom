@@ -1,8 +1,6 @@
 pub mod test;
 
-pub use maelstrom_client_base::{
-    spec, ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, MANIFEST_DIR,
-};
+pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
 
 use anyhow::{anyhow, Result};
 use indicatif::ProgressBar;
@@ -168,7 +166,6 @@ async fn run_progress_bar(
 impl Client {
     pub fn new(
         mut process_handle: ClientBgProcess,
-        driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
@@ -186,13 +183,11 @@ impl Client {
         };
 
         slog::debug!(s.log, "client sending start";
-            "driver_mode" => ?driver_mode,
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir.as_ref(),
             "cache_dir" => ?cache_dir.as_ref(),
         );
         let msg = proto::StartRequest {
-            driver_mode: driver_mode.into_proto_buf(),
             broker_addr: broker_addr.into_proto_buf(),
             project_dir: project_dir.as_ref().into_proto_buf(),
             cache_dir: cache_dir.as_ref().into_proto_buf(),
@@ -337,56 +332,5 @@ impl Client {
             let res = client.get_artifact_upload_progress(proto::Void {}).await?;
             Ok(res.map(|v| TryFromProtoBuf::try_from_proto_buf(v.into_result()?)))
         })
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_broker_msg_single_threaded(&self, count: usize) {
-        slog::debug!(self.log, "client.process_broker_msg_single_threaded"; "count" => count);
-        self.send_sync(move |mut client| async move {
-            client
-                .process_broker_msg_single_threaded(proto::ProcessBrokerMsgSingleThreadedRequest {
-                    count: count as u64,
-                })
-                .await
-        })
-        .unwrap();
-        slog::debug!(
-            self.log,
-            "client.process_broker_msg_single_threaded complete"
-        );
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_client_messages_single_threaded(&self, kind: ClientMessageKind) {
-        slog::debug!(
-            self.log, "client.process_client_messages_single_threaded";
-            "kind" => ?kind
-        );
-        self.send_sync(move |mut client| async move {
-            client
-                .process_client_messages_single_threaded(
-                    proto::ProcessClientMessagesSingleThreadedRequest {
-                        kind: kind.into_proto_buf(),
-                    },
-                )
-                .await
-        })
-        .unwrap();
-        slog::debug!(
-            self.log,
-            "client.process_client_messages_single_threaded complete"
-        );
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    pub fn process_artifact_single_threaded(&self) {
-        slog::debug!(self.log, "client.process_artifact_single_threaded");
-        self.send_sync(move |mut client| async move {
-            client
-                .process_artifact_single_threaded(proto::Void {})
-                .await
-        })
-        .unwrap();
-        slog::debug!(self.log, "client.process_artifact_single_threaded complete");
     }
 }

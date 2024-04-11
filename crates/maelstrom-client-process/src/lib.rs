@@ -3,7 +3,6 @@ mod digest_repo;
 mod dispatcher;
 mod driver;
 mod rpc;
-mod test;
 
 use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;
@@ -21,8 +20,7 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    ArtifactUploadProgress, ClientDriverMode, ClientMessageKind, MANIFEST_DIR, STUB_MANIFEST_DIR,
-    SYMLINK_MANIFEST_DIR,
+    ArtifactUploadProgress, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
 use maelstrom_util::{
@@ -201,7 +199,6 @@ struct Client {
 
 impl Client {
     async fn new(
-        driver_mode: ClientDriverMode,
         broker_addr: BrokerAddr,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
@@ -218,7 +215,7 @@ impl Client {
         };
 
         slog::debug!(log, "client starting");
-        let driver = new_driver(driver_mode);
+        let driver = new_driver();
         let upload_tracker = ArtifactUploadTracker::default();
         let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
@@ -498,25 +495,5 @@ impl Client {
 
     async fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
         self.upload_tracker.get_artifact_upload_progress().await
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    async fn process_broker_msg_single_threaded(&self, count: usize) {
-        slog::debug!(self.log, "process_broker_msg_single_threaded");
-        self.driver.process_broker_msg_single_threaded(count).await
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    async fn process_client_messages_single_threaded(&self, wanted: ClientMessageKind) {
-        slog::debug!(self.log, "process_client_messages_single_threaded"; "wanted" => ?wanted);
-        self.driver
-            .process_client_messages_single_threaded(wanted)
-            .await
-    }
-
-    /// Must only be called if created with `ClientDriverMode::SingleThreaded`
-    async fn process_artifact_single_threaded(&self) {
-        slog::debug!(self.log, "process_artifact_single_threaded");
-        self.driver.process_artifact_single_threaded().await
     }
 }
