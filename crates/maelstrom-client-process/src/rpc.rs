@@ -320,6 +320,8 @@ impl ClientProcess for Handler {
 
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
+const SHUTDOWN_POLL_MILLIS: u64 = 100;
+
 #[tokio::main]
 pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
@@ -337,7 +339,8 @@ pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Re
                     if v.is_read_closed() {
                         break;
                     }
-                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                    tokio::time::sleep(std::time::Duration::from_millis(SHUTDOWN_POLL_MILLIS))
+                        .await;
                 }
             },
         )
