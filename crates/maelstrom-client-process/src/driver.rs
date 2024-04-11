@@ -41,10 +41,10 @@ impl DispatcherAdapter {
 }
 
 impl dispatcher::Deps for DispatcherAdapter {
-    type JobHandle = Box<dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync>;
+    type JobHandle = OneShotSender<(ClientJobId, JobOutcomeResult)>;
 
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
-        handle(cjid, result)
+        handle.send((cjid, result)).ok();
     }
 
     type JobStateCountsHandle = OneShotSender<JobStateCounts>;

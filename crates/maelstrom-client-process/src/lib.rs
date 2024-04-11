@@ -416,13 +416,7 @@ impl Client {
         let (sender, receiver) = oneshot::channel();
 
         self.dispatcher_sender
-            .send(Message::AddJob(
-                spec,
-                Box::new(move |cjid: ClientJobId, res: JobOutcomeResult| {
-                    let _ = sender.send((cjid, res));
-                })
-                    as Box<(dyn FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static)>,
-            ))
+            .send(Message::AddJob(spec, sender))
             .await?;
 
         receiver.await.map_err(Error::new)
