@@ -37,6 +37,3 @@ tokio.workspace = true
 tokio-stream.workspace = true
 toml.workspace = true
 tonic.workspace = true
-
-[dev-dependencies]
-maelstrom-test.workspace = true

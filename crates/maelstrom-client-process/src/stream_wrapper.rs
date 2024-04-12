@@ -86,3 +86,85 @@ impl<T: Connected> Connected for StreamWrapper<T> {
         self.inner.connect_info()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    use tokio::{
+        io::{AsyncReadExt as _, AsyncWriteExt as _},
+        net::UnixStream,
+        task,
+    };
+
+    #[tokio::test]
+    async fn eof_triggers_event() {
+        let (s1, mut s2) = UnixStream::pair().unwrap();
+        let (mut s1, receiver) = StreamWrapper::new(s1);
+        let fired = Arc::new(AtomicBool::new(false));
+
+        let fired_clone = fired.clone();
+        let receiver_task = task::spawn(async move {
+            receiver.await;
+            fired_clone.store(true, Ordering::SeqCst);
+        });
+
+        // We haven't read yet, so the event shouldn't have fired.
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // Reading non-EOF shouldn't have triggered it either.
+        s2.write_all(b"hello").await.unwrap();
+        let mut buf = [0u8; 5];
+        s1.read_exact(&mut buf).await.unwrap();
+        assert_eq!(&buf, b"hello");
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // Dropping the writer shouldn't trigger it either, since we haven't read yet.
+        drop(s2);
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // Now, reading and seeing the EOF should trigger it.
+        let mut vec = vec![];
+        s1.read_to_end(&mut vec).await.unwrap();
+        assert!(vec.is_empty());
+        receiver_task.await.unwrap();
+        assert!(fired.load(Ordering::SeqCst));
+    }
+
+    struct ErrorReader;
+
+    impl AsyncRead for ErrorReader {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, "foo")))
+        }
+    }
+
+    #[tokio::test]
+    async fn error_triggers_event() {
+        let (mut s, receiver) = StreamWrapper::new(ErrorReader);
+        let fired = Arc::new(AtomicBool::new(false));
+
+        let fired_clone = fired.clone();
+        let receiver_task = task::spawn(async move {
+            receiver.await;
+            fired_clone.store(true, Ordering::SeqCst);
+        });
+
+        // We haven't read yet, so the event shouldn't have fired.
+        assert!(!fired.load(Ordering::SeqCst));
+
+        // Now reading should give us an error and fire the event.
+        let mut vec = vec![];
+        s.read_to_end(&mut vec).await.unwrap_err();
+        assert!(vec.is_empty());
+        receiver_task.await.unwrap();
+        assert!(fired.load(Ordering::SeqCst));
+    }
+}
