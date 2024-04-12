@@ -3136,6 +3136,7 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-linux",
  "maelstrom-simex",
+ "pin-project",
  "rand",
  "serde",
  "serde_with",

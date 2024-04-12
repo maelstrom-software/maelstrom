@@ -11,7 +11,7 @@ use anyhow::Result;
 use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
 use dispatcher::{Dispatcher, DispatcherDeps, Message};
-use executor::{Executor, JobHandleReceiver, JobHandleSender};
+use executor::Executor;
 use lru::LruCache;
 use maelstrom_base::{
     manifest::ManifestEntryData,
@@ -23,7 +23,8 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheRoot},
     fs::Fs,
     manifest::AsyncManifestReader,
-    net, sync,
+    net,
+    sync::{self, EventReceiver, EventSender},
 };
 use slog::{debug, error, info, o, Logger};
 use std::collections::{HashMap, HashSet};
@@ -189,7 +190,7 @@ impl DispatcherAdapter {
         jid: JobId,
         spec: JobSpec,
         layer_fs_path: PathBuf,
-        job_handle_receiver: JobHandleReceiver,
+        kill_event_receiver: EventReceiver,
     ) -> Result<()> {
         let log = self
             .log
@@ -220,7 +221,7 @@ impl DispatcherAdapter {
                         .run_job(
                             &spec,
                             inline_limit,
-                            job_handle_receiver,
+                            kill_event_receiver,
                             fuse_spawn,
                             runtime,
                         )
@@ -241,17 +242,17 @@ impl Drop for TimerHandle {
 }
 
 impl DispatcherDeps for DispatcherAdapter {
-    type JobHandle = JobHandleSender;
+    type JobHandle = EventSender;
 
     fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {
-        let (job_handle_sender, job_handle_receiver) = executor::job_handle();
-        if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, job_handle_receiver) {
+        let (kill_event_sender, kill_event_receiver) = sync::event();
+        if let Err(e) = self.start_job_inner(jid, spec, layer_fs_path, kill_event_receiver) {
             let _ = self.dispatcher_sender.send(Message::JobCompleted(
                 jid,
                 Err(JobError::System(e.to_string())),
             ));
         }
-        job_handle_sender
+        kill_event_sender
     }
 
     type TimerHandle = TimerHandle;

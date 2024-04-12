@@ -2,26 +2,22 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
+use maelstrom_util::sync::{self, EventReceiver, EventSender};
 use pin_project::pin_project;
 use std::io::{self, IoSlice};
-use tokio::{
-    io::{AsyncRead, AsyncWrite, ReadBuf},
-    sync::oneshot,
-};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::server::Connected;
-
-pub enum Never {}
 
 #[pin_project]
 pub struct StreamWrapper<T> {
     #[pin]
     inner: T,
-    sender: Option<oneshot::Sender<Never>>,
+    sender: Option<EventSender>,
 }
 
 impl<T> StreamWrapper<T> {
-    pub fn new(inner: T) -> (Self, oneshot::Receiver<Never>) {
-        let (sender, receiver) = oneshot::channel();
+    pub fn new(inner: T) -> (Self, EventReceiver) {
+        let (sender, receiver) = sync::event();
         (
             Self {
                 inner,

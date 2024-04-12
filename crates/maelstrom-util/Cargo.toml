@@ -28,6 +28,7 @@ indoc.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
+pin-project.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 sha2.workspace = true
@@ -43,7 +44,7 @@ concat-idents.workspace = true
 maelstrom-simex.workspace = true
 rand.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["io-util", "macros", "rt-multi-thread", "time"] }
 
 [[bin]]
 name = "manifest-cli"

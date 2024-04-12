@@ -269,9 +269,7 @@ pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Re
         .add_service(ClientProcessServer::new(Handler::new(log)))
         .serve_with_incoming_shutdown(
             tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
-            async move {
-                let _ = receiver.await;
-            },
+            receiver,
         )
         .await?;
     Ok(())

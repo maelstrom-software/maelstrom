@@ -16,6 +16,7 @@ use maelstrom_linux::{
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
+use maelstrom_util::sync::EventReceiver;
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -92,18 +93,6 @@ impl JobSpec {
             timeout,
         }
     }
-}
-
-// This type can never be instantiated. We use oneshot senders and receivers as job handles, but we
-// only want to send a message when the sender is dropped.
-enum JobHandlePayload {}
-
-pub struct JobHandleSender(#[allow(dead_code)] oneshot::Sender<JobHandlePayload>);
-pub struct JobHandleReceiver(oneshot::Receiver<JobHandlePayload>);
-
-pub fn job_handle() -> (JobHandleSender, JobHandleReceiver) {
-    let (sender, receiver) = oneshot::channel();
-    (JobHandleSender(sender), JobHandleReceiver(receiver))
 }
 
 pub struct Executor {
@@ -199,7 +188,7 @@ impl Executor {
     ///
     /// This function expects a Tokio runtime, which it uses to start a few tasks.
     ///
-    /// The `job_handle_receiver` is used to kill the child process. If the attached sender is ever
+    /// The `kill_event_receiver` is used to kill the child process. If the attached sender is ever
     /// closed, the child will be immediately killed with a SIGTERM.
     ///
     /// This function should be run in a `spawn_blocking` context. Ideally, this function would be
@@ -209,11 +198,11 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        job_handle_receiver: JobHandleReceiver,
+        kill_event_receiver: EventReceiver,
         fuse_spawn: impl FnOnce(OwnedFd),
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
-        self.run_job_inner(spec, inline_limit, job_handle_receiver, fuse_spawn, runtime)
+        self.run_job_inner(spec, inline_limit, kill_event_receiver, fuse_spawn, runtime)
     }
 }
 
@@ -228,17 +217,15 @@ impl Executor {
 
 async fn wait_for_child(
     child_pidfd: OwnedFd,
-    mut job_handle_receiver: JobHandleReceiver,
+    mut kill_event_receiver: EventReceiver,
 ) -> Result<JobStatus> {
     let async_fd = AsyncFd::with_interest(child_pidfd, Interest::READABLE)?;
-    let mut listen_for_killer = true;
+    let mut kill_event_received = false;
     loop {
         select! {
-            _ = &mut job_handle_receiver.0, if listen_for_killer => {
-                // We kill when the sender is dropped. No message can actually be sent because the
-                // message type can't be instantiated.
+            _ = &mut kill_event_receiver, if !kill_event_received => {
                 linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
-                listen_for_killer = false;
+                kill_event_received = true;
             },
             res = async_fd.readable() => {
                 let _ = res?;
@@ -345,7 +332,7 @@ impl Executor {
         &self,
         spec: &JobSpec,
         inline_limit: InlineLimit,
-        job_handle_receiver: JobHandleReceiver,
+        kill_event_receiver: EventReceiver,
         fuse_spawn: impl FnOnce(OwnedFd),
         runtime: runtime::Handle,
     ) -> JobResult<JobCompleted, Error> {
@@ -740,7 +727,7 @@ impl Executor {
         // An alternative would be to panic and send a plain JobStatus back.
         let (status_sender, status_receiver) = oneshot::channel();
         runtime.spawn(async move {
-            let _ = status_sender.send(wait_for_child(child_pidfd, job_handle_receiver).await);
+            let _ = status_sender.send(wait_for_child(child_pidfd, kill_event_receiver).await);
         });
 
         // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
@@ -835,7 +822,7 @@ mod tests {
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
-    use maelstrom_util::async_fs;
+    use maelstrom_util::{async_fs, sync};
     use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::sync::Mutex;
@@ -956,7 +943,7 @@ mod tests {
                 status,
                 effects: JobEffects { stdout, stderr },
             } = tokio::task::spawn_blocking(move || {
-                let (_job_handle_sender, job_handle_receiver) = job_handle();
+                let (_kill_event_sender, kill_event_receiver) = sync::event();
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
@@ -965,7 +952,7 @@ mod tests {
                 .run_job(
                     &self.spec,
                     self.inline_limit,
-                    job_handle_receiver,
+                    kill_event_receiver,
                     |fd| self.mount.spawn(fd),
                     runtime::Handle::current(),
                 )
@@ -1563,7 +1550,7 @@ mod tests {
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
         let mount = TarMount::new().await;
         let spec = JobSpec::from_spec(spec);
-        let (_job_handle_sender, job_handle_receiver) = job_handle();
+        let (_kill_event_sender, kill_event_receiver) = sync::event();
         assert_matches!(
             tokio::task::spawn_blocking(move || {
                 Executor::new(
@@ -1574,7 +1561,7 @@ mod tests {
                 .run_job(
                     &spec,
                     ByteSize::b(0).into(),
-                    job_handle_receiver,
+                    kill_event_receiver,
                     |fd| mount.spawn(fd),
                     runtime::Handle::current(),
                 )
