@@ -4,6 +4,7 @@ mod dispatcher;
 mod driver;
 mod local_broker;
 mod rpc;
+mod stream_wrapper;
 
 use anyhow::{anyhow, Error, Result};
 use artifact_upload::ArtifactUploadTracker;

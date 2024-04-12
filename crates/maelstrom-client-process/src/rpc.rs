@@ -1,4 +1,4 @@
-use crate::Client;
+use crate::{stream_wrapper::StreamWrapper, Client};
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
@@ -15,7 +15,6 @@ use std::{
     result, sync::Arc,
 };
 use tokio::{
-    io::Interest,
     net::UnixStream as TokioUnixStream,
     sync::{mpsc, RwLock},
     task,
@@ -262,28 +261,16 @@ impl ClientProcess for Handler {
 
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
-const SHUTDOWN_POLL_MILLIS: u64 = 100;
-
 #[tokio::main]
 pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
-    let sock1 = TokioUnixStream::from_std(sock.try_clone()?)?;
-    let sock2 = TokioUnixStream::from_std(sock)?;
+    let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
         .add_service(ClientProcessServer::new(Handler::new(log)))
         .serve_with_incoming_shutdown(
-            tokio_stream::once(TokioError::<_>::Ok(sock1)).chain(tokio_stream::pending()),
+            tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
             async move {
-                loop {
-                    let Ok(v) = sock2.ready(Interest::READABLE).await else {
-                        break;
-                    };
-                    if v.is_read_closed() {
-                        break;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(SHUTDOWN_POLL_MILLIS))
-                        .await;
-                }
+                let _ = receiver.await;
             },
         )
         .await?;

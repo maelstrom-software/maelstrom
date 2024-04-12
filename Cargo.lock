@@ -2954,6 +2954,7 @@ dependencies = [
  "maelstrom-container",
  "maelstrom-test",
  "maelstrom-util",
+ "pin-project",
  "serde",
  "serde_repr",
  "serde_with",
