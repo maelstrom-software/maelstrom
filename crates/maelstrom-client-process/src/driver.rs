@@ -66,9 +66,7 @@ impl ClientDeps {
         let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
         let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
 
-        let dispatcher_adapter = DispatcherAdapter {
-            local_broker_sender: local_broker_sender.clone(),
-        };
+        let dispatcher_adapter = DispatcherAdapter::new(local_broker_sender.clone());
         let dispatcher = Dispatcher::new(dispatcher_adapter);
         let local_broker_adapter = LocalBrokerAdapter::new(
             dispatcher_sender.clone(),

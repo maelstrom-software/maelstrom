@@ -49,6 +49,14 @@ struct DispatcherAdapter {
     local_broker_sender: UnboundedSender<local_broker::Message>,
 }
 
+impl DispatcherAdapter {
+    pub fn new(local_broker_sender: UnboundedSender<local_broker::Message>) -> Self {
+        Self {
+            local_broker_sender,
+        }
+    }
+}
+
 impl dispatcher::Deps for DispatcherAdapter {
     type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
 
