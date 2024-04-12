@@ -33,7 +33,7 @@ use maelstrom_util::{
 };
 pub use rpc::client_process_main;
 use sha2::{Digest as _, Sha256};
-use slog::{debug, Drain as _, Logger};
+use slog::{debug, Drain as _};
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -180,10 +180,38 @@ impl Client {
 
         slog::debug!(log, "client starting");
         let upload_tracker = ArtifactUploadTracker::default();
-        let deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
+        let mut deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
         let dispatcher_sender = deps.dispatcher_sender.clone();
         let log_clone = log.clone();
-        task::spawn(client_main(log_clone, deps));
+        task::spawn(async move {
+            let mut join_set = JoinSet::new();
+
+            join_set.spawn(sync::channel_reader(deps.dispatcher_receiver, move |msg| {
+                deps.dispatcher.receive_message(msg)
+            }));
+
+            join_set.spawn(async move {
+                while deps.artifact_pusher.process_one().await {}
+                deps.artifact_pusher.wait().await
+            });
+
+            join_set.spawn(async move { while deps.socket_reader.process_one().await {} });
+
+            join_set.spawn(sync::channel_reader(
+                deps.local_broker_receiver,
+                move |msg| deps.local_broker.receive_message(msg),
+            ));
+
+            join_set.spawn(net::async_socket_writer(
+                deps.broker_receiver,
+                deps.broker_socket_writer,
+                move |msg| {
+                    debug!(log_clone, "sending broker message"; "msg" => ?msg);
+                },
+            ));
+
+            join_set.join_next().await;
+        });
 
         slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
@@ -526,34 +554,4 @@ impl ClientDeps {
             broker_receiver,
         })
     }
-}
-
-pub async fn client_main(log: Logger, mut deps: ClientDeps) {
-    let mut join_set = JoinSet::new();
-
-    join_set.spawn(sync::channel_reader(deps.dispatcher_receiver, move |msg| {
-        deps.dispatcher.receive_message(msg)
-    }));
-
-    join_set.spawn(async move {
-        while deps.artifact_pusher.process_one().await {}
-        deps.artifact_pusher.wait().await
-    });
-
-    join_set.spawn(async move { while deps.socket_reader.process_one().await {} });
-
-    join_set.spawn(sync::channel_reader(
-        deps.local_broker_receiver,
-        move |msg| deps.local_broker.receive_message(msg),
-    ));
-
-    join_set.spawn(net::async_socket_writer(
-        deps.broker_receiver,
-        deps.broker_socket_writer,
-        move |msg| {
-            debug!(log, "sending broker message"; "msg" => ?msg);
-        },
-    ));
-
-    join_set.join_next().await;
 }
