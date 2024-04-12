@@ -70,11 +70,11 @@ impl ClientDeps {
             local_broker_sender: local_broker_sender.clone(),
         };
         let dispatcher = Dispatcher::new(dispatcher_adapter);
-        let local_broker_adapter = LocalBrokerAdapter {
-            dispatcher_sender: dispatcher_sender.clone(),
+        let local_broker_adapter = LocalBrokerAdapter::new(
+            dispatcher_sender.clone(),
             broker_sender,
             artifact_pusher_sender,
-        };
+        );
         let local_broker = LocalBroker::new(local_broker_adapter);
         let socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
         let artifact_pusher =

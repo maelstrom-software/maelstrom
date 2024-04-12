@@ -78,6 +78,20 @@ struct LocalBrokerAdapter {
     artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
 }
 
+impl LocalBrokerAdapter {
+    pub fn new(
+        dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+        broker_sender: UnboundedSender<ClientToBroker>,
+        artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
+    ) -> Self {
+        Self {
+            dispatcher_sender,
+            broker_sender,
+            artifact_pusher_sender,
+        }
+    }
+}
+
 impl local_broker::Deps for LocalBrokerAdapter {
     fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
         self.dispatcher_sender
