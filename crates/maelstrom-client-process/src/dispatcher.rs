@@ -91,11 +91,11 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
     }
 }
 
-pub struct DispatcherAdapter {
+pub struct Adapter {
     local_broker_sender: UnboundedSender<local_broker::Message>,
 }
 
-impl DispatcherAdapter {
+impl Adapter {
     pub fn new(local_broker_sender: UnboundedSender<local_broker::Message>) -> Self {
         Self {
             local_broker_sender,
@@ -103,7 +103,7 @@ impl DispatcherAdapter {
     }
 }
 
-impl Deps for DispatcherAdapter {
+impl Deps for Adapter {
     type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
 
     fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {

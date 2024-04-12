@@ -46,14 +46,14 @@ use tokio::{
 };
 
 struct LocalBrokerAdapter {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
+    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
 }
 
 impl LocalBrokerAdapter {
     pub fn new(
-        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
+        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
         broker_sender: UnboundedSender<ClientToBroker>,
         artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
     ) -> Self {
@@ -191,7 +191,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
+    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,

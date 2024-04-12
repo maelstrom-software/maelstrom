@@ -38,12 +38,12 @@ impl SocketReader {
 }
 
 pub struct ClientDeps {
-    dispatcher: Dispatcher<dispatcher::DispatcherAdapter>,
+    dispatcher: Dispatcher<dispatcher::Adapter>,
     local_broker: LocalBroker<LocalBrokerAdapter>,
     artifact_pusher: ArtifactPusher,
     socket_reader: SocketReader,
-    pub dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
-    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<dispatcher::DispatcherAdapter>>,
+    pub dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<dispatcher::Adapter>>,
     local_broker_receiver: UnboundedReceiver<local_broker::Message>,
     broker_socket_writer: OwnedWriteHalf,
     broker_receiver: UnboundedReceiver<ClientToBroker>,
@@ -66,7 +66,7 @@ impl ClientDeps {
         let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
         let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
 
-        let dispatcher_adapter = dispatcher::DispatcherAdapter::new(local_broker_sender.clone());
+        let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
         let dispatcher = Dispatcher::new(dispatcher_adapter);
         let local_broker_adapter = LocalBrokerAdapter::new(
             dispatcher_sender.clone(),
