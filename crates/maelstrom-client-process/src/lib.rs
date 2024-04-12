@@ -15,7 +15,7 @@ use itertools::Itertools as _;
 use local_broker::LocalBroker;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
-    proto::{ClientToBroker, Hello},
+    proto::Hello,
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -42,12 +42,9 @@ use std::{
     time::SystemTime,
 };
 use tokio::{
-    net::{
-        tcp::{self, OwnedWriteHalf},
-        TcpStream,
-    },
+    net::{tcp, TcpStream},
     sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        mpsc::{self, UnboundedSender},
         oneshot, Mutex,
     },
     task::{self, JoinSet},
@@ -180,31 +177,54 @@ impl Client {
 
         slog::debug!(log, "client starting");
         let upload_tracker = ArtifactUploadTracker::default();
-        let mut deps = ClientDeps::new(broker_addr, upload_tracker.clone()).await?;
-        let dispatcher_sender = deps.dispatcher_sender.clone();
+        let mut broker_socket = TcpStream::connect(broker_addr.inner())
+            .await
+            .with_context(|| format!("failed to connect to {broker_addr}"))?;
+        net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
+
+        let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
+        let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
+
+        let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
+        let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+        let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
+
+        let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
+        let mut dispatcher = Dispatcher::new(dispatcher_adapter);
+        let local_broker_adapter = local_broker::Adapter::new(
+            dispatcher_sender.clone(),
+            broker_sender,
+            artifact_pusher_sender,
+        );
+        let mut local_broker = LocalBroker::new(local_broker_adapter);
+        let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
+        let mut artifact_pusher = ArtifactPusher::new(
+            broker_addr,
+            artifact_pusher_receiver,
+            upload_tracker.clone(),
+        );
         let log_clone = log.clone();
         task::spawn(async move {
             let mut join_set = JoinSet::new();
 
-            join_set.spawn(sync::channel_reader(deps.dispatcher_receiver, move |msg| {
-                deps.dispatcher.receive_message(msg)
+            join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
+                dispatcher.receive_message(msg)
             }));
 
             join_set.spawn(async move {
-                while deps.artifact_pusher.process_one().await {}
-                deps.artifact_pusher.wait().await
+                while artifact_pusher.process_one().await {}
+                artifact_pusher.wait().await
             });
 
-            join_set.spawn(async move { while deps.socket_reader.process_one().await {} });
+            join_set.spawn(async move { while socket_reader.process_one().await {} });
 
-            join_set.spawn(sync::channel_reader(
-                deps.local_broker_receiver,
-                move |msg| deps.local_broker.receive_message(msg),
-            ));
+            join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
+                local_broker.receive_message(msg)
+            }));
 
             join_set.spawn(net::async_socket_writer(
-                deps.broker_receiver,
-                deps.broker_socket_writer,
+                broker_receiver,
+                broker_socket_writer,
                 move |msg| {
                     debug!(log_clone, "sending broker message"; "msg" => ?msg);
                 },
@@ -498,60 +518,5 @@ impl SocketReader {
         self.channel
             .send(local_broker::Message::Broker(message))
             .is_ok()
-    }
-}
-
-pub struct ClientDeps {
-    dispatcher: Dispatcher<dispatcher::Adapter>,
-    local_broker: LocalBroker<local_broker::Adapter>,
-    artifact_pusher: ArtifactPusher,
-    socket_reader: SocketReader,
-    pub dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
-    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<dispatcher::Adapter>>,
-    local_broker_receiver: UnboundedReceiver<local_broker::Message>,
-    broker_socket_writer: OwnedWriteHalf,
-    broker_receiver: UnboundedReceiver<ClientToBroker>,
-}
-
-impl ClientDeps {
-    pub async fn new(
-        broker_addr: BrokerAddr,
-        upload_tracker: ArtifactUploadTracker,
-    ) -> Result<Self> {
-        let mut broker_socket = TcpStream::connect(broker_addr.inner())
-            .await
-            .with_context(|| format!("failed to connect to {broker_addr}"))?;
-        net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
-
-        let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-        let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
-
-        let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
-        let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-        let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
-
-        let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
-        let dispatcher = Dispatcher::new(dispatcher_adapter);
-        let local_broker_adapter = local_broker::Adapter::new(
-            dispatcher_sender.clone(),
-            broker_sender,
-            artifact_pusher_sender,
-        );
-        let local_broker = LocalBroker::new(local_broker_adapter);
-        let socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
-        let artifact_pusher =
-            ArtifactPusher::new(broker_addr, artifact_pusher_receiver, upload_tracker);
-
-        Ok(Self {
-            artifact_pusher,
-            socket_reader,
-            dispatcher,
-            local_broker,
-            local_broker_receiver,
-            dispatcher_sender,
-            dispatcher_receiver,
-            broker_socket_writer,
-            broker_receiver,
-        })
     }
 }
