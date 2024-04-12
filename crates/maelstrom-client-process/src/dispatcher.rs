@@ -5,6 +5,7 @@ use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
 };
+use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 pub trait Deps {
     type JobHandle;
@@ -87,5 +88,40 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
                 }
             }
         }
+    }
+}
+
+pub struct DispatcherAdapter {
+    local_broker_sender: UnboundedSender<local_broker::Message>,
+}
+
+impl DispatcherAdapter {
+    pub fn new(local_broker_sender: UnboundedSender<local_broker::Message>) -> Self {
+        Self {
+            local_broker_sender,
+        }
+    }
+}
+
+impl Deps for DispatcherAdapter {
+    type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
+
+    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
+        handle.send((cjid, result)).ok();
+    }
+
+    type JobStateCountsHandle = oneshot::Sender<JobStateCounts>;
+
+    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
+        handle.send(counts).ok();
+    }
+
+    fn send_message_to_local_broker(&mut self, message: local_broker::Message) {
+        self.local_broker_sender.send(message).ok();
+    }
+
+    type AllJobsCompleteHandle = oneshot::Sender<()>;
+    fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle) {
+        handle.send(()).ok();
     }
 }

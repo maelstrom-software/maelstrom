@@ -2,7 +2,7 @@ use crate::{
     artifact_upload::{ArtifactPusher, ArtifactUploadTracker},
     dispatcher::{self, Dispatcher},
     local_broker::{self, LocalBroker},
-    DispatcherAdapter, LocalBrokerAdapter,
+    LocalBrokerAdapter,
 };
 use anyhow::{Context as _, Result};
 use maelstrom_base::proto::{ClientToBroker, Hello};
@@ -38,12 +38,12 @@ impl SocketReader {
 }
 
 pub struct ClientDeps {
-    dispatcher: Dispatcher<DispatcherAdapter>,
+    dispatcher: Dispatcher<dispatcher::DispatcherAdapter>,
     local_broker: LocalBroker<LocalBrokerAdapter>,
     artifact_pusher: ArtifactPusher,
     socket_reader: SocketReader,
-    pub dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
-    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<DispatcherAdapter>>,
+    pub dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
+    dispatcher_receiver: UnboundedReceiver<dispatcher::Message<dispatcher::DispatcherAdapter>>,
     local_broker_receiver: UnboundedReceiver<local_broker::Message>,
     broker_socket_writer: OwnedWriteHalf,
     broker_receiver: UnboundedReceiver<ClientToBroker>,
@@ -66,7 +66,7 @@ impl ClientDeps {
         let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
         let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
 
-        let dispatcher_adapter = DispatcherAdapter::new(local_broker_sender.clone());
+        let dispatcher_adapter = dispatcher::DispatcherAdapter::new(local_broker_sender.clone());
         let dispatcher = Dispatcher::new(dispatcher_adapter);
         let local_broker_adapter = LocalBrokerAdapter::new(
             dispatcher_sender.clone(),

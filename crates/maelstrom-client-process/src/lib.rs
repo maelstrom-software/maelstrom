@@ -45,50 +45,15 @@ use tokio::{
     task,
 };
 
-struct DispatcherAdapter {
-    local_broker_sender: UnboundedSender<local_broker::Message>,
-}
-
-impl DispatcherAdapter {
-    pub fn new(local_broker_sender: UnboundedSender<local_broker::Message>) -> Self {
-        Self {
-            local_broker_sender,
-        }
-    }
-}
-
-impl dispatcher::Deps for DispatcherAdapter {
-    type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
-
-    fn job_done(&self, handle: Self::JobHandle, cjid: ClientJobId, result: JobOutcomeResult) {
-        handle.send((cjid, result)).ok();
-    }
-
-    type JobStateCountsHandle = oneshot::Sender<JobStateCounts>;
-
-    fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
-        handle.send(counts).ok();
-    }
-
-    fn send_message_to_local_broker(&mut self, message: local_broker::Message) {
-        self.local_broker_sender.send(message).ok();
-    }
-
-    type AllJobsCompleteHandle = oneshot::Sender<()>;
-    fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle) {
-        handle.send(()).ok();
-    }
-}
-
 struct LocalBrokerAdapter {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
 }
 
 impl LocalBrokerAdapter {
     pub fn new(
-        dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
         broker_sender: UnboundedSender<ClientToBroker>,
         artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
     ) -> Self {
@@ -226,7 +191,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<DispatcherAdapter>>,
+    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::DispatcherAdapter>>,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
