@@ -15,7 +15,6 @@ use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
-    proto::ClientToBroker,
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -44,53 +43,6 @@ use tokio::{
     sync::{mpsc::UnboundedSender, oneshot, Mutex},
     task,
 };
-
-struct LocalBrokerAdapter {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
-    broker_sender: UnboundedSender<ClientToBroker>,
-    artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
-}
-
-impl LocalBrokerAdapter {
-    pub fn new(
-        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
-        broker_sender: UnboundedSender<ClientToBroker>,
-        artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
-    ) -> Self {
-        Self {
-            dispatcher_sender,
-            broker_sender,
-            artifact_pusher_sender,
-        }
-    }
-}
-
-impl local_broker::Deps for LocalBrokerAdapter {
-    fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
-        self.dispatcher_sender
-            .send(dispatcher::Message::JobResponse(cjid, result))
-            .ok();
-    }
-
-    fn send_job_state_counts_response_to_dispatcher(&mut self, counts: JobStateCounts) {
-        self.dispatcher_sender
-            .send(dispatcher::Message::JobStateCountsResponse(counts))
-            .ok();
-    }
-
-    fn send_message_to_broker(&mut self, message: ClientToBroker) {
-        self.broker_sender.send(message).ok();
-    }
-
-    fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path) {
-        self.artifact_pusher_sender
-            .send(ArtifactPushRequest {
-                digest,
-                path: path.to_owned(),
-            })
-            .ok();
-    }
-}
 
 pub struct ArtifactPushRequest {
     pub path: PathBuf,
