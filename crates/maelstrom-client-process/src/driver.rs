@@ -38,7 +38,7 @@ impl SocketReader {
 
 pub struct ClientDeps {
     dispatcher: Dispatcher<dispatcher::Adapter>,
-    local_broker: LocalBroker<local_broker::LocalBrokerAdapter>,
+    local_broker: LocalBroker<local_broker::Adapter>,
     artifact_pusher: ArtifactPusher,
     socket_reader: SocketReader,
     pub dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
@@ -67,7 +67,7 @@ impl ClientDeps {
 
         let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
         let dispatcher = Dispatcher::new(dispatcher_adapter);
-        let local_broker_adapter = local_broker::LocalBrokerAdapter::new(
+        let local_broker_adapter = local_broker::Adapter::new(
             dispatcher_sender.clone(),
             broker_sender,
             artifact_pusher_sender,

@@ -70,13 +70,13 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
     }
 }
 
-pub struct LocalBrokerAdapter {
+pub struct Adapter {
     dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
 }
 
-impl LocalBrokerAdapter {
+impl Adapter {
     pub fn new(
         dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
         broker_sender: UnboundedSender<ClientToBroker>,
@@ -90,7 +90,7 @@ impl LocalBrokerAdapter {
     }
 }
 
-impl Deps for LocalBrokerAdapter {
+impl Deps for Adapter {
     fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
         self.dispatcher_sender
             .send(dispatcher::Message::JobResponse(cjid, result))
