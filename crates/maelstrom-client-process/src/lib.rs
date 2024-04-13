@@ -158,92 +158,97 @@ struct Client {
     state: Mutex<ClientState>,
 }
 
-impl Client {
-    async fn new(
-        broker_addr: BrokerAddr,
-        project_dir: impl AsRef<Path>,
-        cache_dir: impl AsRef<Path>,
-        log: Option<slog::Logger>,
-    ) -> Result<Self> {
-        let fs = async_fs::Fs::new();
-        for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
-            fs.create_dir_all(cache_dir.as_ref().join(d)).await?;
-        }
+async fn start_tasks(
+    broker_addr: BrokerAddr,
+    log: slog::Logger,
+) -> Result<(
+    UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+    ArtifactUploadTracker,
+)> {
+    slog::debug!(log, "client starting");
 
-        let log = match log {
-            Some(l) => l,
-            None => default_log(&fs, cache_dir.as_ref()).await?,
-        };
+    let mut broker_socket = TcpStream::connect(broker_addr.inner())
+        .await
+        .with_context(|| format!("failed to connect to {broker_addr}"))?;
+    net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
 
-        slog::debug!(log, "client starting");
-        let upload_tracker = ArtifactUploadTracker::default();
-        let mut broker_socket = TcpStream::connect(broker_addr.inner())
-            .await
-            .with_context(|| format!("failed to connect to {broker_addr}"))?;
-        net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
+    slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
-        let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-        let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
+    let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
 
-        let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
-        let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-        let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
+    let upload_tracker = ArtifactUploadTracker::default();
 
-        let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
-        let mut dispatcher = Dispatcher::new(dispatcher_adapter);
-        let local_broker_adapter = local_broker::Adapter::new(
-            dispatcher_sender.clone(),
-            broker_sender,
-            artifact_pusher_sender,
-        );
-        let mut local_broker = LocalBroker::new(local_broker_adapter);
-        let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
-        let mut artifact_pusher = ArtifactPusher::new(
-            broker_addr,
-            artifact_pusher_receiver,
-            upload_tracker.clone(),
-        );
-        let log_clone = log.clone();
-        task::spawn(async move {
-            let mut join_set = JoinSet::new();
+    let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
+    let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
+    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+    let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
 
-            join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
-                dispatcher.receive_message(msg)
-            }));
+    let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
+    let mut dispatcher = Dispatcher::new(dispatcher_adapter);
+    let local_broker_adapter = local_broker::Adapter::new(
+        dispatcher_sender.clone(),
+        broker_sender,
+        artifact_pusher_sender,
+    );
+    let mut local_broker = LocalBroker::new(local_broker_adapter);
+    let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
+    let mut artifact_pusher = ArtifactPusher::new(
+        broker_addr,
+        artifact_pusher_receiver,
+        upload_tracker.clone(),
+    );
 
-            join_set.spawn(async move {
-                while artifact_pusher.process_one().await {}
-                artifact_pusher.wait().await
-            });
+    task::spawn(async move {
+        let mut join_set = JoinSet::new();
 
-            join_set.spawn(async move { while socket_reader.process_one().await {} });
+        join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
+            dispatcher.receive_message(msg)
+        }));
 
-            join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
-                local_broker.receive_message(msg)
-            }));
-
-            join_set.spawn(net::async_socket_writer(
-                broker_receiver,
-                broker_socket_writer,
-                move |msg| {
-                    debug!(log_clone, "sending broker message"; "msg" => ?msg);
-                },
-            ));
-
-            join_set.join_next().await;
+        join_set.spawn(async move {
+            while artifact_pusher.process_one().await {}
+            artifact_pusher.wait().await
         });
 
-        slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
+        join_set.spawn(async move { while socket_reader.process_one().await {} });
 
+        join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
+            local_broker.receive_message(msg)
+        }));
+
+        join_set.spawn(net::async_socket_writer(
+            broker_receiver,
+            broker_socket_writer,
+            move |msg| {
+                debug!(log, "sending broker message"; "msg" => ?msg);
+            },
+        ));
+
+        join_set.join_next().await;
+    });
+
+    Ok((dispatcher_sender, upload_tracker))
+}
+
+impl Client {
+    async fn new(
+        project_dir: PathBuf,
+        cache_dir: PathBuf,
+        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+        upload_tracker: ArtifactUploadTracker,
+        log: slog::Logger,
+    ) -> Result<Self> {
+        let container_image_depot = ContainerImageDepot::new(&project_dir)?;
+        let digest_repo = DigestRepository::new(&cache_dir);
         Ok(Client {
             dispatcher_sender,
-            cache_dir: cache_dir.as_ref().to_owned(),
-            project_dir: project_dir.as_ref().to_owned(),
+            cache_dir,
+            project_dir,
             upload_tracker,
-            container_image_depot: ContainerImageDepot::new(project_dir.as_ref())?,
+            container_image_depot,
             log,
             state: Mutex::new(ClientState {
-                digest_repo: DigestRepository::new(cache_dir.as_ref()),
+                digest_repo,
                 processed_artifact_paths: HashSet::default(),
                 cached_layers: HashMap::new(),
             }),

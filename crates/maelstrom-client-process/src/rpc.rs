@@ -9,6 +9,7 @@ use maelstrom_client_base::{
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_container::ProgressTracker;
+use maelstrom_util::async_fs;
 use slog::Logger;
 use std::{
     error, future::Future, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
@@ -121,11 +122,29 @@ impl ClientProcess for Handler {
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         run_handler(async {
             let request = request.into_inner();
+            let broker_addr = TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?;
+            let project_dir = PathBuf::try_from_proto_buf(request.project_dir)?;
+            let cache_dir = PathBuf::try_from_proto_buf(request.cache_dir)?;
+            let fs = async_fs::Fs::new();
+            for d in [
+                crate::MANIFEST_DIR,
+                crate::STUB_MANIFEST_DIR,
+                crate::SYMLINK_MANIFEST_DIR,
+            ] {
+                fs.create_dir_all(cache_dir.join(d)).await?;
+            }
+            let log = match &self.log {
+                Some(log) => log.clone(),
+                None => crate::default_log(&fs, cache_dir.as_ref()).await?,
+            };
+            let (dispatcher_sender, upload_tracker) =
+                crate::start_tasks(broker_addr, log.clone()).await?;
             let client = Client::new(
-                TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
-                PathBuf::try_from_proto_buf(request.project_dir)?,
-                PathBuf::try_from_proto_buf(request.cache_dir)?,
-                self.log.clone(),
+                project_dir,
+                cache_dir,
+                dispatcher_sender,
+                upload_tracker,
+                log,
             )
             .await?;
             *self.client.write().await = Some(client);
