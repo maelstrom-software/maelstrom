@@ -958,25 +958,58 @@ impl Splicer {
         Ok(())
     }
 
-    pub fn chunk_size(&self) -> usize {
+    pub fn buffer_size(&self) -> usize {
         self.pipe_size
     }
 }
 
 struct SlowWriter {
     buffer: Vec<u8>,
+    chunk_size: usize,
 }
 
 impl SlowWriter {
-    fn new() -> Self {
-        Self { buffer: vec![] }
+    fn new(chunk_size: usize) -> Self {
+        Self {
+            buffer: vec![],
+            chunk_size,
+        }
     }
-
-    const CHUNK_SIZE: usize = 1024 * 1024;
 
     pub fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.buffer.extend(bytes);
         Ok(())
+    }
+
+    /// We aren't allowed to seek the given `fd` here, so we must do splice with a tiny pipe
+    /// instead.
+    fn offset_write_fd(
+        &mut self,
+        fd: linux::Fd,
+        mut offset: u64,
+        length: usize,
+    ) -> io::Result<usize> {
+        let (pipe_out, pipe_in) = linux::pipe()?;
+        let pipe_size = linux::get_pipe_size(pipe_in.as_fd())?;
+        let chunk_size = std::cmp::min(self.chunk_size, pipe_size);
+
+        let mut remaining = length;
+        while remaining > 0 {
+            let end = self.buffer.len();
+            let to_read = std::cmp::min(chunk_size, remaining);
+            self.buffer.resize(end + to_read, 0);
+            let in_pipe = linux::splice(fd, Some(offset), pipe_in.as_fd(), None, to_read)?;
+            offset += in_pipe as u64;
+
+            let in_buffer = linux::read(pipe_out.as_fd(), &mut self.buffer[end..])?;
+            assert_eq!(in_pipe, in_buffer);
+            remaining -= in_buffer;
+            self.buffer.resize(end + in_buffer, 0);
+            if in_buffer == 0 {
+                break;
+            }
+        }
+        Ok(length - remaining)
     }
 
     pub fn write_fd(
@@ -986,21 +1019,22 @@ impl SlowWriter {
         length: usize,
     ) -> io::Result<usize> {
         if let Some(offset) = offset {
-            linux::lseek(fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
+            return self.offset_write_fd(fd, offset, length);
         }
-        let mut total_read = 0;
-        while total_read < length {
+
+        let mut remaining = length;
+        while remaining > 0 {
             let end = self.buffer.len();
-            let to_read = std::cmp::min(Self::CHUNK_SIZE, length);
+            let to_read = std::cmp::min(self.chunk_size, remaining);
             self.buffer.resize(end + to_read, 0);
             let read = linux::read(fd, &mut self.buffer[end..])?;
-            total_read += read;
+            remaining -= read;
             self.buffer.resize(end + read, 0);
             if read == 0 {
                 break;
             }
         }
-        Ok(total_read)
+        Ok(length - remaining)
     }
 
     pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
@@ -1008,18 +1042,15 @@ impl SlowWriter {
             linux::lseek(fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
         }
 
-        let mut i = 0;
-        while i < self.buffer.len() {
-            let length = std::cmp::min(i + Self::CHUNK_SIZE, self.buffer.len());
-            let written = linux::write(fd, &self.buffer[i..length])?;
-            i += written;
-        }
+        let written = linux::write(fd, &self.buffer[..])?;
+        assert_eq!(written, self.buffer.len());
         self.buffer = vec![];
+
         Ok(())
     }
 
-    pub fn chunk_size(&self) -> usize {
-        Self::CHUNK_SIZE
+    pub fn buffer_size(&self) -> usize {
+        SLOW_WRITE_BUFFER_SIZE
     }
 }
 
@@ -1027,6 +1058,9 @@ enum SpliceOrFallback {
     Splice(Splicer),
     Fallback(SlowWriter),
 }
+
+const SLOW_WRITE_BUFFER_SIZE: usize = 1024 * 1024;
+const SLOW_WRITE_CHUNK_SIZE: usize = 1024 * 1024;
 
 pub struct MaybeFastWriter(SpliceOrFallback);
 
@@ -1036,15 +1070,17 @@ impl MaybeFastWriter {
             Ok(splicer) => Self(SpliceOrFallback::Splice(splicer)),
             Err(err) => {
                 slog::error!(log, "Failed to get pipe memory, cannot splice"; "error" => ?err);
-                Self(SpliceOrFallback::Fallback(SlowWriter::new()))
+                Self(SpliceOrFallback::Fallback(SlowWriter::new(
+                    SLOW_WRITE_CHUNK_SIZE,
+                )))
             }
         }
     }
 
-    pub fn chunk_size(&self) -> usize {
+    pub fn buffer_size(&self) -> usize {
         match &self.0 {
-            SpliceOrFallback::Splice(splicer) => splicer.chunk_size(),
-            SpliceOrFallback::Fallback(writer) => writer.chunk_size(),
+            SpliceOrFallback::Splice(splicer) => splicer.buffer_size(),
+            SpliceOrFallback::Fallback(writer) => writer.buffer_size(),
         }
     }
 
@@ -1053,7 +1089,7 @@ impl MaybeFastWriter {
             unreachable!()
         };
         if splicer.reset_pipe().is_err() {
-            self.0 = SpliceOrFallback::Fallback(SlowWriter::new());
+            self.0 = SpliceOrFallback::Fallback(SlowWriter::new(SLOW_WRITE_CHUNK_SIZE));
         }
         err
     }
@@ -1159,7 +1195,7 @@ fn slow_writer() {
     for i in 1..15 {
         for j in 1..15 {
             maybe_fast_writer_test(
-                MaybeFastWriter(SpliceOrFallback::Fallback(SlowWriter::new())),
+                MaybeFastWriter(SpliceOrFallback::Fallback(SlowWriter::new(5))),
                 i,
                 j,
             );

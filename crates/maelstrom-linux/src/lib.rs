@@ -966,6 +966,10 @@ pub fn set_pipe_size(fd: Fd, size: usize) -> Result<(), Errno> {
         .map(drop)
 }
 
+pub fn get_pipe_size(fd: Fd) -> Result<usize, Errno> {
+    Errno::result(unsafe { libc::fcntl(fd.0, libc::F_GETPIPE_SZ) }).map(|sz| sz as usize)
+}
+
 pub enum Whence {
     SeekSet,
     SeekCur,

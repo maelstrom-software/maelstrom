@@ -38,7 +38,9 @@ pub fn main(
 
     let mut file_offset = 0;
     while file_offset < expected_size {
-        let written = writer.write_fd(stream_fd, None, writer.chunk_size())?;
+        let remaining = expected_size - file_offset;
+        let to_read = std::cmp::min(writer.buffer_size(), remaining as usize);
+        let written = writer.write_fd(stream_fd, None, to_read)?;
         if written == 0 {
             return Err(anyhow!("got unexpected EOF receiving artifact"));
         }
