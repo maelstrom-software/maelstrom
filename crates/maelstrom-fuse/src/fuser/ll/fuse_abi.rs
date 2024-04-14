@@ -5,17 +5,13 @@
 //! interface is versioned and capabilities are exchanged during the initialization (mounting)
 //! of a filesystem.
 //!
-//! libfuse (Linux/BSD): https://github.com/libfuse/libfuse/blob/master/include/fuse_kernel.h
+//! libfuse (Linux/BSD): <https://github.com/libfuse/libfuse/blob/master/include/fuse_kernel.h>
 //! - supports ABI 7.8 since FUSE 2.6.0
 //! - supports ABI 7.12 since FUSE 2.8.0
 //! - supports ABI 7.18 since FUSE 2.9.0
 //! - supports ABI 7.19 since FUSE 2.9.1
 //! - supports ABI 7.26 since FUSE 3.0.0
 //!
-//! Items without a version annotation are valid with ABI 7.8 and later
-
-#![warn(missing_debug_implementations)]
-#![allow(missing_docs)]
 
 use crate::fuser::consts::{FATTR_ATIME_NOW, FATTR_MTIME_NOW};
 use std::convert::TryFrom;

@@ -1,3 +1,6 @@
+//! This crate contains code to help implement the Linux FUSE API using async Rust.
+//!
+//! The guts were adapted from the fuser crate and can be found in the [`fuser`] module
 pub mod fuser;
 
 use anyhow::Result;
@@ -17,8 +20,15 @@ use std::time::Duration;
 use tokio::sync::Semaphore;
 use tokio::task::{self, JoinHandle};
 
+/// The number of requests the [`DispatchingFs`] allow in-flight. When this limit is reached it
+/// will block the next FUSE request until an existing one finishes.
+///
+/// This limit is put in place to try to have some control on the amount of tasks and memory being
+/// used by a FUSE connection.
 const MAX_INFLIGHT: usize = 1000;
 
+/// The handle returned by [`fuse_mount_namespace`]. It can be used make the child exit (thus
+/// removing the mount) also it provides a way to get the path to the mount (via `/proc/`)
 pub struct FuseNamespaceHandle {
     stream: linux::UnixStream,
     handle: JoinHandle<std::io::Result<()>>,
@@ -26,6 +36,7 @@ pub struct FuseNamespaceHandle {
 }
 
 impl FuseNamespaceHandle {
+    /// Make the child exit and wait for it. This makes the mount go away.
     pub async fn umount_and_join(self) -> Result<()> {
         let _ = self.stream.shutdown();
         drop(self.stream);
@@ -33,6 +44,7 @@ impl FuseNamespaceHandle {
         Ok(())
     }
 
+    /// The path to the mount (via `/proc/`)
     pub fn mount_path(&self) -> &Path {
         &self.mount_path
     }
@@ -67,6 +79,16 @@ fn run_fuse_child(
     std::process::exit(0)
 }
 
+/// Serve a FUSE connection using the provided handler and name. The FUSE connection will be
+/// mounted in a child process in its own namespace.
+///
+/// This is useful because it doesn't require root access to mount the namespace (or the fusermount
+/// binary). The mount can be accessed via a path in `/proc`. The returned handle gives a way to
+/// get the path to the mount and exit the child process.
+///
+/// The child process hangs around waiting on a UNIX domain socket so if the parent dies it should
+/// cleanly exit on its own. (Crucially it also doesn't attempt to access the mount after the
+/// parent is gone)
 pub async fn fuse_mount_namespace(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     name: &str,
@@ -112,6 +134,11 @@ pub async fn fuse_mount_namespace(
     })
 }
 
+/// Serve a FUSE connection using the provided handler and file-descriptor. The file-descriptor
+/// must have been obtained by opening `/dev/fuse`.
+///
+/// The function returns when the FUSE connection has been closed either via an error or cleanly
+/// unmounting.
 pub async fn run_fuse(
     handler: impl FuseFileSystem + Send + Sync + 'static,
     fd: linux::OwnedFd,
@@ -298,6 +325,8 @@ impl<FileSystemT: FuseFileSystem + Send + Sync + 'static> fuser::Filesystem
     }
 }
 
+/// Passed to all the [`FuseFileSystem`] request functions and contains information about who is
+/// doing the request.
 pub struct Request {
     pub uid: u32,
     pub gid: u32,
@@ -316,6 +345,7 @@ impl From<&fuser::Request<'_>> for Request {
 
 pub type ErrnoResult<T> = std::result::Result<T, Errno>;
 
+/// Response from a [`FuseFileSystem::look_up`] request
 #[derive(Debug)]
 pub struct EntryResponse {
     pub ttl: Duration,
@@ -331,6 +361,7 @@ impl Response for EntryResponse {
     }
 }
 
+/// Response from a [`FuseFileSystem::get_attr`] request
 #[derive(Debug)]
 pub struct AttrResponse {
     pub ttl: Duration,
@@ -375,6 +406,7 @@ impl Response for ReadResponse {
     }
 }
 
+/// Response from a [`FuseFileSystem::read_link`] request
 #[derive(Debug)]
 pub struct ReadLinkResponse {
     pub data: Vec<u8>,
@@ -388,6 +420,7 @@ impl Response for ReadLinkResponse {
     }
 }
 
+/// Directory entry, used in [`FuseFileSystem::read_dir`] request
 pub struct DirEntry {
     pub ino: u64,
     pub offset: i64,
@@ -401,6 +434,7 @@ impl DirEntry {
     }
 }
 
+/// The Linux FUSE API as a trait for async Rust code.
 #[async_trait]
 pub trait FuseFileSystem {
     async fn look_up(
