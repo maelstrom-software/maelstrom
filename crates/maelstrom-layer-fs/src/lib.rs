@@ -1,3 +1,102 @@
+//! This crate contains a Linux FUSE file-system implementation called LayerFS.
+//!
+//! # Introduction
+//! The file-system is based on "layers" which can stack on top of each-other. Each layer
+//! represents its own complete file-system, and when stacked the file-systems are unioned
+//! together. When file-systems are unioned together the one which is stacked on "top" of the other
+//! is favored. This achieves a similar effect to what can be done with overlay-fs.
+//!
+//! # Disk Layout
+//! A layer is stored on disk as a directory of files. Each directory contains the following files
+//! - `super.bin` contains information about the layer including any layers it is stacked on top of
+//! - `file_table.bin` contains a listing of all the files in the layer
+//! - `attributes_table.bin` contains the attributes for all the files in the layer
+//! - `<offset>.dir_data.bin` contains directory contents for the directory found at `<offset>` in
+//!    the file table.
+//!
+//! Notice that none of the above bullets mention containing file-data. Most file-data is instead
+//! read from files outside of the layer. This what the `cache_dir` in [`LayerFs::from_path`] is
+//! used for. However, if a file contains a small amount of data it can actually be stored in the
+//! attributes as "inline data" to avoid the overhead of reading from another file.
+//!
+//! # The Stacking
+//! When a layer is stacked on top of other layers, the directory entries for that layer may point
+//! to directories or files in the lower layers. This is supported because [`FileId`] contains a
+//! [`LayerId`]. This allows us to create the aforementioned overlay-fs like functionality.
+//!
+//! When an upper layer contains files which also exist in a lower layer, the lower layer files are
+//! obscured by the upper layer files. When an upper layer contains a directory that also exists in
+//! the lower layer, the directory contents are unioned together.
+//!
+//! ```ascii art
+//! +------------------------+             +-----------+
+//! | /   layer_id 2         |  built from | /         |
+//! | `-- a.txt => (2, 10)   | <========== | `-- a.txt |
+//! | `-- b.txt => (2, 3)    |             +-----------+
+//! | `-- c.txt => (1, 3)    |
+//! | `-- d/ => (0, 3)       |
+//! +------------------------+             +-----------+
+//! | /   layer_id 1         |  built from | /         |
+//! | `-- a.txt => (1, 10)   | <========== | `-- a.txt |
+//! | `-- c.txt => (1, 3)    |             | `-- c.txt |
+//! | `-- d/ => (0, 3)       |             +-----------+
+//! +------------------------+
+//! | /   layer_id 0         |
+//! | `-- d/ => (0, 3)       |
+//! |     `-- e.txt => (0, 4)|
+//! +------------------------+
+//! ```
+//! figure 1. Three stacked layers
+//!
+//! In figure 1 we illustrate a stacking of three layers. We show the [`FileId`] each directory
+//! entry has as a way to illustrate how the stacking functions. Here is a description of the
+//! layers
+//! - Layer 0 has a directory `/d` and file `/d/e.txt`. Since this is a bottom layer all of its
+//!   directory entries have `LayerId` 0
+//! - Layer 1 has two files `/a.txt` and `/c.txt`. It also has a directory entry for `/d` from
+//!   layer 0. Since this layer contains no entry itself for `/d`, this was merged in.
+//! - Layer 2 has files `/a.txt`, `/b.txt`, `/c.txt` and directory `/d`. It has inherited entries
+//!   for `/b.txt`, `/c.txt` and `/d` This can be seen because they all have `FileId`s which
+//!   point to layer 1 or 0. `/a.txt` has `LayerId` 2, meaning that this file is shadowing `/a.txt`
+//!   from layer 1. This means the `/a.txt` in layer 1 is now inaccessible.
+//!
+//! # Building Layers
+//! Conceptually there are two different kinds of layers, "bottom layers" and "upper layers".
+//! Upper layers are layer which are stacked on top of other layers. Bottom layers are layers which
+//! aren't stacked on top of any other layers and are thus self-sufficient. Upper layers require
+//! the layers they are stacked on top of to be present in order to be used. Upper layers are
+//! created by stacking a bottom layer on top of some other layer.
+//!
+//! ```ascii art
+//! +----------------+
+//! | 2 upper layer  | <-------+
+//! +----------------+         |
+//! +----------------+         | UpperLayerBuilder::fill_from_bottom_layer
+//! | 1 upper layer  |         |
+//! +----------------+         |
+//! +----------------+  +---------------+
+//! | 0 bottom layer |  |  bottom layer |
+//! +----------------+  +---------------+
+//! ```
+//! figure 2. A new upper layer with id 2 is being created stacked on top of two other layers.
+//!
+//! When creating a bottom layer, [`BottomLayerBuilder`] must be used. It can create a bottom layer
+//! using either a manifest or a tar file as input.
+//!
+//! When creating an upper layer, [`UpperLayerBuilder`] must be used. The path to the layer you are
+//! stacking on top of is given as input to [`UpperLayerBuilder::new`]. The bottom layer we are
+//! using as input to create the upper layer is passed to
+//! [`UpperLayerBuilder::fill_from_bottom_layer`].
+//!
+//! When creating upper layers, the layers that they are stacked on top of are not modified. This
+//! means that layers can be reused in multiple stacks. This is also why the layer numbering is
+//! done from the bottom-up.
+//!
+//! # Serving the File-System
+//! Serving the file-system is done via FUSE. First the path to the top of the layer stack you want
+//! to serve should be passed to [`LayerFs::from_path`]. Then either [`LayerFs::mount`] or
+//! [`LayerFs::run_fuse`] should be called.
+
 mod avl;
 mod builder;
 mod dir;
@@ -79,6 +178,8 @@ impl LazyLayerSuper {
     }
 }
 
+/// The in-memory representation of a mountable `LayerFs` layer. This can be either a bottom layer
+/// or upper layer.
 pub struct LayerFs {
     data_fs: Fs,
     top_layer_path: PathBuf,
@@ -88,6 +189,8 @@ pub struct LayerFs {
 
 #[anyhow_trace]
 impl LayerFs {
+    /// Instantiate a `LayerFs` with the given path to its data structures. `cache_path` should
+    /// contain a path to a directory that can be used to look-up file-data via digest.
     pub fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
@@ -163,6 +266,8 @@ impl LayerFs {
         self.cache_path.join(digest.to_string())
     }
 
+    /// Mount the file-system in a child process. It can then be accessed via a path in `/proc`.
+    /// See [`maelstrom_fuse::fuse_mount_namespace`] for more details.
     pub async fn mount(
         self,
         log: slog::Logger,
@@ -173,6 +278,8 @@ impl LayerFs {
         maelstrom_fuse::fuse_mount_namespace(adapter, "Maelstrom LayerFS").await
     }
 
+    /// Serve the file-system using the given FUSE file-descriptor. The function returns when the
+    /// connection has closed either with an error or due to unmounting.
     pub async fn run_fuse(
         self,
         log: slog::Logger,
@@ -185,6 +292,7 @@ impl LayerFs {
     }
 }
 
+/// This cache contains a synchronized collection of open files and cached data.
 pub struct ReaderCache {
     dir_readers: LruCache<PathBuf, Arc<Mutex<DirectoryDataReader>>>,
     file_readers: LruCache<PathBuf, Arc<Mutex<FileMetadataReader>>>,

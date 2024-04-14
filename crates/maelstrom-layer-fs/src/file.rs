@@ -13,6 +13,7 @@ use std::num::NonZeroU32;
 use std::path::Path;
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
+/// Reads LayerFS file metadata from file_table.bin and attributes_table.bin
 pub struct FileMetadataReader {
     file_table: BufferedStream<File>,
     file_table_start: u64,

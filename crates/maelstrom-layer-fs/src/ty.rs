@@ -16,6 +16,9 @@ use std::path::Path;
 use std::path::PathBuf;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
+/// Identifier for a layer within a given LayerFS stacking.
+///
+/// It is a number which increases by one for each layer in a stacking and `0` is the bottom.
 #[derive(Copy, Clone, Debug, From, Hash, Deserialize, Serialize, PartialEq, Eq)]
 pub struct LayerId(u32);
 
@@ -31,6 +34,7 @@ impl LayerId {
     }
 }
 
+/// The data stored in `super.bin` for a LayerFS layer.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LayerSuper {
     pub layer_id: LayerId,
@@ -56,6 +60,7 @@ impl LayerSuper {
     }
 }
 
+/// Identifies a LayerFS file. Basically a tuple of [`LayerId`] and file-table offset
 #[derive(Copy, Clone, Debug, Hash, Deserialize, Serialize, PartialEq, Eq)]
 pub struct FileId {
     layer_id: LayerId,
@@ -147,6 +152,7 @@ impl TryFrom<u64> for AttributesId {
     }
 }
 
+/// The attributes we store in attribute-table about each file.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FileAttributes {
     pub size: u64,
@@ -154,6 +160,7 @@ pub struct FileAttributes {
     pub mtime: UnixTimestamp,
 }
 
+/// The data for a file
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum FileData {
     Empty,
@@ -165,6 +172,7 @@ pub enum FileData {
     },
 }
 
+/// What is stored in the file-table about each file.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct FileTableEntry {
     pub kind: FileType,

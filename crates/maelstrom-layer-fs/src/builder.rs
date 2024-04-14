@@ -59,6 +59,7 @@ impl<'fs> DirectoryDataWriterCache<'fs> {
     }
 }
 
+/// Creates a LayerFS bottom layer using a manifest or a tar file as input.
 pub struct BottomLayerBuilder<'fs> {
     layer_fs: LayerFs,
     file_writer: FileMetadataWriter,
@@ -68,6 +69,11 @@ pub struct BottomLayerBuilder<'fs> {
 
 #[anyhow_trace]
 impl<'fs> BottomLayerBuilder<'fs> {
+    /// Build the new bottom layer in `data_dir`.
+    /// `cache_path` should contain a path to a directory that can be used to look-up file-data via
+    /// digest.
+    /// The given timestamp will be used for the atttributes of files or directories created which
+    /// don't otherwise have their timestamp specified by the manifest or tar.
     pub async fn new(
         _log: slog::Logger,
         data_fs: &'fs Fs,
@@ -194,6 +200,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(inserted)
     }
 
+    /// Add a regular file at the given path in the new layer. Creates any intermediate directories
+    /// that don't exist.
     pub async fn add_file_path(
         &mut self,
         path: &Utf8Path,
@@ -221,10 +229,13 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(file_id)
     }
 
+    /// Set the attributes for the given existing file in the new layer.
     pub async fn set_attr(&mut self, id: FileId, attrs: FileAttributes) -> Result<()> {
         self.file_writer.update_attributes(id, attrs).await
     }
 
+    /// Add a directory at the given path in the new layer. Creates any intermediate directories
+    /// that don't exist.
     pub async fn add_dir_path(&mut self, path: &Utf8Path, attrs: FileAttributes) -> Result<FileId> {
         let parent_id = if let Some(parent) = path.parent() {
             self.ensure_path(parent).await?
@@ -240,6 +251,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         }
     }
 
+    /// Add a symlink at the given path in the new layer. Creates any intermediate directories
+    /// that don't exist.
     pub async fn add_symlink_path(
         &mut self,
         path: &Utf8Path,
@@ -271,6 +284,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(file_id)
     }
 
+    /// Add a hardlink at the given path in the new layer. Creates any intermediate directories
+    /// that don't exist.
     pub async fn add_link_path(&mut self, path: &Utf8Path, target: &Utf8Path) -> Result<FileId> {
         let parent_id = if let Some(parent) = path.parent() {
             self.ensure_path(parent).await?
@@ -301,6 +316,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(existing.file_id)
     }
 
+    /// Add all of the entries from the given tar data to the new layer. Data for the new files
+    /// will point to the given digest and contain the offset and length from the tar entry.
     pub async fn add_from_tar(
         &mut self,
         digest: Sha256Digest,
@@ -372,6 +389,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(())
     }
 
+    /// Add all of the entries from the given manifest data to the new layer.
     pub async fn add_from_manifest(
         &mut self,
         manifest_stream: impl AsyncRead + AsyncSeek + Unpin,
@@ -412,6 +430,8 @@ impl<'fs> BottomLayerBuilder<'fs> {
         Ok(())
     }
 
+    /// Finish building. Flush all caches to disk. Returns a `LayerFs` instance for the built layer
+    /// for convenience.
     pub async fn finish(mut self) -> Result<LayerFs> {
         self.file_writer.flush().await?;
         self.dir_writer_cache.flush().await?;
@@ -599,6 +619,7 @@ impl<'fs> DirectoryDataWriterStack<'fs> {
     }
 }
 
+/// Builds an upper layer LayerFS layer using a bottom layer as input.
 pub struct UpperLayerBuilder<'fs> {
     upper: LayerFs,
     lower: &'fs LayerFs,
@@ -606,6 +627,10 @@ pub struct UpperLayerBuilder<'fs> {
 
 #[anyhow_trace]
 impl<'fs> UpperLayerBuilder<'fs> {
+    /// Build the new bottom layer in `data_dir`
+    /// `cache_path` should contain a path to a directory that can be used to look-up file-data via
+    /// digest.
+    /// `lower` is what we are stacking the new layer on top of.
     pub async fn new(
         _log: slog::Logger,
         data_dir: &Path,
@@ -662,6 +687,17 @@ impl<'fs> UpperLayerBuilder<'fs> {
         Ok(())
     }
 
+    /// Fill this upper layer with all of the data from the given bottom layer.
+    ///
+    /// This function only supports being called once per builder.
+    ///
+    /// The file-table and attribute-table from the given bottom layer are hardlinked into the new
+    /// layer.
+    ///
+    /// The file-system from the given bottom layer is walked together with the file-system we are
+    /// being stacked on top of. Anywhere they overlap we merge the directory contents together. If
+    /// a directory doesn't appear in `other` we point directly to the existing directory in the
+    /// lower layer.
     pub async fn fill_from_bottom_layer(&mut self, other: &LayerFs) -> Result<()> {
         self.hard_link_files(other).await?;
         let mut dir_writers = DirectoryDataWriterStack::new(&self.upper);
@@ -691,6 +727,8 @@ impl<'fs> UpperLayerBuilder<'fs> {
         Ok(())
     }
 
+    /// Finish building. Flush all caches to disk. Returns a `LayerFs` instance for the built layer
+    /// for convenience.
     pub async fn finish(self) -> Result<LayerFs> {
         Ok(self.upper)
     }

@@ -15,6 +15,7 @@ use std::io::SeekFrom;
 use std::pin::Pin;
 use tokio::io::{AsyncSeekExt as _, AsyncWriteExt as _};
 
+/// Reads data from a LayerFS directory contents file (`<offset>.dir_data.bin`)
 pub struct DirectoryDataReader {
     stream: BufferedStream<File>,
     entry_begin: u64,
@@ -196,6 +197,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
     }
 }
 
+/// This is a stream of FUSE directory entries from some directory
 pub type DirectoryStream = Pin<
     Box<dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>> + Send>,
 >;
