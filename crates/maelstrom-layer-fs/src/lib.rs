@@ -105,7 +105,6 @@ mod ty;
 
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
-use async_trait::async_trait;
 pub use builder::*;
 pub use dir::{DirectoryDataReader, DirectoryStream};
 pub use file::FileMetadataReader;
@@ -383,7 +382,6 @@ impl LayerFsFuseAdapter {
     }
 }
 
-#[async_trait]
 impl FuseFileSystem for LayerFsFuseAdapter {
     async fn look_up(&self, req: Request, parent: u64, name: &OsStr) -> ErrnoResult<EntryResponse> {
         let name = to_einval(self.log.clone(), name.to_str().ok_or("invalid name"))?;
@@ -507,24 +505,24 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 
     type ReadDirStream<'a> = DirectoryStream;
 
-    async fn read_dir<'a>(
-        &'a self,
+    async fn read_dir(
+        &self,
         _req: Request,
         ino: u64,
         _fh: u64,
         offset: i64,
-    ) -> ErrnoResult<Self::ReadDirStream<'a>> {
+    ) -> ErrnoResult<Self::ReadDirStream<'_>> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let reader = to_eio(
             self.log.clone(),
             DirectoryDataReader::new(&self.layer_fs, file).await,
         )?;
-        Ok(to_eio(
+        to_eio(
             self.log.clone(),
             reader
                 .into_stream(self.log.clone(), offset.try_into()?)
                 .await,
-        )?)
+        )
     }
 
     async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {

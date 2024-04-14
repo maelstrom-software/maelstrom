@@ -1,6 +1,5 @@
 ///! This example is taken from the fuser project
 use anyhow::Result;
-use async_trait::async_trait;
 use maelstrom_fuse::{
     AttrResponse, DirEntry, EntryResponse, ErrnoResult, FileAttr, FileType, FuseFileSystem,
     ReadResponse, Request,
@@ -48,7 +47,6 @@ const HELLO_TXT_ATTR: FileAttr = FileAttr {
 
 struct HelloFs;
 
-#[async_trait]
 impl FuseFileSystem for HelloFs {
     async fn look_up(
         &self,

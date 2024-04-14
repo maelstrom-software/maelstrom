@@ -148,7 +148,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
             .borrow_mut()
             .seek(SeekFrom::Start(key.as_u64()))
             .await?;
-        Ok(decode_path(self.stream.borrow_mut()).await?)
+        decode_path(self.stream.borrow_mut()).await
     }
 
     async fn update(&mut self, key: AvlPtr, value: DirectoryEntry) -> Result<()> {

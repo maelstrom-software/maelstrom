@@ -4,7 +4,6 @@
 pub mod fuser;
 
 use anyhow::Result;
-use async_trait::async_trait;
 pub use fuser::{FileAttr, FileType};
 use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
@@ -232,7 +231,6 @@ impl<FileSystemT> DispatchingFs<FileSystemT> {
     }
 }
 
-#[async_trait]
 impl<FileSystemT: FuseFileSystem + Send + Sync + 'static> fuser::Filesystem
     for DispatchingFs<FileSystemT>
 {
@@ -435,23 +433,30 @@ impl DirEntry {
 }
 
 /// The Linux FUSE API as a trait for async Rust code.
-#[async_trait]
 pub trait FuseFileSystem {
-    async fn look_up(
+    fn look_up(
         &self,
         _req: Request,
         _parent: u64,
         _name: &OsStr,
-    ) -> ErrnoResult<EntryResponse> {
-        Err(Errno::ENOSYS)
+    ) -> impl Future<Output = ErrnoResult<EntryResponse>> + Send {
+        async move { Err(Errno::ENOSYS) }
     }
 
-    async fn get_attr(&self, _req: Request, _ino: u64) -> ErrnoResult<AttrResponse> {
-        Err(Errno::ENOSYS)
+    fn get_attr(
+        &self,
+        _req: Request,
+        _ino: u64,
+    ) -> impl Future<Output = ErrnoResult<AttrResponse>> + Send {
+        async move { Err(Errno::ENOSYS) }
     }
 
-    async fn read_link(&self, _req: Request, _ino: u64) -> ErrnoResult<ReadLinkResponse> {
-        Err(Errno::ENOSYS)
+    fn read_link(
+        &self,
+        _req: Request,
+        _ino: u64,
+    ) -> impl Future<Output = ErrnoResult<ReadLinkResponse>> + Send {
+        async move { Err(Errno::ENOSYS) }
     }
 
     /*
@@ -461,7 +466,7 @@ pub trait FuseFileSystem {
     */
 
     #[allow(clippy::too_many_arguments)]
-    async fn read(
+    fn read(
         &self,
         _req: Request,
         _ino: u64,
@@ -470,8 +475,8 @@ pub trait FuseFileSystem {
         _size: u32,
         _flags: i32,
         _lock_owner: Option<u64>,
-    ) -> ErrnoResult<ReadResponse> {
-        Err(Errno::ENOSYS)
+    ) -> impl Future<Output = ErrnoResult<ReadResponse>> + Send {
+        async move { Err(Errno::ENOSYS) }
     }
 
     /*
@@ -497,14 +502,14 @@ pub trait FuseFileSystem {
     where
         Self: 'a;
 
-    async fn read_dir<'a>(
-        &'a self,
+    fn read_dir(
+        &self,
         _req: Request,
         _ino: u64,
         _fh: u64,
         _offset: i64,
-    ) -> ErrnoResult<Self::ReadDirStream<'a>> {
-        Err(Errno::ENOSYS)
+    ) -> impl Future<Output = ErrnoResult<Self::ReadDirStream<'_>>> + Send {
+        async move { Err(Errno::ENOSYS) }
     }
 
     /*

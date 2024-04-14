@@ -2,7 +2,6 @@
 //!
 //! This code is copied and adapted from <https://github.com/cberner/fuser>
 
-use async_trait::async_trait;
 use libc::{c_int, ENOSYS, EPERM};
 use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
@@ -238,8 +237,7 @@ impl KernelConfig {
 /// These methods correspond to fuse_lowlevel_ops in libfuse. Reasonable default
 /// implementations are provided here to get a mountable filesystem that does
 /// nothing.
-#[allow(clippy::too_many_arguments)]
-#[async_trait]
+#[allow(clippy::too_many_arguments, async_fn_in_trait)]
 pub trait Filesystem: Send {
     /// Initialize filesystem.
     /// Called before any other filesystem method.
