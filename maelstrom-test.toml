@@ -43,6 +43,13 @@ layers = [{ stubs = ["/tmp/"] }]
 mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
 
 [[directives]]
+filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
+added_mounts = [
+    { fs_type = "proc", mount_point = "/proc" },
+]
+added_layers = [{ stubs = [ "proc/" ] }]
+
+[[directives]]
 filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },

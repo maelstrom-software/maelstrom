@@ -4,6 +4,7 @@ use crate::ext::OptionExt as _;
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
+use maelstrom_linux as linux;
 use sha2::{Digest as _, Sha256};
 use std::io::{self, Chain, Read, Repeat, Take, Write};
 use std::num::NonZeroUsize;
@@ -892,4 +893,276 @@ fn buffered_stream_simex_read_3_write_3_size_10() {
     maelstrom_simex::SimulationExplorer::default().for_each(|mut sim| {
         buffered_stream_simex_test(&mut sim, 3, 3, 10);
     })
+}
+
+struct Splicer {
+    pipe_in: linux::OwnedFd,
+    pipe_out: linux::OwnedFd,
+    written: usize,
+    pipe_size: usize,
+}
+
+impl Splicer {
+    fn new() -> io::Result<Self> {
+        let (pipe_out, pipe_in) = linux::pipe()?;
+        let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
+        let pipe_size = pipe_max_s.trim().parse().unwrap();
+        linux::set_pipe_size(pipe_in.as_fd(), pipe_size)?;
+        Ok(Self {
+            pipe_in,
+            pipe_out,
+            written: 0,
+            pipe_size,
+        })
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        assert!(
+            self.written + bytes.len() <= self.pipe_size,
+            "attempt to write more than pipe can hold"
+        );
+        linux::write(self.pipe_in.as_fd(), bytes)?;
+        self.written += bytes.len();
+        Ok(())
+    }
+
+    pub fn write_fd(
+        &mut self,
+        fd: linux::Fd,
+        offset: Option<u64>,
+        length: usize,
+    ) -> io::Result<usize> {
+        assert!(
+            self.written + length <= self.pipe_size,
+            "attempt to write more than pipe can hold"
+        );
+        let written = linux::splice(fd, offset, self.pipe_in.as_fd(), None, length)?;
+        self.written += written;
+        Ok(written)
+    }
+
+    pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
+        let copied = linux::splice(self.pipe_out.as_fd(), None, fd, offset, self.written)?;
+        assert_eq!(copied, self.written);
+        self.written = 0;
+        Ok(())
+    }
+
+    pub fn reset_pipe(&mut self) -> io::Result<()> {
+        (self.pipe_out, self.pipe_in) = linux::pipe()?;
+        let pipe_max_s = std::fs::read_to_string("/proc/sys/fs/pipe-max-size")?;
+        let pipe_size = pipe_max_s.trim().parse().unwrap();
+        linux::set_pipe_size(self.pipe_in.as_fd(), pipe_size)?;
+        self.written = 0;
+        self.pipe_size = pipe_size;
+        Ok(())
+    }
+
+    pub fn chunk_size(&self) -> usize {
+        self.pipe_size
+    }
+}
+
+struct SlowWriter {
+    buffer: Vec<u8>,
+}
+
+impl SlowWriter {
+    fn new() -> Self {
+        Self { buffer: vec![] }
+    }
+
+    const CHUNK_SIZE: usize = 1024 * 1024;
+
+    pub fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.buffer.extend(bytes);
+        Ok(())
+    }
+
+    pub fn write_fd(
+        &mut self,
+        fd: linux::Fd,
+        offset: Option<u64>,
+        length: usize,
+    ) -> io::Result<usize> {
+        if let Some(offset) = offset {
+            linux::lseek(fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
+        }
+        let mut total_read = 0;
+        while total_read < length {
+            let end = self.buffer.len();
+            let to_read = std::cmp::min(Self::CHUNK_SIZE, length);
+            self.buffer.resize(end + to_read, 0);
+            let read = linux::read(fd, &mut self.buffer[end..])?;
+            total_read += read;
+            self.buffer.resize(end + read, 0);
+            if read == 0 {
+                break;
+            }
+        }
+        Ok(total_read)
+    }
+
+    pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
+        if let Some(offset) = offset {
+            linux::lseek(fd, i64::try_from(offset).unwrap(), linux::Whence::SeekSet)?;
+        }
+
+        let mut i = 0;
+        while i < self.buffer.len() {
+            let length = std::cmp::min(i + Self::CHUNK_SIZE, self.buffer.len());
+            let written = linux::write(fd, &self.buffer[i..length])?;
+            i += written;
+        }
+        self.buffer = vec![];
+        Ok(())
+    }
+
+    pub fn chunk_size(&self) -> usize {
+        Self::CHUNK_SIZE
+    }
+}
+
+enum SpliceOrFallback {
+    Splice(Splicer),
+    Fallback(SlowWriter),
+}
+
+pub struct MaybeFastWriter(SpliceOrFallback);
+
+impl MaybeFastWriter {
+    pub fn new(log: slog::Logger) -> Self {
+        match Splicer::new() {
+            Ok(splicer) => Self(SpliceOrFallback::Splice(splicer)),
+            Err(err) => {
+                slog::error!(log, "Failed to get pipe memory, cannot splice"; "error" => ?err);
+                Self(SpliceOrFallback::Fallback(SlowWriter::new()))
+            }
+        }
+    }
+
+    pub fn chunk_size(&self) -> usize {
+        match &self.0 {
+            SpliceOrFallback::Splice(splicer) => splicer.chunk_size(),
+            SpliceOrFallback::Fallback(writer) => writer.chunk_size(),
+        }
+    }
+
+    fn reset_splicer(&mut self, err: io::Error) -> io::Error {
+        let SpliceOrFallback::Splice(splicer) = &mut self.0 else {
+            unreachable!()
+        };
+        if splicer.reset_pipe().is_err() {
+            self.0 = SpliceOrFallback::Fallback(SlowWriter::new());
+        }
+        err
+    }
+
+    pub fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
+        match &mut self.0 {
+            SpliceOrFallback::Splice(splicer) => {
+                splicer.write(bytes).map_err(|e| self.reset_splicer(e))
+            }
+            SpliceOrFallback::Fallback(writer) => writer.write(bytes),
+        }
+    }
+
+    pub fn write_fd(
+        &mut self,
+        fd: linux::Fd,
+        offset: Option<u64>,
+        length: usize,
+    ) -> io::Result<usize> {
+        match &mut self.0 {
+            SpliceOrFallback::Splice(splicer) => splicer
+                .write_fd(fd, offset, length)
+                .map_err(|e| self.reset_splicer(e)),
+            SpliceOrFallback::Fallback(writer) => writer.write_fd(fd, offset, length),
+        }
+    }
+
+    pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
+        match &mut self.0 {
+            SpliceOrFallback::Splice(splicer) => splicer
+                .copy_to_fd(fd, offset)
+                .map_err(|e| self.reset_splicer(e)),
+            SpliceOrFallback::Fallback(writer) => writer.copy_to_fd(fd, offset),
+        }
+    }
+}
+
+#[cfg(test)]
+fn maybe_fast_writer_test(mut writer: MaybeFastWriter, len1: usize, len2: usize) {
+    use std::io::Write as _;
+    use std::io::{Seek as _, SeekFrom};
+    use std::os::fd::AsRawFd as _;
+
+    let buf1 = Vec::from_iter((0u8..0xFFu8).cycle().take(len1));
+    let buf2 = Vec::from_iter((0u8..0xFFu8).cycle().take(len2));
+
+    writer.write(&buf1).unwrap();
+
+    let tmp = tempfile::tempdir().unwrap();
+    let fs = crate::fs::Fs::new();
+    let mut f1 = fs.create_file_read_write(tmp.path().join("f1")).unwrap();
+    f1.write_all(b"xx").unwrap();
+    f1.write_all(&buf2).unwrap();
+    f1.write_all(b"xx").unwrap();
+    f1.flush().unwrap();
+    let fd = linux::Fd::from_raw(f1.as_raw_fd());
+    writer.write_fd(fd, Some(2), buf2.len()).unwrap();
+
+    let mut f2 = fs.create_file_read_write(tmp.path().join("f2")).unwrap();
+    let fd = linux::Fd::from_raw(f2.as_raw_fd());
+    writer.copy_to_fd(fd, None).unwrap();
+
+    f2.seek(SeekFrom::Start(0)).unwrap();
+    let mut read = vec![];
+    f2.read_to_end(&mut read).unwrap();
+
+    let expected = Vec::from_iter(buf1.iter().copied().chain(buf2.iter().copied()));
+    assert_eq!(&read[..], expected);
+
+    // Do it again, we should have reset
+    writer.write(&buf1).unwrap();
+    let fd = linux::Fd::from_raw(f1.as_raw_fd());
+    writer.write_fd(fd, Some(2), buf2.len()).unwrap();
+
+    let mut f3 = fs.create_file_read_write(tmp.path().join("f3")).unwrap();
+    f3.write_all(b"xx").unwrap();
+    f3.flush().unwrap();
+
+    let fd = linux::Fd::from_raw(f3.as_raw_fd());
+    writer.copy_to_fd(fd, Some(0)).unwrap();
+
+    f3.seek(SeekFrom::Start(0)).unwrap();
+    let mut read = vec![];
+    f3.read_to_end(&mut read).unwrap();
+    assert_eq!(&read[..], expected);
+}
+
+#[test]
+fn splicer() {
+    for i in 1..15 {
+        for j in 1..15 {
+            maybe_fast_writer_test(
+                MaybeFastWriter(SpliceOrFallback::Splice(Splicer::new().unwrap())),
+                i,
+                j,
+            );
+        }
+    }
+}
+
+#[test]
+fn slow_writer() {
+    for i in 1..15 {
+        for j in 1..15 {
+            maybe_fast_writer_test(
+                MaybeFastWriter(SpliceOrFallback::Fallback(SlowWriter::new())),
+                i,
+                j,
+            );
+        }
+    }
 }

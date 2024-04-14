@@ -966,6 +966,26 @@ pub fn set_pipe_size(fd: Fd, size: usize) -> Result<(), Errno> {
         .map(drop)
 }
 
+pub enum Whence {
+    SeekSet,
+    SeekCur,
+    SeekEnd,
+}
+
+impl Whence {
+    fn as_i32(&self) -> i32 {
+        match self {
+            Self::SeekSet => libc::SEEK_SET,
+            Self::SeekCur => libc::SEEK_CUR,
+            Self::SeekEnd => libc::SEEK_END,
+        }
+    }
+}
+
+pub fn lseek(fd: Fd, offset: i64, whence: Whence) -> Result<i64, Errno> {
+    Errno::result(unsafe { libc::lseek(fd.0, offset, whence.as_i32()) })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

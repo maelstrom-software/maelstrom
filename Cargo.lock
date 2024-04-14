@@ -3132,6 +3132,7 @@ dependencies = [
  "indoc",
  "lru",
  "maelstrom-base",
+ "maelstrom-linux",
  "maelstrom-simex",
  "rand",
  "serde",

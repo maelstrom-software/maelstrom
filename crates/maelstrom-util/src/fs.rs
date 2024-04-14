@@ -342,6 +342,20 @@ impl Fs {
         })
     }
 
+    pub fn create_file_read_write<P: AsRef<Path>>(&self, path: P) -> Result<File<'_>> {
+        let path = path.as_ref();
+        Ok(File {
+            inner: std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(path)
+                .with_context(|| format!("create_file_read_write(\"{}\")", path.display()))?,
+            path: path.into(),
+            fs: self,
+        })
+    }
+
     pub fn canonicalize<P: AsRef<Path>>(&self, path: P) -> Result<PathBuf> {
         fs_trampoline!(std::fs::canonicalize, path)
     }
