@@ -2,7 +2,6 @@ pub use oci_spec::image::{Arch, Os};
 
 use anyhow::Result;
 use async_compression::tokio::bufread::GzipDecoder;
-use async_trait::async_trait;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
 use maelstrom_util::async_fs::{self as fs, Fs};
@@ -428,7 +427,7 @@ impl LockedContainerImageTags {
     }
 }
 
-#[async_trait]
+#[allow(async_fn_in_trait)]
 pub trait ContainerImageDepotOps {
     async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String>;
     async fn download_image(
@@ -452,7 +451,6 @@ impl DefaultContainerImageDepotOps {
     }
 }
 
-#[async_trait]
 impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
     async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
         resolve_tag(&self.client, name, tag).await
@@ -641,7 +639,6 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
 struct PanicContainerImageDepotOps;
 
 #[cfg(test)]
-#[async_trait]
 impl ContainerImageDepotOps for PanicContainerImageDepotOps {
     async fn resolve_tag(&self, _name: &str, _tag: &str) -> Result<String> {
         panic!()
@@ -663,7 +660,6 @@ impl ContainerImageDepotOps for PanicContainerImageDepotOps {
 struct FakeContainerImageDepotOps(HashMap<String, String>);
 
 #[cfg(test)]
-#[async_trait]
 impl ContainerImageDepotOps for FakeContainerImageDepotOps {
     async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
         Ok(self.0.get(&format!("{name}-{tag}")).unwrap().clone())
