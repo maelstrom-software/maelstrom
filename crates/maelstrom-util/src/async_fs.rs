@@ -259,9 +259,24 @@ impl Fs {
         let path = path.as_ref();
         Ok(File {
             inner: tokio::fs::File::options()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(path)
+                .await
+                .with_context(|| format!("create(\"{}\")", path.display()))?,
+            path: path.into(),
+        })
+    }
+
+    pub async fn open_or_create_file_read_write<P: AsRef<Path>>(&self, path: P) -> Result<File> {
+        let path = path.as_ref();
+        Ok(File {
+            inner: tokio::fs::File::options()
                 .create(true)
                 .read(true)
                 .write(true)
+                .truncate(false)
                 .open(path)
                 .await
                 .with_context(|| format!("create(\"{}\")", path.display()))?,

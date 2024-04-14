@@ -118,7 +118,9 @@ impl FileMetadataWriter {
         let mut file_table = BufferedStream::new(
             CHUNK_SIZE,
             CACHE_SIZE.try_into().unwrap(),
-            data_fs.create_file_read_write(file_table_path).await?,
+            data_fs
+                .open_or_create_file_read_write(file_table_path)
+                .await?,
         )
         .await?;
         encode_path(&mut file_table, &FileTableHeader::default()).await?;
@@ -127,7 +129,7 @@ impl FileMetadataWriter {
             CHUNK_SIZE,
             CACHE_SIZE.try_into().unwrap(),
             data_fs
-                .create_file_read_write(attributes_table_path)
+                .open_or_create_file_read_write(attributes_table_path)
                 .await?,
         )
         .await?;

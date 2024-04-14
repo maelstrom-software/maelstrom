@@ -116,15 +116,14 @@ impl ManifestDigestCache {
         let mut locked_cache = self.cache.lock().unwrap();
         let waiting = locked_cache.pending.remove(&path).unwrap();
         for (digest, jid) in waiting {
+            // This is a clippy bug <https://github.com/rust-lang/rust-clippy/issues/12357>
+            #[allow(clippy::useless_asref)]
+            let res = result
+                .as_ref()
+                .map(|v| v.clone())
+                .map_err(|e| anyhow::Error::msg(e.to_string()));
             self.sender
-                .send(Message::ReadManifestDigests(
-                    digest,
-                    jid,
-                    result
-                        .as_ref()
-                        .map(|v| v.clone())
-                        .map_err(|e| anyhow::Error::msg(e.to_string())),
-                ))
+                .send(Message::ReadManifestDigests(digest, jid, res))
                 .ok();
         }
         if let Ok(digests) = result {

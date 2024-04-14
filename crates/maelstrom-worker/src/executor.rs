@@ -99,7 +99,7 @@ impl JobSpec {
 // only want to send a message when the sender is dropped.
 enum JobHandlePayload {}
 
-pub struct JobHandleSender(oneshot::Sender<JobHandlePayload>);
+pub struct JobHandleSender(#[allow(dead_code)] oneshot::Sender<JobHandlePayload>);
 pub struct JobHandleReceiver(oneshot::Receiver<JobHandlePayload>);
 
 pub fn job_handle() -> (JobHandleSender, JobHandleReceiver) {
