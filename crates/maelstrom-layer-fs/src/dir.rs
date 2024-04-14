@@ -5,7 +5,6 @@ use crate::ty::{
 use crate::{to_eio, LayerFs};
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
-use async_trait::async_trait;
 use maelstrom_util::async_fs::{File, Fs};
 use maelstrom_util::io::BufferedStream;
 use serde::{Deserialize, Serialize};
@@ -121,7 +120,6 @@ impl<FileT> DirectoryEntryStorage<FileT> {
 
 type DirectoryEntry = AvlNode<String, DirectoryEntryData>;
 
-#[async_trait]
 #[anyhow_trace]
 impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntryStorage<FileT> {
     type Key = String;

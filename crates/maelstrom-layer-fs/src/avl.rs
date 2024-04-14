@@ -1,6 +1,5 @@
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
 use std::borrow::BorrowMut;
@@ -76,7 +75,6 @@ fn avl_node_encoding_size_remains_same() {
     assert_eq!(start_size, end_size);
 }
 
-#[async_trait]
 pub trait AvlStorage {
     type Key;
     type Value;
@@ -540,7 +538,6 @@ mod tests {
         values: Vec<AvlNode<u32, u32>>,
     }
 
-    #[async_trait]
     impl AvlStorage for MemoryStorage {
         type Key = u32;
         type Value = u32;
