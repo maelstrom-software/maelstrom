@@ -5,6 +5,9 @@ use maelstrom_fuse::{
     ReadResponse, Request,
 };
 use maelstrom_linux::Errno;
+use slog::{o, Drain, Logger};
+use slog_async::Async;
+use slog_term::{FullFormat, TermDecorator};
 use std::ffi::OsStr;
 use std::time::{Duration, UNIX_EPOCH};
 use tokio::io::AsyncBufReadExt as _;
@@ -133,7 +136,12 @@ impl FuseFileSystem for HelloFs {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let handle = maelstrom_fuse::fuse_mount_namespace(HelloFs, "hello").await?;
+    let decorator = TermDecorator::new().build();
+    let drain = FullFormat::new(decorator).build().fuse();
+    let drain = Async::new(drain).build().fuse();
+    let log = Logger::root(drain, o!());
+
+    let handle = maelstrom_fuse::fuse_mount_namespace(HelloFs, log, "hello").await?;
     println!("mounted at {}", handle.mount_path().display());
 
     // wait for newline on stdin

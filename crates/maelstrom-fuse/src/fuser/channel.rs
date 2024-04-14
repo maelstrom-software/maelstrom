@@ -24,9 +24,9 @@ impl Channel {
     /// Create a new communication channel to the kernel driver by mounting the
     /// given path. The kernel driver will delegate filesystem operations of
     /// the given path to the channel.
-    pub(crate) fn new(device: Arc<AsyncFd<File>>) -> Self {
+    pub(crate) fn new(device: Arc<AsyncFd<File>>, log: slog::Logger) -> Self {
         Self {
-            sender: ChannelSender::new(device.clone()),
+            sender: ChannelSender::new(device.clone(), log),
             device,
         }
     }
@@ -64,7 +64,11 @@ struct SpliceRequest {
     reply: oneshot::Sender<io::Result<()>>,
 }
 
-fn run_splice_sender(fuse: Arc<AsyncFd<File>>, mut recv: mpsc::Receiver<SpliceRequest>) {
+fn run_splice_sender(
+    fuse: Arc<AsyncFd<File>>,
+    mut recv: mpsc::Receiver<SpliceRequest>,
+    _log: slog::Logger,
+) {
     let fuse_fd = Fd::from_raw(fuse.get_ref().as_raw_fd());
 
     let (mut pipe_out, mut pipe_in) = linux::pipe().unwrap();
@@ -103,10 +107,10 @@ pub struct ChannelSender {
 }
 
 impl ChannelSender {
-    fn new(device: Arc<AsyncFd<File>>) -> Self {
+    fn new(device: Arc<AsyncFd<File>>, log: slog::Logger) -> Self {
         let (send, recv) = mpsc::channel(1000);
         let other_file = device.clone();
-        tokio::task::spawn_blocking(move || run_splice_sender(other_file, recv));
+        tokio::task::spawn_blocking(move || run_splice_sender(other_file, recv, log));
         Self { device, send }
     }
 }

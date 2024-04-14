@@ -90,6 +90,7 @@ fn run_fuse_child(
 /// parent is gone)
 pub async fn fuse_mount_namespace(
     handler: impl FuseFileSystem + Send + Sync + 'static,
+    log: slog::Logger,
     name: &str,
 ) -> Result<FuseNamespaceHandle> {
     let mount_path = std::env::current_dir()?;
@@ -123,6 +124,7 @@ pub async fn fuse_mount_namespace(
             DispatchingFs::new(handler),
             fd.unwrap().into(),
             crate::fuser::SessionACL::All,
+            log,
         )?;
         session.run().await
     });
@@ -140,12 +142,14 @@ pub async fn fuse_mount_namespace(
 /// unmounting.
 pub async fn run_fuse(
     handler: impl FuseFileSystem + Send + Sync + 'static,
+    log: slog::Logger,
     fd: linux::OwnedFd,
 ) -> Result<()> {
     let mut session = crate::fuser::Session::from_fd(
         DispatchingFs::new(handler),
         fd.into(),
         crate::fuser::SessionACL::All,
+        log,
     )?;
     session.run().await?;
     Ok(())

@@ -58,12 +58,13 @@ impl<FS: Filesystem> Session<FS> {
         filesystem: FS,
         fd: std::os::fd::OwnedFd,
         allowed: SessionACL,
+        log: slog::Logger,
     ) -> io::Result<Self> {
         let file = Arc::new(AsyncFd::with_interest(
             fd.into(),
             Interest::READABLE | Interest::WRITABLE | Interest::ERROR,
         )?);
-        let ch = Channel::new(file);
+        let ch = Channel::new(file, log);
 
         Ok(Session {
             filesystem,

@@ -275,8 +275,8 @@ impl LayerFs {
         cache: Arc<Mutex<ReaderCache>>,
     ) -> Result<maelstrom_fuse::FuseNamespaceHandle> {
         slog::debug!(log, "mounting FUSE file-system in namespace");
-        let adapter = LayerFsFuseAdapter::new(self, log, cache);
-        maelstrom_fuse::fuse_mount_namespace(adapter, "Maelstrom LayerFS").await
+        let adapter = LayerFsFuseAdapter::new(self, log.clone(), cache);
+        maelstrom_fuse::fuse_mount_namespace(adapter, log, "Maelstrom LayerFS").await
     }
 
     /// Serve the file-system using the given FUSE file-descriptor. The function returns when the
@@ -288,8 +288,8 @@ impl LayerFs {
         fd: maelstrom_linux::OwnedFd,
     ) -> Result<()> {
         slog::debug!(log, "running FUSE file-system");
-        let adapter = LayerFsFuseAdapter::new(self, log, cache);
-        maelstrom_fuse::run_fuse(adapter, fd).await
+        let adapter = LayerFsFuseAdapter::new(self, log.clone(), cache);
+        maelstrom_fuse::run_fuse(adapter, log, fd).await
     }
 }
 
