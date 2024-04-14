@@ -106,8 +106,9 @@ mod ty;
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
 pub use builder::*;
-pub use dir::{DirectoryDataReader, DirectoryStream};
+pub use dir::DirectoryDataReader;
 pub use file::FileMetadataReader;
+use futures::stream::StreamExt as _;
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
 use maelstrom_fuse::{
@@ -118,6 +119,7 @@ use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::Fs;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
@@ -503,7 +505,12 @@ impl FuseFileSystem for LayerFsFuseAdapter {
         }
     }
 
-    type ReadDirStream<'a> = DirectoryStream;
+    type ReadDirStream<'a> = Pin<
+        Box<
+            dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>>
+                + Send,
+        >,
+    >;
 
     async fn read_dir(
         &self,
@@ -517,12 +524,20 @@ impl FuseFileSystem for LayerFsFuseAdapter {
             self.log.clone(),
             DirectoryDataReader::new(&self.layer_fs, file).await,
         )?;
-        to_eio(
+        let stream = to_eio(
             self.log.clone(),
-            reader
-                .into_stream(self.log.clone(), offset.try_into()?)
-                .await,
-        )
+            reader.into_stream(offset.try_into()?).await,
+        )?;
+        let log = self.log.clone();
+        Ok(Box::pin(stream.map(move |res| {
+            let (offset, entry) = to_eio(log.clone(), res)?;
+            Ok(maelstrom_fuse::DirEntry {
+                ino: entry.value.file_id.as_u64(),
+                offset: i64::try_from(offset).unwrap(),
+                kind: entry.value.kind,
+                name: entry.key,
+            })
+        })))
     }
 
     async fn read_link(&self, _req: Request, ino: u64) -> ErrnoResult<ReadLinkResponse> {
@@ -552,7 +567,6 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::StreamExt as _;
     use maelstrom_base::{
         manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode},
         Utf8PathBuf,

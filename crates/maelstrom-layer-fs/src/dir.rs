@@ -2,7 +2,7 @@ use crate::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
 use crate::ty::{
     decode_path, encode_path, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
 };
-use crate::{to_eio, LayerFs};
+use crate::LayerFs;
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
 use maelstrom_util::async_fs::{File, Fs};
@@ -52,43 +52,25 @@ impl DirectoryDataReader {
         tree.get(&entry_name.into()).await
     }
 
-    pub async fn next_entry(&mut self) -> Result<Option<DirectoryEntry>> {
+    pub async fn next_entry(&mut self) -> Result<Option<(u64, DirectoryEntry)>> {
         if self.stream.stream_position().await? == self.length {
             return Ok(None);
         }
         let entry: DirectoryEntry = decode_path(&mut self.stream).await?;
-        Ok(Some(entry))
-    }
-
-    async fn next_fuse_entry(&mut self) -> Result<Option<maelstrom_fuse::DirEntry>> {
-        let Some(entry) = self.next_entry().await? else {
-            return Ok(None);
-        };
-        let offset = i64::try_from(self.stream.stream_position().await?).unwrap();
-        Ok(Some(maelstrom_fuse::DirEntry {
-            ino: entry.value.file_id.as_u64(),
-            offset: offset - i64::try_from(self.entry_begin).unwrap(),
-            kind: entry.value.kind,
-            name: entry.key,
-        }))
+        let offset = self.stream.stream_position().await? - self.entry_begin;
+        Ok(Some((offset, entry)))
     }
 
     pub async fn into_stream(
         mut self,
-        log: slog::Logger,
         offset: DirectoryOffset,
-    ) -> Result<DirectoryStream> {
+    ) -> Result<impl futures::Stream<Item = Result<(u64, DirectoryEntry)>> + Send> {
         self.stream
             .seek(SeekFrom::Start(self.entry_begin + u64::from(offset)))
             .await?;
-        Ok(Box::pin(futures::stream::unfold(
-            (self, log),
-            |(mut self_, log)| async {
-                to_eio(log.clone(), self_.next_fuse_entry().await)
-                    .transpose()
-                    .map(|v| (v, (self_, log)))
-            },
-        )))
+        Ok(futures::stream::unfold(self, |mut self_| async {
+            self_.next_entry().await.transpose().map(|v| (v, self_))
+        }))
     }
 
     pub async fn into_ordered_stream(self) -> Result<OrderedDirectoryStream> {
@@ -194,11 +176,6 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
         Ok(())
     }
 }
-
-/// This is a stream of FUSE directory entries from some directory
-pub type DirectoryStream = Pin<
-    Box<dyn futures::Stream<Item = maelstrom_fuse::ErrnoResult<maelstrom_fuse::DirEntry>> + Send>,
->;
 
 pub type OrderedDirectoryStream =
     Pin<Box<dyn futures::Stream<Item = Result<(String, DirectoryEntryData)>> + Send>>;
