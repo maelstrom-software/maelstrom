@@ -6,7 +6,6 @@ use bumpalo::{
     collections::{String as BumpString, Vec as BumpVec},
     Bump,
 };
-use c_str_macro::c_str;
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobMountFsType,
@@ -422,7 +421,7 @@ impl Executor {
         writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
         builder.push(
             Syscall::OpenAndSaveFd(
-                c_str!("/proc/self/uid_map"),
+                c"/proc/self/uid_map",
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
@@ -439,7 +438,7 @@ impl Executor {
         // mapping.
         builder.push(
             Syscall::OpenAndSaveFd(
-                c_str!("/proc/self/setgroups"),
+                c"/proc/self/setgroups",
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
@@ -456,7 +455,7 @@ impl Executor {
         writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
         builder.push(
             Syscall::OpenAndSaveFd(
-                c_str!("/proc/self/gid_map"),
+                c"/proc/self/gid_map",
                 OpenFlags::WRONLY | OpenFlags::TRUNC,
                 FileMode::default(),
             ),
@@ -485,7 +484,7 @@ impl Executor {
 
         builder.push(
             Syscall::OpenAndSaveFd(
-                c_str!("/dev/fuse"),
+                c"/dev/fuse",
                 OpenFlags::RDWR | OpenFlags::NONBLOCK,
                 FileMode::default(),
             ),
@@ -495,7 +494,7 @@ impl Executor {
         let new_root_path = self.mount_dir.as_c_str();
         builder.push(
             Syscall::FuseMountUsingSavedFd(
-                c_str!("Maelstrom LayerFS"),
+                c"Maelstrom LayerFS",
                 new_root_path,
                 MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
                 self.root_mode,
@@ -538,7 +537,7 @@ impl Executor {
                 Syscall::Mount(
                     None,
                     self.tmpfs_dir.as_c_str(),
-                    Some(c_str!("tmpfs")),
+                    Some(c"tmpfs"),
                     MountFlags::default(),
                     None,
                 ),
@@ -562,7 +561,7 @@ impl Executor {
                 Syscall::Mount(
                     None,
                     new_root_path,
-                    Some(c_str!("overlay")),
+                    Some(c"overlay"),
                     MountFlags::default(),
                     Some(options.into_bytes().into_bump_slice()),
                 ),
@@ -582,8 +581,12 @@ impl Executor {
             macro_rules! dev {
                 ($dev:literal) => {
                     (
-                        c_str!(concat!("/dev/", $dev)),
-                        c_str!(concat!("./dev/", $dev)),
+                        unsafe {
+                            CStr::from_ptr(concat!("/dev/", $dev, "\0").as_ptr() as *const _)
+                        },
+                        unsafe {
+                            CStr::from_ptr(concat!("./dev/", $dev, "\0").as_ptr() as *const _)
+                        },
                         concat!("/dev/", $dev),
                     )
                 };
@@ -610,7 +613,7 @@ impl Executor {
         }
 
         // Pivot root to be the new root. See man 2 pivot_root.
-        builder.push(Syscall::PivotRoot(c_str!("."), c_str!(".")), &|err| {
+        builder.push(Syscall::PivotRoot(c".", c"."), &|err| {
             syserr(anyhow!("pivot_root: {err}"))
         });
 
@@ -629,12 +632,12 @@ impl Executor {
 
             let (fs_type, flags, type_name) = match mount.fs_type {
                 JobMountFsType::Proc => (
-                    c_str!("proc"),
+                    c"proc",
                     MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
                     "proc",
                 ),
-                JobMountFsType::Tmp => (c_str!("tmpfs"), MountFlags::default(), "tmpfs"),
-                JobMountFsType::Sys => (c_str!("sysfs"), MountFlags::default(), "sysfs"),
+                JobMountFsType::Tmp => (c"tmpfs", MountFlags::default(), "tmpfs"),
+                JobMountFsType::Sys => (c"sysfs", MountFlags::default(), "sysfs"),
             };
             let mount_point = mount.mount_point.as_str();
             builder.push(
@@ -652,7 +655,7 @@ impl Executor {
         }
 
         // Unmount the old root. See man 2 pivot_root.
-        builder.push(Syscall::Umount2(c_str!("."), UmountFlags::DETACH), &|err| {
+        builder.push(Syscall::Umount2(c".", UmountFlags::DETACH), &|err| {
             syserr(anyhow!("umount of old root: {err}"))
         });
 

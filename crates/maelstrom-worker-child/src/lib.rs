@@ -109,7 +109,7 @@ impl<'a> Syscall<'a> {
                 )
                 .unwrap();
                 let source = Some(*source);
-                let fstype = Some(unsafe { CStr::from_ptr("fuse\0".as_ptr() as *const i8) });
+                let fstype = Some(c"fuse");
                 linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
             }
             Syscall::SendMsgSavedFd(buffer) => {
