@@ -79,11 +79,10 @@ fn filter_case(
 /// among them.
 ///
 /// This object is separate from `MainAppDeps` because it is lent to `JobQueuing`
-struct JobQueuingDeps<StdErrT> {
+struct JobQueuingDeps {
     cargo: String,
     packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
-    stderr: Mutex<StdErrT>,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
@@ -96,13 +95,12 @@ struct JobQueuingDeps<StdErrT> {
     manifest_options: ManifestOptions,
 }
 
-impl<StdErrT> JobQueuingDeps<StdErrT> {
+impl JobQueuingDeps {
     #[allow(clippy::too_many_arguments)]
     fn new(
         cargo: String,
         packages: BTreeMap<PackageId, CargoPackage>,
         filter: pattern::Pattern,
-        stderr: StdErrT,
         stderr_color: bool,
         test_metadata: AllMetadata,
         test_listing: TestListing,
@@ -117,7 +115,6 @@ impl<StdErrT> JobQueuingDeps<StdErrT> {
             cargo,
             packages,
             filter,
-            stderr: Mutex::new(stderr),
             stderr_color,
             tracker: Arc::new(JobStatusTracker::default()),
             jobs_queued: AtomicU64::new(0),
@@ -141,9 +138,9 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueuing<'a, StdErrT, ProgressIndicatorT> {
+struct ArtifactQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
-    queuing_deps: &'a JobQueuingDeps<StdErrT>,
+    queuing_deps: &'a JobQueuingDeps,
     client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
@@ -162,9 +159,9 @@ struct TestListingResult {
     ignored_cases: HashSet<String>,
 }
 
-fn list_test_cases<ProgressIndicatorT, StdErrT>(
+fn list_test_cases<ProgressIndicatorT>(
     log: slog::Logger,
-    queuing_deps: &JobQueuingDeps<StdErrT>,
+    queuing_deps: &JobQueuingDeps,
     ind: &ProgressIndicatorT,
     artifact: &CargoArtifact,
     package_name: &str,
@@ -202,14 +199,14 @@ fn generate_artifacts(
     artifacts::add_generated_artifacts(client, &binary, log)
 }
 
-impl<'a, StdErrT, ProgressIndicatorT> ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>
+impl<'a, ProgressIndicatorT> ArtifactQueuing<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps<StdErrT>,
+        queuing_deps: &'a JobQueuingDeps,
         client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
@@ -393,27 +390,26 @@ where
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
-struct JobQueuing<'a, StdErrT, ProgressIndicatorT> {
+struct JobQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
-    queuing_deps: &'a JobQueuingDeps<StdErrT>,
+    queuing_deps: &'a JobQueuingDeps,
     client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
     wait_handle: Option<WaitHandle>,
     package_match: bool,
     artifacts: Option<TestArtifactStream>,
-    artifact_queuing: Option<ArtifactQueuing<'a, StdErrT, ProgressIndicatorT>>,
+    artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT>>,
     timeout_override: Option<Option<Timeout>>,
 }
 
-impl<'a, StdErrT, ProgressIndicatorT: ProgressIndicator> JobQueuing<'a, StdErrT, ProgressIndicatorT>
+impl<'a, ProgressIndicatorT: ProgressIndicator> JobQueuing<'a, ProgressIndicatorT>
 where
     ProgressIndicatorT: ProgressIndicator,
-    StdErrT: io::Write,
 {
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps<StdErrT>,
+        queuing_deps: &'a JobQueuingDeps,
         client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
@@ -495,7 +491,7 @@ where
     fn finish(&mut self) -> Result<()> {
         slog::debug!(self.log, "checking for cargo errors");
         if let Some(wh) = self.wait_handle.take() {
-            wh.wait(&mut *self.queuing_deps.stderr.lock().unwrap())?;
+            wh.wait()?;
         }
         Ok(())
     }
@@ -525,15 +521,15 @@ where
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
-pub struct MainAppDeps<StdErrT> {
+pub struct MainAppDeps {
     pub client: Client,
-    queuing_deps: JobQueuingDeps<StdErrT>,
+    queuing_deps: JobQueuingDeps,
     cache_dir: PathBuf,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
 
-impl<StdErrT> MainAppDeps<StdErrT> {
+impl MainAppDeps {
     /// Creates a new `MainAppDeps`
     ///
     /// `bg_proc`: handle to background client process
@@ -541,7 +537,6 @@ impl<StdErrT> MainAppDeps<StdErrT> {
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
     /// `list_action`: if some, tests aren't run, instead tests or other things are listed
-    /// `stderr`: is written to for error output
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
     /// `workspace_root`: the path to the root of the workspace
     /// `workspace_packages`: a listing of the packages in the workspace
@@ -554,7 +549,6 @@ impl<StdErrT> MainAppDeps<StdErrT> {
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
-        stderr: StdErrT,
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
@@ -607,7 +601,6 @@ impl<StdErrT> MainAppDeps<StdErrT> {
                 cargo,
                 selected_packages,
                 filter,
-                stderr,
                 stderr_color,
                 test_metadata,
                 test_listing,
@@ -664,20 +657,20 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT> {
-    deps: &'deps MainAppDeps<StdErrT>,
-    queuing: JobQueuing<'deps, StdErrT, ProgressIndicatorT>,
+struct MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT> {
+    deps: &'deps MainAppDeps,
+    queuing: JobQueuing<'deps, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: TermT,
 }
 
-impl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
-        deps: &'deps MainAppDeps<StdErrT>,
-        queuing: JobQueuing<'deps, StdErrT, ProgressIndicatorT>,
+        deps: &'deps MainAppDeps,
+        queuing: JobQueuing<'deps, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: TermT,
@@ -692,10 +685,9 @@ impl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'deps, 'scope, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'deps, StdErrT, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'deps, 'scope, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
 where
-    StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
     ProgressDriverT: ProgressDriver<'scope>,
@@ -828,15 +820,14 @@ impl Logger {
     }
 }
 
-fn new_helper<'deps, 'scope, StdErrT, ProgressIndicatorT, TermT>(
-    deps: &'deps MainAppDeps<StdErrT>,
+fn new_helper<'deps, 'scope, ProgressIndicatorT, TermT>(
+    deps: &'deps MainAppDeps,
     prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
-    StdErrT: io::Write + Send,
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
     'deps: 'scope,
@@ -882,8 +873,8 @@ where
 /// `quiet`: indicates whether quiet mode should be used or not
 /// `term`: represents the terminal
 /// `driver`: drives the background work needed for updating the progress bars
-pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
-    deps: &'deps MainAppDeps<StdErrT>,
+pub fn main_app_new<'deps, 'scope, TermT>(
+    deps: &'deps MainAppDeps,
     stdout_tty: bool,
     quiet: Quiet,
     term: TermT,
@@ -891,7 +882,6 @@ pub fn main_app_new<'deps, 'scope, TermT, StdErrT>(
     timeout_override: Option<Option<Timeout>>,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
-    StdErrT: io::Write + Send,
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
     'deps: 'scope,
 {

@@ -1,6 +1,7 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
-    config::Config, main_app_new, progress::DefaultProgressDriver, ListAction, Logger, MainAppDeps,
+    cargo::CargoBuildError, config::Config, main_app_new, progress::DefaultProgressDriver,
+    ListAction, Logger, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Args};
@@ -61,6 +62,16 @@ struct ListOptions {
     packages: bool,
 }
 
+fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
+    if let Err(e) = &res {
+        if let Some(e) = e.downcast_ref::<CargoBuildError>() {
+            eprintln!("{}", &e.stderr);
+            return Ok(e.exit_code);
+        }
+    }
+    res
+}
+
 /// The main function for the client. This should be called on a task of its own. It will return
 /// when a signal is received or when all work has been processed by the broker.
 pub fn main() -> Result<ExitCode> {
@@ -100,7 +111,6 @@ pub fn main() -> Result<ExitCode> {
         extra_options.include,
         extra_options.exclude,
         list_action,
-        std::io::stderr(),
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
@@ -113,7 +123,7 @@ pub fn main() -> Result<ExitCode> {
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
-    std::thread::scope(|scope| {
+    let res = std::thread::scope(|scope| {
         let mut app = main_app_new(
             &deps,
             stdout_tty,
@@ -125,5 +135,7 @@ pub fn main() -> Result<ExitCode> {
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;
         app.finish()
-    })
+    });
+    drop(deps);
+    maybe_print_build_error(res)
 }

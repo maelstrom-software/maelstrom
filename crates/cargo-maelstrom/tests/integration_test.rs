@@ -259,7 +259,6 @@ fn run_app(
         .exec()
         .unwrap();
 
-    let mut stderr = vec![];
     let mut b = FakeBroker::new(state, log.clone());
 
     let deps = MainAppDeps::new(
@@ -268,7 +267,6 @@ fn run_app(
         include_filter,
         exclude_filter,
         list,
-        &mut stderr,
         false, // stderr_color
         &workspace_root,
         &cargo_metadata.workspace_packages(),

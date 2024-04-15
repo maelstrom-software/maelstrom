@@ -1,29 +1,60 @@
-use anyhow::{Error, Result};
+use anyhow::Result;
 use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
 use maelstrom_macro::Config;
+use maelstrom_util::process::ExitCode;
 use regex::Regex;
+use std::os::unix::process::ExitStatusExt as _;
 use std::{
     ffi::OsString,
-    io::{self, BufReader},
+    fmt,
+    io::{BufReader, Read as _},
     iter,
     path::{Path, PathBuf},
     process::{Child, ChildStdout, Command, Stdio},
-    str,
+    str, thread,
 };
+
+#[derive(Debug)]
+pub struct CargoBuildError {
+    pub stderr: String,
+    pub exit_code: ExitCode,
+}
+
+impl std::error::Error for CargoBuildError {}
+
+impl fmt::Display for CargoBuildError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "cargo exited with {:?}\nstderr:\n{}",
+            self.exit_code, self.stderr
+        )
+    }
+}
 
 pub struct WaitHandle {
     child: Child,
+    stderr_handle: thread::JoinHandle<Result<String>>,
 }
 
 impl WaitHandle {
-    pub fn wait(mut self, mut stderr: impl io::Write) -> Result<()> {
-        if self.child.wait()?.success() {
+    pub fn wait(mut self) -> Result<()> {
+        let exit_status = self.child.wait()?;
+        if exit_status.success() {
             Ok(())
         } else {
-            std::io::copy(self.child.stderr.as_mut().unwrap(), &mut stderr)?;
-            Err(Error::msg("build failure".to_string()))
+            let stderr = self.stderr_handle.join().unwrap()?;
+            // Do like bash does and encode the signal in the exit code
+            let exit_code = exit_status
+                .code()
+                .unwrap_or_else(|| 128 + exit_status.signal().unwrap());
+            Err(CargoBuildError {
+                stderr,
+                exit_code: ExitCode::from(exit_code as u8),
+            }
+            .into())
         }
     }
 }
@@ -78,9 +109,18 @@ pub fn run_cargo_test(
 
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().unwrap();
+    let mut stderr = child.stderr.take().unwrap();
+    let stderr_handle = thread::spawn(move || {
+        let mut stderr_string = String::new();
+        stderr.read_to_string(&mut stderr_string)?;
+        Ok(stderr_string)
+    });
 
     Ok((
-        WaitHandle { child },
+        WaitHandle {
+            child,
+            stderr_handle,
+        },
         TestArtifactStream {
             stream: CargoMessage::parse_stream(BufReader::new(stdout)),
         },
