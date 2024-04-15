@@ -20,7 +20,7 @@ use tokio::{
     net::TcpStream,
     sync::{
         mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex, Semaphore,
+        Mutex,
     },
     task::JoinSet,
 };
@@ -140,22 +140,29 @@ pub fn start_task(
     broker_addr: BrokerAddr,
     upload_tracker: ArtifactUploadTracker,
 ) {
-    let mut pending_uploads = 0;
-    let sem = Arc::new(Semaphore::new(0));
-
     join_set.spawn(async move {
-        while let Some(msg) = receiver.recv().await {
-            let upload_tracker = upload_tracker.clone();
-            let sem = sem.clone();
-            pending_uploads += 1;
-            tokio::task::spawn(async move {
-                // N.B. We are ignoring this Result<_>
-                push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
-                    .await
-                    .ok();
-                sem.add_permits(1);
-            });
+        // When this join_set gets destroyed, all outstanding artifact pusher tasks will be
+        // canceled. That will happen either when our sender is closed, or when our own task is
+        // canceled. In either case, it means the process is shutting down.
+        //
+        // We have to be careful not to let the join_set grow indefinitely. This is why we select!
+        // below. We always wait on the join_set's join_next, and ignore the results. This way we
+        // immediately clean up when a task completes.
+        let mut join_set = JoinSet::new();
+        loop {
+            tokio::select! {
+                Some(_) = join_set.join_next() => {},
+                res = receiver.recv() => {
+                    let Some(msg) = res else { break; };
+                    let upload_tracker = upload_tracker.clone();
+
+                    join_set.spawn(async move {
+                        // N.B. We are ignoring this Result<_>
+                        let _ = push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
+                            .await;
+                    });
+                }
+            }
         }
-        sem.acquire_many(pending_uploads).await.unwrap().forget();
     });
 }
