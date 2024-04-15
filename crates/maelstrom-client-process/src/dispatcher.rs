@@ -98,7 +98,7 @@ impl<DepsT: Deps> Dispatcher<DepsT> {
 }
 
 pub struct Adapter {
-    local_broker_sender: UnboundedSender<local_broker::Message>,
+    local_broker_sender: local_broker::Sender,
 }
 
 impl Deps for Adapter {
@@ -134,7 +134,7 @@ pub fn channel() -> (Sender, Receiver) {
 pub fn start_task(
     join_set: &mut JoinSet<()>,
     receiver: Receiver,
-    local_broker_sender: UnboundedSender<local_broker::Message>,
+    local_broker_sender: local_broker::Sender,
 ) {
     let adapter = Adapter {
         local_broker_sender,

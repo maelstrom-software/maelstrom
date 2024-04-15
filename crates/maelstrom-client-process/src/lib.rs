@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use futures::StreamExt;
 use itertools::Itertools as _;
-use local_broker::LocalBroker;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
     proto::Hello,
@@ -28,7 +27,7 @@ use maelstrom_util::{
     config::common::BrokerAddr,
     io::Sha256Stream,
     manifest::{AsyncManifestWriter, ManifestBuilder},
-    net, sync,
+    net,
 };
 pub use rpc::client_process_main;
 use sha2::{Digest as _, Sha256};
@@ -176,15 +175,9 @@ async fn start_tasks(
 
     let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
     let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-    let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
+    let (local_broker_sender, local_broker_receiver) = local_broker::channel();
 
     let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
-    let local_broker_adapter = local_broker::Adapter::new(
-        dispatcher_sender.clone(),
-        broker_sender,
-        artifact_pusher_sender,
-    );
-    let mut local_broker = LocalBroker::new(local_broker_adapter);
     let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender.clone());
     let mut artifact_pusher = ArtifactPusher::new(
         broker_addr,
@@ -195,6 +188,13 @@ async fn start_tasks(
     let mut join_set = JoinSet::new();
 
     dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
+    local_broker::start_task(
+        &mut join_set,
+        local_broker_receiver,
+        dispatcher_sender.clone(),
+        broker_sender,
+        artifact_pusher_sender,
+    );
 
     join_set.spawn(async move {
         while artifact_pusher.process_one().await {}
@@ -202,10 +202,6 @@ async fn start_tasks(
     });
 
     join_set.spawn(async move { while socket_reader.process_one().await {} });
-
-    join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
-        local_broker.receive_message(msg)
-    }));
 
     join_set.spawn(net::async_socket_writer(
         broker_receiver,
@@ -500,7 +496,7 @@ impl Client {
 
 pub struct SocketReader {
     stream: tcp::OwnedReadHalf,
-    channel: UnboundedSender<local_broker::Message>,
+    channel: local_broker::Sender,
 }
 
 impl SocketReader {
