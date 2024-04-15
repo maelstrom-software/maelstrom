@@ -6,7 +6,7 @@ mod rpc;
 mod stream_wrapper;
 
 use anyhow::{anyhow, Context as _, Error, Result};
-use artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
+use artifact_upload::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use futures::StreamExt;
@@ -169,21 +169,14 @@ async fn start_tasks(
 
     slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
-    let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
-
-    let upload_tracker = ArtifactUploadTracker::default();
-
-    let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-    let (local_broker_sender, local_broker_receiver) = local_broker::channel();
-
     let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
+    let (local_broker_sender, local_broker_receiver) = local_broker::channel();
+    let upload_tracker = ArtifactUploadTracker::default();
+    let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_upload::channel();
+
+    let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
+    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
     let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender.clone());
-    let mut artifact_pusher = ArtifactPusher::new(
-        broker_addr,
-        artifact_pusher_receiver,
-        upload_tracker.clone(),
-    );
 
     let mut join_set = JoinSet::new();
 
@@ -195,11 +188,12 @@ async fn start_tasks(
         broker_sender,
         artifact_pusher_sender,
     );
-
-    join_set.spawn(async move {
-        while artifact_pusher.process_one().await {}
-        artifact_pusher.wait().await
-    });
+    artifact_upload::start_task(
+        &mut join_set,
+        artifact_pusher_receiver,
+        broker_addr,
+        upload_tracker.clone(),
+    );
 
     join_set.spawn(async move { while socket_reader.process_one().await {} });
 

@@ -15,10 +15,15 @@ use std::{
     collections::HashMap,
     path::{Path, PathBuf},
 };
-use tokio::io::{self, AsyncRead, AsyncReadExt as _};
-use tokio::net::TcpStream;
-use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::{
+    io::{self, AsyncRead, AsyncReadExt as _},
+    net::TcpStream,
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        Mutex, Semaphore,
+    },
+    task::JoinSet,
+};
 
 struct UploadProgress {
     size: u64,
@@ -122,7 +127,7 @@ async fn push_one_artifact(
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
-pub struct ArtifactPusher {
+struct ArtifactPusher {
     broker_addr: BrokerAddr,
     receiver: UnboundedReceiver<ArtifactPushRequest>,
     upload_tracker: ArtifactUploadTracker,
@@ -131,7 +136,7 @@ pub struct ArtifactPusher {
 }
 
 impl ArtifactPusher {
-    pub fn new(
+    fn new(
         broker_addr: BrokerAddr,
         receiver: UnboundedReceiver<ArtifactPushRequest>,
         upload_tracker: ArtifactUploadTracker,
@@ -147,7 +152,7 @@ impl ArtifactPusher {
 
     /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
     /// until the function return false
-    pub async fn process_one(&mut self) -> bool {
+    async fn process_one(&mut self) -> bool {
         let Some(msg) = self.receiver.recv().await else {
             return false;
         };
@@ -166,7 +171,7 @@ impl ArtifactPusher {
         true
     }
 
-    pub async fn wait(&mut self) {
+    async fn wait(&mut self) {
         self.sem
             .acquire_many(self.pending_uploads)
             .await
@@ -174,4 +179,25 @@ impl ArtifactPusher {
             .forget();
         self.pending_uploads = 0;
     }
+}
+
+pub type Sender = UnboundedSender<ArtifactPushRequest>;
+pub type Receiver = UnboundedReceiver<ArtifactPushRequest>;
+
+pub fn channel() -> (Sender, Receiver) {
+    mpsc::unbounded_channel()
+}
+
+pub fn start_task(
+    join_set: &mut JoinSet<()>,
+    receiver: Receiver,
+    broker_addr: BrokerAddr,
+    upload_tracker: ArtifactUploadTracker,
+) {
+    let mut artifact_pusher = ArtifactPusher::new(broker_addr, receiver, upload_tracker);
+
+    join_set.spawn(async move {
+        while artifact_pusher.process_one().await {}
+        artifact_pusher.wait().await
+    });
 }
