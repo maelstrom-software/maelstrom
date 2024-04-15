@@ -418,7 +418,7 @@ where
         let package_names: Vec<_> = queuing_deps
             .packages
             .values()
-            .map(|p| p.name.clone())
+            .map(|p| format!("{}@{}", &p.name, &p.version))
             .collect();
 
         let building_tests = !package_names.is_empty()
