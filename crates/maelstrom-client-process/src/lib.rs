@@ -198,32 +198,32 @@ async fn start_tasks(
         upload_tracker.clone(),
     );
 
+    let mut join_set = JoinSet::new();
+
+    join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
+        dispatcher.receive_message(msg)
+    }));
+
+    join_set.spawn(async move {
+        while artifact_pusher.process_one().await {}
+        artifact_pusher.wait().await
+    });
+
+    join_set.spawn(async move { while socket_reader.process_one().await {} });
+
+    join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
+        local_broker.receive_message(msg)
+    }));
+
+    join_set.spawn(net::async_socket_writer(
+        broker_receiver,
+        broker_socket_writer,
+        move |msg| {
+            debug!(log, "sending broker message"; "msg" => ?msg);
+        },
+    ));
+
     task::spawn(async move {
-        let mut join_set = JoinSet::new();
-
-        join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
-            dispatcher.receive_message(msg)
-        }));
-
-        join_set.spawn(async move {
-            while artifact_pusher.process_one().await {}
-            artifact_pusher.wait().await
-        });
-
-        join_set.spawn(async move { while socket_reader.process_one().await {} });
-
-        join_set.spawn(sync::channel_reader(local_broker_receiver, move |msg| {
-            local_broker.receive_message(msg)
-        }));
-
-        join_set.spawn(net::async_socket_writer(
-            broker_receiver,
-            broker_socket_writer,
-            move |msg| {
-                debug!(log, "sending broker message"; "msg" => ?msg);
-            },
-        ));
-
         join_set.join_next().await;
     });
 
