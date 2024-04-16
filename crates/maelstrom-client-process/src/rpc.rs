@@ -62,11 +62,21 @@ macro_rules! with_client_async {
     };
 }
 
-async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
-    match body.await {
-        Ok(v) => Ok(Response::new(v)),
-        Err(e) => Err(Status::new(Code::Unknown, e.to_string())),
+trait ResultExt<T> {
+    fn map_to_tonic(self) -> TonicResponse<T>;
+}
+
+impl<T> ResultExt<T> for Result<T> {
+    fn map_to_tonic(self) -> TonicResponse<T> {
+        match self {
+            Ok(v) => Ok(Response::new(v)),
+            Err(e) => Err(Status::new(Code::Unknown, e.to_string())),
+        }
     }
+}
+
+async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
+    body.await.map_to_tonic()
 }
 
 async fn map_err<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResult<RetT> {
