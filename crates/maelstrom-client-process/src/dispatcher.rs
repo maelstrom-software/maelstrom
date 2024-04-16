@@ -1,11 +1,17 @@
 use crate::local_broker;
 use maelstrom_base::{stats::JobStateCounts, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest};
-use maelstrom_util::ext::OptionExt as _;
+use maelstrom_util::{ext::OptionExt as _, sync};
 use std::{
     collections::{HashMap, VecDeque},
     path::PathBuf,
 };
-use tokio::sync::{mpsc::UnboundedSender, oneshot};
+use tokio::{
+    sync::{
+        mpsc::{self, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
+    task::JoinSet,
+};
 
 pub trait Deps {
     type JobHandle;
@@ -95,14 +101,6 @@ pub struct Adapter {
     local_broker_sender: UnboundedSender<local_broker::Message>,
 }
 
-impl Adapter {
-    pub fn new(local_broker_sender: UnboundedSender<local_broker::Message>) -> Self {
-        Self {
-            local_broker_sender,
-        }
-    }
-}
-
 impl Deps for Adapter {
     type JobHandle = oneshot::Sender<(ClientJobId, JobOutcomeResult)>;
 
@@ -124,4 +122,25 @@ impl Deps for Adapter {
     fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle) {
         handle.send(()).ok();
     }
+}
+
+pub type Sender = UnboundedSender<Message<Adapter>>;
+pub type Receiver = UnboundedReceiver<Message<Adapter>>;
+
+pub fn channel() -> (Sender, Receiver) {
+    mpsc::unbounded_channel()
+}
+
+pub fn start_task(
+    join_set: &mut JoinSet<()>,
+    receiver: Receiver,
+    local_broker_sender: UnboundedSender<local_broker::Message>,
+) {
+    let adapter = Adapter {
+        local_broker_sender,
+    };
+    let mut dispatcher = Dispatcher::new(adapter);
+    join_set.spawn(sync::channel_reader(receiver, move |msg| {
+        dispatcher.receive_message(msg)
+    }));
 }

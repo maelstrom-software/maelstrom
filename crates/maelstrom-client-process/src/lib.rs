@@ -9,7 +9,6 @@ use anyhow::{anyhow, Context as _, Error, Result};
 use artifact_upload::{ArtifactPusher, ArtifactUploadTracker};
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
-use dispatcher::Dispatcher;
 use futures::StreamExt;
 use itertools::Itertools as _;
 use local_broker::LocalBroker;
@@ -149,7 +148,7 @@ struct ClientState {
 }
 
 struct Client {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+    dispatcher_sender: dispatcher::Sender,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -161,10 +160,7 @@ struct Client {
 async fn start_tasks(
     broker_addr: BrokerAddr,
     log: slog::Logger,
-) -> Result<(
-    UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
-    ArtifactUploadTracker,
-)> {
+) -> Result<(dispatcher::Sender, ArtifactUploadTracker)> {
     slog::debug!(log, "client starting");
 
     let mut broker_socket = TcpStream::connect(broker_addr.inner())
@@ -179,19 +175,17 @@ async fn start_tasks(
     let upload_tracker = ArtifactUploadTracker::default();
 
     let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-    let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
     let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
     let (local_broker_sender, local_broker_receiver) = mpsc::unbounded_channel();
 
-    let dispatcher_adapter = dispatcher::Adapter::new(local_broker_sender.clone());
-    let mut dispatcher = Dispatcher::new(dispatcher_adapter);
+    let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
     let local_broker_adapter = local_broker::Adapter::new(
         dispatcher_sender.clone(),
         broker_sender,
         artifact_pusher_sender,
     );
     let mut local_broker = LocalBroker::new(local_broker_adapter);
-    let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
+    let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender.clone());
     let mut artifact_pusher = ArtifactPusher::new(
         broker_addr,
         artifact_pusher_receiver,
@@ -200,9 +194,7 @@ async fn start_tasks(
 
     let mut join_set = JoinSet::new();
 
-    join_set.spawn(sync::channel_reader(dispatcher_receiver, move |msg| {
-        dispatcher.receive_message(msg)
-    }));
+    dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
 
     join_set.spawn(async move {
         while artifact_pusher.process_one().await {}
@@ -234,7 +226,7 @@ impl Client {
     async fn new(
         project_dir: PathBuf,
         cache_dir: PathBuf,
-        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+        dispatcher_sender: dispatcher::Sender,
         upload_tracker: ArtifactUploadTracker,
         log: slog::Logger,
     ) -> Result<Self> {

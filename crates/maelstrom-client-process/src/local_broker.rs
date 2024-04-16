@@ -71,14 +71,14 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
 }
 
 pub struct Adapter {
-    dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+    dispatcher_sender: dispatcher::Sender,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
 }
 
 impl Adapter {
     pub fn new(
-        dispatcher_sender: UnboundedSender<dispatcher::Message<dispatcher::Adapter>>,
+        dispatcher_sender: dispatcher::Sender,
         broker_sender: UnboundedSender<ClientToBroker>,
         artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
     ) -> Self {
