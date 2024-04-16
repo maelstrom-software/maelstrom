@@ -13,11 +13,13 @@ camino.workspace = true
 cargo_metadata.workspace = true
 chrono.workspace = true
 clap.workspace = true
+elf.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
+zerocopy.workspace = true
 
 [dev-dependencies]
 colored-diff.workspace = true

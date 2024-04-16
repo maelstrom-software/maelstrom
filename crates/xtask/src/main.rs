@@ -1,4 +1,5 @@
 mod changelog;
+mod distribute;
 mod publish;
 
 use anyhow::Result;
@@ -8,6 +9,7 @@ use clap::{Parser, Subcommand};
 enum Command {
     Changelog(changelog::CliArgs),
     Publish(publish::CliArgs),
+    Distribute(distribute::CliArgs),
 }
 
 /// Perform a number of different tasks for the Maelstrom project related to building, testing,
@@ -24,5 +26,6 @@ fn main() -> Result<()> {
     match CliArgs::parse().command {
         Command::Changelog(options) => changelog::main(options),
         Command::Publish(options) => publish::main(options),
+        Command::Distribute(options) => distribute::main(options),
     }
 }
