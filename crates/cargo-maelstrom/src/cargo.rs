@@ -71,6 +71,9 @@ impl Iterator for TestArtifactStream {
             match self.stream.next()? {
                 Err(e) => return Some(Err(e.into())),
                 Ok(CargoMessage::CompilerArtifact(artifact)) => {
+                    if artifact.target.kind.iter().any(|kind| kind == "proc-macro") {
+                        continue;
+                    }
                     if artifact.executable.is_some() && artifact.profile.test {
                         return Some(Ok(artifact));
                     }
