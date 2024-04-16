@@ -2,7 +2,7 @@ use crate::{
     client::{self, Client},
     stream_wrapper::StreamWrapper,
 };
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Error};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
     proto::{
@@ -15,7 +15,7 @@ use maelstrom_container::ProgressTracker;
 use maelstrom_util::async_fs;
 use slog::Logger;
 use std::{
-    error, future::Future, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
+    error, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
     result, sync::Arc,
 };
 use tokio::{
@@ -73,11 +73,6 @@ impl<T> ResultExt<T> for Result<T> {
             Err(e) => Err(Status::new(Code::Unknown, e.to_string())),
         }
     }
-}
-
-async fn map_err<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResult<RetT> {
-    body.await
-        .map_err(|e| Status::new(Code::Unknown, e.to_string()))
 }
 
 #[derive(Clone)]
@@ -210,7 +205,7 @@ impl ClientProcess for Handler {
 
             let self_clone = self.clone();
             task::spawn(async move {
-                let result = map_err(async {
+                let result = async {
                     let image = with_client_async!(self_clone, |client| {
                         client
                             .get_container_image(&name, &tag, tracker.clone())
@@ -220,8 +215,9 @@ impl ClientProcess for Handler {
                     Ok(proto::GetContainerImageResponse {
                         image: Some(image.into_proto_buf()),
                     })
-                })
-                .await;
+                }
+                .await
+                .map_err(|e: Error| Status::new(Code::Unknown, e.to_string()));
                 tracker.finish(result);
             });
             Ok(Box::pin(UnboundedReceiverStream::new(receiver)) as Self::GetContainerImageStream)
