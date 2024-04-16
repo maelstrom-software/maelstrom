@@ -1,4 +1,4 @@
-mod artifact_upload;
+mod artifact_pusher;
 mod digest_repo;
 mod dispatcher;
 mod local_broker;
@@ -6,7 +6,7 @@ mod rpc;
 mod stream_wrapper;
 
 use anyhow::{anyhow, Context as _, Error, Result};
-use artifact_upload::ArtifactUploadTracker;
+use artifact_pusher::ArtifactUploadTracker;
 use async_trait::async_trait;
 use digest_repo::DigestRepository;
 use futures::StreamExt;
@@ -172,7 +172,7 @@ async fn start_tasks(
     let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
     let (local_broker_sender, local_broker_receiver) = local_broker::channel();
     let upload_tracker = ArtifactUploadTracker::default();
-    let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_upload::channel();
+    let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
 
     let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
     let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
@@ -188,7 +188,7 @@ async fn start_tasks(
         broker_sender,
         artifact_pusher_sender,
     );
-    artifact_upload::start_task(
+    artifact_pusher::start_task(
         &mut join_set,
         artifact_pusher_receiver,
         broker_addr,
