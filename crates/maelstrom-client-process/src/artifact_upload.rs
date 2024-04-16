@@ -127,60 +127,6 @@ async fn push_one_artifact(
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
-struct ArtifactPusher {
-    broker_addr: BrokerAddr,
-    receiver: UnboundedReceiver<ArtifactPushRequest>,
-    upload_tracker: ArtifactUploadTracker,
-    pending_uploads: u32,
-    sem: Arc<Semaphore>,
-}
-
-impl ArtifactPusher {
-    fn new(
-        broker_addr: BrokerAddr,
-        receiver: UnboundedReceiver<ArtifactPushRequest>,
-        upload_tracker: ArtifactUploadTracker,
-    ) -> Self {
-        Self {
-            broker_addr,
-            receiver,
-            upload_tracker,
-            pending_uploads: 0,
-            sem: Arc::new(Semaphore::new(0)),
-        }
-    }
-
-    /// Processes one request. In order to drive the ArtifactPusher, this should be called in a loop
-    /// until the function return false
-    async fn process_one(&mut self) -> bool {
-        let Some(msg) = self.receiver.recv().await else {
-            return false;
-        };
-
-        let upload_tracker = self.upload_tracker.clone();
-        let broker_addr = self.broker_addr;
-        let sem = self.sem.clone();
-        self.pending_uploads += 1;
-        tokio::task::spawn(async move {
-            // N.B. We are ignoring this Result<_>
-            push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
-                .await
-                .ok();
-            sem.add_permits(1);
-        });
-        true
-    }
-
-    async fn wait(&mut self) {
-        self.sem
-            .acquire_many(self.pending_uploads)
-            .await
-            .unwrap()
-            .forget();
-        self.pending_uploads = 0;
-    }
-}
-
 pub type Sender = UnboundedSender<ArtifactPushRequest>;
 pub type Receiver = UnboundedReceiver<ArtifactPushRequest>;
 
@@ -190,14 +136,26 @@ pub fn channel() -> (Sender, Receiver) {
 
 pub fn start_task(
     join_set: &mut JoinSet<()>,
-    receiver: Receiver,
+    mut receiver: Receiver,
     broker_addr: BrokerAddr,
     upload_tracker: ArtifactUploadTracker,
 ) {
-    let mut artifact_pusher = ArtifactPusher::new(broker_addr, receiver, upload_tracker);
+    let mut pending_uploads = 0;
+    let sem = Arc::new(Semaphore::new(0));
 
     join_set.spawn(async move {
-        while artifact_pusher.process_one().await {}
-        artifact_pusher.wait().await
+        while let Some(msg) = receiver.recv().await {
+            let upload_tracker = upload_tracker.clone();
+            let sem = sem.clone();
+            pending_uploads += 1;
+            tokio::task::spawn(async move {
+                // N.B. We are ignoring this Result<_>
+                push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
+                    .await
+                    .ok();
+                sem.add_permits(1);
+            });
+        }
+        sem.acquire_many(pending_uploads).await.unwrap().forget();
     });
 }
