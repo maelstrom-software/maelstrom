@@ -1,4 +1,3 @@
-use crate::ArtifactPushRequest;
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
@@ -127,8 +126,13 @@ async fn push_one_artifact(
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
-pub type Sender = UnboundedSender<ArtifactPushRequest>;
-pub type Receiver = UnboundedReceiver<ArtifactPushRequest>;
+pub struct Message {
+    pub path: PathBuf,
+    pub digest: Sha256Digest,
+}
+
+pub type Sender = UnboundedSender<Message>;
+pub type Receiver = UnboundedReceiver<Message>;
 
 pub fn channel() -> (Sender, Receiver) {
     mpsc::unbounded_channel()

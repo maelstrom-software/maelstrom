@@ -1,4 +1,4 @@
-use crate::{dispatcher, ArtifactPushRequest};
+use crate::{artifact_pusher, dispatcher};
 use maelstrom_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::JobStateCounts,
@@ -77,7 +77,7 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
 struct Adapter {
     dispatcher_sender: dispatcher::Sender,
     broker_sender: UnboundedSender<ClientToBroker>,
-    artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
+    artifact_pusher_sender: artifact_pusher::Sender,
 }
 
 impl Deps for Adapter {
@@ -99,7 +99,7 @@ impl Deps for Adapter {
 
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path) {
         self.artifact_pusher_sender
-            .send(ArtifactPushRequest {
+            .send(artifact_pusher::Message {
                 digest,
                 path: path.to_owned(),
             })
@@ -119,7 +119,7 @@ pub fn start_task(
     receiver: Receiver,
     dispatcher_sender: dispatcher::Sender,
     broker_sender: UnboundedSender<ClientToBroker>,
-    artifact_pusher_sender: UnboundedSender<ArtifactPushRequest>,
+    artifact_pusher_sender: artifact_pusher::Sender,
 ) {
     let adapter = Adapter {
         dispatcher_sender,

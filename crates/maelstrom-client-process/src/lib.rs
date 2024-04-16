@@ -48,11 +48,6 @@ use tokio::{
     task::{self, JoinSet},
 };
 
-pub struct ArtifactPushRequest {
-    pub path: PathBuf,
-    pub digest: Sha256Digest,
-}
-
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = async_fs::Fs::new();
     let mut f = fs.open_file(path).await?;
