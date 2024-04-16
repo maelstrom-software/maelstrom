@@ -1,4 +1,7 @@
-use crate::{stream_wrapper::StreamWrapper, Client};
+use crate::{
+    client::{self, Client},
+    stream_wrapper::StreamWrapper,
+};
 use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
@@ -135,10 +138,10 @@ impl ClientProcess for Handler {
             }
             let log = match &self.log {
                 Some(log) => log.clone(),
-                None => crate::default_log(&fs, cache_dir.as_ref()).await?,
+                None => client::default_log(&fs, cache_dir.as_ref()).await?,
             };
             let (dispatcher_sender, upload_tracker) =
-                crate::start_tasks(broker_addr, log.clone()).await?;
+                client::start_tasks(broker_addr, log.clone()).await?;
             let client = Client::new(
                 project_dir,
                 cache_dir,
