@@ -1,5 +1,4 @@
 use anyhow::Result;
-use indicatif::ProgressBar;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
     JobStatus,
@@ -115,8 +114,7 @@ fn main() -> Result<ExitCode> {
     let reader: Box<dyn Read> = Box::new(io::stdin().lock());
     let image_lookup = |image: &str| {
         let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
-        let prog = ProgressBar::hidden();
-        let image = client.get_container_image(image, version, prog)?;
+        let image = client.get_container_image(image, version)?;
         Ok(ImageConfig {
             layers: image.layers.clone(),
             environment: image.env().cloned(),

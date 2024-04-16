@@ -17,7 +17,7 @@ use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
     ArtifactUploadProgress, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
-use maelstrom_container::{ContainerImage, ContainerImageDepot, ProgressTracker};
+use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
     async_fs,
     config::common::BrokerAddr,
@@ -420,15 +420,10 @@ impl Client {
         Ok(res)
     }
 
-    pub async fn get_container_image(
-        &self,
-        name: &str,
-        tag: &str,
-        prog: impl ProgressTracker,
-    ) -> Result<ContainerImage> {
+    pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         slog::debug!(self.log, "get_container_image"; "name" => name, "tag" => tag);
         self.container_image_depot
-            .get_container_image(name, tag, prog)
+            .get_container_image(name, tag, NullProgressTracker)
             .await
     }
 

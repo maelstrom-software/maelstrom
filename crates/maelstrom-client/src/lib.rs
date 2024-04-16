@@ -3,7 +3,6 @@ pub mod test;
 pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
 
 use anyhow::{anyhow, Result};
-use indicatif::ProgressBar;
 use maelstrom_base::{
     stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
@@ -19,7 +18,6 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::pin::Pin;
 use std::thread;
-use tokio_stream::StreamExt as _;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -141,28 +139,6 @@ where
     res?.into_inner().into_result()
 }
 
-async fn run_progress_bar(
-    prog: ProgressBar,
-    stream: tonic::Response<tonic::Streaming<proto::GetContainerImageProgressResponse>>,
-) -> TonicResponse<proto::GetContainerImageResponse> {
-    use proto::get_container_image_progress_response::Progress;
-    let (meta, mut stream, ext) = stream.into_parts();
-    while let Some(msg) = stream.next().await {
-        match msg?.progress {
-            Some(Progress::ProgressLength(len)) => prog.set_length(len),
-            Some(Progress::ProgressInc(v)) => prog.inc(v),
-            Some(Progress::Done(v)) => {
-                return Ok(tonic::Response::from_parts(meta, v, ext));
-            }
-            None => break,
-        }
-    }
-    Err(tonic::Status::new(
-        tonic::Code::Unknown,
-        "malformed progress response",
-    ))
-}
-
 impl Client {
     pub fn new(
         mut process_handle: ClientBgProcess,
@@ -258,19 +234,13 @@ impl Client {
         ))
     }
 
-    pub fn get_container_image(
-        &self,
-        name: &str,
-        tag: &str,
-        prog: ProgressBar,
-    ) -> Result<ContainerImage> {
+    pub fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         let msg = proto::GetContainerImageRequest {
             name: name.into(),
             tag: tag.into(),
         };
-        let img = self.send_sync(move |mut client| async move {
-            run_progress_bar(prog, client.get_container_image(msg).await?).await
-        })?;
+        let img =
+            self.send_sync(move |mut client| async move { client.get_container_image(msg).await })?;
         TryFromProtoBuf::try_from_proto_buf(img)
     }
 

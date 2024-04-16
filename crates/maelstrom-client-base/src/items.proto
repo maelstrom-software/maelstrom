@@ -168,14 +168,6 @@ message GetContainerImageResponse {
     ContainerImage image = 1;
 }
 
-message GetContainerImageProgressResponse {
-    oneof progress {
-        uint64 progress_length = 1;
-        uint64 progress_inc = 2;
-        GetContainerImageResponse done = 3;
-    }
-}
-
 message JobError {
     oneof kind {
         string execution = 1;
@@ -255,7 +247,7 @@ service ClientProcess {
     rpc Start(StartRequest) returns (Void);
     rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
-    rpc GetContainerImage(GetContainerImageRequest) returns (stream GetContainerImageProgressResponse);
+    rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
     rpc AddJob(AddJobRequest) returns (AddJobResponse);
     rpc WaitForOutstandingJobs(Void) returns (Void);
     rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);

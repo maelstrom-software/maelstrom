@@ -2,7 +2,7 @@ use crate::{
     client::{self, Client},
     stream_wrapper::StreamWrapper,
 };
-use anyhow::{anyhow, Result, Error};
+use anyhow::{anyhow, Result};
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
     proto::{
@@ -11,19 +11,10 @@ use maelstrom_client_base::{
     },
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_container::ProgressTracker;
 use maelstrom_util::async_fs;
 use slog::Logger;
-use std::{
-    error, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, pin::Pin,
-    result, sync::Arc,
-};
-use tokio::{
-    net::UnixStream as TokioUnixStream,
-    sync::{mpsc, RwLock},
-    task,
-};
-use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
+use std::{error, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, result, sync::Arc};
+use tokio::{net::UnixStream as TokioUnixStream, sync::RwLock};
 use tonic::{transport::Server, Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
@@ -75,54 +66,9 @@ impl<T> ResultExt<T> for Result<T> {
     }
 }
 
-#[derive(Clone)]
-struct ChannelProgressTracker {
-    sender: mpsc::UnboundedSender<TonicResult<proto::GetContainerImageProgressResponse>>,
-}
-
-impl ChannelProgressTracker {
-    fn new(
-        sender: mpsc::UnboundedSender<TonicResult<proto::GetContainerImageProgressResponse>>,
-    ) -> Self {
-        Self { sender }
-    }
-
-    fn finish(self, resp: TonicResult<proto::GetContainerImageResponse>) {
-        use proto::get_container_image_progress_response::Progress;
-        let _ = self
-            .sender
-            .send(resp.map(|v| proto::GetContainerImageProgressResponse {
-                progress: Some(Progress::Done(v)),
-            }));
-    }
-}
-
-impl ProgressTracker for ChannelProgressTracker {
-    fn set_length(&self, length: u64) {
-        use proto::get_container_image_progress_response::Progress;
-        let _ = self
-            .sender
-            .send(Ok(proto::GetContainerImageProgressResponse {
-                progress: Some(Progress::ProgressLength(length)),
-            }));
-    }
-
-    fn inc(&self, v: u64) {
-        use proto::get_container_image_progress_response::Progress;
-        let _ = self
-            .sender
-            .send(Ok(proto::GetContainerImageProgressResponse {
-                progress: Some(Progress::ProgressInc(v)),
-            }));
-    }
-}
-
 #[allow(clippy::unit_arg)]
 #[tonic::async_trait]
 impl ClientProcess for Handler {
-    type GetContainerImageStream =
-        Pin<Box<dyn Stream<Item = TonicResult<proto::GetContainerImageProgressResponse>> + Send>>;
-
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         async {
             let request = request.into_inner();
@@ -197,30 +143,18 @@ impl ClientProcess for Handler {
     async fn get_container_image(
         &self,
         request: Request<proto::GetContainerImageRequest>,
-    ) -> TonicResponse<Self::GetContainerImageStream> {
+    ) -> TonicResponse<proto::GetContainerImageResponse> {
         async {
-            let (sender, receiver) = mpsc::unbounded_channel();
-            let tracker = ChannelProgressTracker::new(sender);
-            let proto::GetContainerImageRequest { name, tag } = request.into_inner();
-
-            let self_clone = self.clone();
-            task::spawn(async move {
-                let result = async {
-                    let image = with_client_async!(self_clone, |client| {
-                        client
-                            .get_container_image(&name, &tag, tracker.clone())
-                            .await
-                    })
-                    .await?;
-                    Ok(proto::GetContainerImageResponse {
-                        image: Some(image.into_proto_buf()),
-                    })
-                }
-                .await
-                .map_err(|e: Error| Status::new(Code::Unknown, e.to_string()));
-                tracker.finish(result);
-            });
-            Ok(Box::pin(UnboundedReceiverStream::new(receiver)) as Self::GetContainerImageStream)
+            let request = request.into_inner();
+            with_client_async!(self, |client| {
+                client
+                    .get_container_image(&request.name, &request.tag)
+                    .await
+            })
+            .await
+            .map(|image| proto::GetContainerImageResponse {
+                image: Some(image.into_proto_buf()),
+            })
         }
         .await
         .map_to_tonic()

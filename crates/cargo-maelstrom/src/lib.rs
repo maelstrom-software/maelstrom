@@ -15,7 +15,7 @@ use cargo::{
 };
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
-use indicatif::{ProgressBar, TermLike};
+use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
 use maelstrom_util::{
@@ -295,16 +295,12 @@ where
             self.ind
                 .update_enqueue_status(format!("downloading image {image}"));
             let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
-            let prog = self
-                .ind
-                .new_side_progress(format!("downloading image {image}"))
-                .unwrap_or_else(ProgressBar::hidden);
             slog::debug!(
                 self.log, "getting container image";
                 "image" => &image,
                 "version" => &version,
             );
-            let image = self.client.get_container_image(image, version, prog)?;
+            let image = self.client.get_container_image(image, version)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
