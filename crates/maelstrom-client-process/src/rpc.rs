@@ -75,10 +75,6 @@ impl<T> ResultExt<T> for Result<T> {
     }
 }
 
-async fn run_handler<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResponse<RetT> {
-    body.await.map_to_tonic()
-}
-
 async fn map_err<RetT>(body: impl Future<Output = Result<RetT>>) -> TonicResult<RetT> {
     body.await
         .map_err(|e| Status::new(Code::Unknown, e.to_string()))
@@ -133,7 +129,7 @@ impl ClientProcess for Handler {
         Pin<Box<dyn Stream<Item = TonicResult<proto::GetContainerImageProgressResponse>> + Send>>;
 
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
-        run_handler(async {
+        async {
             let request = request.into_inner();
             let broker_addr = TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?;
             let project_dir = PathBuf::try_from_proto_buf(request.project_dir)?;
@@ -162,15 +158,16 @@ impl ClientProcess for Handler {
             .await?;
             *self.client.write().await = Some(client);
             Ok(proto::Void {})
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn add_artifact(
         &self,
         request: Request<proto::AddArtifactRequest>,
     ) -> TonicResponse<proto::AddArtifactResponse> {
-        run_handler(async {
+        async {
             let request = request.into_inner();
             let path = PathBuf::try_from_proto_buf(request.path)?;
             Ok(proto::AddArtifactResponse {
@@ -178,15 +175,16 @@ impl ClientProcess for Handler {
                     .await?
                     .into_proto_buf(),
             })
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn add_layer(
         &self,
         request: Request<proto::AddLayerRequest>,
     ) -> TonicResponse<proto::AddLayerResponse> {
-        run_handler(async {
+        async {
             let layer = request.into_inner().into_result()?;
             let layer = TryFromProtoBuf::try_from_proto_buf(layer)?;
             Ok(proto::AddLayerResponse {
@@ -196,15 +194,16 @@ impl ClientProcess for Handler {
                         .into_proto_buf(),
                 ),
             })
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn get_container_image(
         &self,
         request: Request<proto::GetContainerImageRequest>,
     ) -> TonicResponse<Self::GetContainerImageStream> {
-        run_handler(async {
+        async {
             let (sender, receiver) = mpsc::unbounded_channel();
             let tracker = ChannelProgressTracker::new(sender);
             let proto::GetContainerImageRequest { name, tag } = request.into_inner();
@@ -226,15 +225,16 @@ impl ClientProcess for Handler {
                 tracker.finish(result);
             });
             Ok(Box::pin(UnboundedReceiverStream::new(receiver)) as Self::GetContainerImageStream)
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn add_job(
         &self,
         request: Request<proto::AddJobRequest>,
     ) -> TonicResponse<proto::AddJobResponse> {
-        run_handler(async {
+        async {
             let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
             with_client_async!(self, |client| { client.run_job(spec).await })
                 .await
@@ -242,27 +242,29 @@ impl ClientProcess for Handler {
                     client_job_id: cjid.into_proto_buf(),
                     result: Some(res.into_proto_buf()),
                 })
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn wait_for_outstanding_jobs(
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
-        run_handler(async {
+        async {
             let client = self.take_client().await?;
             client.wait_for_outstanding_jobs().await?;
             Ok(proto::Void {})
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn get_job_state_counts(
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
-        run_handler(async {
+        async {
             Ok(proto::GetJobStateCountsResponse {
                 counts: Some(
                     with_client_async!(self, |client| { client.get_job_state_counts().await })
@@ -270,15 +272,16 @@ impl ClientProcess for Handler {
                         .into_proto_buf(),
                 ),
             })
-        })
+        }
         .await
+        .map_to_tonic()
     }
 
     async fn get_artifact_upload_progress(
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
-        run_handler(async {
+        async {
             Ok(proto::GetArtifactUploadProgressResponse {
                 progress: with_client_async!(self, |client| {
                     Ok(client.get_artifact_upload_progress().await)
@@ -286,8 +289,9 @@ impl ClientProcess for Handler {
                 .await?
                 .into_proto_buf(),
             })
-        })
+        }
         .await
+        .map_to_tonic()
     }
 }
 
