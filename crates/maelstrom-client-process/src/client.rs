@@ -3,7 +3,7 @@ mod state_machine;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
-    dispatcher, local_broker, SocketReader,
+    dispatcher, local_broker,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
@@ -391,12 +391,13 @@ impl Client {
             }
 
             // Connect to the broker and send it a Hello message.
-            let (broker_socket_reader, mut broker_socket_writer) =
+            let (broker_socket_read_half, mut broker_socket_write_half) =
                 TcpStream::connect(broker_addr.inner())
                     .await
                     .with_context(|| format!("failed to connect to {broker_addr}"))?
                     .into_split();
-            net::write_message_to_async_socket(&mut broker_socket_writer, Hello::Client).await?;
+            net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client)
+                .await?;
             debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
             // Create standalone sub-components.
@@ -407,23 +408,36 @@ impl Client {
             // Create all of the channels our tasks are going to need to communicate with each
             // other.
             let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
-            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+            let (broker_socket_writer_sender, broker_socket_writer_receiver) =
+                mpsc::unbounded_channel();
             let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
             let (local_broker_sender, local_broker_receiver) = local_broker::channel();
 
             // Start all of the tasks in a JoinSet.
             let mut join_set = JoinSet::new();
             let log_clone = log.clone();
-            dispatcher::start_task(
-                &mut join_set,
-                dispatcher_receiver,
+            let log_clone2 = log.clone();
+            join_set.spawn(net::async_socket_reader(
+                broker_socket_read_half,
                 local_broker_sender.clone(),
-            );
+                move |msg| {
+                    debug!(log_clone, "received broker message"; "msg" => ?msg);
+                    local_broker::Message::Broker(msg)
+                },
+            ));
+            join_set.spawn(net::async_socket_writer(
+                broker_socket_writer_receiver,
+                broker_socket_write_half,
+                move |msg| {
+                    debug!(log_clone2, "sending broker message"; "msg" => ?msg);
+                },
+            ));
+            dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
             local_broker::start_task(
                 &mut join_set,
                 local_broker_receiver,
                 dispatcher_sender.clone(),
-                broker_sender,
+                broker_socket_writer_sender,
                 artifact_pusher_sender,
             );
             artifact_pusher::start_task(
@@ -432,15 +446,6 @@ impl Client {
                 broker_addr,
                 upload_tracker.clone(),
             );
-            let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
-            join_set.spawn(async move { while socket_reader.process_one().await {} });
-            join_set.spawn(net::async_socket_writer(
-                broker_receiver,
-                broker_socket_writer,
-                move |msg| {
-                    debug!(log_clone, "sending broker message"; "msg" => ?msg);
-                },
-            ));
 
             Ok((
                 ClientState {
