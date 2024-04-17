@@ -1,4 +1,4 @@
-![MaelstromLogo](https://github.com/maelstrom-software/maelstrom/assets/146376379/c95eb097-92b2-4895-a87c-c1d6e1ab5f90)
+![Maelstrom Logo (Dark Compatible)](https://github.com/maelstrom-software/maelstrom/assets/146376379/7b46a1c1-e67f-412a-b618-42f7e2c25139)
 
 [![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
 
