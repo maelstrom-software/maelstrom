@@ -28,7 +28,7 @@ use maelstrom_util::{
     net,
 };
 use sha2::{Digest as _, Sha256};
-use slog::{debug, Drain as _};
+use slog::{debug, Drain as _, Logger};
 use state_machine::StateMachine;
 use std::{
     collections::{HashMap, HashSet},
@@ -103,18 +103,18 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
-pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<slog::Logger> {
+pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
     let log_file = fs
         .open_or_create_file(cache_dir.join("cargo-maelstrom.log"))
         .await?;
     let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
-    Ok(slog::Logger::root(drain, slog::o!()))
+    Ok(Logger::root(drain, slog::o!()))
 }
 
 pub struct Client {
-    state_machine: Arc<StateMachine<Option<slog::Logger>, ClientState>>,
+    state_machine: Arc<StateMachine<Option<Logger>, ClientState>>,
 }
 
 struct ClientState {
@@ -123,7 +123,7 @@ struct ClientState {
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
     container_image_depot: ContainerImageDepot,
-    log: slog::Logger,
+    log: Logger,
     locked: Mutex<ClientStateLocked>,
 }
 
@@ -256,7 +256,7 @@ impl ClientState {
     }
 
     async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
-        slog::debug!(self.log, "add_artifact"; "path" => ?path);
+        debug!(self.log, "add_artifact"; "path" => ?path);
 
         let fs = async_fs::Fs::new();
         let path = fs.canonicalize(path).await?;
@@ -281,7 +281,7 @@ impl ClientState {
     }
 
     async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        slog::debug!(self.log, "add_layer"; "layer" => ?layer);
+        debug!(self.log, "add_layer"; "layer" => ?layer);
 
         if let Some(l) = self.locked.lock().await.cached_layers.get(&layer) {
             return Ok(l.clone());
@@ -352,16 +352,16 @@ impl ClientState {
 
 pub async fn start_tasks(
     broker_addr: BrokerAddr,
-    log: slog::Logger,
+    log: Logger,
 ) -> Result<(dispatcher::Sender, ArtifactUploadTracker, JoinSet<()>)> {
-    slog::debug!(log, "client starting");
+    debug!(log, "client starting");
 
     let mut broker_socket = TcpStream::connect(broker_addr.inner())
         .await
         .with_context(|| format!("failed to connect to {broker_addr}"))?;
     net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
 
-    slog::debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
+    debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
     let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
     let (local_broker_sender, local_broker_receiver) = local_broker::channel();
@@ -403,7 +403,7 @@ pub async fn start_tasks(
 }
 
 impl Client {
-    pub fn new(log: Option<slog::Logger>) -> Self {
+    pub fn new(log: Option<Logger>) -> Self {
         Self {
             state_machine: Arc::new(StateMachine::new(log)),
         }
@@ -418,7 +418,7 @@ impl Client {
         let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
         async fn try_to_start(
-            log: Option<slog::Logger>,
+            log: Option<Logger>,
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
@@ -490,7 +490,7 @@ impl Client {
 
     pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         let state = self.state_machine.active()?;
-        slog::debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
+        debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
         state
             .container_image_depot
             .get_container_image(name, tag, NullProgressTracker)
@@ -500,7 +500,7 @@ impl Client {
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        slog::debug!(state.log, "run_job"; "spec" => ?spec);
+        debug!(state.log, "run_job"; "spec" => ?spec);
         state
             .dispatcher_sender
             .send(dispatcher::Message::AddJob(spec, sender))?;
@@ -510,7 +510,7 @@ impl Client {
     pub async fn wait_for_outstanding_jobs(&self) -> Result<()> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        slog::debug!(state.log, "wait_for_outstanding_jobs");
+        debug!(state.log, "wait_for_outstanding_jobs");
         state
             .dispatcher_sender
             .send(dispatcher::Message::NotifyWhenAllJobsComplete(sender))?;
