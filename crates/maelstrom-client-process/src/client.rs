@@ -113,24 +113,34 @@ pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<slog::Lo
     Ok(slog::Logger::root(drain, slog::o!()))
 }
 
-struct ClientStateStarted {
+pub struct Client {
+    state_machine: Arc<StateMachine<Option<slog::Logger>, ClientState>>,
+}
+
+struct ClientState {
     dispatcher_sender: dispatcher::Sender,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
     container_image_depot: ContainerImageDepot,
     log: slog::Logger,
-    locked: Mutex<ClientStateStartedLocked>,
+    locked: Mutex<ClientStateLocked>,
+}
+
+struct ClientStateLocked {
+    digest_repo: DigestRepository,
+    processed_artifact_paths: HashSet<PathBuf>,
+    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
 }
 
 #[async_trait]
-impl<'a> maelstrom_util::manifest::DataUpload for &'a ClientStateStarted {
+impl<'a> maelstrom_util::manifest::DataUpload for &'a ClientState {
     async fn upload(&mut self, path: &Path) -> Result<Sha256Digest> {
         self.add_artifact(path).await
     }
 }
 
-impl ClientStateStarted {
+impl ClientState {
     fn build_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(MANIFEST_DIR)
@@ -340,16 +350,6 @@ impl ClientStateStarted {
     }
 }
 
-struct ClientStateStartedLocked {
-    digest_repo: DigestRepository,
-    processed_artifact_paths: HashSet<PathBuf>,
-    cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
-}
-
-pub struct Client {
-    keeper: Arc<StateMachine<Option<slog::Logger>, ClientStateStarted>>,
-}
-
 pub async fn start_tasks(
     broker_addr: BrokerAddr,
     log: slog::Logger,
@@ -405,7 +405,7 @@ pub async fn start_tasks(
 impl Client {
     pub fn new(log: Option<slog::Logger>) -> Self {
         Self {
-            keeper: Arc::new(StateMachine::new(log)),
+            state_machine: Arc::new(StateMachine::new(log)),
         }
     }
 
@@ -415,14 +415,14 @@ impl Client {
         project_dir: PathBuf,
         cache_dir: PathBuf,
     ) -> Result<()> {
-        let (log, activation_handle) = self.keeper.try_to_begin_activation()?;
+        let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
         async fn try_to_start(
             log: Option<slog::Logger>,
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
-        ) -> Result<(ClientStateStarted, JoinSet<()>)> {
+        ) -> Result<(ClientState, JoinSet<()>)> {
             let fs = async_fs::Fs::new();
             for d in [
                 crate::MANIFEST_DIR,
@@ -444,14 +444,14 @@ impl Client {
                 start_tasks(broker_addr, log.clone()).await?;
 
             Ok((
-                ClientStateStarted {
+                ClientState {
                     dispatcher_sender,
                     cache_dir,
                     project_dir,
                     upload_tracker,
                     container_image_depot,
                     log,
-                    locked: Mutex::new(ClientStateStartedLocked {
+                    locked: Mutex::new(ClientStateLocked {
                         digest_repo,
                         processed_artifact_paths: HashSet::default(),
                         cached_layers: HashMap::new(),
@@ -464,7 +464,7 @@ impl Client {
         match try_to_start(log, broker_addr, project_dir, cache_dir).await {
             Ok((state, mut join_set)) => {
                 activation_handle.activate(state);
-                let keeper_clone = self.keeper.clone();
+                let keeper_clone = self.state_machine.clone();
                 task::spawn(async move {
                     join_set.join_next().await;
                     keeper_clone
@@ -481,15 +481,15 @@ impl Client {
     }
 
     pub async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
-        self.keeper.active()?.add_artifact(path).await
+        self.state_machine.active()?.add_artifact(path).await
     }
 
     pub async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        self.keeper.active()?.add_layer(layer).await
+        self.state_machine.active()?.add_layer(layer).await
     }
 
     pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        let state = self.keeper.active()?;
+        let state = self.state_machine.active()?;
         slog::debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
         state
             .container_image_depot
@@ -498,7 +498,7 @@ impl Client {
     }
 
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
-        let (state, watcher) = self.keeper.active_with_watcher()?;
+        let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slog::debug!(state.log, "run_job"; "spec" => ?spec);
         state
@@ -508,7 +508,7 @@ impl Client {
     }
 
     pub async fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        let (state, watcher) = self.keeper.active_with_watcher()?;
+        let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slog::debug!(state.log, "wait_for_outstanding_jobs");
         state
@@ -518,7 +518,7 @@ impl Client {
     }
 
     pub async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
-        let (state, watcher) = self.keeper.active_with_watcher()?;
+        let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         state
             .dispatcher_sender
@@ -528,7 +528,7 @@ impl Client {
 
     pub async fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
         Ok(self
-            .keeper
+            .state_machine
             .active()?
             .upload_tracker
             .get_artifact_upload_progress()
