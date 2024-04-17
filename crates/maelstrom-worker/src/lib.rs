@@ -421,22 +421,20 @@ pub async fn main(config: Config, log: Logger) -> Result<()> {
 
     let log_clone = log.clone();
     let dispatcher_sender_clone = dispatcher_sender.clone();
-    join_set.spawn(net::async_socket_reader(
-        read_stream,
-        dispatcher_sender_clone,
-        move |msg| {
+    join_set.spawn(async move {
+        let _ = net::async_socket_reader(read_stream, dispatcher_sender_clone, move |msg| {
             debug!(log_clone, "received broker message"; "msg" => ?msg);
             Message::Broker(msg)
-        },
-    ));
+        })
+        .await;
+    });
     let log_clone = log.clone();
-    join_set.spawn(net::async_socket_writer(
-        broker_socket_receiver,
-        write_stream,
-        move |msg| {
+    join_set.spawn(async move {
+        let _ = net::async_socket_writer(broker_socket_receiver, write_stream, move |msg| {
             debug!(log_clone, "sending broker message"; "msg" => ?msg);
-        },
-    ));
+        })
+        .await;
+    });
     join_set.spawn(dispatcher_main(
         config,
         dispatcher_receiver,

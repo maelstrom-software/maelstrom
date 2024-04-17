@@ -115,13 +115,15 @@ async fn unassigned_connection_main(
                 id,
                 SchedulerMessage::ClientConnected,
                 SchedulerMessage::ClientDisconnected,
-                |scheduler_sender| {
-                    net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                |scheduler_sender| async move {
+                    let _ = net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
                         SchedulerMessage::FromClient(id, msg)
                     })
+                    .await;
                 },
-                |scheduler_receiver| {
-                    net::async_socket_writer(scheduler_receiver, write_stream, |_| {})
+                |scheduler_receiver| async move {
+                    let _ =
+                        net::async_socket_writer(scheduler_receiver, write_stream, |_| {}).await;
                 },
             )
             .await;
@@ -140,16 +142,19 @@ async fn unassigned_connection_main(
                 id,
                 |id, sender| SchedulerMessage::WorkerConnected(id, slots as usize, sender),
                 SchedulerMessage::WorkerDisconnected,
-                |scheduler_sender| {
-                    net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                |scheduler_sender| async move {
+                    let _ = net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
                         debug!(log_clone, "received worker message"; "msg" => ?msg);
                         SchedulerMessage::FromWorker(id, msg)
                     })
+                    .await;
                 },
-                |scheduler_receiver| {
-                    net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
-                        debug!(log_clone2, "sending worker message"; "msg" => ?msg);
-                    })
+                |scheduler_receiver| async move {
+                    let _ =
+                        net::async_socket_writer(scheduler_receiver, write_stream, move |msg| {
+                            debug!(log_clone2, "sending worker message"; "msg" => ?msg);
+                        })
+                        .await;
                 },
             )
             .await;

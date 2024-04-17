@@ -69,18 +69,15 @@ pub async fn async_socket_writer<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut socket: (impl AsyncWrite + Unpin),
     mut log: impl FnMut(&MessageT),
-) where
+) -> Result<()>
+where
     MessageT: Serialize,
 {
     while let Some(msg) = channel.recv().await {
         log(&msg);
-        if write_message_to_async_socket(&mut socket, msg)
-            .await
-            .is_err()
-        {
-            break;
-        }
+        write_message_to_async_socket(&mut socket, msg).await?;
     }
+    Ok(())
 }
 
 /// Loop, reading messages from a socket and writing them to an mpsc channel. The `transform`
@@ -90,12 +87,14 @@ pub async fn async_socket_reader<MessageT, TransformedT>(
     mut socket: (impl AsyncRead + Unpin),
     channel: UnboundedSender<TransformedT>,
     transform: impl Fn(MessageT) -> TransformedT,
-) where
+) -> Result<()>
+where
     MessageT: DeserializeOwned,
 {
-    while let Ok(msg) = read_message_from_async_socket(&mut socket).await {
+    loop {
+        let msg = read_message_from_async_socket(&mut socket).await?;
         if channel.send(transform(msg)).is_err() {
-            break;
+            return Ok(());
         }
     }
 }

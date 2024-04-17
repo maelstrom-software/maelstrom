@@ -413,21 +413,28 @@ impl Client {
             let mut join_set = JoinSet::new();
             let log_clone = log.clone();
             let log_clone2 = log.clone();
-            join_set.spawn(net::async_socket_reader(
-                broker_socket_read_half,
-                local_broker_sender.clone(),
-                move |msg| {
-                    debug!(log_clone, "received broker message"; "msg" => ?msg);
-                    local_broker::Message::Broker(msg)
-                },
-            ));
-            join_set.spawn(net::async_socket_writer(
-                broker_socket_writer_receiver,
-                broker_socket_write_half,
-                move |msg| {
-                    debug!(log_clone2, "sending broker message"; "msg" => ?msg);
-                },
-            ));
+            let local_broker_sender_clone = local_broker_sender.clone();
+            join_set.spawn(async move {
+                let _ = net::async_socket_reader(
+                    broker_socket_read_half,
+                    local_broker_sender_clone,
+                    move |msg| {
+                        debug!(log_clone, "received broker message"; "msg" => ?msg);
+                        local_broker::Message::Broker(msg)
+                    },
+                )
+                .await;
+            });
+            join_set.spawn(async move {
+                let _ = net::async_socket_writer(
+                    broker_socket_writer_receiver,
+                    broker_socket_write_half,
+                    move |msg| {
+                        debug!(log_clone2, "sending broker message"; "msg" => ?msg);
+                    },
+                )
+                .await;
+            });
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
             local_broker::start_task(
                 &mut join_set,
