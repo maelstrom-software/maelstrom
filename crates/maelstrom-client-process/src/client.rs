@@ -103,16 +103,6 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
-pub async fn file_logger(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
-    let log_file = fs
-        .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
-        .await?;
-    let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    Ok(Logger::root(drain, slog::o!()))
-}
-
 pub struct Client {
     state_machine: Arc<StateMachine<Option<Logger>, ClientState>>,
 }
@@ -350,58 +340,6 @@ impl ClientState {
     }
 }
 
-pub async fn start_tasks(
-    broker_addr: BrokerAddr,
-    log: Logger,
-) -> Result<(dispatcher::Sender, ArtifactUploadTracker, JoinSet<()>)> {
-    debug!(log, "client starting");
-
-    let mut broker_socket = TcpStream::connect(broker_addr.inner())
-        .await
-        .with_context(|| format!("failed to connect to {broker_addr}"))?;
-    net::write_message_to_async_socket(&mut broker_socket, Hello::Client).await?;
-
-    debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
-
-    let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
-    let (local_broker_sender, local_broker_receiver) = local_broker::channel();
-    let upload_tracker = ArtifactUploadTracker::default();
-    let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
-
-    let (broker_socket_reader, broker_socket_writer) = broker_socket.into_split();
-    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-    let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender.clone());
-
-    let mut join_set = JoinSet::new();
-
-    dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
-    local_broker::start_task(
-        &mut join_set,
-        local_broker_receiver,
-        dispatcher_sender.clone(),
-        broker_sender,
-        artifact_pusher_sender,
-    );
-    artifact_pusher::start_task(
-        &mut join_set,
-        artifact_pusher_receiver,
-        broker_addr,
-        upload_tracker.clone(),
-    );
-
-    join_set.spawn(async move { while socket_reader.process_one().await {} });
-
-    join_set.spawn(net::async_socket_writer(
-        broker_receiver,
-        broker_socket_writer,
-        move |msg| {
-            debug!(log, "sending broker message"; "msg" => ?msg);
-        },
-    ));
-
-    Ok((dispatcher_sender, upload_tracker, join_set))
-}
-
 impl Client {
     pub fn new(log: Option<Logger>) -> Self {
         Self {
@@ -415,7 +353,15 @@ impl Client {
         project_dir: PathBuf,
         cache_dir: PathBuf,
     ) -> Result<()> {
-        let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
+        async fn file_logger(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
+            let log_file = fs
+                .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
+                .await?;
+            let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
+            let drain = slog_term::FullFormat::new(decorator).build().fuse();
+            let drain = slog_async::Async::new(drain).build().fuse();
+            Ok(Logger::root(drain, slog::o!()))
+        }
 
         async fn try_to_start(
             log: Option<Logger>,
@@ -424,6 +370,18 @@ impl Client {
             cache_dir: PathBuf,
         ) -> Result<(ClientState, JoinSet<()>)> {
             let fs = async_fs::Fs::new();
+
+            // Ensure we have a logger. If this program was started by a user on the shell, then a
+            // logger will have been provided. Otherwise, open a log file in the cache directory
+            // and log there.
+            let log = match log {
+                Some(log) => log,
+                None => file_logger(&fs, cache_dir.as_ref()).await?,
+            };
+            debug!(log, "client starting");
+
+            // Ensure all of the appropriate subdirectories have been created in the cache
+            // directory.
             for d in [
                 crate::MANIFEST_DIR,
                 crate::STUB_MANIFEST_DIR,
@@ -432,16 +390,57 @@ impl Client {
                 fs.create_dir_all(cache_dir.join(d)).await?;
             }
 
-            let log = match log {
-                Some(log) => log.clone(),
-                None => file_logger(&fs, cache_dir.as_ref()).await?,
-            };
+            // Connect to the broker and send it a Hello message.
+            let (broker_socket_reader, mut broker_socket_writer) =
+                TcpStream::connect(broker_addr.inner())
+                    .await
+                    .with_context(|| format!("failed to connect to {broker_addr}"))?
+                    .into_split();
+            net::write_message_to_async_socket(&mut broker_socket_writer, Hello::Client).await?;
+            debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
+            // Create standalone sub-components.
             let container_image_depot = ContainerImageDepot::new(&project_dir)?;
             let digest_repo = DigestRepository::new(&cache_dir);
+            let upload_tracker = ArtifactUploadTracker::default();
 
-            let (dispatcher_sender, upload_tracker, join_set) =
-                start_tasks(broker_addr, log.clone()).await?;
+            // Create all of the channels our tasks are going to need to communicate with each
+            // other.
+            let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
+            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+            let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
+            let (local_broker_sender, local_broker_receiver) = local_broker::channel();
+
+            // Start all of the tasks in a JoinSet.
+            let mut join_set = JoinSet::new();
+            let log_clone = log.clone();
+            dispatcher::start_task(
+                &mut join_set,
+                dispatcher_receiver,
+                local_broker_sender.clone(),
+            );
+            local_broker::start_task(
+                &mut join_set,
+                local_broker_receiver,
+                dispatcher_sender.clone(),
+                broker_sender,
+                artifact_pusher_sender,
+            );
+            artifact_pusher::start_task(
+                &mut join_set,
+                artifact_pusher_receiver,
+                broker_addr,
+                upload_tracker.clone(),
+            );
+            let mut socket_reader = SocketReader::new(broker_socket_reader, local_broker_sender);
+            join_set.spawn(async move { while socket_reader.process_one().await {} });
+            join_set.spawn(net::async_socket_writer(
+                broker_receiver,
+                broker_socket_writer,
+                move |msg| {
+                    debug!(log_clone, "sending broker message"; "msg" => ?msg);
+                },
+            ));
 
             Ok((
                 ClientState {
@@ -461,13 +460,15 @@ impl Client {
             ))
         }
 
+        let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
+
         match try_to_start(log, broker_addr, project_dir, cache_dir).await {
             Ok((state, mut join_set)) => {
                 activation_handle.activate(state);
-                let keeper_clone = self.state_machine.clone();
+                let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
                     join_set.join_next().await;
-                    keeper_clone
+                    state_machine_clone
                         .fail("client exited prematurely".to_string())
                         .assert_is_true();
                 });
