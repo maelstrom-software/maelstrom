@@ -2,11 +2,10 @@
 
 [![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
 
-Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners.
+Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners. You should use Maelstrom to run your tests because:
 
 * It's easy. Maelstrom functions as a drop-in replacement for cargo-test, so in most cases, it just works.
-* It's reliable. Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing test errors caused by inter-test dependencies or by
-hidden test-environment dependencies.
+* It's reliable. Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing test errors caused by inter-test or test-environment dependencies.
 * It's scalable. Add more worker machines to linearly improve test throughput.
 * It works everywhere. Maelstrom workers are rootless containers so you can run them securely, anywhere.
 * It's clean. Maelstrom has a home-grown container implementation (not relying on docker or RunC), optimized to be low-overhead and start quickly.
