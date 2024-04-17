@@ -1,9 +1,12 @@
+mod state_machine;
+
+use state_machine::ClientStateKeeper;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
     dispatcher, local_broker, SocketReader,
 };
-use anyhow::{anyhow, bail, Context as _, Error, Result};
+use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use futures::StreamExt;
 use itertools::Itertools as _;
@@ -27,7 +30,6 @@ use maelstrom_util::{
 use sha2::{Digest as _, Sha256};
 use slog::{debug, Drain as _};
 use std::{
-    cell::UnsafeCell,
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
@@ -107,14 +109,6 @@ pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<slog::Lo
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
     let drain = slog_async::Async::new(drain).build().fuse();
     Ok(slog::Logger::root(drain, slog::o!()))
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum ClientState {
-    NotYetStarted,
-    Starting,
-    Started,
-    Failed,
 }
 
 struct ClientStateStarted {
@@ -351,7 +345,7 @@ struct ClientStateStartedLocked {
 }
 
 pub struct Client {
-    keeper: ClientStateKeeper,
+    keeper: ClientStateKeeper<ClientStateStarted>,
 }
 
 pub async fn start_tasks(
@@ -408,116 +402,6 @@ pub async fn start_tasks(
     });
 
     Ok((dispatcher_sender, upload_tracker))
-}
-
-struct ClientStateKeeper {
-    not_yet_started: UnsafeCell<Option<slog::Logger>>,
-    started: UnsafeCell<Option<ClientStateStarted>>,
-    failed: UnsafeCell<Option<String>>,
-    sender: tokio::sync::watch::Sender<ClientState>,
-}
-
-unsafe impl Sync for ClientStateKeeper {}
-
-impl ClientStateKeeper {
-    fn new(log: Option<slog::Logger>) -> Self {
-        Self {
-            not_yet_started: UnsafeCell::new(log),
-            started: UnsafeCell::new(None),
-            failed: UnsafeCell::new(None),
-            sender: tokio::sync::watch::Sender::new(ClientState::NotYetStarted),
-        }
-    }
-
-    fn try_to_move_to_starting(&self) -> Result<Option<slog::Logger>> {
-        if !self.sender.send_if_modified(|state| {
-            if *state == ClientState::NotYetStarted {
-                *state = ClientState::Starting;
-                true
-            } else {
-                false
-            }
-        }) {
-            bail!("client already started");
-        }
-        let log_ptr = self.not_yet_started.get();
-        Ok(unsafe { &mut *log_ptr }.take())
-    }
-
-    fn move_to_started(&self, state: ClientStateStarted) {
-        let ptr = self.started.get();
-        unsafe { *ptr = Some(state) };
-        let old = self.sender.send_replace(ClientState::Started);
-        assert_eq!(old, ClientState::Starting);
-    }
-
-    fn fail_to_start(&self, err: String) {
-        let ptr = self.failed.get();
-        unsafe { *ptr = Some(err) };
-        let old = self.sender.send_replace(ClientState::Failed);
-        assert_eq!(old, ClientState::Starting);
-    }
-
-    fn started(&self) -> Result<&ClientStateStarted> {
-        match *self.sender.borrow() {
-            ClientState::NotYetStarted | ClientState::Starting => {
-                Err(anyhow!("client not yet started"))
-            }
-            ClientState::Started => {
-                let started_ptr = self.started.get();
-                let state = unsafe { &*started_ptr }.as_ref().unwrap();
-                Ok(state)
-            }
-            ClientState::Failed => Err(self._done_err()),
-        }
-    }
-
-    fn started_with_watcher(&self) -> Result<(&ClientStateStarted, StateWatcher<'_>)> {
-        let receiver = self.sender.subscribe();
-        let idx = *receiver.borrow();
-        match idx {
-            ClientState::NotYetStarted | ClientState::Starting => {
-                Err(anyhow!("client not yet started"))
-            }
-            ClientState::Started => {
-                let started_ptr = self.started.get();
-                let state = unsafe { &*started_ptr }.as_ref().unwrap();
-                Ok((
-                    state,
-                    StateWatcher {
-                        keeper: self,
-                        receiver,
-                    },
-                ))
-            }
-            ClientState::Failed => Err(self._done_err()),
-        }
-    }
-
-    fn _done_err(&self) -> Error {
-        let done_ptr = self.failed.get();
-        let err = unsafe { &*done_ptr }.as_ref().unwrap();
-        anyhow!("client failed with error: {err}")
-    }
-}
-
-struct StateWatcher<'a> {
-    keeper: &'a ClientStateKeeper,
-    receiver: tokio::sync::watch::Receiver<ClientState>,
-}
-
-impl<'a> StateWatcher<'a> {
-    async fn recv<T>(mut self, receiver: tokio::sync::oneshot::Receiver<T>) -> Result<T> {
-        tokio::select! {
-            Ok(result) = receiver => {
-                Ok(result)
-            }
-            _ = self.receiver.changed() => {
-                assert_eq!(*self.receiver.borrow(), ClientState::Failed);
-                Err(self.keeper._done_err())
-            }
-        }
-    }
 }
 
 impl Client {
