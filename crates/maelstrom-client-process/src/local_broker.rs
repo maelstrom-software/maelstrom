@@ -1,4 +1,5 @@
 use crate::{artifact_pusher, dispatcher};
+use anyhow::Result;
 use maelstrom_base::{
     proto::{BrokerToClient, ClientToBroker},
     stats::JobStateCounts,
@@ -115,7 +116,7 @@ pub fn channel() -> (Sender, Receiver) {
 }
 
 pub fn start_task(
-    join_set: &mut JoinSet<()>,
+    join_set: &mut JoinSet<Result<()>>,
     receiver: Receiver,
     dispatcher_sender: dispatcher::Sender,
     broker_sender: UnboundedSender<ClientToBroker>,
@@ -127,7 +128,7 @@ pub fn start_task(
         artifact_pusher_sender,
     };
     let mut local_broker = LocalBroker::new(adapter);
-    join_set.spawn(async move {
-        let _ = sync::channel_reader(receiver, move |msg| local_broker.receive_message(msg)).await;
-    });
+    join_set.spawn(sync::channel_reader(receiver, move |msg| {
+        local_broker.receive_message(msg)
+    }));
 }

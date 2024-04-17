@@ -368,7 +368,7 @@ impl Client {
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
-        ) -> Result<(ClientState, JoinSet<()>)> {
+        ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
 
             // Ensure we have a logger. If this program was started by a user on the shell, then a
@@ -415,7 +415,7 @@ impl Client {
             let log_clone2 = log.clone();
             let local_broker_sender_clone = local_broker_sender.clone();
             join_set.spawn(async move {
-                let _ = net::async_socket_reader(
+                net::async_socket_reader(
                     broker_socket_read_half,
                     local_broker_sender_clone,
                     move |msg| {
@@ -423,17 +423,19 @@ impl Client {
                         local_broker::Message::Broker(msg)
                     },
                 )
-                .await;
+                .await
+                .with_context(|| "Reading from broker")
             });
             join_set.spawn(async move {
-                let _ = net::async_socket_writer(
+                net::async_socket_writer(
                     broker_socket_writer_receiver,
                     broker_socket_write_half,
                     move |msg| {
                         debug!(log_clone2, "sending broker message"; "msg" => ?msg);
                     },
                 )
-                .await;
+                .await
+                .with_context(|| "Writing to broker")
             });
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
             local_broker::start_task(
@@ -475,9 +477,16 @@ impl Client {
                 activation_handle.activate(state);
                 let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
-                    join_set.join_next().await;
+                    while let Some(res) = join_set.join_next().await {
+                        // We ignore Ok(_) because we expect to hear about the real error later.
+                        if let Err(err) = res {
+                            state_machine_clone.fail(err.to_string()).assert_is_true();
+                            return;
+                        }
+                    }
+                    // Somehow we didn't get a real error. That's not good!
                     state_machine_clone
-                        .fail("client exited prematurely".to_string())
+                        .fail("client unexpectedly exited prematurely".to_string())
                         .assert_is_true();
                 });
                 Ok(())

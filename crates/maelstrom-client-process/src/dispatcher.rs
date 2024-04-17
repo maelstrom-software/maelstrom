@@ -1,4 +1,5 @@
 use crate::local_broker;
+use anyhow::Result;
 use maelstrom_base::{stats::JobStateCounts, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest};
 use maelstrom_util::{ext::OptionExt as _, sync};
 use std::{
@@ -132,7 +133,7 @@ pub fn channel() -> (Sender, Receiver) {
 }
 
 pub fn start_task(
-    join_set: &mut JoinSet<()>,
+    join_set: &mut JoinSet<Result<()>>,
     receiver: Receiver,
     local_broker_sender: local_broker::Sender,
 ) {
@@ -140,7 +141,7 @@ pub fn start_task(
         local_broker_sender,
     };
     let mut dispatcher = Dispatcher::new(adapter);
-    join_set.spawn(async move {
-        let _ = sync::channel_reader(receiver, move |msg| dispatcher.receive_message(msg)).await;
-    });
+    join_set.spawn(sync::channel_reader(receiver, move |msg| {
+        dispatcher.receive_message(msg)
+    }));
 }

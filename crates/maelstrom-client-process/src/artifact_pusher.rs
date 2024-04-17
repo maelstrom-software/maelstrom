@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
     Sha256Digest,
@@ -139,7 +139,7 @@ pub fn channel() -> (Sender, Receiver) {
 }
 
 pub fn start_task(
-    join_set: &mut JoinSet<()>,
+    join_set: &mut JoinSet<Result<()>>,
     mut receiver: Receiver,
     broker_addr: BrokerAddr,
     upload_tracker: ArtifactUploadTracker,
@@ -155,18 +155,20 @@ pub fn start_task(
         let mut join_set = JoinSet::new();
         loop {
             tokio::select! {
-                Some(_) = join_set.join_next() => {},
+                Some(res) = join_set.join_next() => {
+                    res.unwrap()?; // We don't expect JoinErrors.
+                },
                 res = receiver.recv() => {
                     let Some(msg) = res else { break; };
                     let upload_tracker = upload_tracker.clone();
 
                     join_set.spawn(async move {
-                        // N.B. We are ignoring this Result<_>
-                        let _ = push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
-                            .await;
+                        push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
+                            .await.with_context(|| "Pushing artifact")
                     });
                 }
             }
         }
+        Ok(())
     });
 }
