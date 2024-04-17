@@ -59,19 +59,11 @@ fn print_error(label: &str, res: Result<()>) {
     }
 }
 
-enum ClientBgHandle {
-    Pid(maelstrom_linux::Pid),
-    Thread(Option<thread::JoinHandle<Result<()>>>),
-}
+struct ClientBgHandle(maelstrom_linux::Pid);
 
 impl ClientBgHandle {
     fn wait(&mut self) -> Result<()> {
-        match self {
-            Self::Pid(pid) => {
-                maelstrom_linux::waitpid(*pid).map_err(|e| anyhow!("waitpid failed: {e}"))?;
-            }
-            Self::Thread(handle) => print_error("process", handle.take().unwrap().join().unwrap()),
-        }
+        maelstrom_linux::waitpid(self.0).map_err(|e| anyhow!("waitpid failed: {e}"))?;
         Ok(())
     }
 }
@@ -86,23 +78,13 @@ impl ClientBgProcess {
         let (sock1, sock2) = UnixStream::pair()?;
         if let Some(pid) = maelstrom_linux::fork().map_err(|e| anyhow!("fork failed: {e}"))? {
             Ok(Self {
-                handle: ClientBgHandle::Pid(pid),
+                handle: ClientBgHandle(pid),
                 sock: Some(sock1),
             })
         } else {
             maelstrom_client_process::client_process_main(sock2, None).unwrap();
             std::process::exit(0)
         }
-    }
-
-    pub fn new_from_thread() -> Result<Self> {
-        let (sock1, sock2) = UnixStream::pair()?;
-        let handle =
-            thread::spawn(move || maelstrom_client_process::client_process_main(sock1, None));
-        Ok(Self {
-            handle: ClientBgHandle::Thread(Some(handle)),
-            sock: Some(sock2),
-        })
     }
 
     fn take_socket(&mut self) -> UnixStream {
