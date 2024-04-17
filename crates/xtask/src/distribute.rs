@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use clap::Parser;
 use elf::endian::AnyEndian;
 use elf::parse::ParseError;
@@ -143,23 +143,123 @@ fn remove_glibc_version_from_version_r(path: &Path, version: &str) -> Result<()>
 }
 
 fn patchelf(args: &[&str], path: &Path) -> Result<()> {
-    Command::new("patchelf").args(args).arg(path).output()?;
+    if !Command::new("patchelf")
+        .args(args)
+        .arg(path)
+        .status()?
+        .success()
+    {
+        bail!("pathelf failed");
+    }
     Ok(())
 }
 
+fn patch_binary(path: &Path) -> Result<()> {
+    patchelf(&["--set-interpreter", "/lib64/ld-linux-x86-64.so.2"], path)?;
+    patchelf(&["--remove-rpath"], path)?;
+    patchelf(&["--clear-symbol-version", "fmod"], path)?;
+    remove_glibc_version_from_version_r(path, "GLIBC_2.38")?;
+    Ok(())
+}
+
+/// Package and upload artifacts to github.
 #[derive(Debug, Parser)]
 pub struct CliArgs {
-    binary_path: PathBuf,
+    /// Version to add artifacts to
+    version: String,
+    /// Just print the upload command instead of actually uploading
+    #[clap(long)]
+    dry_run: bool,
+}
+
+const ARTIFACT_NAMES: [&str; 4] = [
+    "cargo-maelstrom",
+    "maelstrom-worker",
+    "maelstrom-broker",
+    "maelstrom-run",
+];
+
+fn tar_gz(binary: &Path, target: &Path) -> Result<()> {
+    let mut cmd = Command::new("tar");
+    cmd.arg("cfz").arg(target);
+    if let Some(parent) = binary.parent() {
+        cmd.arg("-C").arg(parent);
+    }
+    cmd.arg(binary.file_name().unwrap());
+    if !cmd.status()?.success() {
+        bail!("tar cfz failed");
+    }
+    Ok(())
+}
+
+fn get_binary_paths() -> Result<Vec<PathBuf>> {
+    let mut paths = vec![];
+    for a in ARTIFACT_NAMES {
+        let binary_path = PathBuf::from("target/release").join(a);
+        if !binary_path.exists() {
+            bail!("{} does not exist", binary_path.display());
+        }
+        paths.push(binary_path);
+    }
+    Ok(paths)
+}
+
+fn package_artifacts(temp_dir: &tempfile::TempDir, binaries: &[PathBuf]) -> Result<Vec<PathBuf>> {
+    let mut packaged = vec![];
+    for binary_path in binaries {
+        let new_binary = temp_dir.path().join(binary_path.file_name().unwrap());
+        std::fs::copy(binary_path, &new_binary)?;
+        patch_binary(&new_binary)?;
+        let tar_gz_path = new_binary.with_extension("tar.gz");
+        tar_gz(&new_binary, &tar_gz_path)?;
+        packaged.push(tar_gz_path)
+    }
+    Ok(packaged)
+}
+
+fn prompt(msg: &str, yes: &str, no: &str) -> Result<bool> {
+    loop {
+        print!("{}", msg);
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().read_line(&mut line)?;
+        if line.trim() == yes {
+            return Ok(true);
+        }
+        if line.trim() == no {
+            return Ok(false);
+        }
+    }
+}
+
+fn upload(paths: &[PathBuf], tag: &str, dry_run: bool) -> Result<()> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("release").arg("upload").arg(tag).args(paths);
+    if !dry_run {
+        if !cmd.status()?.success() {
+            bail!("gh release failed");
+        }
+    } else {
+        println!("dry-run, command to run:");
+        println!("{cmd:?}");
+    }
+    Ok(())
 }
 
 pub fn main(args: CliArgs) -> Result<()> {
-    patchelf(
-        &["--set-interpreter", "/lib64/ld-linux-x86-64.so.2"],
-        &args.binary_path,
-    )?;
-    patchelf(&["--remove-rpath"], &args.binary_path)?;
-    patchelf(&["--clear-symbol-version", "fmod"], &args.binary_path)?;
-    remove_glibc_version_from_version_r(&args.binary_path, "GLIBC_2.38")?;
+    let tag = args.version;
+    let temp_dir = tempfile::tempdir()?;
+    let binary_paths = get_binary_paths()?;
+    println!("Package and upload the following binaries for {tag}?");
+    for p in &binary_paths {
+        println!("    {}", p.display());
+    }
+    println!();
+    if !prompt("yes or no? ", "yes", "no")? {
+        return Ok(());
+    }
 
+    let packaged = package_artifacts(&temp_dir, &binary_paths)?;
+    upload(&packaged, &tag, args.dry_run)?;
     Ok(())
 }
