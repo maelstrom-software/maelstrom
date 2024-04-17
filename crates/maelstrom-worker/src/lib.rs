@@ -375,7 +375,9 @@ async fn dispatcher_main(
         }
         Ok(adapter) => {
             let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
-            sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg)).await
+            let _ =
+                sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg))
+                    .await;
         }
     }
 }

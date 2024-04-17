@@ -1,4 +1,5 @@
 //! Functions that are useful for communicating between tasks and threads within a program.
+use anyhow::Result;
 use pin_project::pin_project;
 use std::{
     future::Future,
@@ -12,10 +13,11 @@ use tokio::sync::{mpsc::UnboundedReceiver, oneshot};
 pub async fn channel_reader<MessageT>(
     mut channel: UnboundedReceiver<MessageT>,
     mut processor: impl FnMut(MessageT),
-) {
+) -> Result<()> {
     while let Some(x) = channel.recv().await {
         processor(x);
     }
+    Ok(())
 }
 
 // N.B. We'd use the ! type if it were stable.
@@ -55,7 +57,7 @@ mod tests {
     async fn no_messages() {
         let (_, rx) = mpsc::unbounded_channel::<u8>();
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await.unwrap();
         assert!(vec.is_empty(), "{vec:?}");
     }
 
@@ -64,7 +66,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         task::spawn(async move { tx.send(1).unwrap() });
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await.unwrap();
 
         assert_eq!(vec, vec![1]);
     }
@@ -78,7 +80,7 @@ mod tests {
             tx.send(3).unwrap();
         });
         let mut vec = vec![];
-        channel_reader(rx, |s| vec.push(s)).await;
+        channel_reader(rx, |s| vec.push(s)).await.unwrap();
 
         assert_eq!(vec, vec![1, 2, 3]);
     }

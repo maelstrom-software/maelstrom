@@ -140,7 +140,7 @@ pub fn start_task(
         local_broker_sender,
     };
     let mut dispatcher = Dispatcher::new(adapter);
-    join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        dispatcher.receive_message(msg)
-    }));
+    join_set.spawn(async move {
+        let _ = sync::channel_reader(receiver, move |msg| dispatcher.receive_message(msg)).await;
+    });
 }

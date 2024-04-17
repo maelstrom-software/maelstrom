@@ -127,7 +127,7 @@ pub fn start_task(
         artifact_pusher_sender,
     };
     let mut local_broker = LocalBroker::new(adapter);
-    join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        local_broker.receive_message(msg)
-    }));
+    join_set.spawn(async move {
+        let _ = sync::channel_reader(receiver, move |msg| local_broker.receive_message(msg)).await;
+    });
 }

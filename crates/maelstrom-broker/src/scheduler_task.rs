@@ -94,6 +94,7 @@ impl SchedulerTask {
         sync::channel_reader(self.receiver, |msg| {
             self.scheduler.receive_message(&mut PassThroughDeps, msg)
         })
-        .await;
+        .await
+        .unwrap();
     }
 }
