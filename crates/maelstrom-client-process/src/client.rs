@@ -23,6 +23,7 @@ use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTrack
 use maelstrom_util::{
     async_fs,
     config::common::BrokerAddr,
+    ext::BoolExt,
     manifest::{AsyncManifestWriter, ManifestBuilder},
     net,
 };
@@ -466,7 +467,9 @@ impl Client {
                 let keeper_clone = self.keeper.clone();
                 task::spawn(async move {
                     join_set.join_next().await;
-                    keeper_clone.fail("client exited prematurely".to_string());
+                    keeper_clone
+                        .fail("client exited prematurely".to_string())
+                        .assert_is_true();
                 });
                 Ok(())
             }
