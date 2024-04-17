@@ -105,7 +105,7 @@ const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
 pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
     let log_file = fs
-        .open_or_create_file(cache_dir.join("cargo-maelstrom.log"))
+        .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
         .await?;
     let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
     let drain = slog_term::FullFormat::new(decorator).build().fuse();
