@@ -11,7 +11,11 @@
 | maelstrom-worker | [![maelstrom-worker](https://img.shields.io/crates/v/maelstrom-worker.svg)](https://crates.io/crates/maelstrom-worker) [![maelstrom-client](https://img.shields.io/docsrs/maelstrom-worker)](https://docs.rs/maelstrom-worker)|
 
 
-Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners. You should use Maelstrom to run your tests because:
+Maelstrom is an extremely fast Rust test runner built on top of a
+general-purpose clustered job runner. Maelstrom packages your Rust tests into
+hermetic micro-containers, then distributes them to be run on an arbitrarily
+large cluster of test-runners. You should use Maelstrom to run your tests
+because:
 
 * It's easy. Maelstrom functions as a drop-in replacement for cargo-test, so in most cases, it just works.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing test errors caused by inter-test or test-environment dependencies.
