@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use zerocopy::{AsBytes, FromBytes, FromZeroes};
 
-#[derive(Clone, Debug, FromZeroes, FromBytes, AsBytes)]
+#[derive(Clone, Debug, Default, PartialEq, FromZeroes, FromBytes, AsBytes)]
 #[repr(C)]
 struct Verneed {
     version: u16,
@@ -20,7 +20,7 @@ struct Verneed {
     next: u32,
 }
 
-#[derive(Clone, Debug, FromZeroes, FromBytes, AsBytes)]
+#[derive(Clone, Debug, Default, PartialEq, FromZeroes, FromBytes, AsBytes)]
 #[repr(C)]
 struct Vernaux {
     hash: u32,
@@ -36,7 +36,7 @@ impl Vernaux {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 struct VerneedEntry {
     need: Verneed,
     aux: Vec<Vernaux>,
@@ -98,6 +98,98 @@ fn encode_version_entries(entries: Vec<VerneedEntry>) -> Result<Vec<u8>> {
     }
 
     Ok(encoded)
+}
+
+#[test]
+fn encode_decode_version_entries() {
+    let entries = vec![
+        VerneedEntry {
+            need: Verneed {
+                version: 1,
+                file: 12,
+                ..Default::default()
+            },
+            aux: vec![
+                Vernaux {
+                    hash: 13,
+                    flags: 1,
+                    other: 2,
+                    name: 14,
+                    ..Default::default()
+                },
+                Vernaux {
+                    hash: 14,
+                    flags: 1,
+                    other: 2,
+                    name: 15,
+                    ..Default::default()
+                },
+            ],
+        },
+        VerneedEntry {
+            need: Verneed {
+                version: 1,
+                file: 12,
+                ..Default::default()
+            },
+            aux: vec![Vernaux {
+                hash: 15,
+                flags: 1,
+                other: 2,
+                name: 16,
+                ..Default::default()
+            }],
+        },
+    ];
+    let data = encode_version_entries(entries).unwrap();
+
+    let decoded = decode_version_entries(&data).unwrap();
+    assert_eq!(
+        decoded,
+        vec![
+            VerneedEntry {
+                need: Verneed {
+                    version: 1,
+                    cnt: 2,
+                    file: 12,
+                    aux: mem::size_of::<Verneed>() as u32,
+                    next: mem::size_of::<Verneed>() as u32 + mem::size_of::<Vernaux>() as u32 * 2,
+                },
+                aux: vec![
+                    Vernaux {
+                        hash: 13,
+                        flags: 1,
+                        other: 2,
+                        name: 14,
+                        next: mem::size_of::<Vernaux>() as u32,
+                    },
+                    Vernaux {
+                        hash: 14,
+                        flags: 1,
+                        other: 2,
+                        name: 15,
+                        next: 0
+                    },
+                ],
+            },
+            VerneedEntry {
+                need: Verneed {
+                    version: 1,
+                    cnt: 1,
+                    file: 12,
+                    aux: mem::size_of::<Verneed>() as u32,
+                    next: 0
+                },
+                aux: vec![Vernaux {
+                    hash: 15,
+                    flags: 1,
+                    other: 2,
+                    name: 16,
+                    next: 0
+                }],
+            },
+        ]
+    );
 }
 
 fn remove_glibc_version_from_version_r(path: &Path, version: &str) -> Result<()> {
