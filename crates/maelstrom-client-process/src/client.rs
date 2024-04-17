@@ -103,7 +103,7 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 /// I picked this time arbitrarily 2024-1-11 11:11:11
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
-pub async fn default_log(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
+pub async fn file_logger(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
     let log_file = fs
         .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
         .await?;
@@ -434,7 +434,7 @@ impl Client {
 
             let log = match log {
                 Some(log) => log.clone(),
-                None => default_log(&fs, cache_dir.as_ref()).await?,
+                None => file_logger(&fs, cache_dir.as_ref()).await?,
             };
 
             let container_image_depot = ContainerImageDepot::new(&project_dir)?;
