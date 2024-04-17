@@ -1,6 +1,5 @@
 mod state_machine;
 
-use state_machine::ClientStateKeeper;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
@@ -29,11 +28,13 @@ use maelstrom_util::{
 };
 use sha2::{Digest as _, Sha256};
 use slog::{debug, Drain as _};
+use state_machine::StateMachine;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
     path::{Path, PathBuf},
     pin::pin,
+    sync::Arc,
 };
 use tokio::{
     net::TcpStream,
@@ -345,13 +346,13 @@ struct ClientStateStartedLocked {
 }
 
 pub struct Client {
-    keeper: ClientStateKeeper<ClientStateStarted>,
+    keeper: Arc<StateMachine<Option<slog::Logger>, ClientStateStarted>>,
 }
 
 pub async fn start_tasks(
     broker_addr: BrokerAddr,
     log: slog::Logger,
-) -> Result<(dispatcher::Sender, ArtifactUploadTracker)> {
+) -> Result<(dispatcher::Sender, ArtifactUploadTracker, JoinSet<()>)> {
     slog::debug!(log, "client starting");
 
     let mut broker_socket = TcpStream::connect(broker_addr.inner())
@@ -397,17 +398,13 @@ pub async fn start_tasks(
         },
     ));
 
-    task::spawn(async move {
-        join_set.join_next().await;
-    });
-
-    Ok((dispatcher_sender, upload_tracker))
+    Ok((dispatcher_sender, upload_tracker, join_set))
 }
 
 impl Client {
     pub fn new(log: Option<slog::Logger>) -> Self {
         Self {
-            keeper: ClientStateKeeper::new(log),
+            keeper: Arc::new(StateMachine::new(log)),
         }
     }
 
@@ -417,14 +414,14 @@ impl Client {
         project_dir: PathBuf,
         cache_dir: PathBuf,
     ) -> Result<()> {
-        let log = self.keeper.try_to_move_to_starting()?;
+        let (log, activation_handle) = self.keeper.try_to_begin_activation()?;
 
         async fn try_to_start(
             log: Option<slog::Logger>,
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
-        ) -> Result<ClientStateStarted> {
+        ) -> Result<(ClientStateStarted, JoinSet<()>)> {
             let fs = async_fs::Fs::new();
             for d in [
                 crate::MANIFEST_DIR,
@@ -439,48 +436,57 @@ impl Client {
                 None => default_log(&fs, cache_dir.as_ref()).await?,
             };
 
-            let (dispatcher_sender, upload_tracker) = start_tasks(broker_addr, log.clone()).await?;
-
             let container_image_depot = ContainerImageDepot::new(&project_dir)?;
             let digest_repo = DigestRepository::new(&cache_dir);
 
-            Ok(ClientStateStarted {
-                dispatcher_sender,
-                cache_dir,
-                project_dir,
-                upload_tracker,
-                container_image_depot,
-                log,
-                locked: Mutex::new(ClientStateStartedLocked {
-                    digest_repo,
-                    processed_artifact_paths: HashSet::default(),
-                    cached_layers: HashMap::new(),
-                }),
-            })
+            let (dispatcher_sender, upload_tracker, join_set) =
+                start_tasks(broker_addr, log.clone()).await?;
+
+            Ok((
+                ClientStateStarted {
+                    dispatcher_sender,
+                    cache_dir,
+                    project_dir,
+                    upload_tracker,
+                    container_image_depot,
+                    log,
+                    locked: Mutex::new(ClientStateStartedLocked {
+                        digest_repo,
+                        processed_artifact_paths: HashSet::default(),
+                        cached_layers: HashMap::new(),
+                    }),
+                },
+                join_set,
+            ))
         }
 
         match try_to_start(log, broker_addr, project_dir, cache_dir).await {
-            Ok(state) => {
-                self.keeper.move_to_started(state);
+            Ok((state, mut join_set)) => {
+                activation_handle.activate(state);
+                let keeper_clone = self.keeper.clone();
+                task::spawn(async move {
+                    join_set.join_next().await;
+                    keeper_clone.fail("client exited prematurely".to_string());
+                });
                 Ok(())
             }
             Err(err) => {
-                self.keeper.fail_to_start(err.to_string());
+                activation_handle.fail(err.to_string());
                 Err(err)
             }
         }
     }
 
     pub async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
-        self.keeper.started()?.add_artifact(path).await
+        self.keeper.active()?.add_artifact(path).await
     }
 
     pub async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        self.keeper.started()?.add_layer(layer).await
+        self.keeper.active()?.add_layer(layer).await
     }
 
     pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        let state = self.keeper.started()?;
+        let state = self.keeper.active()?;
         slog::debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
         state
             .container_image_depot
@@ -489,38 +495,38 @@ impl Client {
     }
 
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
-        let (state, watcher) = self.keeper.started_with_watcher()?;
+        let (state, watcher) = self.keeper.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slog::debug!(state.log, "run_job"; "spec" => ?spec);
         state
             .dispatcher_sender
             .send(dispatcher::Message::AddJob(spec, sender))?;
-        watcher.recv(receiver).await
+        watcher.wait(receiver).await
     }
 
     pub async fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        let (state, watcher) = self.keeper.started_with_watcher()?;
+        let (state, watcher) = self.keeper.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         slog::debug!(state.log, "wait_for_outstanding_jobs");
         state
             .dispatcher_sender
             .send(dispatcher::Message::NotifyWhenAllJobsComplete(sender))?;
-        watcher.recv(receiver).await
+        watcher.wait(receiver).await
     }
 
     pub async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
-        let (state, watcher) = self.keeper.started_with_watcher()?;
+        let (state, watcher) = self.keeper.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         state
             .dispatcher_sender
             .send(dispatcher::Message::GetJobStateCounts(sender))?;
-        watcher.recv(receiver).await
+        watcher.wait(receiver).await
     }
 
     pub async fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
         Ok(self
             .keeper
-            .started()?
+            .active()?
             .upload_tracker
             .get_artifact_upload_progress()
             .await)
