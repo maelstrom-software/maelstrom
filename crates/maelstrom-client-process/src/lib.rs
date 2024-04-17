@@ -8,7 +8,6 @@ mod stream_wrapper;
 
 use anyhow::Result;
 use maelstrom_base::Sha256Digest;
-use maelstrom_client_base::{MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR};
 use maelstrom_util::{async_fs, io::Sha256Stream};
 pub use rpc::client_process_main;
 use std::{path::Path, time::SystemTime};

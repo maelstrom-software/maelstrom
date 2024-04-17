@@ -382,11 +382,7 @@ impl Client {
 
             // Ensure all of the appropriate subdirectories have been created in the cache
             // directory.
-            for d in [
-                crate::MANIFEST_DIR,
-                crate::STUB_MANIFEST_DIR,
-                crate::SYMLINK_MANIFEST_DIR,
-            ] {
+            for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
                 fs.create_dir_all(cache_dir.join(d)).await?;
             }
 
