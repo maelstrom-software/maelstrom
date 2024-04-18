@@ -303,7 +303,7 @@ fn package_artifacts(temp_dir: &tempfile::TempDir, binaries: &[PathBuf]) -> Resu
         std::fs::copy(binary_path, &new_binary)?;
         patch_binary(&new_binary)?;
         let tar_gz_path = temp_dir.path().join(format!(
-            "{}-aarch64-unknown-linux-gnu.tgz",
+            "{}-x86_64-unknown-linux-gnu.tgz",
             new_binary.file_name().unwrap().to_str().unwrap()
         ));
         tar_gz(&new_binary, &tar_gz_path)?;
