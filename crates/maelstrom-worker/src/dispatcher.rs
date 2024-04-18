@@ -54,9 +54,6 @@ pub trait Deps {
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
 
-    /// Start a thread that will download an artifact from the broker and extract it into `path`.
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
-
     /// Start a task that will build a layer-fs bottom layer out of an artifact
     fn build_bottom_fs_layer(
         &mut self,
@@ -77,6 +74,15 @@ pub trait Deps {
 
     /// Start a task to read the digests out of the given path to a manfiest.
     fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId);
+}
+
+/// The artifact fetcher is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
+/// the same for "real" and local workers, but the artifact fetching is different. We may
+/// eventually do some other fs stuff differently between the two, in which case we'll have to
+/// rename this trait and move more methods into it from [`Deps`].
+pub trait ArtifactFetcher {
+    /// Start a thread that will download an artifact from the broker and extract it into `path`.
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -148,12 +154,20 @@ pub enum Message {
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
 }
 
-impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
+impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
+    Dispatcher<DepsT, ArtifactFetcherT, CacheT>
+{
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
-    pub fn new(deps: DepsT, cache: CacheT, slots: Slots) -> Self {
+    pub fn new(
+        deps: DepsT,
+        artifact_fetcher: ArtifactFetcherT,
+        cache: CacheT,
+        slots: Slots,
+    ) -> Self {
         Dispatcher {
             deps,
+            artifact_fetcher,
             cache,
             slots: slots.into_inner().into(),
             awaiting_layers: HashMap::default(),
@@ -262,8 +276,9 @@ struct ExecutingJob<DepsT: Deps> {
 /// broker to order the requests properly.
 ///
 /// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<DepsT: Deps, CacheT> {
+pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, CacheT> {
     deps: DepsT,
+    artifact_fetcher: ArtifactFetcherT,
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
@@ -271,15 +286,18 @@ pub struct Dispatcher<DepsT: Deps, CacheT> {
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
 
-struct Fetcher<'dispatcher, DepsT, CacheT> {
+struct Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT> {
     deps: &'dispatcher mut DepsT,
+    artifact_fetcher: &'dispatcher mut ArtifactFetcherT,
     cache: &'dispatcher mut CacheT,
     jid: JobId,
 }
 
-impl<'dispatcher, DepsT, CacheT> tracker::Fetcher for Fetcher<'dispatcher, DepsT, CacheT>
+impl<'dispatcher, DepsT, ArtifactFetcherT, CacheT> tracker::Fetcher
+    for Fetcher<'dispatcher, DepsT, ArtifactFetcherT, CacheT>
 where
     DepsT: Deps,
+    ArtifactFetcherT: ArtifactFetcher,
     CacheT: Cache,
 {
     fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
@@ -290,7 +308,8 @@ where
             GetArtifact::Success(path) => FetcherResult::Got(path),
             GetArtifact::Wait => FetcherResult::Pending,
             GetArtifact::Get(path) => {
-                self.deps.start_artifact_fetch(digest.clone(), path);
+                self.artifact_fetcher
+                    .start_artifact_fetch(digest.clone(), path);
                 FetcherResult::Pending
             }
         }
@@ -352,7 +371,9 @@ where
     }
 }
 
-impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
+impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
+    Dispatcher<DepsT, ArtifactFetcherT, CacheT>
+{
     /// Start at most one job, depending on whether there are any queued jobs and if there are any
     /// available slots.
     fn possibly_start_job(&mut self) {
@@ -397,6 +418,7 @@ impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
     fn receive_enqueue_job(&mut self, jid: JobId, spec: JobSpec) {
         let mut fetcher = Fetcher {
             deps: &mut self.deps,
+            artifact_fetcher: &mut self.artifact_fetcher,
             cache: &mut self.cache,
             jid,
         };
@@ -522,7 +544,11 @@ impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
         jid: JobId,
         kind: cache::CacheEntryKind,
         digest: &Sha256Digest,
-        cb: impl FnOnce(&mut LayerTracker, &Sha256Digest, &mut Fetcher<'_, DepsT, CacheT>),
+        cb: impl FnOnce(
+            &mut LayerTracker,
+            &Sha256Digest,
+            &mut Fetcher<'_, DepsT, ArtifactFetcherT, CacheT>,
+        ),
     ) {
         match self.awaiting_layers.entry(jid) {
             Entry::Vacant(_) => {
@@ -535,6 +561,7 @@ impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
                 // have, then we can go ahead and schedule the job.
                 let mut fetcher = Fetcher {
                     deps: &mut self.deps,
+                    artifact_fetcher: &mut self.artifact_fetcher,
                     cache: &mut self.cache,
                     jid,
                 };
@@ -552,7 +579,12 @@ impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
         kind: cache::CacheEntryKind,
         digest: Sha256Digest,
         bytes_used: u64,
-        cb: impl Fn(&mut LayerTracker, &Sha256Digest, PathBuf, &mut Fetcher<'_, DepsT, CacheT>),
+        cb: impl Fn(
+            &mut LayerTracker,
+            &Sha256Digest,
+            PathBuf,
+            &mut Fetcher<'_, DepsT, ArtifactFetcherT, CacheT>,
+        ),
     ) {
         let (path, jobs) = self.cache.got_artifact_success(kind, &digest, bytes_used);
         for jid in jobs {
@@ -693,12 +725,6 @@ mod tests {
             TestHandle(TestMessage::TimerHandleDropped(jid), self.clone())
         }
 
-        fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
-            self.borrow_mut()
-                .messages
-                .push(StartArtifactFetch(digest, path));
-        }
-
         fn build_bottom_fs_layer(
             &mut self,
             digest: Sha256Digest,
@@ -739,6 +765,14 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(SendMessageToBroker(message));
+        }
+    }
+
+    impl ArtifactFetcher for Rc<RefCell<TestState>> {
+        fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+            self.borrow_mut()
+                .messages
+                .push(StartArtifactFetch(digest, path));
         }
     }
 
@@ -798,7 +832,8 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
-        dispatcher: Dispatcher<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
+        dispatcher:
+            Dispatcher<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
     }
 
     impl Fixture {
@@ -815,6 +850,7 @@ mod tests {
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
             }));
             let dispatcher = Dispatcher::new(
+                test_state.clone(),
                 test_state.clone(),
                 test_state.clone(),
                 Slots::try_from(slots).unwrap(),

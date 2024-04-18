@@ -148,7 +148,6 @@ type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
 struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
-    broker_addr: BrokerAddr,
     inline_limit: InlineLimit,
     log: Logger,
     executor: Arc<Executor>,
@@ -162,7 +161,6 @@ impl DispatcherAdapter {
     fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
-        broker_addr: BrokerAddr,
         inline_limit: InlineLimit,
         log: Logger,
         mount_dir: PathBuf,
@@ -174,7 +172,6 @@ impl DispatcherAdapter {
         fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
             broker_socket_sender,
-            broker_addr,
             inline_limit,
             executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
             blob_cache_dir,
@@ -271,23 +268,6 @@ impl Deps for DispatcherAdapter {
         }))
     }
 
-    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
-        let sender = self.dispatcher_sender.clone();
-        let broker_addr = self.broker_addr;
-        let mut log = self.log.new(o!(
-            "digest" => digest.to_string(),
-            "broker_addr" => broker_addr.inner().to_string()
-        ));
-        debug!(log, "artifact fetcher starting");
-        thread::spawn(move || {
-            let result = fetcher::main(&digest, path, broker_addr, &mut log);
-            debug!(log, "artifact fetcher completed"; "result" => ?result);
-            sender
-                .send(Message::ArtifactFetchCompleted(digest, result))
-                .ok();
-        });
-    }
-
     fn build_bottom_fs_layer(
         &mut self,
         digest: Sha256Digest,
@@ -350,6 +330,41 @@ impl Deps for DispatcherAdapter {
     }
 }
 
+struct ArtifactFetcher {
+    dispatcher_sender: DispatcherSender,
+    broker_addr: BrokerAddr,
+    log: Logger,
+}
+
+impl ArtifactFetcher {
+    fn new(dispatcher_sender: DispatcherSender, broker_addr: BrokerAddr, log: Logger) -> Self {
+        ArtifactFetcher {
+            broker_addr,
+            dispatcher_sender,
+            log,
+        }
+    }
+}
+
+impl dispatcher::ArtifactFetcher for ArtifactFetcher {
+    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+        let sender = self.dispatcher_sender.clone();
+        let broker_addr = self.broker_addr;
+        let mut log = self.log.new(o!(
+            "digest" => digest.to_string(),
+            "broker_addr" => broker_addr.inner().to_string()
+        ));
+        debug!(log, "artifact fetcher starting");
+        thread::spawn(move || {
+            let result = fetcher::main(&digest, path, broker_addr, &mut log);
+            debug!(log, "artifact fetcher completed"; "result" => ?result);
+            sender
+                .send(Message::ArtifactFetchCompleted(digest, result))
+                .ok();
+        });
+    }
+}
+
 async fn dispatcher_main(
     config: Config,
     dispatcher_receiver: DispatcherReceiver,
@@ -368,10 +383,11 @@ async fn dispatcher_main(
         config.cache_size,
         log.clone(),
     );
+    let artifact_fetcher =
+        ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
     match DispatcherAdapter::new(
         dispatcher_sender,
         broker_socket_sender,
-        config.broker,
         config.inline_limit,
         log.clone(),
         mount_dir,
@@ -382,7 +398,7 @@ async fn dispatcher_main(
             error!(log, "could not start executor"; "err" => ?err);
         }
         Ok(adapter) => {
-            let mut dispatcher = Dispatcher::new(adapter, cache, config.slots);
+            let mut dispatcher = Dispatcher::new(adapter, artifact_fetcher, cache, config.slots);
             let _ =
                 sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg))
                     .await;
