@@ -13,11 +13,7 @@ use maelstrom_client_base::{
 use maelstrom_container::ContainerImage;
 use maelstrom_util::config::common::BrokerAddr;
 use spec::Layer;
-use std::future::Future;
-use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::pin::Pin;
-use std::thread;
+use std::{future::Future, os::unix::net::UnixStream, path::Path, pin::Pin, process, thread};
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -82,8 +78,13 @@ impl ClientBgProcess {
                 sock: Some(sock1),
             })
         } else {
-            maelstrom_client_process::client_process_main(sock2, None).unwrap();
-            std::process::exit(0)
+            match maelstrom_client_process::client_process_main(sock2, None) {
+                Ok(()) => process::exit(0),
+                Err(err) => {
+                    eprintln!("exiting because of error: {err}");
+                    process::exit(1);
+                }
+            }
         }
     }
 
