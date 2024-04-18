@@ -58,7 +58,7 @@ async fn stats_heartbeat(sender: SchedulerSender) {
 
 /// The main function for the broker. It will return when a signal is received, or when the broker
 /// or http listener socket returns an error at accept time.
-async fn broker_main_inner(
+async fn main_inner_inner(
     listener: TcpListener,
     http_listener: TcpListener,
     cache_root: CacheRoot,
@@ -101,8 +101,12 @@ async fn broker_main_inner(
     join_set.join_next().await;
 }
 
+pub fn main(config: Config, log: Logger) -> Result<()> {
+    main_inner(config, log)
+}
+
 #[tokio::main]
-pub async fn broker_main(config: Config, log: Logger) -> Result<()> {
+async fn main_inner(config: Config, log: Logger) -> Result<()> {
     let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.port.inner(), 0, 0);
     let listener = TcpListener::bind(sock_addr)
         .await
@@ -125,7 +129,7 @@ pub async fn broker_main(config: Config, log: Logger) -> Result<()> {
         "http_addr" => http_listener_addr,
         "pid" => process::id());
 
-    broker_main_inner(
+    main_inner_inner(
         listener,
         http_listener,
         config.cache_root,

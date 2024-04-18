@@ -11,6 +11,6 @@ pub fn main() -> Result<()> {
         let (sock, addr) = listener.accept()?;
         slog::info!(log, "got connection"; "address" => ?addr);
 
-        maelstrom_client_process::client_process_main(sock, Some(log))
+        maelstrom_client_process::main(sock, Some(log))
     })
 }

@@ -78,7 +78,7 @@ impl ClientBgProcess {
                 sock: Some(sock1),
             })
         } else {
-            match maelstrom_client_process::client_process_main(sock2, None) {
+            match maelstrom_client_process::main(sock2, None) {
                 Ok(()) => process::exit(0),
                 Err(err) => {
                     eprintln!("exiting because of error: {err}");
