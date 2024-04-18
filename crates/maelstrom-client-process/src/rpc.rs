@@ -1,8 +1,5 @@
-use crate::{
-    client::{self, Client},
-    stream_wrapper::StreamWrapper,
-};
-use anyhow::{anyhow, Result};
+use crate::{client::Client, stream_wrapper::StreamWrapper};
+use anyhow::Result;
 use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
     proto::{
@@ -11,46 +8,24 @@ use maelstrom_client_base::{
     },
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_util::async_fs;
 use slog::Logger;
 use std::{error, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, result, sync::Arc};
-use tokio::{net::UnixStream as TokioUnixStream, sync::RwLock};
+use tokio::net::UnixStream as TokioUnixStream;
 use tonic::{transport::Server, Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
 type TonicResponse<T> = TonicResult<Response<T>>;
 
-#[derive(Clone)]
 struct Handler {
-    client: Arc<RwLock<Option<Client>>>,
-    log: Option<Logger>,
+    client: Arc<Client>,
 }
 
 impl Handler {
-    fn new(log: Option<Logger>) -> Self {
+    fn new(client: Client) -> Self {
         Self {
-            client: Arc::new(RwLock::new(None)),
-            log,
+            client: Arc::new(client),
         }
     }
-
-    async fn take_client(&self) -> Result<Client> {
-        let mut guard = self.client.write().await;
-        guard.take().ok_or_else(|| anyhow!("must call start first"))
-    }
-}
-
-macro_rules! with_client_async {
-    ($s:expr, |$client:ident| { $($body:expr);* }) => {
-        async {
-            let client_guard = $s.client.read().await;
-            let $client = client_guard
-                .as_ref()
-                .ok_or_else(|| anyhow!("must call start first"))?;
-            let res: Result<_> = { $($body);* };
-            res
-        }
-    };
 }
 
 trait ResultExt<T> {
@@ -72,33 +47,14 @@ impl ClientProcess for Handler {
     async fn start(&self, request: Request<proto::StartRequest>) -> TonicResponse<proto::Void> {
         async {
             let request = request.into_inner();
-            let broker_addr = TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?;
-            let project_dir = PathBuf::try_from_proto_buf(request.project_dir)?;
-            let cache_dir = PathBuf::try_from_proto_buf(request.cache_dir)?;
-            let fs = async_fs::Fs::new();
-            for d in [
-                crate::MANIFEST_DIR,
-                crate::STUB_MANIFEST_DIR,
-                crate::SYMLINK_MANIFEST_DIR,
-            ] {
-                fs.create_dir_all(cache_dir.join(d)).await?;
-            }
-            let log = match &self.log {
-                Some(log) => log.clone(),
-                None => client::default_log(&fs, cache_dir.as_ref()).await?,
-            };
-            let (dispatcher_sender, upload_tracker) =
-                client::start_tasks(broker_addr, log.clone()).await?;
-            let client = Client::new(
-                project_dir,
-                cache_dir,
-                dispatcher_sender,
-                upload_tracker,
-                log,
-            )
-            .await?;
-            *self.client.write().await = Some(client);
-            Ok(proto::Void {})
+            self.client
+                .start(
+                    TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
+                    TryFromProtoBuf::try_from_proto_buf(request.project_dir)?,
+                    TryFromProtoBuf::try_from_proto_buf(request.cache_dir)?,
+                )
+                .await
+                .map(IntoProtoBuf::into_proto_buf)
         }
         .await
         .map_to_tonic()
@@ -111,11 +67,12 @@ impl ClientProcess for Handler {
         async {
             let request = request.into_inner();
             let path = PathBuf::try_from_proto_buf(request.path)?;
-            Ok(proto::AddArtifactResponse {
-                digest: with_client_async!(self, |client| { client.add_artifact(&path).await })
-                    .await?
-                    .into_proto_buf(),
-            })
+            self.client
+                .add_artifact(&path)
+                .await
+                .map(|digest| proto::AddArtifactResponse {
+                    digest: digest.into_proto_buf(),
+                })
         }
         .await
         .map_to_tonic()
@@ -128,13 +85,12 @@ impl ClientProcess for Handler {
         async {
             let layer = request.into_inner().into_result()?;
             let layer = TryFromProtoBuf::try_from_proto_buf(layer)?;
-            Ok(proto::AddLayerResponse {
-                spec: Some(
-                    with_client_async!(self, |client| { client.add_layer(layer).await })
-                        .await?
-                        .into_proto_buf(),
-                ),
-            })
+            self.client
+                .add_layer(layer)
+                .await
+                .map(|spec| proto::AddLayerResponse {
+                    spec: Some(spec.into_proto_buf()),
+                })
         }
         .await
         .map_to_tonic()
@@ -146,15 +102,12 @@ impl ClientProcess for Handler {
     ) -> TonicResponse<proto::GetContainerImageResponse> {
         async {
             let request = request.into_inner();
-            with_client_async!(self, |client| {
-                client
-                    .get_container_image(&request.name, &request.tag)
-                    .await
-            })
-            .await
-            .map(|image| proto::GetContainerImageResponse {
-                image: Some(image.into_proto_buf()),
-            })
+            self.client
+                .get_container_image(&request.name, &request.tag)
+                .await
+                .map(|image| proto::GetContainerImageResponse {
+                    image: Some(image.into_proto_buf()),
+                })
         }
         .await
         .map_to_tonic()
@@ -165,8 +118,10 @@ impl ClientProcess for Handler {
         request: Request<proto::AddJobRequest>,
     ) -> TonicResponse<proto::AddJobResponse> {
         async {
-            let spec = TryFromProtoBuf::try_from_proto_buf(request.into_inner().into_result()?)?;
-            with_client_async!(self, |client| { client.run_job(spec).await })
+            let spec = request.into_inner().into_result()?;
+            let spec = TryFromProtoBuf::try_from_proto_buf(spec)?;
+            self.client
+                .run_job(spec)
                 .await
                 .map(|(cjid, res)| proto::AddJobResponse {
                     client_job_id: cjid.into_proto_buf(),
@@ -181,47 +136,37 @@ impl ClientProcess for Handler {
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::Void> {
-        async {
-            let client = self.take_client().await?;
-            client.wait_for_outstanding_jobs().await?;
-            Ok(proto::Void {})
-        }
-        .await
-        .map_to_tonic()
+        self.client
+            .wait_for_outstanding_jobs()
+            .await
+            .map(IntoProtoBuf::into_proto_buf)
+            .map_to_tonic()
     }
 
     async fn get_job_state_counts(
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetJobStateCountsResponse> {
-        async {
-            Ok(proto::GetJobStateCountsResponse {
-                counts: Some(
-                    with_client_async!(self, |client| { client.get_job_state_counts().await })
-                        .await?
-                        .into_proto_buf(),
-                ),
+        self.client
+            .get_job_state_counts()
+            .await
+            .map(|counts| proto::GetJobStateCountsResponse {
+                counts: Some(counts.into_proto_buf()),
             })
-        }
-        .await
-        .map_to_tonic()
+            .map_to_tonic()
     }
 
     async fn get_artifact_upload_progress(
         &self,
         _request: Request<proto::Void>,
     ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
-        async {
-            Ok(proto::GetArtifactUploadProgressResponse {
-                progress: with_client_async!(self, |client| {
-                    Ok(client.get_artifact_upload_progress().await)
-                })
-                .await?
-                .into_proto_buf(),
+        self.client
+            .get_artifact_upload_progress()
+            .await
+            .map(|progress| proto::GetArtifactUploadProgressResponse {
+                progress: progress.into_proto_buf(),
             })
-        }
-        .await
-        .map_to_tonic()
+            .map_to_tonic()
     }
 }
 
@@ -232,7 +177,7 @@ pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Re
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
-        .add_service(ClientProcessServer::new(Handler::new(log)))
+        .add_service(ClientProcessServer::new(Handler::new(Client::new(log))))
         .serve_with_incoming_shutdown(
             tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
             receiver,

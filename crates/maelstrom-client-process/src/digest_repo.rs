@@ -21,14 +21,14 @@ enum DigestRepositoryVersion {
 }
 
 #[serde_as]
-#[derive(Serialize, Deserialize)]
+#[derive(Deserialize, Serialize)]
 struct DigestRepositoryEntry {
     #[serde_as(as = "DisplayFromStr")]
     digest: Sha256Digest,
     mtime: DateTime<Utc>,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Default, Deserialize, Serialize)]
 struct DigestRepositoryContents {
     version: DigestRepositoryVersion,
     digests: HashMap<PathBuf, DigestRepositoryEntry>,
