@@ -7,13 +7,19 @@ mod connection;
 mod http;
 mod scheduler_task;
 
+use anyhow::{Context as _, Result};
+use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
 use maelstrom_util::config::common::{CacheRoot, CacheSize};
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
-use slog::{error, Logger};
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc,
+use slog::{error, info, Logger};
+use std::{
+    net::{Ipv6Addr, SocketAddrV6},
+    process,
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc,
+    },
 };
 use tokio::{
     net::TcpListener,
@@ -50,10 +56,9 @@ async fn stats_heartbeat(sender: SchedulerSender) {
     }
 }
 
-/// The main function for the broker. This should be called on a task of its own. It will return
-/// when a signal is received, or when the broker or http listener socket returns an error at
-/// accept time.
-pub async fn main(
+/// The main function for the broker. It will return when a signal is received, or when the broker
+/// or http listener socket returns an error at accept time.
+async fn broker_main_inner(
     listener: TcpListener,
     http_listener: TcpListener,
     cache_root: CacheRoot,
@@ -94,4 +99,40 @@ pub async fn main(
     ));
 
     join_set.join_next().await;
+}
+
+#[tokio::main]
+pub async fn broker_main(config: Config, log: Logger) -> Result<()> {
+    let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.port.inner(), 0, 0);
+    let listener = TcpListener::bind(sock_addr)
+        .await
+        .context("binding listener socket")?;
+
+    let sock_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, *config.http_port.inner(), 0, 0);
+    let http_listener = TcpListener::bind(sock_addr)
+        .await
+        .context("binding http listener socket")?;
+
+    let listener_addr = listener
+        .local_addr()
+        .context("retrieving listener local address")?;
+    let http_listener_addr = http_listener
+        .local_addr()
+        .context("retrieving listener local address")?;
+    info!(log, "started";
+        "config" => ?config,
+        "addr" => listener_addr,
+        "http_addr" => http_listener_addr,
+        "pid" => process::id());
+
+    broker_main_inner(
+        listener,
+        http_listener,
+        config.cache_root,
+        config.cache_size,
+        log.clone(),
+    )
+    .await;
+    info!(log, "exiting");
+    Ok(())
 }
