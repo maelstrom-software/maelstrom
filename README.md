@@ -1,6 +1,10 @@
 ![Maelstrom Logo (Dark Compatible)](https://github.com/maelstrom-software/maelstrom/assets/146376379/7b46a1c1-e67f-412a-b618-42f7e2c25139)
 
 [![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
+[![cargo-maelstrom]: https://crates.io/crates/cargo-maelstrom]
+[![maelstrom-worker]: https://crates.io/crates/maelstrom-worker]
+[![maelstrom-broker]: https://crates.io/crates/maelstrom-broker]
+[![maelstrom-run]: https://crates.io/crates/maelstrom-run]
 
 Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners. You should use Maelstrom to run your tests because:
 
