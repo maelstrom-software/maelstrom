@@ -7,10 +7,17 @@ mod rpc;
 mod stream_wrapper;
 
 use anyhow::Result;
+use client::Client;
+use futures::stream::StreamExt as _;
 use maelstrom_base::Sha256Digest;
+use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_util::{async_fs, io::Sha256Stream};
-pub use rpc::client_process_main;
-use std::{path::Path, time::SystemTime};
+use rpc::Handler;
+use slog::Logger;
+use std::{error, os::unix::net::UnixStream as StdUnixStream, path::Path, time::SystemTime};
+use stream_wrapper::StreamWrapper;
+use tokio::net::UnixStream as TokioUnixStream;
+use tonic::transport::Server;
 
 async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let fs = async_fs::Fs::new();
@@ -20,4 +27,20 @@ async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
     let mtime = f.metadata().await?.modified()?;
 
     Ok((mtime, hasher.finalize().1))
+}
+
+type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
+
+#[tokio::main]
+pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+    sock.set_nonblocking(true)?;
+    let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
+    Server::builder()
+        .add_service(ClientProcessServer::new(Handler::new(Client::new(log))))
+        .serve_with_incoming_shutdown(
+            tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
+            receiver,
+        )
+        .await?;
+    Ok(())
 }

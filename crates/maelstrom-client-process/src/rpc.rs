@@ -1,27 +1,21 @@
-use crate::{client::Client, stream_wrapper::StreamWrapper};
+use crate::client::Client;
 use anyhow::Result;
-use futures::stream::StreamExt as _;
 use maelstrom_client_base::{
-    proto::{
-        self,
-        client_process_server::{ClientProcess, ClientProcessServer},
-    },
+    proto::{self, client_process_server::ClientProcess},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use slog::Logger;
-use std::{error, os::unix::net::UnixStream as StdUnixStream, path::PathBuf, result, sync::Arc};
-use tokio::net::UnixStream as TokioUnixStream;
-use tonic::{transport::Server, Code, Request, Response, Status};
+use std::{path::PathBuf, result, sync::Arc};
+use tonic::{Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
 type TonicResponse<T> = TonicResult<Response<T>>;
 
-struct Handler {
+pub struct Handler {
     client: Arc<Client>,
 }
 
 impl Handler {
-    fn new(client: Client) -> Self {
+    pub fn new(client: Client) -> Self {
         Self {
             client: Arc::new(client),
         }
@@ -168,20 +162,4 @@ impl ClientProcess for Handler {
             })
             .map_to_tonic()
     }
-}
-
-type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
-
-#[tokio::main]
-pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
-    sock.set_nonblocking(true)?;
-    let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
-    Server::builder()
-        .add_service(ClientProcessServer::new(Handler::new(Client::new(log))))
-        .serve_with_incoming_shutdown(
-            tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
-            receiver,
-        )
-        .await?;
-    Ok(())
 }
