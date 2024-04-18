@@ -302,7 +302,10 @@ fn package_artifacts(temp_dir: &tempfile::TempDir, binaries: &[PathBuf]) -> Resu
         let new_binary = temp_dir.path().join(binary_path.file_name().unwrap());
         std::fs::copy(binary_path, &new_binary)?;
         patch_binary(&new_binary)?;
-        let tar_gz_path = new_binary.with_extension("tar.gz");
+        let tar_gz_path = temp_dir.path().join(format!(
+            "{}-aarch64-unknown-linux-gnu.tgz",
+            new_binary.file_name().unwrap().to_str().unwrap()
+        ));
         tar_gz(&new_binary, &tar_gz_path)?;
         packaged.push(tar_gz_path)
     }
