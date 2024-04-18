@@ -39,3 +39,6 @@ enum-map.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"

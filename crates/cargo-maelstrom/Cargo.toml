@@ -51,3 +51,6 @@ tempfile.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
