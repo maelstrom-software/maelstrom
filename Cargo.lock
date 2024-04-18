@@ -2951,6 +2951,7 @@ dependencies = [
  "maelstrom-client-base",
  "maelstrom-container",
  "maelstrom-util",
+ "maelstrom-worker",
  "pin-project",
  "serde",
  "serde_repr",

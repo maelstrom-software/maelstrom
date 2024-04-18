@@ -32,7 +32,7 @@ async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+async fn client_process_main_inner(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
@@ -43,4 +43,9 @@ pub async fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Re
         )
         .await?;
     Ok(())
+}
+
+pub fn client_process_main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+    maelstrom_worker::clone_into_pid_and_user_namespace()?;
+    client_process_main_inner(sock, log)
 }
