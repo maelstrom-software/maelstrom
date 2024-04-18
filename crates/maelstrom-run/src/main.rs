@@ -13,7 +13,6 @@ use maelstrom_util::{
     config::common::{BrokerAddr, LogLevel},
     process::{ExitCode, ExitCodeAccumulator},
 };
-use slog::Drain as _;
 use std::{
     io::{self, Read, Write as _},
     path::PathBuf,
@@ -103,36 +102,32 @@ fn main() -> Result<ExitCode> {
 
     let bg_proc = ClientBgProcess::new_from_fork()?;
 
-    let decorator = slog_term::TermDecorator::new().build();
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    let drain = slog::LevelFilter::new(drain, config.log_level.as_slog_level()).fuse();
-    let log = slog::Logger::root(drain, slog::o!());
-
-    let accum = Arc::new(ExitCodeAccumulator::default());
-    let client = Client::new(bg_proc, config.broker, ".", cache_dir(), log)?;
-    let reader: Box<dyn Read> = Box::new(io::stdin().lock());
-    let image_lookup = |image: &str| {
-        let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
-        let image = client.get_container_image(image, version)?;
-        Ok(ImageConfig {
-            layers: image.layers.clone(),
-            environment: image.env().cloned(),
-            working_directory: image.working_dir().map(From::from),
-        })
-    };
-    let job_specs = job_spec_iter_from_reader(
-        reader,
-        |layer| client.add_layer(layer),
-        std_env_lookup,
-        image_lookup,
-    );
-    for job_spec in job_specs {
-        let accum_clone = accum.clone();
-        client.add_job(job_spec?, move |cjid, result| {
-            visitor(cjid, result, accum_clone)
-        })?;
-    }
-    client.wait_for_outstanding_jobs()?;
-    Ok(accum.get())
+    maelstrom_util::log::run_with_logger(config.log_level, |log| {
+        let accum = Arc::new(ExitCodeAccumulator::default());
+        let client = Client::new(bg_proc, config.broker, ".", cache_dir(), log)?;
+        let reader: Box<dyn Read> = Box::new(io::stdin().lock());
+        let image_lookup = |image: &str| {
+            let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
+            let image = client.get_container_image(image, version)?;
+            Ok(ImageConfig {
+                layers: image.layers.clone(),
+                environment: image.env().cloned(),
+                working_directory: image.working_dir().map(From::from),
+            })
+        };
+        let job_specs = job_spec_iter_from_reader(
+            reader,
+            |layer| client.add_layer(layer),
+            std_env_lookup,
+            image_lookup,
+        );
+        for job_spec in job_specs {
+            let accum_clone = accum.clone();
+            client.add_job(job_spec?, move |cjid, result| {
+                visitor(cjid, result, accum_clone)
+            })?;
+        }
+        client.wait_for_outstanding_jobs()?;
+        Ok(accum.get())
+    })
 }

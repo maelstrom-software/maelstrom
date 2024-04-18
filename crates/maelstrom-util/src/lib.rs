@@ -9,6 +9,7 @@ pub mod ext;
 pub mod fs;
 pub mod heap;
 pub mod io;
+pub mod log;
 pub mod manifest;
 pub mod net;
 pub mod process;

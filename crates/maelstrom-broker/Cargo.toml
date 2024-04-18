@@ -28,8 +28,6 @@ tar.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 slog.workspace = true
-slog-term.workspace = true
-slog-async.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]

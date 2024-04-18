@@ -822,22 +822,13 @@ mod tests {
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
-    use maelstrom_util::{async_fs, sync};
+    use maelstrom_util::{async_fs, log::test_logger, sync};
     use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::sync::Mutex;
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
-
-    fn test_logger() -> slog::Logger {
-        use slog::Drain as _;
-
-        let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, slog::o!())
-    }
 
     struct TarMount {
         _temp_dir: TempDir,

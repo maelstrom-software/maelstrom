@@ -28,7 +28,7 @@ use maelstrom_util::{
     net,
 };
 use sha2::{Digest as _, Sha256};
-use slog::{debug, Drain as _, Logger};
+use slog::{debug, Logger};
 use state_machine::StateMachine;
 use std::{
     collections::{HashMap, HashSet},
@@ -357,10 +357,9 @@ impl Client {
             let log_file = fs
                 .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
                 .await?;
-            let decorator = slog_term::PlainDecorator::new(log_file.into_inner().into_std().await);
-            let drain = slog_term::FullFormat::new(decorator).build().fuse();
-            let drain = slog_async::Async::new(drain).build().fuse();
-            Ok(Logger::root(drain, slog::o!()))
+            Ok(maelstrom_util::log::file_logger(
+                log_file.into_inner().into_std().await,
+            ))
         }
 
         async fn try_to_start(
