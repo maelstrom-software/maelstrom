@@ -52,6 +52,3 @@ maelstrom-linux = { workspace = true, features = ["std", "test"] }
 maelstrom-test.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros"] }
-
-[package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
