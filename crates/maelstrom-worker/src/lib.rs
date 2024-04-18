@@ -10,7 +10,7 @@ mod layer_fs;
 use anyhow::{Context as _, Result};
 use cache::{Cache, StdCacheFs};
 use config::{Config, InlineLimit};
-use dispatcher::{Dispatcher, DispatcherDeps, Message};
+use dispatcher::{Deps, Dispatcher, Message};
 use executor::Executor;
 use lru::LruCache;
 use maelstrom_base::{
@@ -247,7 +247,7 @@ impl Drop for TimerHandle {
     }
 }
 
-impl DispatcherDeps for DispatcherAdapter {
+impl Deps for DispatcherAdapter {
     type JobHandle = EventSender;
 
     fn start_job(&mut self, jid: JobId, spec: JobSpec, layer_fs_path: PathBuf) -> Self::JobHandle {

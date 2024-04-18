@@ -31,7 +31,7 @@ use tracker::{FetcherResult, LayerTracker};
 
 /// The external dependencies for [`Dispatcher`]. All of these methods must be asynchronous: they
 /// must not block the current task or thread.
-pub trait DispatcherDeps {
+pub trait Deps {
     /// The job handle should kill an outstanding job when it is dropped. Even if the job is
     /// killed, the `Dispatcher` should always be called with [`Message::JobCompleted`]. It must be
     /// safe to drop this handle after the job has completed.
@@ -140,7 +140,7 @@ pub enum Message {
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
 }
 
-impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
+impl<DepsT: Deps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
     pub fn new(deps: DepsT, cache: CacheT, slots: Slots) -> Self {
@@ -220,7 +220,7 @@ struct AvailableJob {
 }
 
 /// An executing job may have been canceled or timed out, or it may be executing normally.
-enum ExecutingJobState<DepsT: DispatcherDeps> {
+enum ExecutingJobState<DepsT: Deps> {
     /// The job is executing normally. It hasn't been canceled or timed-out. When it terminates,
     /// we're going to send a `JobOutcome::Completed` result to the broker, unless it times out or
     /// is canceled in the meantime.
@@ -244,7 +244,7 @@ enum ExecutingJobState<DepsT: DispatcherDeps> {
 
 /// This struct represents an executing job. It is created when we call `start_job` on our deps,
 /// and destroyed when we get a `Message::JobCompleted`.
-struct ExecutingJob<DepsT: DispatcherDeps> {
+struct ExecutingJob<DepsT: Deps> {
     state: ExecutingJobState<DepsT>,
     cache_keys: HashSet<CacheKey>,
 }
@@ -254,7 +254,7 @@ struct ExecutingJob<DepsT: DispatcherDeps> {
 /// broker to order the requests properly.
 ///
 /// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<DepsT: DispatcherDeps, CacheT> {
+pub struct Dispatcher<DepsT: Deps, CacheT> {
     deps: DepsT,
     cache: CacheT,
     slots: usize,
@@ -271,7 +271,7 @@ struct Fetcher<'dispatcher, DepsT, CacheT> {
 
 impl<'dispatcher, DepsT, CacheT> tracker::Fetcher for Fetcher<'dispatcher, DepsT, CacheT>
 where
-    DepsT: DispatcherDeps,
+    DepsT: Deps,
     CacheT: DispatcherCache,
 {
     fn fetch_artifact(&mut self, digest: &Sha256Digest) -> FetcherResult {
@@ -342,7 +342,7 @@ where
     }
 }
 
-impl<DepsT: DispatcherDeps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
+impl<DepsT: Deps, CacheT: DispatcherCache> Dispatcher<DepsT, CacheT> {
     /// Start at most one job, depending on whether there are any queued jobs and if there are any
     /// available slots.
     fn possibly_start_job(&mut self) {
@@ -667,7 +667,7 @@ mod tests {
         }
     }
 
-    impl DispatcherDeps for Rc<RefCell<TestState>> {
+    impl Deps for Rc<RefCell<TestState>> {
         type JobHandle = TestHandle;
 
         fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle {
