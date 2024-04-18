@@ -282,7 +282,9 @@ impl Deps for DispatcherAdapter {
         thread::spawn(move || {
             let result = fetcher::main(&digest, path, broker_addr, &mut log);
             debug!(log, "artifact fetcher completed"; "result" => ?result);
-            sender.send(Message::ArtifactFetcher(digest, result)).ok();
+            sender
+                .send(Message::ArtifactFetchCompleted(digest, result))
+                .ok();
         });
     }
 

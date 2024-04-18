@@ -142,7 +142,7 @@ pub enum Message {
     Broker(BrokerToWorker),
     JobCompleted(JobId, JobResult<JobCompleted, String>),
     JobTimer(JobId),
-    ArtifactFetcher(Sha256Digest, Result<u64>),
+    ArtifactFetchCompleted(Sha256Digest, Result<u64>),
     BuiltBottomFsLayer(Sha256Digest, Result<u64>),
     BuiltUpperFsLayer(Sha256Digest, Result<u64>),
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
@@ -172,10 +172,10 @@ impl<DepsT: Deps, CacheT: Cache> Dispatcher<DepsT, CacheT> {
             Message::Broker(BrokerToWorker::CancelJob(jid)) => self.receive_cancel_job(jid),
             Message::JobCompleted(jid, result) => self.receive_job_completed(jid, result),
             Message::JobTimer(jid) => self.receive_job_timer(jid),
-            Message::ArtifactFetcher(digest, Err(err)) => {
+            Message::ArtifactFetchCompleted(digest, Err(err)) => {
                 self.receive_artifact_failure(digest, err)
             }
-            Message::ArtifactFetcher(digest, Ok(bytes_used)) => {
+            Message::ArtifactFetchCompleted(digest, Ok(bytes_used)) => {
                 self.receive_artifact_success(digest, bytes_used)
             }
             Message::BuiltBottomFsLayer(digest, Ok(bytes_used)) => {
@@ -1583,21 +1583,21 @@ mod tests {
             CacheGetArtifact(Blob, digest!(43), jid!(1)),
             CacheGetArtifact(Blob, digest!(44), jid!(1)),
         };
-        ArtifactFetcher(digest!(41), Ok(101)) => {
+        ArtifactFetchCompleted(digest!(41), Ok(101)) => {
             CacheGotArtifactSuccess(Blob, digest!(41), 101),
             CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
         };
-        ArtifactFetcher(digest!(42), Err(anyhow!("foo"))) => {
+        ArtifactFetchCompleted(digest!(42), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(Blob, digest!(42)),
             SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(
                 string!("Failed to download and extract layer artifact 000000000000000000000000000000000000000000000000000000000000002a: foo"))))),
             CacheDecrementRefCount(Blob, digest!(41))
         };
-        ArtifactFetcher(digest!(43), Ok(103)) => {
+        ArtifactFetchCompleted(digest!(43), Ok(103)) => {
             CacheGotArtifactSuccess(Blob, digest!(43), 103),
             CacheDecrementRefCount(Blob, digest!(43))
         };
-        ArtifactFetcher(digest!(44), Err(anyhow!("foo"))) => {
+        ArtifactFetchCompleted(digest!(44), Err(anyhow!("foo"))) => {
             CacheGotArtifactFailure(Blob, digest!(44)),
         };
     }
