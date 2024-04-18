@@ -398,7 +398,8 @@ async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
 
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
-pub async fn main(config: Config, log: Logger) -> Result<()> {
+#[tokio::main]
+pub async fn worker_main(config: Config, log: Logger) -> Result<()> {
     info!(log, "started"; "config" => ?config, "pid" => process::id());
 
     let (read_stream, mut write_stream) = TcpStream::connect(config.broker.inner())
