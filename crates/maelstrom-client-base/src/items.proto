@@ -111,10 +111,6 @@ message GetContainerImageRequest {
     string tag = 2;
 }
 
-message ProcessBrokerMsgSingleThreadedRequest {
-    uint64 count = 1;
-}
-
 message Error {
     string message_ = 1;
 }
