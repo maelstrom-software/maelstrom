@@ -9,7 +9,7 @@ mod layer_fs;
 
 use anyhow::{Context as _, Result};
 use cache::{Cache, StdCacheFs};
-use config::{Config, InlineLimit};
+use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::Executor;
 use lru::LruCache;
@@ -23,7 +23,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheRoot},
+    config::common::{BrokerAddr, CacheRoot, InlineLimit},
     fs::Fs,
     manifest::AsyncManifestReader,
     net,

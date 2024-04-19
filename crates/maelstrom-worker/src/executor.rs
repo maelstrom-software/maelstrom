@@ -1,6 +1,5 @@
 //! Easily start and stop processes.
 
-use crate::config::InlineLimit;
 use anyhow::{anyhow, Error, Result};
 use bumpalo::{
     collections::{String as BumpString, Vec as BumpVec},
@@ -16,7 +15,7 @@ use maelstrom_linux::{
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
-use maelstrom_util::sync::EventReceiver;
+use maelstrom_util::{config::common::InlineLimit, sync::EventReceiver};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};

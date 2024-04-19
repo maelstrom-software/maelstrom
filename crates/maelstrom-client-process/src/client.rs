@@ -22,12 +22,11 @@ use maelstrom_client_base::{
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheRoot, CacheSize},
+    config::common::{BrokerAddr, CacheRoot, CacheSize, InlineLimit, Slots},
     ext::BoolExt,
     manifest::{AsyncManifestWriter, ManifestBuilder},
     net, sync,
 };
-use maelstrom_worker::config::{InlineLimit, Slots};
 use sha2::{Digest as _, Sha256};
 use slog::{debug, Logger};
 use state_machine::StateMachine;

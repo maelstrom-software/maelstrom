@@ -3,16 +3,13 @@
 
 mod tracker;
 
-use crate::{
-    cache::{self, GetArtifact},
-    config::Slots,
-};
+use crate::cache::{self, GetArtifact};
 use anyhow::{Error, Result};
 use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobResult, JobSpec, Sha256Digest,
 };
-use maelstrom_util::ext::OptionExt as _;
+use maelstrom_util::{config::common::Slots, ext::OptionExt as _};
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},

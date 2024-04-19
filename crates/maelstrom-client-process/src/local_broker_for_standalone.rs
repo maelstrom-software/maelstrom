@@ -8,8 +8,7 @@ use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ClientId, ClientJobId, JobId, JobOutcomeResult, Sha256Digest,
 };
-use maelstrom_util::{fs::Fs, sync};
-use maelstrom_worker::config::Slots;
+use maelstrom_util::{config::common::Slots, fs::Fs, sync};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
