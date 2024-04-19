@@ -370,6 +370,7 @@ impl Client {
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
+            slots: Slots,
         ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
 
@@ -440,12 +441,21 @@ impl Client {
                 .with_context(|| "Writing to broker")
             });
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
+
+            // Just create a black-hole local_worker sender. We shouldn't be sending any
+            // messages to it in remote mode.
+            let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
+            drop(local_worker_receiver);
+
             local_broker::start_task(
                 &mut join_set,
+                false,
+                slots,
                 local_broker_receiver,
                 dispatcher_sender.clone(),
                 broker_socket_writer_sender,
                 artifact_pusher_sender,
+                local_worker_sender,
             );
             artifact_pusher::start_task(
                 &mut join_set,
@@ -566,11 +576,20 @@ impl Client {
                 worker_dispatcher.receive_message(msg)
             }));
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
-            local_broker::start_task_for_standalone(
+            // Just create black-hole broker and artifact_pusher senders. We shouldn't be sending any
+            // messages to them in standalone mode.
+            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+            drop(broker_receiver);
+            let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
+            drop(artifact_pusher_receiver);
+            local_broker::start_task(
                 &mut join_set,
+                true,
                 slots,
                 local_broker_receiver,
                 dispatcher_sender.clone(),
+                broker_sender,
+                artifact_pusher_sender,
                 local_worker_sender,
             );
 
@@ -595,7 +614,7 @@ impl Client {
         let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
         let result = if let Some(broker_addr) = broker_addr {
-            try_to_start(log, broker_addr, project_dir, cache_dir).await
+            try_to_start(log, broker_addr, project_dir, cache_dir, slots).await
         } else {
             try_to_start_standalone(log, project_dir, cache_dir, cache_size, inline_limit, slots)
                 .await

@@ -207,50 +207,24 @@ pub fn channel() -> (Sender, Receiver) {
     mpsc::unbounded_channel()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
+    standalone: bool,
+    slots: Slots,
     receiver: Receiver,
     dispatcher_sender: dispatcher::Sender,
     broker_sender: UnboundedSender<ClientToBroker>,
     artifact_pusher_sender: artifact_pusher::Sender,
-) {
-    // Just create a black-hole local_worker sender. We shouldn't be sending any
-    // messages to it in remote mode.
-    let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
-    drop(local_worker_receiver);
-    let adapter = Adapter::new(
-        dispatcher_sender,
-        broker_sender,
-        artifact_pusher_sender,
-        local_worker_sender,
-    );
-    let mut local_broker = LocalBroker::new(false, adapter, Slots::default());
-    join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        local_broker.receive_message(msg)
-    }));
-}
-
-pub fn start_task_for_standalone(
-    join_set: &mut JoinSet<Result<()>>,
-    slots: Slots,
-    receiver: Receiver,
-    dispatcher_sender: dispatcher::Sender,
     local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
-    // Just create black-hole broker and artifact_pusher senders. We shouldn't be sending any
-    // messages to them in standalone mode.
-    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-    drop(broker_receiver);
-    let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-    drop(artifact_pusher_receiver);
-
     let adapter = Adapter::new(
         dispatcher_sender,
         broker_sender,
         artifact_pusher_sender,
         local_worker_sender,
     );
-    let mut local_broker = LocalBroker::new(true, adapter, slots);
+    let mut local_broker = LocalBroker::new(standalone, adapter, slots);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         local_broker.receive_message(msg)
     }));
