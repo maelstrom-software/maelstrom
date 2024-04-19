@@ -117,6 +117,10 @@ impl CacheSize {
     pub fn as_bytes(self) -> u64 {
         self.0 .0
     }
+
+    pub fn from_bytes(bytes: u64) -> Self {
+        Self(ByteSize(bytes))
+    }
 }
 
 impl From<ByteSize> for CacheSize {
@@ -186,6 +190,10 @@ pub struct InlineLimit(#[serde(with = "bytesize_serde")] ByteSize);
 impl InlineLimit {
     pub fn as_bytes(self) -> u64 {
         self.0 .0
+    }
+
+    pub fn from_bytes(bytes: u64) -> Self {
+        Self(ByteSize(bytes))
     }
 }
 

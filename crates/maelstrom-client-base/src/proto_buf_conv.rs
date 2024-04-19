@@ -558,6 +558,54 @@ impl TryFromProtoBuf for maelstrom_util::config::common::BrokerAddr {
     }
 }
 
+impl IntoProtoBuf for maelstrom_util::config::common::CacheSize {
+    type ProtoBufType = u64;
+
+    fn into_proto_buf(self) -> u64 {
+        self.as_bytes()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_util::config::common::CacheSize {
+    type ProtoBufType = u64;
+
+    fn try_from_proto_buf(v: u64) -> Result<Self> {
+        Ok(Self::from_bytes(v))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_util::config::common::InlineLimit {
+    type ProtoBufType = u64;
+
+    fn into_proto_buf(self) -> u64 {
+        self.as_bytes()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_util::config::common::InlineLimit {
+    type ProtoBufType = u64;
+
+    fn try_from_proto_buf(v: u64) -> Result<Self> {
+        Ok(Self::from_bytes(v))
+    }
+}
+
+impl IntoProtoBuf for maelstrom_util::config::common::Slots {
+    type ProtoBufType = u32;
+
+    fn into_proto_buf(self) -> u32 {
+        self.into_inner().into()
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_util::config::common::Slots {
+    type ProtoBufType = u32;
+
+    fn try_from_proto_buf(v: u32) -> Result<Self> {
+        Self::try_from(u16::try_from(v)?).map_err(|s| anyhow!("error deserializing slots: {s}"))
+    }
+}
+
 //                       _     _
 //  _ __ ___   __ _  ___| |___| |_ _ __ ___  _ __ ___
 // | '_ ` _ \ / _` |/ _ \ / __| __| '__/ _ \| '_ ` _ \ _____

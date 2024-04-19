@@ -11,7 +11,7 @@ use maelstrom_client_base::{
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_container::ContainerImage;
-use maelstrom_util::config::common::BrokerAddr;
+use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, Slots};
 use spec::Layer;
 use std::{future::Future, os::unix::net::UnixStream, path::Path, pin::Pin, process, thread};
 
@@ -123,11 +123,15 @@ where
 }
 
 impl Client {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mut process_handle: ClientBgProcess,
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
+        cache_size: CacheSize,
+        inline_limit: InlineLimit,
+        slots: Slots,
         log: slog::Logger,
     ) -> Result<Self> {
         let (send, recv) = tokio::sync::mpsc::unbounded_channel();
@@ -150,6 +154,9 @@ impl Client {
             broker_addr: broker_addr.into_proto_buf(),
             project_dir: project_dir.as_ref().into_proto_buf(),
             cache_dir: cache_dir.as_ref().into_proto_buf(),
+            cache_size: cache_size.into_proto_buf(),
+            inline_limit: inline_limit.into_proto_buf(),
+            slots: slots.into_proto_buf(),
         };
         s.send_sync(|mut client| async move { client.start(msg).await })?;
         slog::debug!(s.log, "client completed start");

@@ -109,7 +109,16 @@ fn main() -> Result<ExitCode> {
 
     maelstrom_util::log::run_with_logger(config.log_level, |log| {
         let accum = Arc::new(ExitCodeAccumulator::default());
-        let client = Client::new(bg_proc, config.broker, ".", cache_dir(), log)?;
+        let client = Client::new(
+            bg_proc,
+            config.broker,
+            ".",
+            cache_dir(),
+            "10GB".parse()?,
+            "1MB".parse()?,
+            "8".parse()?,
+            log,
+        )?;
         let reader: Box<dyn Read> = Box::new(io::stdin().lock());
         let image_lookup = |image: &str| {
             let (image, version) = image.split_once(':').unwrap_or((image, "latest"));

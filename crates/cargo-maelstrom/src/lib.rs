@@ -570,6 +570,9 @@ impl MainAppDeps {
             broker_addr,
             workspace_root,
             cache_dir.clone(),
+            "10GB".parse()?,
+            "1MB".parse()?,
+            "8".parse()?,
             log.clone(),
         )?;
         let test_metadata = AllMetadata::load(workspace_root)?;
