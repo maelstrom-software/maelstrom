@@ -10,7 +10,7 @@ use maelstrom_client::{
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
-    config::common::{BrokerAddr, LogLevel},
+    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     process::{ExitCode, ExitCodeAccumulator},
 };
 use std::{
@@ -22,7 +22,7 @@ use xdg::BaseDirectories;
 
 #[derive(Config, Debug)]
 pub struct Config {
-    /// Socket address of broker.
+    /// Socket address of broker. If not provided, all jobs will be run locally.
     #[config(
         option,
         short = 'b',
@@ -34,6 +34,24 @@ pub struct Config {
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
+
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
+    #[config(
+        short = 's',
+        value_name = "BYTES",
+        default = "CacheSize::default()",
+        next_help_heading = "Local Worker Options"
+    )]
+    pub cache_size: CacheSize,
+
+    /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    #[config(short = 'i', value_name = "BYTES", default = "InlineLimit::default()")]
+    pub inline_limit: InlineLimit,
+
+    /// The number of job slots available.
+    #[config(short = 'S', value_name = "N", default = "Slots::default()")]
+    pub slots: Slots,
 }
 
 fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -> Result<()> {
@@ -114,9 +132,9 @@ fn main() -> Result<ExitCode> {
             config.broker,
             ".",
             cache_dir(),
-            "10GB".parse()?,
-            "1MB".parse()?,
-            "8".parse()?,
+            config.cache_size,
+            config.inline_limit,
+            config.slots,
             log,
         )?;
         let reader: Box<dyn Read> = Box::new(io::stdin().lock());

@@ -1,7 +1,7 @@
 use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::common::{BrokerAddr, LogLevel};
+use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots};
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -26,7 +26,7 @@ impl Debug for Quiet {
 
 #[derive(Config, Debug)]
 pub struct Config {
-    /// Socket address of broker.
+    /// Socket address of broker. If not provided, all tests will be run locally.
     #[config(
         option,
         short = 'b',
@@ -52,6 +52,24 @@ pub struct Config {
         next_help_heading = "Test Override Config Options"
     )]
     pub timeout: Option<u32>,
+
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
+    #[config(
+        short = 's',
+        value_name = "BYTES",
+        default = "CacheSize::default()",
+        next_help_heading = "Local Worker Options"
+    )]
+    pub cache_size: CacheSize,
+
+    /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    #[config(short = 'i', value_name = "BYTES", default = "InlineLimit::default()")]
+    pub inline_limit: InlineLimit,
+
+    /// The number of job slots available.
+    #[config(short = 'S', value_name = "N", default = "Slots::default()")]
+    pub slots: Slots,
 
     #[config(flatten, next_help_heading = "Feature Selection Config Options")]
     pub cargo_feature_selection_options: FeatureSelectionOptions,

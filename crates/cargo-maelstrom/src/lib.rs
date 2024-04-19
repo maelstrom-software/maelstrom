@@ -19,7 +19,7 @@ use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
 use maelstrom_util::{
-    config::common::{BrokerAddr, LogLevel},
+    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     process::ExitCode,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -549,6 +549,9 @@ impl MainAppDeps {
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
         broker_addr: Option<BrokerAddr>,
+        cache_size: CacheSize,
+        inline_limit: InlineLimit,
+        slots: Slots,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
@@ -570,9 +573,9 @@ impl MainAppDeps {
             broker_addr,
             workspace_root,
             cache_dir.clone(),
-            "10GB".parse()?,
-            "1MB".parse()?,
-            "8".parse()?,
+            cache_size,
+            inline_limit,
+            slots,
             log.clone(),
         )?;
         let test_metadata = AllMetadata::load(workspace_root)?;
