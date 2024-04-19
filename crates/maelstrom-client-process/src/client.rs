@@ -369,125 +369,7 @@ impl Client {
 
         async fn try_to_start(
             log: Option<Logger>,
-            broker_addr: BrokerAddr,
-            project_dir: PathBuf,
-            cache_dir: PathBuf,
-            container_image_depot_cache_dir: PathBuf,
-            slots: Slots,
-        ) -> Result<(ClientState, JoinSet<Result<()>>)> {
-            let fs = async_fs::Fs::new();
-
-            // Ensure we have a logger. If this program was started by a user on the shell, then a
-            // logger will have been provided. Otherwise, open a log file in the cache directory
-            // and log there.
-            let log = match log {
-                Some(log) => log,
-                None => file_logger(&fs, cache_dir.as_ref()).await?,
-            };
-            debug!(log, "client starting");
-
-            // Ensure all of the appropriate subdirectories have been created in the cache
-            // directory.
-            for d in [MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR] {
-                fs.create_dir_all(cache_dir.join(d)).await?;
-            }
-
-            // Connect to the broker and send it a Hello message.
-            let (broker_socket_read_half, mut broker_socket_write_half) =
-                TcpStream::connect(broker_addr.inner())
-                    .await
-                    .with_context(|| format!("failed to connect to {broker_addr}"))?
-                    .into_split();
-            net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client)
-                .await?;
-            debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
-
-            // Create standalone sub-components.
-            let container_image_depot =
-                ContainerImageDepot::new(&project_dir, container_image_depot_cache_dir)?;
-            let digest_repo = DigestRepository::new(&cache_dir);
-            let upload_tracker = ArtifactUploadTracker::default();
-
-            // Create all of the channels our tasks are going to need to communicate with each
-            // other.
-            let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
-            let (broker_socket_writer_sender, broker_socket_writer_receiver) =
-                mpsc::unbounded_channel();
-            let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
-            let (local_broker_sender, local_broker_receiver) = local_broker::channel();
-
-            // Start all of the tasks in a JoinSet.
-            let mut join_set = JoinSet::new();
-            let log_clone = log.clone();
-            let log_clone2 = log.clone();
-            let local_broker_sender_clone = local_broker_sender.clone();
-            join_set.spawn(async move {
-                net::async_socket_reader(
-                    broker_socket_read_half,
-                    local_broker_sender_clone,
-                    move |msg| {
-                        debug!(log_clone, "received broker message"; "msg" => ?msg);
-                        local_broker::Message::Broker(msg)
-                    },
-                )
-                .await
-                .with_context(|| "Reading from broker")
-            });
-            join_set.spawn(async move {
-                net::async_socket_writer(
-                    broker_socket_writer_receiver,
-                    broker_socket_write_half,
-                    move |msg| {
-                        debug!(log_clone2, "sending broker message"; "msg" => ?msg);
-                    },
-                )
-                .await
-                .with_context(|| "Writing to broker")
-            });
-            dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
-
-            // Just create a black-hole local_worker sender. We shouldn't be sending any
-            // messages to it in remote mode.
-            let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
-            drop(local_worker_receiver);
-
-            local_broker::start_task(
-                &mut join_set,
-                false,
-                slots,
-                local_broker_receiver,
-                dispatcher_sender.clone(),
-                broker_socket_writer_sender,
-                artifact_pusher_sender,
-                local_worker_sender,
-            );
-            artifact_pusher::start_task(
-                &mut join_set,
-                artifact_pusher_receiver,
-                broker_addr,
-                upload_tracker.clone(),
-            );
-
-            Ok((
-                ClientState {
-                    dispatcher_sender,
-                    cache_dir,
-                    project_dir,
-                    upload_tracker,
-                    container_image_depot,
-                    log,
-                    locked: Mutex::new(ClientStateLocked {
-                        digest_repo,
-                        processed_artifact_paths: HashSet::default(),
-                        cached_layers: HashMap::new(),
-                    }),
-                },
-                join_set,
-            ))
-        }
-
-        async fn try_to_start_standalone(
-            log: Option<Logger>,
+            broker_addr: Option<BrokerAddr>,
             project_dir: PathBuf,
             cache_dir: PathBuf,
             container_image_depot_cache_dir: PathBuf,
@@ -524,80 +406,165 @@ impl Client {
             let digest_repo = DigestRepository::new(&cache_dir);
             let upload_tracker = ArtifactUploadTracker::default();
 
-            // Create all of the channels our tasks are going to need to communicate with each
-            // other.
+            // Create the JoinSet we're going to put tasks in. If we bail early from this function,
+            // we'll cancel all tasks we have started thus far.
+            let mut join_set = JoinSet::new();
+
+            // Create all of the channels we're going to need to connect everything up.
+            let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
+            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
             let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
             let (local_broker_sender, local_broker_receiver) = local_broker::channel();
             let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
 
-            let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
-            let mount_dir = cache_root.join("mount");
-            let tmpfs_dir = cache_root.join("upper");
-            let cache_root = cache_root.join("artifacts");
-            let blob_cache_dir = cache_root.join("blob/sha256");
+            let standalone;
+            if let Some(broker_addr) = broker_addr {
+                // We have a broker_addr, which means we're not in standalone mode.
+                standalone = false;
 
-            let worker_cache = maelstrom_worker::cache::Cache::new(
-                maelstrom_worker::cache::StdCacheFs,
-                CacheRoot::from(cache_root),
-                cache_size,
-                log.clone(),
-            );
-            struct ArtifactFetcher(local_broker::Sender);
-            impl maelstrom_worker::dispatcher::ArtifactFetcher for ArtifactFetcher {
-                fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
-                    self.0
-                        .send(local_broker::Message::LocalWorkerStartArtifactFetch(
-                            digest, path,
-                        ))
-                        .ok();
-                }
+                // Connect to the broker.
+                let (broker_socket_read_half, mut broker_socket_write_half) =
+                    TcpStream::connect(broker_addr.inner())
+                        .await
+                        .with_context(|| format!("failed to connect to {broker_addr}"))?
+                        .into_split();
+                debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
+
+                // Send it a Hello message.
+                net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client)
+                    .await?;
+
+                // Spawn a task to read from the socket and write to the local_broker's channel.
+                let log_clone = log.clone();
+                let local_broker_sender_clone = local_broker_sender.clone();
+                join_set.spawn(async move {
+                    net::async_socket_reader(
+                        broker_socket_read_half,
+                        local_broker_sender_clone,
+                        move |msg| {
+                            debug!(log_clone, "received broker message"; "msg" => ?msg);
+                            local_broker::Message::Broker(msg)
+                        },
+                    )
+                    .await
+                    .with_context(|| "Reading from broker")
+                });
+
+                // Spawn a task to read from the broker's channel and write to the socket.
+                let log_clone = log.clone();
+                join_set.spawn(async move {
+                    net::async_socket_writer(
+                        broker_receiver,
+                        broker_socket_write_half,
+                        move |msg| {
+                            debug!(log_clone, "sending broker message"; "msg" => ?msg);
+                        },
+                    )
+                    .await
+                    .with_context(|| "Writing to broker")
+                });
+
+                // Spawn a task for the artifact_pusher.
+                artifact_pusher::start_task(
+                    &mut join_set,
+                    artifact_pusher_receiver,
+                    broker_addr,
+                    upload_tracker.clone(),
+                );
+            } else {
+                // We don't have a broker_addr, which means we're in standalone mode.
+                standalone = true;
+
+                // Drop the receivers for the artifact_pusher and the broker. We're not going to be
+                // sending messages to their corresponding senders (at least, we better not be!).
+                drop(artifact_pusher_receiver);
+                drop(broker_receiver);
             }
-            let worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
-            struct BrokerSender(local_broker::Sender);
-            impl maelstrom_worker::dispatcher::BrokerSender for BrokerSender {
-                fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                    self.0.send(local_broker::Message::LocalWorker(msg)).ok();
-                }
-            }
-            let worker_broker_sender = BrokerSender(local_broker_sender.clone());
-            let worker_dispatcher_adapter = maelstrom_worker::DispatcherAdapter::new(
-                local_worker_sender.clone(),
-                inline_limit,
-                log.clone(),
-                mount_dir,
-                tmpfs_dir,
-                blob_cache_dir,
-            )?;
-            let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
-                worker_dispatcher_adapter,
-                worker_artifact_fetcher,
-                worker_broker_sender,
-                worker_cache,
-                slots,
+
+            // Spawn a task for the dispatcher.
+            dispatcher::start_task(
+                &mut join_set,
+                dispatcher_receiver,
+                local_broker_sender.clone(),
             );
 
-            // Start all of the tasks in a JoinSet.
-            let mut join_set = JoinSet::new();
-            join_set.spawn(sync::channel_reader(local_worker_receiver, move |msg| {
-                worker_dispatcher.receive_message(msg)
-            }));
-            dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
-            // Just create black-hole broker and artifact_pusher senders. We shouldn't be sending any
-            // messages to them in standalone mode.
-            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-            drop(broker_receiver);
-            let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
-            drop(artifact_pusher_receiver);
+            // Spawn a task for the local_broker.
             local_broker::start_task(
                 &mut join_set,
-                true,
+                standalone,
                 slots,
                 local_broker_receiver,
                 dispatcher_sender.clone(),
                 broker_sender,
                 artifact_pusher_sender,
-                local_worker_sender,
+                local_worker_sender.clone(),
             );
+
+            // Start the local_worker.
+            {
+                let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
+                let mount_dir = cache_root.join("mount");
+                let tmpfs_dir = cache_root.join("upper");
+                let cache_root = cache_root.join("artifacts");
+                let blob_cache_dir = cache_root.join("blob/sha256");
+
+                // Create the local_worker's cache. This is the same cache as the "real" worker
+                // uses.
+                let local_worker_cache = maelstrom_worker::cache::Cache::new(
+                    maelstrom_worker::cache::StdCacheFs,
+                    CacheRoot::from(cache_root),
+                    cache_size,
+                    log.clone(),
+                );
+
+                // Create the local_worker's deps. This the same adapter as the "real" worker uses.
+                let local_worker_dispatcher_adapter = maelstrom_worker::DispatcherAdapter::new(
+                    local_worker_sender,
+                    inline_limit,
+                    log.clone(),
+                    mount_dir,
+                    tmpfs_dir,
+                    blob_cache_dir,
+                )?;
+
+                // Create an ArtifactFetcher for the local_worker that just forwards requests to
+                // the local_broker.
+                struct ArtifactFetcher(local_broker::Sender);
+                impl maelstrom_worker::dispatcher::ArtifactFetcher for ArtifactFetcher {
+                    fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+                        self.0
+                            .send(local_broker::Message::LocalWorkerStartArtifactFetch(
+                                digest, path,
+                            ))
+                            .ok();
+                    }
+                }
+                let local_worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
+
+                // Create a BrokerSender for the local_worker that just forwards messages to
+                // the local_broker.
+                struct BrokerSender(local_broker::Sender);
+                impl maelstrom_worker::dispatcher::BrokerSender for BrokerSender {
+                    fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
+                        self.0.send(local_broker::Message::LocalWorker(msg)).ok();
+                    }
+                }
+                let worker_broker_sender = BrokerSender(local_broker_sender);
+
+                // Create the actual local_worker.
+                let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
+                    local_worker_dispatcher_adapter,
+                    local_worker_artifact_fetcher,
+                    worker_broker_sender,
+                    local_worker_cache,
+                    slots,
+                );
+
+                // Spawn a task for the local_worker.
+                join_set.spawn(sync::channel_reader(local_worker_receiver, move |msg| {
+                    worker_dispatcher.receive_message(msg)
+                }));
+            }
 
             Ok((
                 ClientState {
@@ -619,28 +586,17 @@ impl Client {
 
         let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
-        let result = if let Some(broker_addr) = broker_addr {
-            try_to_start(
-                log,
-                broker_addr,
-                project_dir,
-                cache_dir,
-                container_image_depot_cache_dir,
-                slots,
-            )
-            .await
-        } else {
-            try_to_start_standalone(
-                log,
-                project_dir,
-                cache_dir,
-                container_image_depot_cache_dir,
-                cache_size,
-                inline_limit,
-                slots,
-            )
-            .await
-        };
+        let result = try_to_start(
+            log,
+            broker_addr,
+            project_dir,
+            cache_dir,
+            container_image_depot_cache_dir,
+            cache_size,
+            inline_limit,
+            slots,
+        )
+        .await;
         match result {
             Ok((state, mut join_set)) => {
                 activation_handle.activate(state);
