@@ -46,6 +46,9 @@ impl ClientProcess for Handler {
                     TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
                     TryFromProtoBuf::try_from_proto_buf(request.project_dir)?,
                     TryFromProtoBuf::try_from_proto_buf(request.cache_dir)?,
+                    "20GB".parse()?,
+                    "1MB".parse()?,
+                    "8".parse()?,
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)

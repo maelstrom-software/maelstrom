@@ -3,7 +3,7 @@ mod state_machine;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
-    dispatcher, local_broker,
+    dispatcher, local_broker, local_broker_for_standalone,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
@@ -22,11 +22,12 @@ use maelstrom_client_base::{
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
     async_fs,
-    config::common::BrokerAddr,
+    config::common::{BrokerAddr, CacheRoot, CacheSize},
     ext::BoolExt,
     manifest::{AsyncManifestWriter, ManifestBuilder},
-    net,
+    net, sync,
 };
+use maelstrom_worker::config::{InlineLimit, Slots};
 use sha2::{Digest as _, Sha256};
 use slog::{debug, Logger};
 use state_machine::StateMachine;
@@ -349,9 +350,12 @@ impl Client {
 
     pub async fn start(
         &self,
-        broker_addr: BrokerAddr,
+        broker_addr: Option<BrokerAddr>,
         project_dir: PathBuf,
         cache_dir: PathBuf,
+        cache_size: CacheSize,
+        inline_limit: InlineLimit,
+        slots: Slots,
     ) -> Result<()> {
         async fn file_logger(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
             let log_file = fs
@@ -469,9 +473,135 @@ impl Client {
             ))
         }
 
+        async fn try_to_start_standalone(
+            log: Option<Logger>,
+            project_dir: PathBuf,
+            cache_dir: PathBuf,
+            cache_size: CacheSize,
+            inline_limit: InlineLimit,
+            slots: Slots,
+        ) -> Result<(ClientState, JoinSet<Result<()>>)> {
+            let fs = async_fs::Fs::new();
+
+            // Ensure we have a logger. If this program was started by a user on the shell, then a
+            // logger will have been provided. Otherwise, open a log file in the cache directory
+            // and log there.
+            let log = match log {
+                Some(log) => log,
+                None => file_logger(&fs, cache_dir.as_ref()).await?,
+            };
+            debug!(log, "client starting");
+
+            // Ensure all of the appropriate subdirectories have been created in the cache
+            // directory.
+            const LOCAL_WORKER_DIR: &str = "maelstrom-local-worker";
+            for d in [
+                MANIFEST_DIR,
+                STUB_MANIFEST_DIR,
+                SYMLINK_MANIFEST_DIR,
+                LOCAL_WORKER_DIR,
+            ] {
+                fs.create_dir_all(cache_dir.join(d)).await?;
+            }
+
+            // Create standalone sub-components.
+            let container_image_depot = ContainerImageDepot::new(&project_dir)?;
+            let digest_repo = DigestRepository::new(&cache_dir);
+            let upload_tracker = ArtifactUploadTracker::default();
+
+            // Create all of the channels our tasks are going to need to communicate with each
+            // other.
+            let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
+            let (local_broker_sender, local_broker_receiver) = local_broker::channel();
+            let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
+            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+
+            let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
+            let mount_dir = cache_root.join("mount");
+            let tmpfs_dir = cache_root.join("upper");
+            let cache_root = cache_root.join("artifacts");
+            let blob_cache_dir = cache_root.join("blob/sha256");
+
+            let worker_cache = maelstrom_worker::cache::Cache::new(
+                maelstrom_worker::cache::StdCacheFs,
+                CacheRoot::from(cache_root),
+                cache_size,
+                log.clone(),
+            );
+            struct ArtifactFetcher(local_broker::Sender);
+            impl maelstrom_worker::dispatcher::ArtifactFetcher for ArtifactFetcher {
+                fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
+                    self.0
+                        .send(local_broker::Message::LocalWorkerStartArtifactFetch(
+                            digest, path,
+                        ))
+                        .ok();
+                }
+            }
+            let worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
+            let worker_dispatcher_adapter = maelstrom_worker::DispatcherAdapter::new(
+                local_worker_sender.clone(),
+                broker_sender,
+                inline_limit,
+                log.clone(),
+                mount_dir,
+                tmpfs_dir,
+                blob_cache_dir,
+            )?;
+            let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
+                worker_dispatcher_adapter,
+                worker_artifact_fetcher,
+                worker_cache,
+                slots,
+            );
+
+            // Start all of the tasks in a JoinSet.
+            let mut join_set = JoinSet::new();
+            join_set.spawn(sync::channel_reader(local_worker_receiver, move |msg| {
+                worker_dispatcher.receive_message(msg)
+            }));
+            let local_broker_sender_clone = local_broker_sender.clone();
+            join_set.spawn(sync::channel_reader(broker_receiver, move |msg| {
+                local_broker_sender_clone
+                    .send(local_broker::Message::LocalWorker(msg))
+                    .ok();
+            }));
+            dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
+            local_broker_for_standalone::start_task(
+                &mut join_set,
+                slots,
+                local_broker_receiver,
+                dispatcher_sender.clone(),
+                local_worker_sender,
+            );
+
+            Ok((
+                ClientState {
+                    dispatcher_sender,
+                    cache_dir,
+                    project_dir,
+                    upload_tracker,
+                    container_image_depot,
+                    log,
+                    locked: Mutex::new(ClientStateLocked {
+                        digest_repo,
+                        processed_artifact_paths: HashSet::default(),
+                        cached_layers: HashMap::new(),
+                    }),
+                },
+                join_set,
+            ))
+        }
+
         let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
-        match try_to_start(log, broker_addr, project_dir, cache_dir).await {
+        let result = if let Some(broker_addr) = broker_addr {
+            try_to_start(log, broker_addr, project_dir, cache_dir).await
+        } else {
+            try_to_start_standalone(log, project_dir, cache_dir, cache_size, inline_limit, slots)
+                .await
+        };
+        match result {
             Ok((state, mut join_set)) => {
                 activation_handle.activate(state);
                 let state_machine_clone = self.state_machine.clone();

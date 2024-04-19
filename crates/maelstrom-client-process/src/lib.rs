@@ -3,6 +3,7 @@ mod client;
 mod digest_repo;
 mod dispatcher;
 mod local_broker;
+mod local_broker_for_standalone;
 mod rpc;
 mod stream_wrapper;
 

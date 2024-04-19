@@ -1,7 +1,7 @@
 use crate::{artifact_pusher, dispatcher};
 use anyhow::Result;
 use maelstrom_base::{
-    proto::{BrokerToClient, ClientToBroker},
+    proto::{BrokerToClient, ClientToBroker, WorkerToBroker},
     stats::JobStateCounts,
     ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
@@ -26,7 +26,13 @@ pub enum Message {
     AddArtifact(PathBuf, Sha256Digest),
     JobRequest(ClientJobId, JobSpec),
     JobStateCountsRequest,
+
+    // Only in non-standalone mode.
     Broker(BrokerToClient),
+
+    // Only in standalone mode.
+    LocalWorker(WorkerToBroker),
+    LocalWorkerStartArtifactFetch(Sha256Digest, PathBuf),
 }
 
 pub struct LocalBroker<DepsT> {
@@ -70,6 +76,12 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
             Message::Broker(BrokerToClient::JobStateCountsResponse(counts)) => {
                 self.deps
                     .send_job_state_counts_response_to_dispatcher(counts);
+            }
+            Message::LocalWorker(_) => {
+                unimplemented!("shouldn't get this message in non-standalone mode");
+            }
+            Message::LocalWorkerStartArtifactFetch(_, _) => {
+                unimplemented!("shouldn't get this message in non-standalone mode");
             }
         }
     }

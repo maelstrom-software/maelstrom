@@ -125,7 +125,7 @@ where
 impl Client {
     pub fn new(
         mut process_handle: ClientBgProcess,
-        broker_addr: BrokerAddr,
+        broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Path>,
         cache_dir: impl AsRef<Path>,
         log: slog::Logger,

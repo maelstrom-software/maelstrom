@@ -1,8 +1,8 @@
 //! Code for the worker binary.
 
-mod cache;
+pub mod cache;
 pub mod config;
-mod dispatcher;
+pub mod dispatcher;
 mod executor;
 mod fetcher;
 mod layer_fs;
@@ -142,10 +142,10 @@ impl ManifestDigestCache {
 const MANIFEST_DIGEST_CACHE_SIZE: usize = 10_000;
 
 type DispatcherReceiver = UnboundedReceiver<Message>;
-type DispatcherSender = UnboundedSender<Message>;
+pub type DispatcherSender = UnboundedSender<Message>;
 type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
 
-struct DispatcherAdapter {
+pub struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     broker_socket_sender: BrokerSocketSender,
     inline_limit: InlineLimit,
@@ -158,7 +158,7 @@ struct DispatcherAdapter {
 
 impl DispatcherAdapter {
     #[allow(clippy::too_many_arguments)]
-    fn new(
+    pub fn new(
         dispatcher_sender: DispatcherSender,
         broker_socket_sender: BrokerSocketSender,
         inline_limit: InlineLimit,
@@ -236,7 +236,7 @@ impl DispatcherAdapter {
     }
 }
 
-struct TimerHandle(JoinHandle<()>);
+pub struct TimerHandle(JoinHandle<()>);
 
 impl Drop for TimerHandle {
     fn drop(&mut self) {

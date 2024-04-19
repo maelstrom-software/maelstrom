@@ -3,7 +3,7 @@ syntax = "proto3";
 package maelstrom_client_base.items;
 
 message StartRequest {
-    string broker_addr = 2;
+    optional string broker_addr = 2;
     bytes project_dir = 3;
     bytes cache_dir = 4;
 }

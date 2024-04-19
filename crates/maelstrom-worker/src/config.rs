@@ -12,7 +12,7 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-#[derive(Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(try_from = "u16")]
 pub struct Slots(u16);
 

@@ -27,8 +27,13 @@ impl Debug for Quiet {
 #[derive(Config, Debug)]
 pub struct Config {
     /// Socket address of broker.
-    #[config(short = 'b', value_name = "SOCKADDR")]
-    pub broker: BrokerAddr,
+    #[config(
+        option,
+        short = 'b',
+        value_name = "SOCKADDR",
+        default = r#""standalone mode""#
+    )]
+    pub broker: Option<BrokerAddr>,
 
     /// Minimum log level to output.
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]

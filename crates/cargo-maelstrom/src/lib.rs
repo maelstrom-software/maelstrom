@@ -548,7 +548,7 @@ impl MainAppDeps {
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
-        broker_addr: BrokerAddr,
+        broker_addr: Option<BrokerAddr>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
