@@ -2,7 +2,7 @@ pub mod test;
 
 pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
     stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
@@ -14,6 +14,7 @@ use maelstrom_container::ContainerImage;
 use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, Slots};
 use spec::Layer;
 use std::{future::Future, os::unix::net::UnixStream, path::Path, pin::Pin, process, thread};
+use xdg::BaseDirectories;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -145,15 +146,23 @@ impl Client {
             log,
         };
 
+        let container_image_depot_cache_dir = BaseDirectories::with_prefix("maelstrom/container")
+            .with_context(|| "finding container image depot cache dir")?
+            .get_cache_file("");
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir.as_ref(),
             "cache_dir" => ?cache_dir.as_ref(),
+            "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
+            "cache_size" => ?cache_size,
+            "inline_limit" => ?inline_limit,
+            "slots" => ?slots,
         );
         let msg = proto::StartRequest {
             broker_addr: broker_addr.into_proto_buf(),
             project_dir: project_dir.as_ref().into_proto_buf(),
             cache_dir: cache_dir.as_ref().into_proto_buf(),
+            container_image_depot_cache_dir: container_image_depot_cache_dir.into_proto_buf(),
             cache_size: cache_size.into_proto_buf(),
             inline_limit: inline_limit.into_proto_buf(),
             slots: slots.into_proto_buf(),

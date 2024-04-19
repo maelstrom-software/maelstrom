@@ -347,11 +347,13 @@ impl Client {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
         broker_addr: Option<BrokerAddr>,
         project_dir: PathBuf,
         cache_dir: PathBuf,
+        container_image_depot_cache_dir: PathBuf,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
@@ -370,6 +372,7 @@ impl Client {
             broker_addr: BrokerAddr,
             project_dir: PathBuf,
             cache_dir: PathBuf,
+            container_image_depot_cache_dir: PathBuf,
             slots: Slots,
         ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
@@ -400,7 +403,8 @@ impl Client {
             debug!(log, "client connected to broker"; "broker_addr" => ?broker_addr);
 
             // Create standalone sub-components.
-            let container_image_depot = ContainerImageDepot::new(&project_dir)?;
+            let container_image_depot =
+                ContainerImageDepot::new(&project_dir, container_image_depot_cache_dir)?;
             let digest_repo = DigestRepository::new(&cache_dir);
             let upload_tracker = ArtifactUploadTracker::default();
 
@@ -486,6 +490,7 @@ impl Client {
             log: Option<Logger>,
             project_dir: PathBuf,
             cache_dir: PathBuf,
+            container_image_depot_cache_dir: PathBuf,
             cache_size: CacheSize,
             inline_limit: InlineLimit,
             slots: Slots,
@@ -514,7 +519,8 @@ impl Client {
             }
 
             // Create standalone sub-components.
-            let container_image_depot = ContainerImageDepot::new(&project_dir)?;
+            let container_image_depot =
+                ContainerImageDepot::new(&project_dir, container_image_depot_cache_dir)?;
             let digest_repo = DigestRepository::new(&cache_dir);
             let upload_tracker = ArtifactUploadTracker::default();
 
@@ -614,10 +620,26 @@ impl Client {
         let (log, activation_handle) = self.state_machine.try_to_begin_activation()?;
 
         let result = if let Some(broker_addr) = broker_addr {
-            try_to_start(log, broker_addr, project_dir, cache_dir, slots).await
+            try_to_start(
+                log,
+                broker_addr,
+                project_dir,
+                cache_dir,
+                container_image_depot_cache_dir,
+                slots,
+            )
+            .await
         } else {
-            try_to_start_standalone(log, project_dir, cache_dir, cache_size, inline_limit, slots)
-                .await
+            try_to_start_standalone(
+                log,
+                project_dir,
+                cache_dir,
+                container_image_depot_cache_dir,
+                cache_size,
+                inline_limit,
+                slots,
+            )
+            .await
         };
         match result {
             Ok((state, mut join_set)) => {

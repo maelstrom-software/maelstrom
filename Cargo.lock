@@ -2912,6 +2912,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
+ "xdg",
 ]
 
 [[package]]
@@ -2986,7 +2987,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
- "xdg",
 ]
 
 [[package]]

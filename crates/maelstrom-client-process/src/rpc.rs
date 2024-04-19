@@ -46,6 +46,7 @@ impl ClientProcess for Handler {
                     TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
                     TryFromProtoBuf::try_from_proto_buf(request.project_dir)?,
                     TryFromProtoBuf::try_from_proto_buf(request.cache_dir)?,
+                    TryFromProtoBuf::try_from_proto_buf(request.container_image_depot_cache_dir)?,
                     TryFromProtoBuf::try_from_proto_buf(request.cache_size)?,
                     TryFromProtoBuf::try_from_proto_buf(request.inline_limit)?,
                     TryFromProtoBuf::try_from_proto_buf(request.slots)?,

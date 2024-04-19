@@ -26,7 +26,6 @@ tempfile.workspace = true
 tokio-util.workspace = true
 tokio.workspace = true
 toml.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 maplit.workspace = true

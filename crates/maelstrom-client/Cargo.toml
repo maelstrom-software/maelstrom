@@ -29,6 +29,7 @@ tokio-stream.workspace = true
 tokio.workspace = true
 tonic.workspace = true
 tower.workspace = true
+xdg.workspace = true
 
 [dev-dependencies]
 slog-async.workspace = true

@@ -9,6 +9,7 @@ message StartRequest {
     uint64 cache_size = 5;
     uint64 inline_limit = 6;
     uint32 slots = 7;
+    bytes container_image_depot_cache_dir = 8;
 }
 
 message AddArtifactRequest {
