@@ -1,11 +1,11 @@
 use crate::{artifact_pusher, dispatcher};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use maelstrom_base::{
-    proto::{BrokerToClient, ClientToBroker, WorkerToBroker},
-    stats::JobStateCounts,
-    ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
+    proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
+    stats::{JobState, JobStateCounts},
+    ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
-use maelstrom_util::{fs::Fs, sync};
+use maelstrom_util::{config::common::Slots, fs::Fs, sync};
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -42,15 +42,21 @@ pub enum Message {
 }
 
 pub struct LocalBroker<DepsT> {
+    standalone: bool,
     deps: DepsT,
+    slots: Slots,
     artifacts: HashMap<Sha256Digest, PathBuf>,
+    counts: JobStateCounts,
 }
 
 impl<DepsT: Deps> LocalBroker<DepsT> {
-    pub fn new(deps: DepsT) -> Self {
+    pub fn new(standalone: bool, deps: DepsT, slots: Slots) -> Self {
         Self {
+            standalone,
             deps,
+            slots,
             artifacts: HashMap::new(),
+            counts: JobStateCounts::default(),
         }
     }
 
@@ -60,17 +66,41 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                 self.artifacts.insert(digest, path);
             }
             Message::JobRequest(cjid, spec) => {
-                self.deps
-                    .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec));
+                if self.standalone {
+                    if self.counts[JobState::Running] < *self.slots.inner() as u64 {
+                        self.counts[JobState::Running] += 1;
+                    } else {
+                        self.counts[JobState::Pending] += 1;
+                    }
+                    self.deps.send_message_to_local_worker(
+                        maelstrom_worker::dispatcher::Message::Broker(BrokerToWorker::EnqueueJob(
+                            JobId {
+                                cid: ClientId::from(0),
+                                cjid,
+                            },
+                            spec,
+                        )),
+                    );
+                } else {
+                    self.deps
+                        .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec));
+                }
             }
             Message::JobStateCountsRequest => {
-                self.deps
-                    .send_message_to_broker(ClientToBroker::JobStateCountsRequest);
+                if self.standalone {
+                    self.deps
+                        .send_job_state_counts_response_to_dispatcher(self.counts);
+                } else {
+                    self.deps
+                        .send_message_to_broker(ClientToBroker::JobStateCountsRequest);
+                }
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
+                assert!(!self.standalone);
                 self.deps.send_job_response_to_dispatcher(cjid, result);
             }
             Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
+                assert!(!self.standalone);
                 let path = self.artifacts.get(&digest).unwrap_or_else(|| {
                     panic!("got request for unknown artifact with digest {digest}")
                 });
@@ -80,14 +110,32 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                 unimplemented!("this client doesn't send statistics requests");
             }
             Message::Broker(BrokerToClient::JobStateCountsResponse(counts)) => {
+                assert!(!self.standalone);
                 self.deps
                     .send_job_state_counts_response_to_dispatcher(counts);
             }
-            Message::LocalWorker(_) => {
-                unimplemented!("shouldn't get this message in non-standalone mode");
+            Message::LocalWorker(WorkerToBroker(jid, result)) => {
+                assert!(self.standalone);
+                if self.counts[JobState::Pending] > 0 {
+                    self.counts[JobState::Pending] -= 1;
+                } else {
+                    self.counts[JobState::Running] -= 1;
+                }
+                self.counts[JobState::Complete] += 1;
+                self.deps.send_job_response_to_dispatcher(jid.cjid, result);
             }
-            Message::LocalWorkerStartArtifactFetch(_, _) => {
-                unimplemented!("shouldn't get this message in non-standalone mode");
+            Message::LocalWorkerStartArtifactFetch(digest, path) => {
+                assert!(self.standalone);
+                let response = maelstrom_worker::dispatcher::Message::ArtifactFetchCompleted(
+                    digest.clone(),
+                    match self.artifacts.get(&digest) {
+                        None => Err(anyhow!("no artifact found for digest {digest}")),
+                        Some(stored_path) => self
+                            .deps
+                            .link_artifact_for_local_worker(stored_path.as_path(), path.as_path()),
+                    },
+                );
+                self.deps.send_message_to_local_worker(response);
             }
         }
     }
@@ -176,7 +224,7 @@ pub fn start_task(
         artifact_pusher_sender,
         local_worker_sender,
     );
-    let mut local_broker = LocalBroker::new(adapter);
+    let mut local_broker = LocalBroker::new(false, adapter, Slots::default());
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         local_broker.receive_message(msg)
     }));
