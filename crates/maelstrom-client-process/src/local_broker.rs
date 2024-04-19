@@ -91,6 +91,9 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
 
     fn receive_message(&mut self, message: Message<DepsT>) {
         match message {
+            Message::AddArtifact(path, digest) => {
+                self.artifacts.insert(digest, path);
+            }
             Message::AddJob(spec, handle) => {
                 let cjid = self.next_client_job_id.into();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
@@ -134,9 +137,6 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                 } else {
                     self.all_jobs_complete_handles.push(handle);
                 }
-            }
-            Message::AddArtifact(path, digest) => {
-                self.artifacts.insert(digest, path);
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
                 assert!(!self.standalone);
