@@ -30,7 +30,7 @@ impl<T> ResultExt<T> for Result<T> {
     fn map_to_tonic(self) -> TonicResponse<T> {
         match self {
             Ok(v) => Ok(Response::new(v)),
-            Err(e) => Err(Status::new(Code::Unknown, e.to_string())),
+            Err(e) => Err(Status::new(Code::Unknown, format!("{e:?}"))),
         }
     }
 }
