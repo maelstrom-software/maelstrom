@@ -79,7 +79,7 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
         }
     }
 
-    fn job_response(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
+    fn receive_job_response(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
         let handle = self.job_handles.remove(&cjid).unwrap();
         self.deps.job_done(handle, cjid, result);
         if self.job_handles.is_empty() {
@@ -140,7 +140,7 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
                 assert!(!self.standalone);
-                self.job_response(cjid, result);
+                self.receive_job_response(cjid, result);
             }
             Message::Broker(BrokerToClient::TransferArtifact(digest)) => {
                 assert!(!self.standalone);
@@ -165,7 +165,7 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                     self.counts[JobState::Running] -= 1;
                 }
                 self.counts[JobState::Complete] += 1;
-                self.job_response(jid.cjid, result);
+                self.receive_job_response(jid.cjid, result);
             }
             Message::LocalWorkerStartArtifactFetch(digest, path) => {
                 assert!(self.standalone);
