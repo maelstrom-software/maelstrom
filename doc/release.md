@@ -81,7 +81,7 @@ Publishing to crates.io correctly is a bit of a pain, so we wrote an xtask actio
 
 First, make sure you're logged in to cargo:
 ```bash
-cat ~/.cargo/credentials
+cat ~/.cargo/credentials.toml
 ```
 
 You should see something like this:
