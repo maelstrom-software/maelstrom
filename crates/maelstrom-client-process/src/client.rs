@@ -3,7 +3,7 @@ mod state_machine;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
-    local_broker,
+    router,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
@@ -108,7 +108,7 @@ pub struct Client {
 }
 
 struct ClientState {
-    local_broker_sender: local_broker::Sender,
+    local_broker_sender: router::Sender,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -265,7 +265,7 @@ impl ClientState {
         if !locked.processed_artifact_paths.contains(&path) {
             locked.processed_artifact_paths.insert(path.clone());
             self.local_broker_sender
-                .send(local_broker::Message::AddArtifact(path, digest.clone()))?;
+                .send(router::Message::AddArtifact(path, digest.clone()))?;
         }
         Ok(digest)
     }
@@ -413,7 +413,7 @@ impl Client {
             // Create all of the channels we're going to need to connect everything up.
             let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
             let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-            let (local_broker_sender, local_broker_receiver) = local_broker::channel();
+            let (local_broker_sender, local_broker_receiver) = router::channel();
             let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
 
             let standalone;
@@ -433,7 +433,7 @@ impl Client {
                 net::write_message_to_async_socket(&mut broker_socket_write_half, Hello::Client)
                     .await?;
 
-                // Spawn a task to read from the socket and write to the local_broker's channel.
+                // Spawn a task to read from the socket and write to the router's channel.
                 let log_clone = log.clone();
                 let local_broker_sender_clone = local_broker_sender.clone();
                 join_set.spawn(async move {
@@ -442,7 +442,7 @@ impl Client {
                         local_broker_sender_clone,
                         move |msg| {
                             debug!(log_clone, "received broker message"; "msg" => ?msg);
-                            local_broker::Message::Broker(msg)
+                            router::Message::Broker(msg)
                         },
                     )
                     .await
@@ -480,8 +480,8 @@ impl Client {
                 drop(broker_receiver);
             }
 
-            // Spawn a task for the local_broker.
-            local_broker::start_task(
+            // Spawn a task for the router.
+            router::start_task(
                 &mut join_set,
                 standalone,
                 slots,
@@ -519,25 +519,23 @@ impl Client {
                 )?;
 
                 // Create an ArtifactFetcher for the local_worker that just forwards requests to
-                // the local_broker.
-                struct ArtifactFetcher(local_broker::Sender);
+                // the router.
+                struct ArtifactFetcher(router::Sender);
                 impl maelstrom_worker::dispatcher::ArtifactFetcher for ArtifactFetcher {
                     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
                         self.0
-                            .send(local_broker::Message::LocalWorkerStartArtifactFetch(
-                                digest, path,
-                            ))
+                            .send(router::Message::LocalWorkerStartArtifactFetch(digest, path))
                             .ok();
                     }
                 }
                 let local_worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
 
                 // Create a BrokerSender for the local_worker that just forwards messages to
-                // the local_broker.
-                struct BrokerSender(local_broker::Sender);
+                // the router.
+                struct BrokerSender(router::Sender);
                 impl maelstrom_worker::dispatcher::BrokerSender for BrokerSender {
                     fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                        self.0.send(local_broker::Message::LocalWorker(msg)).ok();
+                        self.0.send(router::Message::LocalWorker(msg)).ok();
                     }
                 }
                 let worker_broker_sender = BrokerSender(local_broker_sender.clone());
@@ -637,7 +635,7 @@ impl Client {
         debug!(state.log, "run_job"; "spec" => ?spec);
         state
             .local_broker_sender
-            .send(local_broker::Message::RunJob(spec, sender))?;
+            .send(router::Message::RunJob(spec, sender))?;
         watcher.wait(receiver).await
     }
 
@@ -647,7 +645,7 @@ impl Client {
         debug!(state.log, "wait_for_outstanding_jobs");
         state
             .local_broker_sender
-            .send(local_broker::Message::NotifyWhenAllJobsComplete(sender))?;
+            .send(router::Message::NotifyWhenAllJobsComplete(sender))?;
         watcher.wait(receiver).await
     }
 
@@ -656,7 +654,7 @@ impl Client {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         state
             .local_broker_sender
-            .send(local_broker::Message::GetJobStateCounts(sender))?;
+            .send(router::Message::GetJobStateCounts(sender))?;
         watcher.wait(receiver).await
     }
 
