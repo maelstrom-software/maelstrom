@@ -11,7 +11,7 @@ pub struct Config {
     pub broker: BrokerAddr,
 
     /// The number of job slots available.
-    #[config(short = 'S', value_name = "N", default = "num_cpus::get()")]
+    #[config(short = 'S', value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
 
     /// The directory to use for the cache.
@@ -24,19 +24,11 @@ pub struct Config {
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
-    #[config(
-        short = 's',
-        value_name = "BYTES",
-        default = "bytesize::ByteSize::gb(1)"
-    )]
+    #[config(short = 's', value_name = "BYTES", default = "CacheSize::default()")]
     pub cache_size: CacheSize,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(
-        short = 'i',
-        value_name = "BYTES",
-        default = "bytesize::ByteSize::mb(1)"
-    )]
+    #[config(short = 'i', value_name = "BYTES", default = "InlineLimit::default()")]
     pub inline_limit: InlineLimit,
 
     /// Minimum log level to output.

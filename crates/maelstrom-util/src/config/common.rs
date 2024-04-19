@@ -135,6 +135,12 @@ impl Debug for CacheSize {
     }
 }
 
+impl Default for CacheSize {
+    fn default() -> Self {
+        Self(ByteSize::gb(1))
+    }
+}
+
 impl Display for CacheSize {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
@@ -209,6 +215,12 @@ impl Debug for InlineLimit {
     }
 }
 
+impl Default for InlineLimit {
+    fn default() -> Self {
+        Self(ByteSize::mb(1))
+    }
+}
+
 impl Display for InlineLimit {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Display::fmt(&self.0, f)
@@ -269,6 +281,18 @@ impl TryFrom<usize> for Slots {
 impl Debug for Slots {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
+    }
+}
+
+impl Default for Slots {
+    fn default() -> Self {
+        Self::try_from(num_cpus::get()).unwrap()
+    }
+}
+
+impl Display for Slots {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
