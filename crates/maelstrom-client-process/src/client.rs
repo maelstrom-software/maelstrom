@@ -3,7 +3,7 @@ mod state_machine;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
-    dispatcher, local_broker,
+    local_broker,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
@@ -108,7 +108,7 @@ pub struct Client {
 }
 
 struct ClientState {
-    dispatcher_sender: dispatcher::Sender,
+    local_broker_sender: local_broker::Sender,
     cache_dir: PathBuf,
     project_dir: PathBuf,
     upload_tracker: ArtifactUploadTracker,
@@ -264,8 +264,8 @@ impl ClientState {
         };
         if !locked.processed_artifact_paths.contains(&path) {
             locked.processed_artifact_paths.insert(path.clone());
-            self.dispatcher_sender
-                .send(dispatcher::Message::AddArtifact(path, digest.clone()))?;
+            self.local_broker_sender
+                .send(local_broker::Message::AddArtifact(path, digest.clone()))?;
         }
         Ok(digest)
     }
@@ -413,7 +413,6 @@ impl Client {
             // Create all of the channels we're going to need to connect everything up.
             let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
             let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
-            let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
             let (local_broker_sender, local_broker_receiver) = local_broker::channel();
             let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
 
@@ -481,20 +480,12 @@ impl Client {
                 drop(broker_receiver);
             }
 
-            // Spawn a task for the dispatcher.
-            dispatcher::start_task(
-                &mut join_set,
-                dispatcher_receiver,
-                local_broker_sender.clone(),
-            );
-
             // Spawn a task for the local_broker.
             local_broker::start_task(
                 &mut join_set,
                 standalone,
                 slots,
                 local_broker_receiver,
-                dispatcher_sender.clone(),
                 broker_sender,
                 artifact_pusher_sender,
                 local_worker_sender.clone(),
@@ -549,7 +540,7 @@ impl Client {
                         self.0.send(local_broker::Message::LocalWorker(msg)).ok();
                     }
                 }
-                let worker_broker_sender = BrokerSender(local_broker_sender);
+                let worker_broker_sender = BrokerSender(local_broker_sender.clone());
 
                 // Create the actual local_worker.
                 let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
@@ -568,7 +559,7 @@ impl Client {
 
             Ok((
                 ClientState {
-                    dispatcher_sender,
+                    local_broker_sender,
                     cache_dir,
                     project_dir,
                     upload_tracker,
@@ -645,8 +636,8 @@ impl Client {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
         state
-            .dispatcher_sender
-            .send(dispatcher::Message::AddJob(spec, sender))?;
+            .local_broker_sender
+            .send(local_broker::Message::AddJob(spec, sender))?;
         watcher.wait(receiver).await
     }
 
@@ -655,8 +646,8 @@ impl Client {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "wait_for_outstanding_jobs");
         state
-            .dispatcher_sender
-            .send(dispatcher::Message::NotifyWhenAllJobsComplete(sender))?;
+            .local_broker_sender
+            .send(local_broker::Message::NotifyWhenAllJobsComplete(sender))?;
         watcher.wait(receiver).await
     }
 
@@ -664,8 +655,8 @@ impl Client {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         state
-            .dispatcher_sender
-            .send(dispatcher::Message::GetJobStateCounts(sender))?;
+            .local_broker_sender
+            .send(local_broker::Message::GetJobStateCounts(sender))?;
         watcher.wait(receiver).await
     }
 
