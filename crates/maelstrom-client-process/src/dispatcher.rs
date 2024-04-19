@@ -28,12 +28,15 @@ pub trait Deps {
 }
 
 pub enum Message<DepsT: Deps> {
+    // These are requests from the client.
     AddArtifact(PathBuf, Sha256Digest),
     AddJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(DepsT::JobStateCountsHandle),
+    NotifyWhenAllJobsComplete(DepsT::AllJobsCompleteHandle),
+
+    // These are responses from the local_broker.
     JobResponse(ClientJobId, JobOutcomeResult),
     JobStateCountsResponse(JobStateCounts),
-    NotifyWhenAllJobsComplete(DepsT::AllJobsCompleteHandle),
 }
 
 pub struct Dispatcher<DepsT: Deps> {
