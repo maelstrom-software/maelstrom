@@ -11,7 +11,7 @@ use futures::StreamExt;
 use itertools::Itertools as _;
 use maelstrom_base::{
     manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
-    proto::Hello,
+    proto::{Hello, WorkerToBroker},
     stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
@@ -513,7 +513,6 @@ impl Client {
             let (dispatcher_sender, dispatcher_receiver) = dispatcher::channel();
             let (local_broker_sender, local_broker_receiver) = local_broker::channel();
             let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
-            let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
 
             let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
             let mount_dir = cache_root.join("mount");
@@ -538,9 +537,15 @@ impl Client {
                 }
             }
             let worker_artifact_fetcher = ArtifactFetcher(local_broker_sender.clone());
+            struct BrokerSender(local_broker::Sender);
+            impl maelstrom_worker::dispatcher::BrokerSender for BrokerSender {
+                fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
+                    self.0.send(local_broker::Message::LocalWorker(msg)).ok();
+                }
+            }
+            let worker_broker_sender = BrokerSender(local_broker_sender.clone());
             let worker_dispatcher_adapter = maelstrom_worker::DispatcherAdapter::new(
                 local_worker_sender.clone(),
-                broker_sender,
                 inline_limit,
                 log.clone(),
                 mount_dir,
@@ -550,6 +555,7 @@ impl Client {
             let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
                 worker_dispatcher_adapter,
                 worker_artifact_fetcher,
+                worker_broker_sender,
                 worker_cache,
                 slots,
             );
@@ -558,12 +564,6 @@ impl Client {
             let mut join_set = JoinSet::new();
             join_set.spawn(sync::channel_reader(local_worker_receiver, move |msg| {
                 worker_dispatcher.receive_message(msg)
-            }));
-            let local_broker_sender_clone = local_broker_sender.clone();
-            join_set.spawn(sync::channel_reader(broker_receiver, move |msg| {
-                local_broker_sender_clone
-                    .send(local_broker::Message::LocalWorker(msg))
-                    .ok();
             }));
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
             local_broker_for_standalone::start_task(

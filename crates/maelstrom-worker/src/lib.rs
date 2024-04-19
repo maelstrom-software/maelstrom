@@ -147,7 +147,6 @@ type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
 
 pub struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
-    broker_socket_sender: BrokerSocketSender,
     inline_limit: InlineLimit,
     log: Logger,
     executor: Arc<Executor>,
@@ -160,7 +159,6 @@ impl DispatcherAdapter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         dispatcher_sender: DispatcherSender,
-        broker_socket_sender: BrokerSocketSender,
         inline_limit: InlineLimit,
         log: Logger,
         mount_dir: PathBuf,
@@ -171,7 +169,6 @@ impl DispatcherAdapter {
         fs.create_dir_all(&mount_dir)?;
         fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
-            broker_socket_sender,
             inline_limit,
             executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
             blob_cache_dir,
@@ -324,10 +321,6 @@ impl Deps for DispatcherAdapter {
     fn read_manifest_digests(&mut self, digest: Sha256Digest, path: PathBuf, jid: JobId) {
         self.manifest_digest_cache.get(digest, path, jid);
     }
-
-    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-        self.broker_socket_sender.send(message).ok();
-    }
 }
 
 struct ArtifactFetcher {
@@ -365,6 +358,24 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
     }
 }
 
+struct BrokerSender {
+    broker_socket_sender: BrokerSocketSender,
+}
+
+impl BrokerSender {
+    fn new(broker_socket_sender: BrokerSocketSender) -> Self {
+        Self {
+            broker_socket_sender,
+        }
+    }
+}
+
+impl dispatcher::BrokerSender for BrokerSender {
+    fn send_message_to_broker(&mut self, message: WorkerToBroker) {
+        self.broker_socket_sender.send(message).ok();
+    }
+}
+
 async fn dispatcher_main(
     config: Config,
     dispatcher_receiver: DispatcherReceiver,
@@ -377,6 +388,7 @@ async fn dispatcher_main(
     let cache_root = config.cache_root.inner().join("artifacts");
     let blob_cache_dir = cache_root.join("blob/sha256");
 
+    let broker_sender = BrokerSender::new(broker_socket_sender);
     let cache = Cache::new(
         StdCacheFs,
         CacheRoot::from(cache_root),
@@ -387,7 +399,6 @@ async fn dispatcher_main(
         ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
     match DispatcherAdapter::new(
         dispatcher_sender,
-        broker_socket_sender,
         config.inline_limit,
         log.clone(),
         mount_dir,
@@ -398,7 +409,13 @@ async fn dispatcher_main(
             error!(log, "could not start executor"; "err" => ?err);
         }
         Ok(adapter) => {
-            let mut dispatcher = Dispatcher::new(adapter, artifact_fetcher, cache, config.slots);
+            let mut dispatcher = Dispatcher::new(
+                adapter,
+                artifact_fetcher,
+                broker_sender,
+                cache,
+                config.slots,
+            );
             let _ =
                 sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg))
                     .await;

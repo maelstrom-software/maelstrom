@@ -48,9 +48,6 @@ pub trait Deps {
     /// canceled beforehand.
     fn start_timer(&mut self, jid: JobId, duration: Duration) -> Self::TimerHandle;
 
-    /// Send a message to the broker.
-    fn send_message_to_broker(&mut self, message: WorkerToBroker);
-
     /// Start a task that will build a layer-fs bottom layer out of an artifact
     fn build_bottom_fs_layer(
         &mut self,
@@ -74,12 +71,19 @@ pub trait Deps {
 }
 
 /// The artifact fetcher is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
-/// the same for "real" and local workers, but the artifact fetching is different. We may
-/// eventually do some other fs stuff differently between the two, in which case we'll have to
-/// rename this trait and move more methods into it from [`Deps`].
+/// the same for "real" and local workers, but the artifact fetching is different
 pub trait ArtifactFetcher {
     /// Start a thread that will download an artifact from the broker and extract it into `path`.
     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf);
+}
+
+/// The broker sender is split out of [`Deps`] for convenience. The rest of [`Deps`] can stay
+/// the same for "real" and local workers, but sending messages to the broker is different. For the
+/// "real" worker, we just enqueue the message as it is, but for the local worker, we need to wrap
+/// it in a local-broker-specific message.
+pub trait BrokerSender {
+    /// Send a message to the broker.
+    fn send_message_to_broker(&mut self, message: WorkerToBroker);
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -151,20 +155,26 @@ pub enum Message {
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
 }
 
-impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
-    Dispatcher<DepsT, ArtifactFetcherT, CacheT>
+impl<
+        DepsT: Deps,
+        ArtifactFetcherT: ArtifactFetcher,
+        BrokerSenderT: BrokerSender,
+        CacheT: Cache,
+    > Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
 {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
     pub fn new(
         deps: DepsT,
         artifact_fetcher: ArtifactFetcherT,
+        broker_sender: BrokerSenderT,
         cache: CacheT,
         slots: Slots,
     ) -> Self {
         Dispatcher {
             deps,
             artifact_fetcher,
+            broker_sender,
             cache,
             slots: slots.into_inner().into(),
             awaiting_layers: HashMap::default(),
@@ -273,9 +283,10 @@ struct ExecutingJob<DepsT: Deps> {
 /// broker to order the requests properly.
 ///
 /// All methods are completely nonblocking. They will never block the task or the thread.
-pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, CacheT> {
+pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     deps: DepsT,
     artifact_fetcher: ArtifactFetcherT,
+    broker_sender: BrokerSenderT,
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
@@ -368,8 +379,12 @@ where
     }
 }
 
-impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
-    Dispatcher<DepsT, ArtifactFetcherT, CacheT>
+impl<
+        DepsT: Deps,
+        ArtifactFetcherT: ArtifactFetcher,
+        BrokerSenderT: BrokerSender,
+        CacheT: Cache,
+    > Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
 {
     /// Start at most one job, depending on whether there are any queued jobs and if there are any
     /// available slots.
@@ -463,14 +478,13 @@ impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
 
         match state {
             ExecutingJobState::Nominal { .. } => {
-                self.deps
+                self.broker_sender
                     .send_message_to_broker(WorkerToBroker(jid, result.map(JobOutcome::Completed)));
             }
             ExecutingJobState::Canceled => {}
-            ExecutingJobState::TimedOut => self.deps.send_message_to_broker(WorkerToBroker(
-                jid,
-                result.map(|c| JobOutcome::TimedOut(c.effects)),
-            )),
+            ExecutingJobState::TimedOut => self.broker_sender.send_message_to_broker(
+                WorkerToBroker(jid, result.map(|c| JobOutcome::TimedOut(c.effects))),
+            ),
         }
 
         for cache::CacheKey { kind, digest } in cache_keys {
@@ -509,7 +523,7 @@ impl<DepsT: Deps, ArtifactFetcherT: ArtifactFetcher, CacheT: Cache>
             //
             // Otherwise, it means that there were previous errors for this entry, or it was
             // canceled, and there's nothing to do here.
-            self.deps.send_message_to_broker(WorkerToBroker(
+            self.broker_sender.send_message_to_broker(WorkerToBroker(
                 jid,
                 Err(JobError::System(format!("{msg} {digest}: {err}"))),
             ));
@@ -757,12 +771,6 @@ mod tests {
                 .messages
                 .push(TestMessage::ReadManifestDigests(digest, path, jid));
         }
-
-        fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-            self.borrow_mut()
-                .messages
-                .push(SendMessageToBroker(message));
-        }
     }
 
     impl ArtifactFetcher for Rc<RefCell<TestState>> {
@@ -770,6 +778,14 @@ mod tests {
             self.borrow_mut()
                 .messages
                 .push(StartArtifactFetch(digest, path));
+        }
+    }
+
+    impl BrokerSender for Rc<RefCell<TestState>> {
+        fn send_message_to_broker(&mut self, message: WorkerToBroker) {
+            self.borrow_mut()
+                .messages
+                .push(SendMessageToBroker(message));
         }
     }
 
@@ -829,8 +845,12 @@ mod tests {
 
     struct Fixture {
         test_state: Rc<RefCell<TestState>>,
-        dispatcher:
-            Dispatcher<Rc<RefCell<TestState>>, Rc<RefCell<TestState>>, Rc<RefCell<TestState>>>,
+        dispatcher: Dispatcher<
+            Rc<RefCell<TestState>>,
+            Rc<RefCell<TestState>>,
+            Rc<RefCell<TestState>>,
+            Rc<RefCell<TestState>>,
+        >,
     }
 
     impl Fixture {
@@ -847,6 +867,7 @@ mod tests {
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
             }));
             let dispatcher = Dispatcher::new(
+                test_state.clone(),
                 test_state.clone(),
                 test_state.clone(),
                 test_state.clone(),
