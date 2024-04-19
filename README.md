@@ -4,11 +4,11 @@
 
 | crate            | badges                                                                                                                                       |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------  |
-| cargo-maelstrom  | ![cargo-maelstrom](https://img.shields.io/crates/v/cargo-maelstrom.svg) ![maelstrom-client](https://img.shields.io/docsrs/cargo-maelstrom)   |
-| maelstrom-run    | ![maelstrom-run](https://img.shields.io/crates/v/maelstrom-run.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-run)         |
-| maelstrom-client | ![maelstrom-client](https://img.shields.io/crates/v/maelstrom-client.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-client)|
-| maelstrom-broker | ![maelstrom-broker](https://img.shields.io/crates/v/maelstrom-broker.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-broker)|
-| maelstrom-worker | ![maelstrom-worker](https://img.shields.io/crates/v/maelstrom-worker.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-worker)|
+| cargo-maelstrom  | [![cargo-maelstrom](https://img.shields.io/crates/v/cargo-maelstrom.svg)](https://crates.io/crates/cargo-maelstrom) [![maelstrom-client](https://img.shields.io/docsrs/cargo-maelstrom)](https://docs.rs/cargo-maelstrom)     |
+| maelstrom-run    | [![maelstrom-run](https://img.shields.io/crates/v/maelstrom-run.svg)](https://crates.io/crates/maelstrom-run) [![maelstrom-client](https://img.shields.io/docsrs/maelstrom-run)](https://docs.rs/maelstrom-run)               |
+| maelstrom-client | [![maelstrom-client](https://img.shields.io/crates/v/maelstrom-client.svg)](https://crates.io/crates/maelstrom-client) [![maelstrom-client](https://img.shields.io/docsrs/maelstrom-client)](https://docs.rs/maelstrom-client)|
+| maelstrom-broker | [![maelstrom-broker](https://img.shields.io/crates/v/maelstrom-broker.svg)](https://crates.io/crates/maelstrom-broker) [![maelstrom-client](https://img.shields.io/docsrs/maelstrom-broker)](https://docs.rs/maelstrom-broker)|
+| maelstrom-worker | [![maelstrom-worker](https://img.shields.io/crates/v/maelstrom-worker.svg)](https://crates.io/crates/maelstrom-worker) [![maelstrom-client](https://img.shields.io/docsrs/maelstrom-worker)](https://docs.rs/maelstrom-worker)|
 
 
 Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners. You should use Maelstrom to run your tests because:
