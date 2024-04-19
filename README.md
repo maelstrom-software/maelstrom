@@ -1,7 +1,15 @@
 ![Maelstrom Logo (Dark Compatible)](https://github.com/maelstrom-software/maelstrom/assets/146376379/7b46a1c1-e67f-412a-b618-42f7e2c25139)
 
 [![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
-![cargo-maelstrom](https://img.shields.io/crates/v/cargo-maelstrom.svg)
+
+| crate            | badges                                                                                                                                       |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------  |
+| cargo-maelstrom  | ![cargo-maelstrom](https://img.shields.io/crates/v/cargo-maelstrom.svg) ![maelstrom-client](https://img.shields.io/docsrs/cargo-maelstrom)   |
+| maelstrom-run    | ![maelstrom-run](https://img.shields.io/crates/v/maelstrom-run.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-run)         |
+| maelstrom-client | ![maelstrom-client](https://img.shields.io/crates/v/maelstrom-client.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-client)|
+| maelstrom-broker | ![maelstrom-broker](https://img.shields.io/crates/v/maelstrom-broker.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-broker)|
+| maelstrom-worker | ![maelstrom-worker](https://img.shields.io/crates/v/maelstrom-worker.svg) ![maelstrom-client](https://img.shields.io/docsrs/maelstrom-worker)|
+
 
 Maelstrom is an extremely fast Rust test runner built on top of a general-purpose clustered job runner. Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners. You should use Maelstrom to run your tests because:
 
