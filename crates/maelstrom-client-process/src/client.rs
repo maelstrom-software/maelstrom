@@ -3,7 +3,7 @@ mod state_machine;
 use crate::{
     artifact_pusher::{self, ArtifactUploadTracker},
     digest_repo::DigestRepository,
-    dispatcher, local_broker, local_broker_for_standalone,
+    dispatcher, local_broker,
 };
 use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
@@ -566,7 +566,7 @@ impl Client {
                 worker_dispatcher.receive_message(msg)
             }));
             dispatcher::start_task(&mut join_set, dispatcher_receiver, local_broker_sender);
-            local_broker_for_standalone::start_task(
+            local_broker::start_task_for_standalone(
                 &mut join_set,
                 slots,
                 local_broker_receiver,
