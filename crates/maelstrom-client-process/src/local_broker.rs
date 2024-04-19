@@ -55,12 +55,12 @@ pub enum Message<DepsT: Deps> {
 struct LocalBroker<DepsT: Deps> {
     deps: DepsT,
     standalone: bool,
+    slots: Slots,
+    artifacts: HashMap<Sha256Digest, PathBuf>,
     next_client_job_id: u32,
     job_handles: HashMap<ClientJobId, DepsT::JobHandle>,
     job_state_counts_handles: VecDeque<DepsT::JobStateCountsHandle>,
     all_jobs_complete_handles: Vec<DepsT::AllJobsCompleteHandle>,
-    slots: Slots,
-    artifacts: HashMap<Sha256Digest, PathBuf>,
     counts: JobStateCounts,
 }
 
@@ -69,12 +69,12 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
         Self {
             deps,
             standalone,
+            slots,
+            artifacts: Default::default(),
             next_client_job_id: Default::default(),
             job_handles: Default::default(),
             job_state_counts_handles: Default::default(),
             all_jobs_complete_handles: Default::default(),
-            slots,
-            artifacts: Default::default(),
             counts: Default::default(),
         }
     }
