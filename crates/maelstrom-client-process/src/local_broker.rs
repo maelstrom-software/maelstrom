@@ -52,7 +52,7 @@ pub enum Message<DepsT: Deps> {
     LocalWorkerStartArtifactFetch(Sha256Digest, PathBuf),
 }
 
-struct LocalBroker<DepsT: Deps> {
+struct Router<DepsT: Deps> {
     deps: DepsT,
     standalone: bool,
     slots: Slots,
@@ -64,7 +64,7 @@ struct LocalBroker<DepsT: Deps> {
     counts: JobStateCounts,
 }
 
-impl<DepsT: Deps> LocalBroker<DepsT> {
+impl<DepsT: Deps> Router<DepsT> {
     fn new(deps: DepsT, standalone: bool, slots: Slots) -> Self {
         Self {
             deps,
@@ -262,7 +262,7 @@ pub fn start_task(
     local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
-    let mut local_broker = LocalBroker::new(adapter, standalone, slots);
+    let mut local_broker = Router::new(adapter, standalone, slots);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         local_broker.receive_message(msg)
     }));
