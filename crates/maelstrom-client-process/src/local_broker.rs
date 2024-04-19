@@ -18,8 +18,14 @@ use tokio::{
 pub trait Deps {
     fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult);
     fn send_job_state_counts_response_to_dispatcher(&mut self, counts: JobStateCounts);
+
+    // Only in remote broker mode.
     fn send_message_to_broker(&mut self, message: ClientToBroker);
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path);
+
+    // Only in standalone mode.
+    fn send_message_to_local_worker(&mut self, message: maelstrom_worker::dispatcher::Message);
+    fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64>;
 }
 
 pub enum Message {
@@ -117,6 +123,14 @@ impl Deps for Adapter {
                 path: path.to_owned(),
             })
             .ok();
+    }
+
+    fn send_message_to_local_worker(&mut self, _message: maelstrom_worker::dispatcher::Message) {
+        unimplemented!();
+    }
+
+    fn link_artifact_for_local_worker(&mut self, _from: &Path, _to: &Path) -> Result<u64> {
+        unimplemented!();
     }
 }
 

@@ -1,10 +1,10 @@
 use crate::{
     dispatcher,
-    local_broker::{Message, Receiver},
+    local_broker::{Deps, Message, Receiver},
 };
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
-    proto::{BrokerToWorker, WorkerToBroker},
+    proto::{BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
     ClientId, ClientJobId, JobId, JobOutcomeResult, Sha256Digest,
 };
@@ -14,13 +14,6 @@ use std::{
     path::{Path, PathBuf},
 };
 use tokio::task::JoinSet;
-
-pub trait Deps {
-    fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult);
-    fn send_job_state_counts_response_to_dispatcher(&mut self, counts: JobStateCounts);
-    fn send_message_to_worker(&mut self, message: maelstrom_worker::dispatcher::Message);
-    fn link_artifact(&mut self, from: &Path, to: &Path) -> Result<u64>;
-}
 
 pub struct LocalBroker<DepsT> {
     deps: DepsT,
@@ -50,16 +43,15 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                 } else {
                     self.counts[JobState::Pending] += 1;
                 }
-                self.deps
-                    .send_message_to_worker(maelstrom_worker::dispatcher::Message::Broker(
-                        BrokerToWorker::EnqueueJob(
-                            JobId {
-                                cid: ClientId::from(0),
-                                cjid,
-                            },
-                            spec,
-                        ),
-                    ));
+                self.deps.send_message_to_local_worker(
+                    maelstrom_worker::dispatcher::Message::Broker(BrokerToWorker::EnqueueJob(
+                        JobId {
+                            cid: ClientId::from(0),
+                            cjid,
+                        },
+                        spec,
+                    )),
+                );
             }
             Message::JobStateCountsRequest => {
                 self.deps
@@ -81,10 +73,10 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
                         None => Err(anyhow!("no artifact found for digest {digest}")),
                         Some(stored_path) => self
                             .deps
-                            .link_artifact(stored_path.as_path(), path.as_path()),
+                            .link_artifact_for_local_worker(stored_path.as_path(), path.as_path()),
                     },
                 );
-                self.deps.send_message_to_worker(response);
+                self.deps.send_message_to_local_worker(response);
             }
             Message::Broker(_) => {
                 unimplemented!("shouldn't get this message in standalone mode");
@@ -112,11 +104,19 @@ impl Deps for Adapter {
             .ok();
     }
 
-    fn send_message_to_worker(&mut self, message: maelstrom_worker::dispatcher::Message) {
+    fn send_message_to_broker(&mut self, _message: ClientToBroker) {
+        unimplemented!();
+    }
+
+    fn start_artifact_transfer_to_broker(&mut self, _digest: Sha256Digest, _path: &Path) {
+        unimplemented!();
+    }
+
+    fn send_message_to_local_worker(&mut self, message: maelstrom_worker::dispatcher::Message) {
         self.worker_sender.send(message).ok();
     }
 
-    fn link_artifact(&mut self, from: &Path, to: &Path) -> Result<u64> {
+    fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64> {
         self.fs.symlink(from, to)?;
         Ok(self.fs.metadata(to)?.len())
     }
