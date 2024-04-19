@@ -637,7 +637,7 @@ impl Client {
         debug!(state.log, "run_job"; "spec" => ?spec);
         state
             .local_broker_sender
-            .send(local_broker::Message::AddJob(spec, sender))?;
+            .send(local_broker::Message::RunJob(spec, sender))?;
         watcher.wait(receiver).await
     }
 

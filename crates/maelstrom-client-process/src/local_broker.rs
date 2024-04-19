@@ -40,7 +40,7 @@ pub trait Deps {
 pub enum Message<DepsT: Deps> {
     // These are requests from the client.
     AddArtifact(PathBuf, Sha256Digest),
-    AddJob(JobSpec, DepsT::JobHandle),
+    RunJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(DepsT::JobStateCountsHandle),
     NotifyWhenAllJobsComplete(DepsT::AllJobsCompleteHandle),
 
@@ -94,7 +94,7 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
             Message::AddArtifact(path, digest) => {
                 self.artifacts.insert(digest, path);
             }
-            Message::AddJob(spec, handle) => {
+            Message::RunJob(spec, handle) => {
                 let cjid = self.next_client_job_id.into();
                 self.next_client_job_id = self.next_client_job_id.checked_add(1).unwrap();
 
