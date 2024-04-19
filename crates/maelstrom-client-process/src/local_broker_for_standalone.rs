@@ -1,19 +1,16 @@
 use crate::{
     dispatcher,
-    local_broker::{Deps, Message, Receiver},
+    local_broker::{Adapter, Deps, Message, Receiver},
 };
 use anyhow::{anyhow, Result};
 use maelstrom_base::{
-    proto::{BrokerToWorker, ClientToBroker, WorkerToBroker},
+    proto::{BrokerToWorker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
-    ClientId, ClientJobId, JobId, JobOutcomeResult, Sha256Digest,
+    ClientId, JobId, Sha256Digest,
 };
-use maelstrom_util::{config::common::Slots, fs::Fs, sync};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
-use tokio::task::JoinSet;
+use maelstrom_util::{config::common::Slots, sync};
+use std::{collections::HashMap, path::PathBuf};
+use tokio::{sync::mpsc, task::JoinSet};
 
 pub struct LocalBroker<DepsT> {
     deps: DepsT,
@@ -85,55 +82,26 @@ impl<DepsT: Deps> LocalBroker<DepsT> {
     }
 }
 
-struct Adapter {
-    dispatcher_sender: dispatcher::Sender,
-    worker_sender: maelstrom_worker::DispatcherSender,
-    fs: Fs,
-}
-
-impl Deps for Adapter {
-    fn send_job_response_to_dispatcher(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
-        self.dispatcher_sender
-            .send(dispatcher::Message::JobResponse(cjid, result))
-            .ok();
-    }
-
-    fn send_job_state_counts_response_to_dispatcher(&mut self, counts: JobStateCounts) {
-        self.dispatcher_sender
-            .send(dispatcher::Message::JobStateCountsResponse(counts))
-            .ok();
-    }
-
-    fn send_message_to_broker(&mut self, _message: ClientToBroker) {
-        unimplemented!();
-    }
-
-    fn start_artifact_transfer_to_broker(&mut self, _digest: Sha256Digest, _path: &Path) {
-        unimplemented!();
-    }
-
-    fn send_message_to_local_worker(&mut self, message: maelstrom_worker::dispatcher::Message) {
-        self.worker_sender.send(message).ok();
-    }
-
-    fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64> {
-        self.fs.symlink(from, to)?;
-        Ok(self.fs.metadata(to)?.len())
-    }
-}
-
 pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     slots: Slots,
     receiver: Receiver,
     dispatcher_sender: dispatcher::Sender,
-    worker_sender: maelstrom_worker::DispatcherSender,
+    local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
-    let adapter = Adapter {
+    // Just create black-hole broker and artifact_pusher senders. We shouldn't be sending any
+    // messages to them in standalone mode.
+    let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
+    drop(broker_receiver);
+    let (artifact_pusher_sender, artifact_pusher_receiver) = mpsc::unbounded_channel();
+    drop(artifact_pusher_receiver);
+
+    let adapter = Adapter::new(
         dispatcher_sender,
-        worker_sender,
-        fs: Fs::new(),
-    };
+        broker_sender,
+        artifact_pusher_sender,
+        local_worker_sender,
+    );
     let mut local_broker = LocalBroker::new(adapter, slots);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         local_broker.receive_message(msg)
