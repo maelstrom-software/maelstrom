@@ -37,6 +37,9 @@ const FIELD_ATTR: [(&str, &str); 4] = [
 ];
 
 fn main() {
+    let protoc_path = protoc_bin_vendored::protoc_bin_path().unwrap();
+    std::env::set_var("PROTOC", protoc_path);
+
     let mut b = tonic_build::configure();
     for resp in INTO_RESULT {
         b = b.message_attribute(resp, "#[derive(maelstrom_macro::IntoResult)]");
