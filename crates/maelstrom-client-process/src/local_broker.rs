@@ -262,8 +262,8 @@ pub fn start_task(
     local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
-    let mut local_broker = Router::new(adapter, standalone, slots);
+    let mut router = Router::new(adapter, standalone, slots);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
-        local_broker.receive_message(msg)
+        router.receive_message(msg)
     }));
 }
