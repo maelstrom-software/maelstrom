@@ -65,7 +65,7 @@ struct LocalBroker<DepsT: Deps> {
 }
 
 impl<DepsT: Deps> LocalBroker<DepsT> {
-    fn new(standalone: bool, deps: DepsT, slots: Slots) -> Self {
+    fn new(deps: DepsT, standalone: bool, slots: Slots) -> Self {
         Self {
             deps,
             standalone,
@@ -262,7 +262,7 @@ pub fn start_task(
     local_worker_sender: maelstrom_worker::DispatcherSender,
 ) {
     let adapter = Adapter::new(broker_sender, artifact_pusher_sender, local_worker_sender);
-    let mut local_broker = LocalBroker::new(standalone, adapter, slots);
+    let mut local_broker = LocalBroker::new(adapter, standalone, slots);
     join_set.spawn(sync::channel_reader(receiver, move |msg| {
         local_broker.receive_message(msg)
     }));
