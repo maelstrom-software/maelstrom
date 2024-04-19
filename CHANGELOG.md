@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+### High-Level
+This release was focused on two things: fixing performance regressions and
+adding a new standalone mode.
+
+In the last release, we introduced a FUSE file system. It gave us a lot of
+functionality that we wanted, but it's performance wasn't great. In this
+release, we've returned performance back to where it was before we added the
+FUSE file system!
+
+Standalone mode allows one to use `cargo-maelstrom` or `maelstrom-run` (or any
+other maelstrom client) without connecting to a broker or worker. This is
+achieved by running a local copy of the worker inside the client. At this
+point, it's an either-or proposition: all the jobs are either run locally, or
+they are all run on the cluster. In future releases we'll ease this so that the
+local worker can be used alongside the cluster.
+\[[161](https://github.com/maelstrom-software/maelstrom/issues/161)\]
+
+There were also some other bug fixes and performance improvements.
+
+### `cargo-maelstrom` and `maelstrom-run`
+#### Added 
+- Standalone mode. This mode is entered when no broker address is specified.
+  The `broker` configuration value is now optional.
+- `cache-size`, `inline-limit`, and `slots` configuration values. These affect
+  the local worker.
+#### Fixed
+- A bug where output from cargo failures could get eaten by the status bar.
+\[[207](https://github.com/maelstrom-software/maelstrom/issues/207)\]
+- A bug where multiple versions of a package would cause errors. (We discovered
+  this running `cargo-maelstrom` in the `clap` repository).
+\[[206](https://github.com/maelstrom-software/maelstrom/issues/206)\]
+
+### `maelstrom-worker`
+#### Changed
+- Re-architected the worker so that it now runs as pid 2 in its own namespace
+  instead of pid 1. This allowed us to simplify the implementation, as a task
+  can spawn a subprocess and then wait for that subprocess independently of what
+  the rest of the system is doing.
+- Jobs are now spawned in the background on their own tasks, removing a
+  performance bottleneck. Before, one job couldn't be spawned until the
+  previous one had completed its exec. This became a big performance blocker
+  with the introduction of FUSE, though it was never ideal. This was enabled by
+  the previous change.
+- All jobs are now started with `clone(CLONE_VM)`. This yielded a moderate, but
+  measurable, performance improvement.
+- We now use `splice` in the FUSE file system, so that no file data ever goes
+  through user-space. This yielded an appreciable performance improvement.
+- The child process now creates the FUSE file system and passes a file
+  descriptor back to the worker to manage. This eliminates the possibility of
+  accidentally leaving around mounted children file systems, as the child is
+  always in its own mount namespace.
+
+### `maelstrom-client-process`
+#### Fixed
+- A bug in how we were waiting for end-of-file. We were accidentally
+  busy-waiting on the open file descriptor, resulting in a big performance
+  degradation.
 
 ## [0.6.0] - 2024-03-29
 ### High-Level
@@ -36,7 +93,7 @@ There were a lot of large changes in this release. At a high level:
   confident we'll regain the performance in the upcoming releases.
 
 - We re-implemented the configuration value system. We moved away from a
-  pre-existing create and impemented our own behavior. As a result, we have
+  pre-existing create and implemented our own behavior. As a result, we have
   much better command-line help messages, support multiple configuration files,
   and fully support XDG. A side-effect of this is that some configuration
   values have changed their names or formats.
@@ -47,7 +104,7 @@ There were a lot of large changes in this release. At a high level:
   are still returned to the client.
   \[[65](https://github.com/maelstrom-software/maelstrom/issues/65)\]
 - The `fuse` device (`/dev/fuse`).
-- `cargo xtask` for various tasks related to buiding and publishing.
+- `cargo xtask` for various tasks related to building and publishing.
 #### Changed
 - The XDG Base Directories spec is now used for locating config files.
   Binaries now also supports multiple config files.
