@@ -125,12 +125,12 @@ impl fmt::Display for EntryKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct CacheKey {
+pub struct Key {
     pub kind: EntryKind,
     pub digest: Sha256Digest,
 }
 
-impl CacheKey {
+impl Key {
     pub fn new(kind: EntryKind, digest: Sha256Digest) -> Self {
         Self { kind, digest }
     }
@@ -164,10 +164,10 @@ enum CacheEntry {
 
 /// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
 #[derive(Default)]
-struct CacheMap(HashMap<CacheKey, CacheEntry>);
+struct CacheMap(HashMap<Key, CacheEntry>);
 
 impl Deref for CacheMap {
-    type Target = HashMap<CacheKey, CacheEntry>;
+    type Target = HashMap<Key, CacheEntry>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -181,7 +181,7 @@ impl DerefMut for CacheMap {
 }
 
 impl HeapDeps for CacheMap {
-    type Element = CacheKey;
+    type Element = Key;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         let lhs_priority = match self.get(lhs) {
@@ -267,7 +267,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         digest: Sha256Digest,
         jid: JobId,
     ) -> GetArtifact {
-        let key = CacheKey::new(kind, digest);
+        let key = Key::new(kind, digest);
         let cache_path = Self::cache_path(&self.root, &key);
         match self.entries.entry(key) {
             Entry::Vacant(entry) => {
@@ -306,7 +306,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// Notify the cache that an artifact fetch has failed. The returned vector lists the jobs that
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
-        let key = CacheKey::new(kind, digest.clone());
+        let key = Key::new(kind, digest.clone());
         let Some(CacheEntry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
             panic!("Got got_artifact in unexpected state");
         };
@@ -325,7 +325,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         digest: &Sha256Digest,
         bytes_used: u64,
     ) -> (PathBuf, Vec<JobId>) {
-        let key = CacheKey::new(kind, digest.clone());
+        let key = Key::new(kind, digest.clone());
         let entry = self
             .entries
             .get_mut(&key)
@@ -355,7 +355,7 @@ impl<FsT: CacheFs> Cache<FsT> {
 
     /// Notify the cache that a reference to an artifact is no longer needed.
     pub fn decrement_ref_count(&mut self, kind: EntryKind, digest: &Sha256Digest) {
-        let key = CacheKey::new(kind, digest.clone());
+        let key = Key::new(kind, digest.clone());
         let entry = self
             .entries
             .get_mut(&key)
@@ -400,7 +400,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Return the directory path for the artifact referenced by `digest`.
-    fn cache_path(root: &Path, key: &CacheKey) -> PathBuf {
+    fn cache_path(root: &Path, key: &Key) -> PathBuf {
         let mut path = root.to_owned();
         path.push(key.kind.to_string());
         path.push("sha256");

@@ -242,7 +242,7 @@ struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
     path: PathBuf,
-    cache_keys: HashSet<cache::CacheKey>,
+    cache_keys: HashSet<cache::Key>,
 }
 
 /// An executing job may have been canceled or timed out, or it may be executing normally.
@@ -272,7 +272,7 @@ enum ExecutingJobState<DepsT: Deps> {
 /// and destroyed when we get a `Message::JobCompleted`.
 struct ExecutingJob<DepsT: Deps> {
     state: ExecutingJobState<DepsT>,
-    cache_keys: HashSet<cache::CacheKey>,
+    cache_keys: HashSet<cache::Key>,
 }
 
 /// Manage jobs based on the slot count and requests from the broker. If the broker sends more job
@@ -442,7 +442,7 @@ impl<
     fn receive_cancel_job(&mut self, jid: JobId) {
         if let Some(entry) = self.awaiting_layers.remove(&jid) {
             // We may have already gotten some layers. Make sure we release those.
-            for cache::CacheKey { kind, digest } in entry.tracker.into_cache_keys() {
+            for cache::Key { kind, digest } in entry.tracker.into_cache_keys() {
                 self.cache.decrement_ref_count(kind, &digest);
             }
         } else if let Some(&mut ExecutingJob { ref mut state, .. }) = self.executing.get_mut(&jid) {
@@ -457,7 +457,7 @@ impl<
                 if entry.jid != jid {
                     true
                 } else {
-                    for cache::CacheKey { kind, digest } in &entry.cache_keys {
+                    for cache::Key { kind, digest } in &entry.cache_keys {
                         self.cache.decrement_ref_count(*kind, digest);
                     }
                     false
@@ -482,7 +482,7 @@ impl<
             ),
         }
 
-        for cache::CacheKey { kind, digest } in cache_keys {
+        for cache::Key { kind, digest } in cache_keys {
             self.cache.decrement_ref_count(kind, &digest);
         }
         self.possibly_start_job();
@@ -522,7 +522,7 @@ impl<
                 jid,
                 Err(JobError::System(format!("{msg} {digest}: {err}"))),
             ));
-            for cache::CacheKey { kind, digest } in entry.tracker.into_cache_keys() {
+            for cache::Key { kind, digest } in entry.tracker.into_cache_keys() {
                 self.cache.decrement_ref_count(kind, &digest);
             }
         }
@@ -702,9 +702,9 @@ mod tests {
 
     struct TestState {
         messages: Vec<TestMessage>,
-        get_artifact_returns: HashMap<cache::CacheKey, GetArtifact>,
-        got_artifact_success_returns: HashMap<cache::CacheKey, (PathBuf, Vec<JobId>)>,
-        got_artifact_failure_returns: HashMap<cache::CacheKey, Vec<JobId>>,
+        get_artifact_returns: HashMap<cache::Key, GetArtifact>,
+        got_artifact_success_returns: HashMap<cache::Key, (PathBuf, Vec<JobId>)>,
+        got_artifact_failure_returns: HashMap<cache::Key, Vec<JobId>>,
     }
 
     struct TestHandle(TestMessage, Rc<RefCell<TestState>>);
@@ -796,7 +796,7 @@ mod tests {
                 .push(CacheGetArtifact(kind, digest.clone(), jid));
             self.borrow_mut()
                 .get_artifact_returns
-                .remove(&cache::CacheKey::new(kind, digest.clone()))
+                .remove(&cache::Key::new(kind, digest.clone()))
                 .expect(&format!("unexpected get_artifact of {kind:?} {digest}"))
         }
 
@@ -810,7 +810,7 @@ mod tests {
                 .push(CacheGotArtifactFailure(kind, digest.clone()));
             self.borrow_mut()
                 .got_artifact_failure_returns
-                .remove(&cache::CacheKey::new(kind, digest.clone()))
+                .remove(&cache::Key::new(kind, digest.clone()))
                 .unwrap()
         }
 
@@ -827,7 +827,7 @@ mod tests {
             ));
             self.borrow_mut()
                 .got_artifact_success_returns
-                .remove(&cache::CacheKey::new(kind, digest.clone()))
+                .remove(&cache::Key::new(kind, digest.clone()))
                 .unwrap()
         }
 
@@ -851,9 +851,9 @@ mod tests {
     impl Fixture {
         fn new<const L: usize, const M: usize, const N: usize>(
             slots: u16,
-            get_artifact_returns: [(cache::CacheKey, GetArtifact); L],
-            got_artifact_success_returns: [(cache::CacheKey, (PathBuf, Vec<JobId>)); M],
-            got_artifact_failure_returns: [(cache::CacheKey, Vec<JobId>); N],
+            get_artifact_returns: [(cache::Key, GetArtifact); L],
+            got_artifact_success_returns: [(cache::Key, (PathBuf, Vec<JobId>)); M],
+            got_artifact_failure_returns: [(cache::Key, Vec<JobId>); N],
         ) -> Self {
             let test_state = Rc::new(RefCell::new(TestState {
                 messages: Vec::default(),
@@ -906,10 +906,10 @@ mod tests {
 
     macro_rules! cache_key {
         (UpperFsLayer, $($d:expr),*) => {
-            cache::CacheKey::new(UpperFsLayer, upper_digest!($($d),*))
+            cache::Key::new(UpperFsLayer, upper_digest!($($d),*))
         };
         ($kind:expr, $d:expr) => {
-            cache::CacheKey::new($kind, digest!($d))
+            cache::Key::new($kind, digest!($d))
         };
     }
 
