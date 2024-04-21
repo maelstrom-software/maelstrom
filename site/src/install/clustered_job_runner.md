@@ -8,13 +8,26 @@ different parts.
 - **The Worker**. There are one or many of these running on the same or different
   machines from each other and the broker.
 
-The broker and the worker only work on Linux. They both can be installed using
-cargo.
+The broker and the worker only work on Linux.
 
-## Installing the Broker
+## Installing from Pre-Built Binary
 
-We will use cargo install the broker, but first we need to install some
-dependencies. First make sure you've installed
+The easiest way to install both is using [cargo-binstall](https://github.com/cargo-bins/cargo-binstall).
+
+```bash
+cargo binstall maelstrom-broker maelstrom-worker
+```
+
+This will install a pre-built binary from the [github releases page](https://github.com/maelstrom-software/maelstrom/releases).
+
+If you don't have `cargo-binstall`, you can always download the binaries manually. If we don't have
+a binary for your specific architecture, you can compile from source.
+
+
+## Compiling the Broker from source
+
+We will use cargo to compile and install the broker, but first we need to install some dependencies.
+First make sure you've installed
 [Rust](https://www.rust-lang.org/tools/install). Then install these other
 required things.
 
@@ -23,20 +36,21 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-opt
 ```
 
-Now we can install the broker
+Now we can compile the broker
 
 ```bash
 export GITHUB_URL="https://github.com/maelstrom-software/maelstrom.git"
 cargo install --git $GITHUB_URL maelstrom-broker
 ```
 
+## Installing the Broker as a Service
 It is best to not run the service as root, so we will create a new user to use
 for this purpose. The broker also uses the local file-system to cache artifacts
 so this will give us a place to put them.
 
 ```bash
 sudo adduser maelstrom-broker
-sudo mkdir ~maelstrom-broker/bin
+sudo mkdir ~maelstrom-broker/{bin, cache}
 sudo mv ~/.cargo/bin/maelstrom-broker ~maelstrom-broker/bin/
 ```
 
@@ -53,7 +67,10 @@ Description=Maelstrom Broker
 [Service]
 User=maelstrom-broker
 WorkingDirectory=/home/maelstrom-broker
-ExecStart=/home/maelstrom-broker/bin/maelstrom-broker --http-port 9000 --port 9001
+ExecStart=/home/maelstrom-broker/bin/maelstrom-broker \
+    --http-port 9000 \
+    --port 9001 \
+    --cache-root /home/maelstrom-broker/cache
 Restart=always
 RestartSec=3
 
@@ -84,10 +101,7 @@ By default it stores its caches in
 `<working-directory>/.cache/maelstrom-broker`. For the given set-up this should
 be `/home/maelstrom-broker/.cache/maelstrom-broker`
 
-## Installing the Worker
-
-You are allowed to have as many worker instances as you would like. Typically
-you should install one per machine you wish to be involved in running jobs.
+## Compiling the Worker from Source
 
 First make sure you've installed [Rust](https://www.rust-lang.org/tools/install).
 
@@ -98,13 +112,17 @@ export GITHUB_URL="https://github.com/maelstrom-software/maelstrom.git"
 cargo install --git $GITHUB_URL maelstrom-worker
 ```
 
+## Installing the Worker as a Service
+You are allowed to have as many worker instances as you would like. Typically
+you should install one per machine you wish to be involved in running jobs.
+
 It is best to not run the service as root, so we will create a new user to use
 for this purpose. The worker also uses the local file-system to cache artifacts
 so this will give us a place to put them.
 
 ```bash
 sudo adduser maelstrom-worker
-sudo mkdir ~maelstrom-worker/bin
+sudo mkdir ~maelstrom-worker/{bin, cache}
 sudo mv ~/.cargo/bin/maelstrom-worker ~maelstrom-worker/bin/
 ```
 
@@ -121,7 +139,9 @@ Description=Maelstrom Worker
 [Service]
 User=maelstrom-worker
 WorkingDirectory=/home/maelstrom-worker
-ExecStart=/home/maelstrom-worker/bin/maelstrom-worker --broker <broker-machine-address>:9001
+ExecStart=/home/maelstrom-worker/bin/maelstrom-worker \
+    --broker <broker-machine-address>:9001 \
+    --cache-root /home/maelstrom-worker/cache
 Restart=always
 RestartSec=3
 
