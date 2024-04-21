@@ -164,9 +164,9 @@ enum CacheEntry {
 
 /// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
 #[derive(Default)]
-struct CacheMap(HashMap<Key, CacheEntry>);
+struct Map(HashMap<Key, CacheEntry>);
 
-impl Deref for CacheMap {
+impl Deref for Map {
     type Target = HashMap<Key, CacheEntry>;
 
     fn deref(&self) -> &Self::Target {
@@ -174,13 +174,13 @@ impl Deref for CacheMap {
     }
 }
 
-impl DerefMut for CacheMap {
+impl DerefMut for Map {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-impl HeapDeps for CacheMap {
+impl HeapDeps for Map {
     type Element = Key;
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
@@ -209,8 +209,8 @@ impl HeapDeps for CacheMap {
 pub struct Cache<FsT> {
     fs: FsT,
     root: PathBuf,
-    entries: CacheMap,
-    heap: Heap<CacheMap>,
+    entries: Map,
+    heap: Heap<Map>,
     next_priority: u64,
     bytes_used: u64,
     bytes_used_target: u64,
@@ -250,7 +250,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         Cache {
             fs,
             root,
-            entries: CacheMap::default(),
+            entries: Map::default(),
             heap: Heap::default(),
             next_priority: 0,
             bytes_used: 0,
