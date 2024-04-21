@@ -18,7 +18,7 @@ use std::{
 };
 
 /// Dependencies that [Cache] has on the file system.
-pub trait CacheFs {
+pub trait Fs {
     /// Return a random u64. This is used for creating unique path names in the directory removal
     /// code path.
     fn rand_u64(&mut self) -> u64;
@@ -49,7 +49,7 @@ pub trait CacheFs {
 /// The standard implementation of CacheFs that uses [std] and [rand].
 pub struct StdFs;
 
-impl CacheFs for StdFs {
+impl Fs for StdFs {
     fn rand_u64(&mut self) -> u64 {
         rand::random()
     }
@@ -217,7 +217,7 @@ pub struct Cache<FsT> {
     log: Logger,
 }
 
-impl<FsT: CacheFs> Cache<FsT> {
+impl<FsT: Fs> Cache<FsT> {
     /// Create a new [Cache] rooted at `root`. The directory `root` and all necessary ancestors
     /// will be created, along with `{root}/removing` and `{root}/{kind}/sha256`. Any pre-existing
     /// entries in `{root}/removing` and `{root}/{kind}/sha256` will be removed. That implies that
@@ -383,7 +383,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     }
 
     /// Remove all files and directories rooted in `source` in a separate thread.
-    fn remove_in_background(fs: &mut impl CacheFs, root: &Path, source: &Path) {
+    fn remove_in_background(fs: &mut impl Fs, root: &Path, source: &Path) {
         let mut target = root.to_owned();
         target.push("removing");
         loop {
@@ -469,7 +469,7 @@ mod tests {
         last_random_number: u64,
     }
 
-    impl CacheFs for TestFs {
+    impl Fs for TestFs {
         fn rand_u64(&mut self) -> u64 {
             self.last_random_number += 1;
             self.last_random_number

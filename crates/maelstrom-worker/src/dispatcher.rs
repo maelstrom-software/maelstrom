@@ -107,7 +107,7 @@ pub trait Cache {
 }
 
 /// The standard implementation of [`Cache`] that just calls into [`cache::Cache`].
-impl<FsT: cache::CacheFs> Cache for cache::Cache<FsT> {
+impl<FsT: cache::Fs> Cache for cache::Cache<FsT> {
     fn get_artifact(
         &mut self,
         kind: cache::EntryKind,
