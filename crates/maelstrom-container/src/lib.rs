@@ -1,6 +1,7 @@
 pub use oci_spec::image::{Arch, Os};
 
 use anyhow::Result;
+use anyhow_trace::anyhow_trace;
 use async_compression::tokio::bufread::GzipDecoder;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
@@ -113,6 +114,7 @@ struct AuthResponse {
     issued_at: String,
 }
 
+#[anyhow_trace]
 async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
     let url = format!(
         "https://auth.docker.io/\
@@ -122,6 +124,7 @@ async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
     Ok(res.token)
 }
 
+#[anyhow_trace]
 async fn get_image_index(
     client: &reqwest::Client,
     token: &AuthToken,
@@ -156,6 +159,7 @@ fn find_manifest_for_platform<'a>(
         .unwrap()
 }
 
+#[anyhow_trace]
 async fn get_image_manifest(
     client: &reqwest::Client,
     token: &AuthToken,
@@ -251,6 +255,7 @@ impl<ProgressT: ProgressTracker, ReadT: tokio::io::AsyncRead + Unpin> tokio::io:
     }
 }
 
+#[anyhow_trace]
 async fn download_layer(
     client: &reqwest::Client,
     token: &AuthToken,
@@ -297,6 +302,7 @@ pub struct ContainerImage {
 }
 
 impl ContainerImage {
+    #[anyhow_trace]
     async fn from_path(fs: &Fs, path: impl AsRef<Path>) -> Result<Self> {
         let c = fs.read_to_string(path).await?;
         Ok(serde_json::from_str(&c)?)
@@ -321,6 +327,7 @@ impl ContainerImage {
     }
 }
 
+#[anyhow_trace]
 fn download_layer_on_task(
     client: reqwest::Client,
     layer_digest: String,
@@ -336,6 +343,7 @@ fn download_layer_on_task(
     })
 }
 
+#[anyhow_trace]
 pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
     let token = get_token(client, name).await?;
 
@@ -344,6 +352,7 @@ pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Res
     Ok(manifest.digest().clone())
 }
 
+#[anyhow_trace]
 pub async fn download_image(
     client: &reqwest::Client,
     name: &str,
@@ -488,6 +497,7 @@ struct LockedTagsHandle {
 }
 
 impl LockedTagsHandle {
+    #[anyhow_trace]
     async fn write(mut self) -> Result<()> {
         self.lock_file.seek(SeekFrom::Start(0)).await?;
         self.lock_file.set_len(0).await?;
@@ -522,6 +532,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         })
     }
 
+    #[anyhow_trace]
     async fn get_image_digest(
         &self,
         locked_tags: &mut LockedContainerImageTags,
@@ -537,10 +548,12 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         })
     }
 
+    #[anyhow_trace]
     async fn get_cached_image(&self, digest: &str) -> Option<ContainerImage> {
         ContainerImage::from_dir(&self.fs, self.cache_dir.join(digest)).await
     }
 
+    #[anyhow_trace]
     async fn download_image(
         &self,
         name: &str,
@@ -567,6 +580,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         Ok(img)
     }
 
+    #[anyhow_trace]
     async fn with_cache_lock<RetT>(
         &self,
         digest: &str,
@@ -578,6 +592,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         body.await
     }
 
+    #[anyhow_trace]
     async fn lock_tags(&self) -> Result<LockedTagsHandle> {
         let mut lock_file = self
             .fs
@@ -594,6 +609,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         })
     }
 
+    #[anyhow_trace]
     pub async fn get_container_image(
         &self,
         name: &str,
