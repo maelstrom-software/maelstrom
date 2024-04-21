@@ -187,6 +187,7 @@ async fn get_image_manifest(
                 "Accept",
                 "application/vnd.docker.distribution.manifest.v2+json",
             )
+            .header("Accept", "application/vnd.oci.image.manifest.v1+json")
             .send()
             .await?,
     )
