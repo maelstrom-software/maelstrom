@@ -24,7 +24,7 @@ If you don't have `cargo-binstall`, you can always download the binaries manuall
 a binary for your specific architecture, you can compile from source.
 
 
-## Compiling the Broker from source
+## Compiling the Broker from Source
 
 We will use cargo to compile and install the broker, but first we need to install some dependencies.
 First make sure you've installed
