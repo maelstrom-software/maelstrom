@@ -462,14 +462,14 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct TestCacheFs {
+    struct TestFs {
         messages: Rc<RefCell<Vec<TestMessage>>>,
         existing_files: HashSet<PathBuf>,
         directories: HashMap<PathBuf, Vec<PathBuf>>,
         last_random_number: u64,
     }
 
-    impl CacheFs for TestCacheFs {
+    impl CacheFs for TestFs {
         fn rand_u64(&mut self) -> u64 {
             self.last_random_number += 1;
             self.last_random_number
@@ -512,24 +512,21 @@ mod tests {
 
     struct Fixture {
         messages: Rc<RefCell<Vec<TestMessage>>>,
-        cache: Cache<TestCacheFs>,
+        cache: Cache<TestFs>,
     }
 
     impl Fixture {
-        fn new_with_fs_and_clear_messages(
-            test_cache_fs: TestCacheFs,
-            bytes_used_target: u64,
-        ) -> Self {
+        fn new_with_fs_and_clear_messages(test_cache_fs: TestFs, bytes_used_target: u64) -> Self {
             let mut fixture = Fixture::new(test_cache_fs, bytes_used_target);
             fixture.clear_messages();
             fixture
         }
 
         fn new_and_clear_messages(bytes_used_target: u64) -> Self {
-            Self::new_with_fs_and_clear_messages(TestCacheFs::default(), bytes_used_target)
+            Self::new_with_fs_and_clear_messages(TestFs::default(), bytes_used_target)
         }
 
-        fn new(test_cache_fs: TestCacheFs, bytes_used_target: u64) -> Self {
+        fn new(test_cache_fs: TestFs, bytes_used_target: u64) -> Self {
             let messages = test_cache_fs.messages.clone();
             let cache = Cache::new(
                 test_cache_fs,
@@ -877,7 +874,7 @@ mod tests {
 
     #[test]
     fn preexisting_directories_do_not_affect_get_request() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
             .insert(long_path!("/z/blob/sha256", 42));
@@ -892,7 +889,7 @@ mod tests {
 
     #[test]
     fn get_request_for_empty_with_download_and_extract_failure_and_files_created() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
             .insert(long_path!("/z/blob/sha256", 42));
@@ -917,7 +914,7 @@ mod tests {
 
     #[test]
     fn multiple_get_requests_for_empty_with_download_and_extract_failure() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
             .insert(long_path!("/z/blob/sha256", 42));
@@ -963,7 +960,7 @@ mod tests {
 
     #[test]
     fn rename_retries_until_unique_path_name() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
             .insert(long_path!("/z/blob/sha256", 42));
@@ -1000,7 +997,7 @@ mod tests {
 
     #[test]
     fn new_ensures_directories_exist() {
-        let mut fixture = Fixture::new(TestCacheFs::default(), 1000);
+        let mut fixture = Fixture::new(TestFs::default(), 1000);
         fixture.expect_messages_in_specific_order(vec![
             MkdirRecursively(path_buf!("/z/removing")),
             ReadDir(path_buf!("/z/removing")),
@@ -1015,7 +1012,7 @@ mod tests {
 
     #[test]
     fn new_restarts_old_removes() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs.directories.insert(
             path_buf!("/z/removing"),
             vec![
@@ -1040,7 +1037,7 @@ mod tests {
 
     #[test]
     fn new_removes_old_sha256_if_it_exists() {
-        let mut test_cache_fs = TestCacheFs::default();
+        let mut test_cache_fs = TestFs::default();
         test_cache_fs
             .existing_files
             .insert(path_buf!("/z/blob/sha256"));
