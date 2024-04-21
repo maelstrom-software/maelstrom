@@ -9,7 +9,7 @@ use maelstrom_util::{
 use slog::{debug, Logger};
 use std::{
     cmp::Ordering,
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry as HashEntry, HashMap},
     fmt, fs, mem,
     num::NonZeroU32,
     ops::{Deref, DerefMut},
@@ -138,7 +138,7 @@ impl Key {
 
 /// An entry for a specific [Sha256Digest] in the [Cache]'s hash table. There is one of these for
 /// every subdirectory in the `sha256` subdirectory of the [Cache]'s root directory.
-enum CacheEntry {
+enum Entry {
     /// The artifact is being downloaded, extracted, and having its checksum validated. There is
     /// probably a subdirectory for this [Sha256Digest], but there might not yet be one, depending
     /// on how far along the extraction process is.
@@ -164,10 +164,10 @@ enum CacheEntry {
 
 /// An implementation of the "newtype" pattern so that we can implement [HeapDeps] on a [HashMap].
 #[derive(Default)]
-struct Map(HashMap<Key, CacheEntry>);
+struct Map(HashMap<Key, Entry>);
 
 impl Deref for Map {
-    type Target = HashMap<Key, CacheEntry>;
+    type Target = HashMap<Key, Entry>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -185,11 +185,11 @@ impl HeapDeps for Map {
 
     fn is_element_less_than(&self, lhs: &Self::Element, rhs: &Self::Element) -> bool {
         let lhs_priority = match self.get(lhs) {
-            Some(CacheEntry::InHeap { priority, .. }) => *priority,
+            Some(Entry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
         let rhs_priority = match self.get(rhs) {
-            Some(CacheEntry::InHeap { priority, .. }) => *priority,
+            Some(Entry::InHeap { priority, .. }) => *priority,
             _ => panic!("Element should be in heap"),
         };
         lhs_priority.cmp(&rhs_priority) == Ordering::Less
@@ -197,7 +197,7 @@ impl HeapDeps for Map {
 
     fn update_index(&mut self, elem: &Self::Element, idx: HeapIndex) {
         match self.get_mut(elem) {
-            Some(CacheEntry::InHeap { heap_index, .. }) => *heap_index = idx,
+            Some(Entry::InHeap { heap_index, .. }) => *heap_index = idx,
             _ => panic!("Element should be in heap"),
         };
     }
@@ -270,28 +270,28 @@ impl<FsT: CacheFs> Cache<FsT> {
         let key = Key::new(kind, digest);
         let cache_path = Self::cache_path(&self.root, &key);
         match self.entries.entry(key) {
-            Entry::Vacant(entry) => {
-                entry.insert(CacheEntry::DownloadingAndExtracting(vec![jid]));
+            HashEntry::Vacant(entry) => {
+                entry.insert(Entry::DownloadingAndExtracting(vec![jid]));
                 GetArtifact::Get(cache_path)
             }
-            Entry::Occupied(entry) => {
+            HashEntry::Occupied(entry) => {
                 let entry = entry.into_mut();
                 match entry {
-                    CacheEntry::DownloadingAndExtracting(jobs) => {
+                    Entry::DownloadingAndExtracting(jobs) => {
                         jobs.push(jid);
                         GetArtifact::Wait
                     }
-                    CacheEntry::InUse { ref_count, .. } => {
+                    Entry::InUse { ref_count, .. } => {
                         *ref_count = ref_count.checked_add(1).unwrap();
                         GetArtifact::Success(cache_path)
                     }
-                    CacheEntry::InHeap {
+                    Entry::InHeap {
                         bytes_used,
                         heap_index,
                         ..
                     } => {
                         let heap_index = *heap_index;
-                        *entry = CacheEntry::InUse {
+                        *entry = Entry::InUse {
                             ref_count: NonZeroU32::new(1).unwrap(),
                             bytes_used: *bytes_used,
                         };
@@ -307,7 +307,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// are affected and that need to be canceled.
     pub fn got_artifact_failure(&mut self, kind: EntryKind, digest: &Sha256Digest) -> Vec<JobId> {
         let key = Key::new(kind, digest.clone());
-        let Some(CacheEntry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
+        let Some(Entry::DownloadingAndExtracting(jobs)) = self.entries.remove(&key) else {
             panic!("Got got_artifact in unexpected state");
         };
         let cache_path = Self::cache_path(&self.root, &key);
@@ -330,13 +330,13 @@ impl<FsT: CacheFs> Cache<FsT> {
             .entries
             .get_mut(&key)
             .expect("Got DownloadingAndExtracting in unexpected state");
-        let CacheEntry::DownloadingAndExtracting(jobs) = entry else {
+        let Entry::DownloadingAndExtracting(jobs) = entry else {
             panic!("Got DownloadingAndExtracting in unexpected state");
         };
         let ref_count = jobs.len().try_into().unwrap();
         let jobs = mem::take(jobs);
         // Reference count must be > 0 since we don't allow cancellation of gets.
-        *entry = CacheEntry::InUse {
+        *entry = Entry::InUse {
             bytes_used,
             ref_count: NonZeroU32::new(ref_count).unwrap(),
         };
@@ -360,7 +360,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             .entries
             .get_mut(&key)
             .expect("Got decrement_ref_count in unexpected state");
-        let CacheEntry::InUse {
+        let Entry::InUse {
             bytes_used,
             ref_count,
         } = entry
@@ -370,7 +370,7 @@ impl<FsT: CacheFs> Cache<FsT> {
         match NonZeroU32::new(ref_count.get() - 1) {
             Some(new_ref_count) => *ref_count = new_ref_count,
             None => {
-                *entry = CacheEntry::InHeap {
+                *entry = Entry::InHeap {
                     bytes_used: *bytes_used,
                     priority: self.next_priority,
                     heap_index: HeapIndex::default(),
@@ -415,7 +415,7 @@ impl<FsT: CacheFs> Cache<FsT> {
             let Some(key) = self.heap.pop(&mut self.entries) else {
                 break;
             };
-            let Some(CacheEntry::InHeap { bytes_used, .. }) = self.entries.remove(&key) else {
+            let Some(Entry::InHeap { bytes_used, .. }) = self.entries.remove(&key) else {
                 panic!("Entry popped off of heap was in unexpected state");
             };
             Self::remove_in_background(
