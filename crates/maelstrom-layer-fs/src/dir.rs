@@ -1,6 +1,7 @@
 use crate::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
 use crate::ty::{
-    decode_path, encode_path, DirectoryEntryData, DirectoryOffset, FileId, LayerFsVersion,
+    decode_with_rich_error, encode_with_rich_error, DirectoryEntryData, DirectoryOffset, FileId,
+    LayerFsVersion,
 };
 use crate::LayerFs;
 use anyhow::Result;
@@ -34,7 +35,7 @@ impl DirectoryDataReader {
         let length = file.metadata().await?.len();
         let mut stream =
             BufferedStream::new(CHUNK_SIZE, CACHE_SIZE.try_into().unwrap(), file).await?;
-        let _header: DirectoryEntryStorageHeader = decode_path(&mut stream).await?;
+        let _header: DirectoryEntryStorageHeader = decode_with_rich_error(&mut stream).await?;
         let entry_begin = stream.stream_position().await?;
         Ok(Self {
             stream,
@@ -56,7 +57,7 @@ impl DirectoryDataReader {
         if self.stream.stream_position().await? == self.length {
             return Ok(None);
         }
-        let entry: DirectoryEntry = decode_path(&mut self.stream).await?;
+        let entry: DirectoryEntry = decode_with_rich_error(&mut self.stream).await?;
         let offset = self.stream.stream_position().await? - self.entry_begin;
         Ok(Some((offset, entry)))
     }
@@ -109,7 +110,8 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
 
     async fn root(&mut self) -> Result<Option<AvlPtr>> {
         self.stream.borrow_mut().seek(SeekFrom::Start(0)).await?;
-        let header: DirectoryEntryStorageHeader = decode_path(self.stream.borrow_mut()).await?;
+        let header: DirectoryEntryStorageHeader =
+            decode_with_rich_error(self.stream.borrow_mut()).await?;
         Ok(header.root)
     }
 
@@ -119,7 +121,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
             root: Some(root),
             ..Default::default()
         };
-        encode_path(self.stream.borrow_mut(), &header).await?;
+        encode_with_rich_error(self.stream.borrow_mut(), &header).await?;
         Ok(())
     }
 
@@ -128,7 +130,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
             .borrow_mut()
             .seek(SeekFrom::Start(key.as_u64()))
             .await?;
-        decode_path(self.stream.borrow_mut()).await
+        decode_with_rich_error(self.stream.borrow_mut()).await
     }
 
     async fn update(&mut self, key: AvlPtr, value: DirectoryEntry) -> Result<()> {
@@ -148,7 +150,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
             old_len
         };
 
-        encode_path(self.stream.borrow_mut(), &value).await?;
+        encode_with_rich_error(self.stream.borrow_mut(), &value).await?;
 
         #[cfg(debug_assertions)]
         {
@@ -167,7 +169,7 @@ impl<FileT: BorrowMut<BufferedStream<File>> + Send> AvlStorage for DirectoryEntr
     async fn insert(&mut self, node: DirectoryEntry) -> Result<AvlPtr> {
         self.stream.borrow_mut().seek(SeekFrom::End(0)).await?;
         let new_ptr = self.stream.borrow_mut().stream_position().await?;
-        encode_path(self.stream.borrow_mut(), &node).await?;
+        encode_with_rich_error(self.stream.borrow_mut(), &node).await?;
         Ok(AvlPtr::new(new_ptr).unwrap())
     }
 
@@ -196,7 +198,7 @@ impl DirectoryDataWriter {
         )
         .await?;
         if !existing {
-            encode_path(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
+            encode_with_rich_error(&mut stream, &DirectoryEntryStorageHeader::default()).await?;
         }
         Ok(Self {
             tree: AvlTree::new(DirectoryEntryStorage::new(stream)),

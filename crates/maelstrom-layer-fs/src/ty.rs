@@ -187,7 +187,8 @@ pub async fn decode<T: DeserializeOwned>(mut stream: impl AsyncRead + Unpin) -> 
     Ok(maelstrom_base::proto::deserialize(&buffer)?)
 }
 
-pub async fn decode_path<T: DeserializeOwned>(
+/// Decode from a stream where we can get the path so we can include it in the error message
+pub async fn decode_with_rich_error<T: DeserializeOwned>(
     stream: &mut (impl AsyncRead + GetPath + Unpin),
 ) -> Result<T> {
     let res = decode(&mut *stream).await;
@@ -212,7 +213,8 @@ pub async fn encode<T: Serialize>(mut stream: impl AsyncWrite + Unpin, t: &T) ->
     Ok(())
 }
 
-pub async fn encode_path<T: Serialize>(
+/// Encode into a stream where we can get the path so we can include it in the error message
+pub async fn encode_with_rich_error<T: Serialize>(
     stream: &mut (impl AsyncWrite + GetPath + Unpin),
     t: &T,
 ) -> Result<()> {
