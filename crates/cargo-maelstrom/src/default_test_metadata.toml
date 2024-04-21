@@ -30,3 +30,55 @@ mounts = [
 
 # Mount these devices in /dev/. These are used pretty commonly by tests.
 devices = ["full", "null", "random", "urandom", "zero"]
+
+# Uncomment this line to forward the RUST_BACKTRACE environment variable.
+# Later directives can override the `environment` key, but the `added_environment` key is only
+# additive. By using it here we ensure it applies to all tests regardless of other directives.
+# added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
+
+# This directive shows how to use a container image from hub.docker.com
+# This directive will override some things from the other one we defined above, but it will inherit
+# mounts and devices from that directive
+#
+# [[directives]]
+# # Only apply to tests in the "require_full_os" package
+# filter = "package.equals(requires_full_os)"
+#
+# # This is the name of the hub.docker.com image to use
+# image.name = "alpline"
+#
+# # This is the tag to use when downloading the image
+# image.tag = "latest"
+#
+# # What do we wish to actually utilize from the image?
+# # Here we pick environment variables and file-system
+# image.use = [ "environment", "layers" ]
+#
+# # Add our own layers on top of the image ones to ensure we have a place to mount out special
+# # file-systems and devices
+# added_layers = [
+#    { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
+# ]
+
+# This directive illustrates how to apply a change to one specific test "tests::my_special_test" in
+# package "package_a". Here we change the user and group to be used for this test to 1000.
+# Everything else we inherit from the first directive in this file.
+#
+# [[directives]]
+# filter = "package.equals(package_a) && name.equals(tests::my_special_test)"
+# user = 1000
+# group = 1000
+
+# Some useful filters to use in directives
+#
+# # Selecting all tests from "package_a"
+# filter = "package.equals(package_a)"
+#
+# # Selecting an integration test called "my_integration_test" from package "package_a"
+# filter = "package.equals(package_a) && test.equals(my_integration_test)"
+#
+# # Selecting a test named "my_test" from any package
+# filter = "name.equals(my_test)"
+
+# # Selecting tests from any package starting with foo_
+# filter = "package.starts_with(foo_)"
