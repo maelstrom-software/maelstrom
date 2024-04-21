@@ -578,7 +578,7 @@ impl MainAppDeps {
             slots,
             log.clone(),
         )?;
-        let test_metadata = AllMetadata::load(workspace_root)?;
+        let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let mut test_listing =
             load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
         test_listing.retain_packages(workspace_packages);

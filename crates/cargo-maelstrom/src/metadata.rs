@@ -3,16 +3,81 @@ mod directive;
 use crate::pattern;
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
-use maelstrom_base::{EnumSet, GroupId, JobDevice, JobMount, Timeout, UserId, Utf8PathBuf};
+use enumset::enum_set;
+use maelstrom_base::{
+    EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, Timeout, UserId, Utf8PathBuf,
+};
 use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, Layer, PossiblyImage};
 use maelstrom_util::fs::Fs;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
 
-#[derive(PartialEq, Eq, Debug, Deserialize, Default)]
+#[derive(PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata {
     directives: Vec<TestDirective>,
+}
+
+impl Default for AllMetadata {
+    /// The default test metadata is used when there is no `maelstrom-test.toml` file.
+    /// It provides some commonly used functionality by test processes in an attempt to give a good
+    /// default.
+    fn default() -> Self {
+        let single_directive = TestDirective {
+            filter: None,
+            // Include any shared libraries needed for running the binary
+            include_shared_libraries: Some(true),
+            enable_loopback: Some(false),
+            enable_writable_file_system: Some(false),
+            working_directory: Some(PossiblyImage::Explicit(Utf8PathBuf::from("/"))),
+            user: Some(UserId::from(0)),
+            group: Some(GroupId::from(0)),
+            timeout: None,
+            // Create directories and files for mounting special file-systems and device files
+            layers: Some(PossiblyImage::Explicit(vec![Layer::Stubs {
+                stubs: vec![
+                    "/{proc,sys,tmp}/".into(),
+                    "/dev/{full,null,random,urandom,zero}".into(),
+                ],
+            }])),
+            environment: None,
+            mounts: Some(vec![
+                // Mount a tempfs at /tmp. Many tests use this for creating temporary files.
+                JobMount {
+                    fs_type: JobMountFsType::Tmp,
+                    mount_point: "/tmp".into(),
+                },
+                // Mount proc at /proc. It is somewhat common to access information about the
+                // current process via files in /proc/self
+                JobMount {
+                    fs_type: JobMountFsType::Proc,
+                    mount_point: "/proc".into(),
+                },
+                // Mount sys at /sys. Accessing OS configuration values in /sys/kernel can be
+                // somewhat common.
+                JobMount {
+                    fs_type: JobMountFsType::Sys,
+                    mount_point: "/sys".into(),
+                },
+            ]),
+            // These special devices are fairly commonly used. Especially /dev/null.
+            devices: Some(enum_set!(
+                JobDevice::Full
+                    | JobDevice::Null
+                    | JobDevice::Random
+                    | JobDevice::Urandom
+                    | JobDevice::Zero
+            )),
+            added_devices: enum_set!(),
+            added_environment: Default::default(),
+            added_layers: vec![],
+            added_mounts: vec![],
+            image: None,
+        };
+        Self {
+            directives: vec![single_directive],
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -203,14 +268,16 @@ impl AllMetadata {
         Ok(toml::from_str(contents)?)
     }
 
-    pub fn load(workspace_root: &impl AsRef<Path>) -> Result<Self> {
+    pub fn load(log: slog::Logger, workspace_root: &impl AsRef<Path>) -> Result<Self> {
         let path = workspace_root.as_ref().join("maelstrom-test.toml");
-
-        Ok(Fs::new()
-            .read_to_string_if_exists(&path)?
-            .map(|c| Self::from_str(&c).with_context(|| format!("parsing {}", path.display())))
-            .transpose()?
-            .unwrap_or_default())
+        if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
+            Ok(Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
+        } else {
+            slog::debug!(
+                log, "no test metadata configuration found, using default"; "search_path" => ?path
+            );
+            Ok(Default::default())
+        }
     }
 }
 
