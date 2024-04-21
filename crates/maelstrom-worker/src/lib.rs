@@ -8,7 +8,7 @@ mod fetcher;
 mod layer_fs;
 
 use anyhow::{Context as _, Result};
-use cache::{Cache, StdCacheFs};
+use cache::{Cache, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::Executor;
@@ -390,7 +390,7 @@ async fn dispatcher_main(
 
     let broker_sender = BrokerSender::new(broker_socket_sender);
     let cache = Cache::new(
-        StdCacheFs,
+        StdFs,
         CacheRoot::from(cache_root),
         config.cache_size,
         log.clone(),

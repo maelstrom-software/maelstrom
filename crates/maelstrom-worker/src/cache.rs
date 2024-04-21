@@ -47,9 +47,9 @@ pub trait CacheFs {
 }
 
 /// The standard implementation of CacheFs that uses [std] and [rand].
-pub struct StdCacheFs;
+pub struct StdFs;
 
-impl CacheFs for StdCacheFs {
+impl CacheFs for StdFs {
     fn rand_u64(&mut self) -> u64 {
         rand::random()
     }

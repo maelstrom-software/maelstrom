@@ -502,7 +502,7 @@ impl Client {
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
                 let local_worker_cache = maelstrom_worker::cache::Cache::new(
-                    maelstrom_worker::cache::StdCacheFs,
+                    maelstrom_worker::cache::StdFs,
                     CacheRoot::from(cache_root),
                     cache_size,
                     log.clone(),
