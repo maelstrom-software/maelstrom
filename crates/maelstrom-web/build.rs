@@ -164,13 +164,21 @@ fn create_web_tar(profile: &str, build_dir: &Path, workspace_root: &Path) {
 }
 
 fn main() {
+    #[cfg(doc)]
+    let is_doc_build = true;
+
+    #[cfg(not(doc))]
+    let is_doc_build = false;
+
     #[cfg(not(debug_assertions))]
     let profile = "release";
 
     #[cfg(debug_assertions)]
     let profile = "dev";
 
-    if std::env::var("TARGET").unwrap() != "wasm32-unknown-unknown" {
+    // Don't build the WASM if doing a doc build. It is wasted work, but also our recursive cargo
+    // invocation isn't working in the docs.rs build.
+    if std::env::var("TARGET").unwrap() != "wasm32-unknown-unknown" && !is_doc_build {
         let crate_root_cargo_lock = Path::new("Cargo.lock");
         let cargo_lock_existed_at_crate_root = crate_root_cargo_lock.exists();
 

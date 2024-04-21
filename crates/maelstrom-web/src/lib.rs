@@ -13,5 +13,8 @@ pub async fn start() -> Result<(), JsValue> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(doc)))]
 pub const WASM_TAR: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/web.tar"));
+
+#[cfg(doc)]
+pub const WASM_TAR: &[u8] = b"";
