@@ -1,7 +1,8 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
-    cargo::CargoBuildError, config::Config, main_app_new, progress::DefaultProgressDriver,
-    ListAction, Logger, MainAppDeps,
+    cargo::CargoBuildError, config::Config, main_app_new,
+    metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver, ListAction,
+    Logger, MainAppDeps,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Args};
@@ -33,6 +34,9 @@ struct ExtraCommandLineOptions {
 
     #[command(flatten)]
     list: ListOptions,
+
+    #[command(flatten)]
+    test_metadata: TestMetadataOptions,
 }
 
 #[derive(Args)]
@@ -60,6 +64,13 @@ struct ListOptions {
             have been run."
     )]
     packages: bool,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Test Metadata Options")]
+struct TestMetadataOptions {
+    #[arg(long, help = "Write out a test metadata file if one does not exist")]
+    init: bool,
 }
 
 fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
@@ -104,6 +115,11 @@ pub fn main() -> Result<ExitCode> {
         .context("getting cargo metadata")?;
     let cargo_metadata: CargoMetadata =
         serde_json::from_slice(&cargo_metadata.stdout).context("parsing cargo metadata")?;
+
+    if extra_options.test_metadata.init {
+        maybe_write_default_test_metadata(&cargo_metadata.workspace_root)?;
+        return Ok(ExitCode::SUCCESS);
+    }
 
     let deps = MainAppDeps::new(
         bg_proc,

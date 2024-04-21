@@ -12,6 +12,29 @@ use maelstrom_util::fs::Fs;
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
 
+/// This file is what we write out for the user when `--init` is provided. It should contain the
+/// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
+const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
+
+const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
+
+/// Write out [`DEFAULT_TEST_METADATA`] to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing
+/// exists there already.
+pub fn maybe_write_default_test_metadata(workspace_root: &impl AsRef<Path>) -> Result<()> {
+    let path = workspace_root.as_ref().join(MAELSTROM_TEST_TOML);
+    let fs = Fs::new();
+    if !fs.exists(&path) {
+        fs.write(&path, DEFAULT_TEST_METADATA)?;
+        println!("Wrote default config to {}.", path.display());
+    } else {
+        println!(
+            "Config already exists at {}. Doing nothing.",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 #[derive(PartialEq, Eq, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata {
@@ -78,6 +101,15 @@ impl Default for AllMetadata {
             directives: vec![single_directive],
         }
     }
+}
+
+#[test]
+fn all_metadata_default_matches_default_file() {
+    // Verifies that it actually parses as valid TOML
+    let parsed_default_file = AllMetadata::from_str(DEFAULT_TEST_METADATA).unwrap();
+
+    // Matches what do when there is no file.
+    assert_eq!(parsed_default_file, AllMetadata::default());
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -269,7 +301,7 @@ impl AllMetadata {
     }
 
     pub fn load(log: slog::Logger, workspace_root: &impl AsRef<Path>) -> Result<Self> {
-        let path = workspace_root.as_ref().join("maelstrom-test.toml");
+        let path = workspace_root.as_ref().join(MAELSTROM_TEST_TOML);
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             Ok(Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
         } else {

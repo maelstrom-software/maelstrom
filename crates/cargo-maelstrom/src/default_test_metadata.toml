@@ -1,0 +1,32 @@
+# Without any `filter` this directive applies to all tests
+[[directives]]
+# Copy any shared libraries the test depends on along with the binary
+include_shared_libraries = true
+
+# Don't bother enabling loopback, we only need this if our tests uses localhost
+enable_loopback = false
+
+# Don't bother creating a writable container for our test. It can still write to /tmp
+enable_writable_file_system = false
+
+# Have our tests run with root as a working directory
+working_directory = "/"
+
+# Run our test as root
+user = 0
+group = 0
+
+# This layer just include files and directories for mounting the following file-systems and devices
+layers = [
+    { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
+]
+
+# Provide /tmp, /proc, /sys. These are used pretty commonly by tests.
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "proc", mount_point = "/proc" },
+    { fs_type = "sys", mount_point = "/sys" },
+]
+
+# Mount these devices in /dev/. These are used pretty commonly by tests.
+devices = ["full", "null", "random", "urandom", "zero"]
