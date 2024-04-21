@@ -1,13 +1,13 @@
 pub use oci_spec::image::{Arch, Os};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use anyhow_trace::anyhow_trace;
 use async_compression::tokio::bufread::GzipDecoder;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
 use maelstrom_util::async_fs::{self as fs, Fs};
 use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use std::future::Future;
 use std::pin::Pin;
@@ -115,6 +115,16 @@ struct AuthResponse {
 }
 
 #[anyhow_trace]
+async fn decode_and_check_for_error<T: DeserializeOwned>(response: reqwest::Response) -> Result<T> {
+    let json: serde_json::Value = response.json().await?;
+    if let Some(error) = json.get("errors") {
+        bail!("docker API error: {error:?}");
+    }
+    let value = serde_json::from_value(json)?;
+    Ok(value)
+}
+
+#[anyhow_trace]
 async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
     let url = format!(
         "https://auth.docker.io/\
@@ -131,19 +141,20 @@ async fn get_image_index(
     pkg: &str,
     tag_or_digest: &str,
 ) -> Result<ImageIndex> {
-    Ok(client
-        .get(&format!(
-            "https://registry-1.docker.io/v2/library/{pkg}/manifests/{tag_or_digest}"
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .header(
-            "Accept",
-            "application/vnd.docker.distribution.manifest.list.v2+json",
-        )
-        .send()
-        .await?
-        .json()
-        .await?)
+    decode_and_check_for_error(
+        client
+            .get(&format!(
+                "https://registry-1.docker.io/v2/library/{pkg}/manifests/{tag_or_digest}"
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            )
+            .send()
+            .await?,
+    )
+    .await
 }
 
 fn find_manifest_for_platform<'a>(
@@ -166,19 +177,20 @@ async fn get_image_manifest(
     pkg: &str,
     manifest_digest: &str,
 ) -> Result<ImageManifest> {
-    Ok(client
-        .get(&format!(
-            "https://registry-1.docker.io/v2/library/{pkg}/manifests/{manifest_digest}"
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .header(
-            "Accept",
-            "application/vnd.docker.distribution.manifest.v2+json",
-        )
-        .send()
-        .await?
-        .json()
-        .await?)
+    decode_and_check_for_error(
+        client
+            .get(&format!(
+                "https://registry-1.docker.io/v2/library/{pkg}/manifests/{manifest_digest}"
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.v2+json",
+            )
+            .send()
+            .await?,
+    )
+    .await
 }
 
 async fn get_image_config(
@@ -187,19 +199,20 @@ async fn get_image_config(
     pkg: &str,
     config_digest: &str,
 ) -> Result<ImageConfiguration> {
-    let config: oci_spec::image::ImageConfiguration = client
-        .get(&format!(
-            "https://registry-1.docker.io/v2/library/{pkg}/blobs/{config_digest}"
-        ))
-        .header("Authorization", format!("Bearer {token}"))
-        .header(
-            "Accept",
-            "sha256:a416a98b71e224a31ee99cff8e16063554498227d2b696152a9c3e0aa65e5824",
-        )
-        .send()
-        .await?
-        .json()
-        .await?;
+    let config: oci_spec::image::ImageConfiguration = decode_and_check_for_error(
+        client
+            .get(&format!(
+                "https://registry-1.docker.io/v2/library/{pkg}/blobs/{config_digest}"
+            ))
+            .header("Authorization", format!("Bearer {token}"))
+            .header(
+                "Accept",
+                "sha256:a416a98b71e224a31ee99cff8e16063554498227d2b696152a9c3e0aa65e5824",
+            )
+            .send()
+            .await?,
+    )
+    .await?;
     Ok(config.into())
 }
 
@@ -305,7 +318,8 @@ impl ContainerImage {
     #[anyhow_trace]
     async fn from_path(fs: &Fs, path: impl AsRef<Path>) -> Result<Self> {
         let c = fs.read_to_string(path).await?;
-        Ok(serde_json::from_str(&c)?)
+        let value = serde_json::from_str(&c)?;
+        Ok(value)
     }
 
     async fn from_dir(fs: &Fs, path: impl AsRef<Path>) -> Option<Self> {
