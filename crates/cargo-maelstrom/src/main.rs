@@ -69,7 +69,10 @@ struct ListOptions {
 #[derive(Args)]
 #[command(next_help_heading = "Test Metadata Options")]
 struct TestMetadataOptions {
-    #[arg(long, help = "Write out a starter test metadata file if one does not exist, then exit.")]
+    #[arg(
+        long,
+        help = "Write out a starter test metadata file if one does not exist, then exit."
+    )]
     init: bool,
 }
 
