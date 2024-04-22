@@ -234,20 +234,23 @@ fn remove_glibc_version_from_version_r(path: &Path, version: &str) -> Result<()>
     Ok(())
 }
 
-fn patchelf(args: &[&str], path: &Path) -> Result<()> {
-    if !Command::new("patchelf")
+fn patchelf(args: &[&str], path: impl AsRef<Path>) -> Result<String> {
+    let output = Command::new("patchelf")
         .args(args)
-        .arg(path)
-        .status()?
-        .success()
-    {
+        .arg(path.as_ref())
+        .output()?;
+    if !output.status.success() {
         bail!("pathelf failed");
     }
-    Ok(())
+    Ok(String::from_utf8(output.stdout).unwrap())
 }
 
 fn patch_binary(path: &Path) -> Result<()> {
-    patchelf(&["--set-interpreter", "/lib64/ld-linux-x86-64.so.2"], path)?;
+    // I'm not sure the best way to get this value, here I am copying it from the system ls binary
+    let interpreter = PathBuf::from(patchelf(&["--print-interpreter"], "/bin/ls")?.trim());
+    let interpreter_str = interpreter.to_str().unwrap();
+
+    patchelf(&["--set-interpreter", interpreter_str], path)?;
     patchelf(&["--remove-rpath"], path)?;
     patchelf(&["--clear-symbol-version", "fmod"], path)?;
     remove_glibc_version_from_version_r(path, "GLIBC_2.38")?;
@@ -296,14 +299,18 @@ fn get_binary_paths() -> Result<Vec<PathBuf>> {
     Ok(paths)
 }
 
-fn package_artifacts(temp_dir: &tempfile::TempDir, binaries: &[PathBuf]) -> Result<Vec<PathBuf>> {
+fn package_artifacts(
+    temp_dir: &tempfile::TempDir,
+    target_triple: &str,
+    binaries: &[PathBuf],
+) -> Result<Vec<PathBuf>> {
     let mut packaged = vec![];
     for binary_path in binaries {
         let new_binary = temp_dir.path().join(binary_path.file_name().unwrap());
         std::fs::copy(binary_path, &new_binary)?;
         patch_binary(&new_binary)?;
         let tar_gz_path = temp_dir.path().join(format!(
-            "{}-x86_64-unknown-linux-gnu.tgz",
+            "{}-{target_triple}.tgz",
             new_binary.file_name().unwrap().to_str().unwrap()
         ));
         tar_gz(&new_binary, &tar_gz_path)?;
@@ -341,6 +348,23 @@ fn upload(paths: &[PathBuf], tag: &str, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
+fn get_target_triple() -> Result<String> {
+    let output = Command::new("rustc").arg("-vV").output()?;
+    if !output.status.success() {
+        bail!("rustc -vV failed");
+    }
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    for line in stdout.split('\n').skip(1) {
+        let mut split = line.split(':');
+        let key = split.next().unwrap();
+        let value = split.next().unwrap();
+        if key == "host" {
+            return Ok(value.trim().into());
+        }
+    }
+    bail!("failed to find \"host\" in rustc -vV output");
+}
+
 pub fn main(args: CliArgs) -> Result<()> {
     let tag = args.version;
     let temp_dir = tempfile::tempdir()?;
@@ -354,7 +378,8 @@ pub fn main(args: CliArgs) -> Result<()> {
         return Ok(());
     }
 
-    let packaged = package_artifacts(&temp_dir, &binary_paths)?;
+    let target_triple = get_target_triple()?;
+    let packaged = package_artifacts(&temp_dir, &target_triple, &binary_paths)?;
     upload(&packaged, &tag, args.dry_run)?;
     Ok(())
 }
