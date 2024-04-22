@@ -702,6 +702,12 @@ mod tests {
         fn from_str(s: &str) -> Self {
             if s.starts_with("wh:") {
                 Self::whiteout(&s[3..])
+            } else if s.starts_with("hl:") {
+                let mut split = s[3..].split(" -> ");
+                Self::link(split.next().unwrap(), split.next().unwrap())
+            } else if s.starts_with("sym:") {
+                let mut split = s[4..].split(" -> ");
+                Self::link(split.next().unwrap(), split.next().unwrap())
             } else if s.ends_with("/") {
                 Self::dir(s)
             } else {
@@ -832,6 +838,7 @@ mod tests {
                 BuildEntry::reg_empty("/Foo"),
                 BuildEntry::reg_empty("/Bar"),
                 BuildEntry::reg_empty("/Baz"),
+                BuildEntry::whiteout("/Qux"), // should be ignored
             ],
         )
         .await;
@@ -1573,6 +1580,16 @@ mod tests {
                 ("Cake", vec!["Cupcakes/"]),
                 ("Cake/Cupcakes", vec!["RedVelvet"]),
             ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_with_whiteout_of_hardlink() {
+        two_layer_test(
+            vec!["/Cake/Cupcakes", "hl:/Cake/Muffins -> /Cake/Cupcakes"],
+            vec!["wh:/Cake/Cupcakes"],
+            vec![("", vec!["Cake/"]), ("Cake", vec!["Muffins"])],
         )
         .await;
     }
