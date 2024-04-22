@@ -26,7 +26,7 @@
 
       cargoToml = importTOML ./Cargo.toml;
 
-      inherit (cargoToml.workspace.package) rust-version;
+      inherit (cargoToml.workspace.package) rust-version version;
     in
     eachDefaultSystem (
       system:
@@ -48,7 +48,7 @@
           overlays = [ (import rust-overlay) ];
         };
 
-        packages.default = pkgs.callPackage ./package.nix { inherit craneLib; };
+        packages.default = pkgs.callPackage ./package.nix { inherit craneLib version; };
 
         devShells.default = pkgs.callPackage ./shell.nix {
           inherit craneLib;

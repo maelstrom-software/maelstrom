@@ -7,6 +7,7 @@
   llvmPackages,
   openssl,
   libiconv,
+  version ? null
 }:
 
 let
@@ -19,6 +20,7 @@ let
 
   self = buildPackage {
     pname = "maelstrom";
+    inherit version;
 
     src = cleanSourceWith {
       src = path ./.;
