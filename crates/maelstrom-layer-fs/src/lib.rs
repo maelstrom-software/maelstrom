@@ -529,14 +529,23 @@ impl FuseFileSystem for LayerFsFuseAdapter {
             reader.into_stream(offset.try_into()?).await,
         )?;
         let log = self.log.clone();
-        Ok(Box::pin(stream.map(move |res| {
-            let (offset, entry) = to_eio(log.clone(), res)?;
-            Ok(maelstrom_fuse::DirEntry {
-                ino: entry.value.file_id.as_u64(),
-                offset: i64::try_from(offset).unwrap(),
-                kind: entry.value.kind,
-                name: entry.key,
-            })
+        Ok(Box::pin(stream.filter_map(move |res| {
+            let log = log.clone();
+            async move {
+                let (offset, entry) = match to_eio(log, res) {
+                    Err(error) => {
+                        return Some(Err(error));
+                    }
+                    Ok(value) => value,
+                };
+                let value = entry.value.into_file_data()?;
+                Some(Ok(maelstrom_fuse::DirEntry {
+                    ino: value.file_id.as_u64(),
+                    offset: i64::try_from(offset).unwrap(),
+                    kind: value.kind,
+                    name: entry.key,
+                }))
+            }
         })))
     }
 
@@ -574,19 +583,30 @@ mod tests {
     use maelstrom_util::manifest::AsyncManifestWriter;
     use slog::Drain as _;
     use std::future::Future;
-    use std::os::unix::{ffi::OsStrExt as _, fs::MetadataExt as _};
+    use std::os::unix::fs::MetadataExt as _;
     use std::pin::Pin;
     use tokio::io::AsyncWriteExt as _;
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
 
+    #[derive(Debug)]
+    enum BuildEntryData {
+        Regular {
+            type_: FileType,
+            data: FileData,
+            mode: u32,
+        },
+        Link {
+            target: String,
+            hard: bool,
+        },
+        Whiteout,
+    }
+
     struct BuildEntry {
         path: String,
-        type_: FileType,
-        data: FileData,
-        mode: u32,
-        is_hard_link: bool,
+        data: BuildEntryData,
     }
 
     impl BuildEntry {
@@ -618,20 +638,22 @@ mod tests {
         fn reg_empty_mode(path: impl Into<String>, mode: u32) -> Self {
             Self {
                 path: path.into(),
-                type_: FileType::RegularFile,
-                data: FileData::Empty,
-                mode,
-                is_hard_link: false,
+                data: BuildEntryData::Regular {
+                    type_: FileType::RegularFile,
+                    data: FileData::Empty,
+                    mode,
+                },
             }
         }
 
         fn reg_mode(path: impl Into<String>, data: FileData, mode: u32) -> Self {
             Self {
                 path: path.into(),
-                type_: FileType::RegularFile,
-                data,
-                mode,
-                is_hard_link: false,
+                data: BuildEntryData::Regular {
+                    type_: FileType::RegularFile,
+                    data,
+                    mode,
+                },
             }
         }
 
@@ -642,35 +664,45 @@ mod tests {
         fn dir_mode(path: impl Into<String>, mode: u32) -> Self {
             Self {
                 path: path.into(),
-                type_: FileType::Directory,
-                data: FileData::Empty,
-                mode,
-                is_hard_link: false,
+                data: BuildEntryData::Regular {
+                    type_: FileType::Directory,
+                    data: FileData::Empty,
+                    mode,
+                },
             }
         }
 
-        fn sym(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+        fn sym(path: impl Into<String>, target: impl Into<String>) -> Self {
             Self {
                 path: path.into(),
-                type_: FileType::Symlink,
-                data: FileData::Inline(target.into()),
-                mode: 0o777,
-                is_hard_link: false,
+                data: BuildEntryData::Link {
+                    target: target.into(),
+                    hard: false,
+                },
             }
         }
 
-        fn link(path: impl Into<String>, target: impl Into<Vec<u8>>) -> Self {
+        fn link(path: impl Into<String>, target: impl Into<String>) -> Self {
             Self {
                 path: path.into(),
-                type_: FileType::RegularFile,
-                data: FileData::Inline(target.into()),
-                mode: 0o777,
-                is_hard_link: true,
+                data: BuildEntryData::Link {
+                    target: target.into(),
+                    hard: true,
+                },
+            }
+        }
+
+        fn whiteout(path: impl Into<String>) -> Self {
+            Self {
+                path: path.into(),
+                data: BuildEntryData::Whiteout,
             }
         }
 
         fn from_str(s: &str) -> Self {
-            if s.ends_with("/") {
+            if s.starts_with("wh:") {
+                Self::whiteout(&s[3..])
+            } else if s.ends_with("/") {
                 Self::dir(s)
             } else {
                 Self::reg_empty(s)
@@ -696,66 +728,68 @@ mod tests {
                 .await
                 .unwrap();
 
-        for BuildEntry {
-            path,
-            type_,
-            data,
-            mode,
-            is_hard_link,
-        } in files
-        {
+        for BuildEntry { path, data } in files {
             let size = match &data {
-                ty::FileData::Empty => 0,
-                ty::FileData::Inline(d) => d.len() as u64,
-                ty::FileData::Digest { length, .. } => *length,
+                BuildEntryData::Regular {
+                    data: ty::FileData::Inline(d),
+                    ..
+                } => d.len() as u64,
+                BuildEntryData::Regular {
+                    data: ty::FileData::Digest { length, .. },
+                    ..
+                } => *length,
+                _ => 0,
             };
-            if is_hard_link {
-                let FileData::Inline(data) = data else {
-                    unreachable!()
-                };
-
-                builder
-                    .add_link_path(path.as_ref(), std::str::from_utf8(&data).unwrap().as_ref())
-                    .await
-                    .unwrap();
-                continue;
-            }
-
-            match type_ {
-                FileType::RegularFile => {
+            match data {
+                BuildEntryData::Link { hard: true, target } => {
                     builder
-                        .add_file_path(
-                            path.as_ref(),
-                            ty::FileAttributes {
-                                size,
-                                mode: Mode(mode),
-                                mtime: ARBITRARY_TIME,
-                            },
-                            data,
-                        )
+                        .add_link_path(path.as_ref(), target.as_ref())
                         .await
                         .unwrap();
                 }
-                FileType::Directory => {
+                BuildEntryData::Link {
+                    hard: false,
+                    target,
+                } => {
                     builder
-                        .add_dir_path(
-                            path.as_ref(),
-                            ty::FileAttributes {
-                                size,
-                                mode: Mode(mode),
-                                mtime: ARBITRARY_TIME,
-                            },
-                        )
+                        .add_symlink_path(path.as_ref(), target)
                         .await
                         .unwrap();
                 }
-                FileType::Symlink => {
-                    let FileData::Inline(data) = data else {
-                        unreachable!()
-                    };
-                    builder.add_symlink_path(path.as_ref(), data).await.unwrap();
+                BuildEntryData::Regular { type_, data, mode } => match type_ {
+                    FileType::RegularFile => {
+                        builder
+                            .add_file_path(
+                                path.as_ref(),
+                                ty::FileAttributes {
+                                    size,
+                                    mode: Mode(mode),
+                                    mtime: ARBITRARY_TIME,
+                                },
+                                data,
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    FileType::Directory => {
+                        builder
+                            .add_dir_path(
+                                path.as_ref(),
+                                ty::FileAttributes {
+                                    size,
+                                    mode: Mode(mode),
+                                    mtime: ARBITRARY_TIME,
+                                },
+                            )
+                            .await
+                            .unwrap();
+                    }
+                    FileType::Symlink => {}
+                    other => panic!("unsupported file type {other:?}"),
+                },
+                BuildEntryData::Whiteout => {
+                    builder.add_whiteout_path(path.as_ref()).await.unwrap();
                 }
-                other => panic!("unsupported file type {other:?}"),
             }
         }
 
@@ -1063,39 +1097,37 @@ mod tests {
         let tar_path = cache_path.join("temp.tar");
         let f = fs.create_file(&tar_path).await.unwrap();
         let mut ar = tokio_tar::Builder::new(f.into_inner());
-        for BuildEntry {
-            path,
-            type_,
-            data,
-            mode,
-            is_hard_link,
-        } in files
-        {
+        for BuildEntry { path, data } in files {
             let mut header = tokio_tar::Header::new_gnu();
-            let data = match data {
-                ty::FileData::Empty => vec![],
-                ty::FileData::Inline(d) => d,
-                _ => panic!(),
-            };
-            header.set_entry_type(match (is_hard_link, type_) {
-                (true, _) => tokio_tar::EntryType::Link,
-                (_, FileType::RegularFile) => tokio_tar::EntryType::Regular,
-                (_, FileType::Directory) => tokio_tar::EntryType::Directory,
-                (_, FileType::Symlink) => tokio_tar::EntryType::Symlink,
-                (_, other) => panic!("unsupported entry type {other:?}"),
-            });
-            if type_ == FileType::Symlink || is_hard_link {
-                header.set_size(0);
-                header
-                    .set_link_name(std::ffi::OsStr::from_bytes(&data))
-                    .unwrap();
-                ar.append_data(&mut header, path, tokio::io::empty())
-                    .await
-                    .unwrap();
-            } else {
-                header.set_size(data.len() as u64);
-                header.set_mode(mode);
-                ar.append_data(&mut header, path, &data[..]).await.unwrap();
+            match data {
+                BuildEntryData::Regular { data, type_, mode } => {
+                    header.set_entry_type(match type_ {
+                        FileType::RegularFile => tokio_tar::EntryType::Regular,
+                        FileType::Directory => tokio_tar::EntryType::Directory,
+                        other => panic!("unsupported entry type {other:?}"),
+                    });
+                    let data = match data {
+                        ty::FileData::Empty => vec![],
+                        ty::FileData::Inline(d) => d,
+                        _ => panic!(),
+                    };
+                    header.set_size(data.len() as u64);
+                    header.set_mode(mode);
+                    ar.append_data(&mut header, path, &data[..]).await.unwrap();
+                }
+                BuildEntryData::Link { hard, target } => {
+                    header.set_entry_type(if hard {
+                        tokio_tar::EntryType::Link
+                    } else {
+                        tokio_tar::EntryType::Symlink
+                    });
+                    header.set_size(0);
+                    header.set_link_name(target).unwrap();
+                    ar.append_data(&mut header, path, tokio::io::empty())
+                        .await
+                        .unwrap();
+                }
+                other => panic!("unsupported builder entry for tar {other:?}"),
             }
         }
         ar.finish().await.unwrap();
@@ -1113,90 +1145,92 @@ mod tests {
         let manifest_path = cache_path.join("temp.manifest");
         let f = fs.create_file(&manifest_path).await.unwrap();
         let mut builder = AsyncManifestWriter::new(f).await.unwrap();
-        for BuildEntry {
-            path,
-            type_,
-            data,
-            mode,
-            is_hard_link,
-        } in files
-        {
+        for BuildEntry { path, data } in files {
             let path: Utf8PathBuf = path.into();
-            let size = match &data {
-                ty::FileData::Empty => 0,
-                ty::FileData::Inline(d) => d.len() as u64,
-                ty::FileData::Digest { length, .. } => *length,
-            };
-            let metadata = ManifestEntryMetadata {
-                size,
-                mode: Mode(mode),
-                mtime: ARBITRARY_TIME,
-            };
-            if is_hard_link {
-                let ty::FileData::Inline(data) = data else {
-                    unimplemented!()
-                };
-                builder
-                    .write_entry(&ManifestEntry {
-                        path,
-                        metadata,
-                        data: ManifestEntryData::Hardlink(
-                            std::str::from_utf8(&data).unwrap().into(),
-                        ),
-                    })
-                    .await
-                    .unwrap();
-                continue;
-            }
-            match type_ {
-                FileType::Directory => builder
-                    .write_entry(&ManifestEntry {
-                        path,
-                        metadata,
-                        data: ManifestEntryData::Directory,
-                    })
-                    .await
-                    .unwrap(),
-                FileType::RegularFile => {
-                    let data = match data {
-                        ty::FileData::Empty => None,
-                        ty::FileData::Inline(d) => {
-                            let temp_path = cache_path.join("temp.bin");
-                            fs.write(&temp_path, d).await.unwrap();
-                            let digest = calc_digest(fs, &temp_path).await;
-                            fs.rename(temp_path, cache_path.join(digest.to_string()))
+            match data {
+                BuildEntryData::Regular { data, type_, mode } => {
+                    let size = match &data {
+                        ty::FileData::Empty => 0,
+                        ty::FileData::Inline(d) => d.len() as u64,
+                        ty::FileData::Digest { length, .. } => *length,
+                    };
+                    let metadata = ManifestEntryMetadata {
+                        size,
+                        mode: Mode(mode),
+                        mtime: ARBITRARY_TIME,
+                    };
+                    match type_ {
+                        FileType::Directory => builder
+                            .write_entry(&ManifestEntry {
+                                path,
+                                metadata,
+                                data: ManifestEntryData::Directory,
+                            })
+                            .await
+                            .unwrap(),
+                        FileType::RegularFile => {
+                            let data = match data {
+                                ty::FileData::Empty => None,
+                                ty::FileData::Inline(d) => {
+                                    let temp_path = cache_path.join("temp.bin");
+                                    fs.write(&temp_path, d).await.unwrap();
+                                    let digest = calc_digest(fs, &temp_path).await;
+                                    fs.rename(temp_path, cache_path.join(digest.to_string()))
+                                        .await
+                                        .unwrap();
+                                    Some(digest)
+                                }
+                                ty::FileData::Digest { digest, offset, .. } => {
+                                    assert_eq!(offset, 0);
+                                    Some(digest)
+                                }
+                            };
+                            builder
+                                .write_entry(&ManifestEntry {
+                                    path,
+                                    metadata,
+                                    data: ManifestEntryData::File(data),
+                                })
                                 .await
                                 .unwrap();
-                            Some(digest)
                         }
-                        ty::FileData::Digest { digest, offset, .. } => {
-                            assert_eq!(offset, 0);
-                            Some(digest)
-                        }
+                        other => panic!("unsupported entry type {other:?}"),
+                    }
+                }
+                BuildEntryData::Link { hard: true, target } => {
+                    let metadata = ManifestEntryMetadata {
+                        size: 0,
+                        mode: Mode(0o777),
+                        mtime: ARBITRARY_TIME,
                     };
                     builder
                         .write_entry(&ManifestEntry {
                             path,
                             metadata,
-                            data: ManifestEntryData::File(data),
+                            data: ManifestEntryData::Hardlink(target.into()),
                         })
                         .await
                         .unwrap();
                 }
-                FileType::Symlink => {
-                    let ty::FileData::Inline(data) = data else {
-                        unimplemented!()
+                BuildEntryData::Link {
+                    hard: false,
+                    target,
+                } => {
+                    let metadata = ManifestEntryMetadata {
+                        size: 0,
+                        mode: Mode(0o777),
+                        mtime: ARBITRARY_TIME,
                     };
                     builder
                         .write_entry(&ManifestEntry {
                             path,
                             metadata,
-                            data: ManifestEntryData::Symlink(data),
+                            data: ManifestEntryData::Symlink(target.into()),
                         })
                         .await
                         .unwrap();
                 }
-                other => panic!("unsupported entry type {other:?}"),
+                other => panic!("unsupported builder entry for manifest {other:?}"),
             }
         }
         drop(builder);
@@ -1233,7 +1267,7 @@ mod tests {
             BuildEntry::reg_empty("Bar/Bin"),
             BuildEntry::reg_empty("Qux/Fred"),
             BuildEntry::dir_mode("Bar", 0o666),
-            BuildEntry::sym("Waldo", b"Foo"),
+            BuildEntry::sym("Waldo", "Foo"),
             BuildEntry::link("Thud", "/Foo"),
         ];
 
@@ -1524,6 +1558,38 @@ mod tests {
                 ("", vec!["Cake/"]),
                 ("Cake", vec!["Cupcakes/"]),
                 ("Cake/Cupcakes", vec!["Sprinkle"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_with_whiteout_of_file() {
+        two_layer_test(
+            vec!["/Cake/Cupcakes/Sprinkle", "/Cake/Cupcakes/RedVelvet"],
+            vec!["wh:/Cake/Cupcakes/Sprinkle"],
+            vec![
+                ("", vec!["Cake/"]),
+                ("Cake", vec!["Cupcakes/"]),
+                ("Cake/Cupcakes", vec!["RedVelvet"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_with_whiteout_of_directory() {
+        two_layer_test(
+            vec![
+                "/Cake/Cupcakes/Sprinkle/Yellow",
+                "/Cake/Cupcakes/Sprinkle/Red",
+                "/Cake/Cupcakes/RedVelvet/",
+            ],
+            vec!["wh:/Cake/Cupcakes/Sprinkle"],
+            vec![
+                ("", vec!["Cake/"]),
+                ("Cake", vec!["Cupcakes/"]),
+                ("Cake/Cupcakes", vec!["RedVelvet/"]),
             ],
         )
         .await;

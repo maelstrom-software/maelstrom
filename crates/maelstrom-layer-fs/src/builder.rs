@@ -1,7 +1,8 @@
 use crate::dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream};
 use crate::file::FileMetadataWriter;
 use crate::ty::{
-    DirectoryEntryData, FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper,
+    DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileData, FileId, FileType,
+    LayerId, LayerSuper,
 };
 use crate::LayerFs;
 use anyhow::bail;
@@ -195,7 +196,18 @@ impl<'fs> BottomLayerBuilder<'fs> {
             .get_writer(&self.layer_fs, parent)
             .await?;
         let inserted = dir_writer
-            .insert_entry(name, DirectoryEntryData { file_id, kind })
+            .insert_entry(name, DirectoryEntryFileData { file_id, kind })
+            .await?;
+        Ok(inserted)
+    }
+
+    async fn add_whiteout(&mut self, parent: FileId, name: &str) -> Result<bool> {
+        let dir_writer = self
+            .dir_writer_cache
+            .get_writer(&self.layer_fs, parent)
+            .await?;
+        let inserted = dir_writer
+            .insert_entry(name, DirectoryEntryData::Whiteout)
             .await?;
         Ok(inserted)
     }
@@ -227,6 +239,22 @@ impl<'fs> BottomLayerBuilder<'fs> {
         }
 
         Ok(file_id)
+    }
+
+    /// Add a whiteout entry at the given path in the new layer. Creates any intermediate
+    /// directories that don't exist.
+    pub async fn add_whiteout_path(&mut self, path: &Utf8Path) -> Result<()> {
+        let parent_id = if let Some(parent) = path.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let inserted = self.add_whiteout(parent_id, name).await?;
+        if !inserted {
+            return Err(anyhow!("file already exists at {path}"));
+        }
+        Ok(())
     }
 
     /// Set the attributes for the given existing file in the new layer.
@@ -305,6 +333,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
             .look_up_entry(target_parent_id, target_name)
             .await?
             .ok_or(anyhow!("link target not found {target:?}"))?;
+        let Some(existing) = existing.into_file_data() else {
+            bail!("hardlink to whiteout entry not allowed {target:?}")
+        };
 
         if existing.kind == FileType::Directory {
             bail!("hardlink to directory not allowed {target:?}")
@@ -549,23 +580,22 @@ impl<'fs> DoubleFsWalk<'fs> {
 
         match &res {
             LeftRight::Both(WalkEntry { data: left, .. }, WalkEntry { data: right, .. }) => {
-                if left.kind == FileType::Directory && right.kind == FileType::Directory {
-                    self.streams.push((
-                        Some(WalkStream::new(self.left_fs, left.file_id, right.file_id).await?),
-                        WalkStream::new(self.right_fs, right.file_id, right.file_id).await?,
-                    ));
-                } else if right.kind == FileType::Directory {
-                    self.streams.push((
-                        None,
-                        WalkStream::new(self.right_fs, right.file_id, right.file_id).await?,
-                    ));
+                if let Some(right_file_id) = right.as_dir() {
+                    let right_stream =
+                        WalkStream::new(self.right_fs, right_file_id, right_file_id).await?;
+                    let left_stream = if let Some(left_file_id) = left.as_dir() {
+                        Some(WalkStream::new(self.left_fs, left_file_id, right_file_id).await?)
+                    } else {
+                        None
+                    };
+                    self.streams.push((left_stream, right_stream));
                 }
             }
             LeftRight::Right(WalkEntry { data: right, .. }) => {
-                if right.kind == FileType::Directory {
+                if let Some(right_file_id) = right.as_dir() {
                     self.streams.push((
                         None,
-                        WalkStream::new(self.right_fs, right.file_id, right.file_id).await?,
+                        WalkStream::new(self.right_fs, right_file_id, right_file_id).await?,
                     ));
                 }
             }
@@ -710,13 +740,16 @@ impl<'fs> UpperLayerBuilder<'fs> {
                     let writer = dir_writers.get_writer(dir_id).await?;
                     writer.insert_entry(&entry.key, entry.data).await?;
                 }
-                LeftRight::Right(mut entry) | LeftRight::Both(_, mut entry) => {
+                LeftRight::Right(entry) | LeftRight::Both(_, entry) => {
+                    let Some(mut data) = entry.data.into_file_data() else {
+                        continue; // whiteout means we just ignore this entry
+                    };
                     let dir_id = FileId::new(upper_id, entry.right_parent.offset());
                     let writer = dir_writers.get_writer(dir_id).await?;
-                    let file_id = FileId::new(upper_id, entry.data.file_id.offset());
-                    entry.data.file_id = file_id;
-                    let kind = entry.data.kind;
-                    writer.insert_entry(&entry.key, entry.data).await?;
+                    let file_id = FileId::new(upper_id, data.file_id.offset());
+                    data.file_id = file_id;
+                    let kind = data.kind;
+                    writer.insert_entry(&entry.key, data).await?;
                     if kind == FileType::Directory {
                         dir_writers.get_writer(file_id).await?;
                     }

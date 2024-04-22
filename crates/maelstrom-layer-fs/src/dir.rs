@@ -45,7 +45,10 @@ impl DirectoryDataReader {
     }
 
     pub async fn look_up(&mut self, entry_name: &str) -> Result<Option<FileId>> {
-        Ok(self.look_up_entry(entry_name).await?.map(|e| e.file_id))
+        Ok(self
+            .look_up_entry(entry_name)
+            .await?
+            .and_then(|e| e.into_file_data().map(|e| e.file_id)))
     }
 
     pub async fn look_up_entry(&mut self, entry_name: &str) -> Result<Option<DirectoryEntryData>> {
@@ -206,7 +209,10 @@ impl DirectoryDataWriter {
     }
 
     pub async fn look_up(&mut self, entry_name: &str) -> Result<Option<FileId>> {
-        Ok(self.look_up_entry(entry_name).await?.map(|e| e.file_id))
+        Ok(self
+            .look_up_entry(entry_name)
+            .await?
+            .and_then(|e| e.into_file_data().map(|e| e.file_id)))
     }
 
     pub async fn look_up_entry(&mut self, entry_name: &str) -> Result<Option<DirectoryEntryData>> {
@@ -222,10 +228,10 @@ impl DirectoryDataWriter {
     pub async fn insert_entry(
         &mut self,
         entry_name: &str,
-        entry_data: DirectoryEntryData,
+        entry_data: impl Into<DirectoryEntryData>,
     ) -> Result<bool> {
         self.tree
-            .insert_if_not_exists(entry_name.into(), entry_data)
+            .insert_if_not_exists(entry_name.into(), entry_data.into())
             .await
     }
 

@@ -123,9 +123,34 @@ impl TryFrom<i64> for DirectoryOffset {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct DirectoryEntryData {
+pub struct DirectoryEntryFileData {
     pub file_id: FileId,
     pub kind: FileType,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, From)]
+pub enum DirectoryEntryData {
+    Whiteout,
+    FileData(DirectoryEntryFileData),
+}
+
+impl DirectoryEntryData {
+    pub fn as_dir(&self) -> Option<FileId> {
+        match self {
+            Self::FileData(DirectoryEntryFileData {
+                kind: FileType::Directory,
+                file_id,
+            }) => Some(*file_id),
+            _ => None,
+        }
+    }
+
+    pub fn into_file_data(self) -> Option<DirectoryEntryFileData> {
+        match self {
+            Self::FileData(data) => Some(data),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Default, Debug, Deserialize_repr, Serialize_repr)]
