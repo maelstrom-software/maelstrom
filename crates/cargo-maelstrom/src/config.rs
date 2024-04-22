@@ -64,7 +64,7 @@ pub struct Config {
     pub cache_size: CacheSize,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(short = 'i', value_name = "BYTES", default = "InlineLimit::default()")]
+    #[config(short = 'I', value_name = "BYTES", default = "InlineLimit::default()")]
     pub inline_limit: InlineLimit,
 
     /// The number of job slots available.
