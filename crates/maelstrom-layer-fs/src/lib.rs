@@ -852,6 +852,7 @@ mod tests {
         fs.metadata(mount_path.join("Bar")).await.unwrap();
         fs.metadata(mount_path.join("Baz")).await.unwrap();
         fs.metadata(mount_path.join("Foo")).await.unwrap();
+        assert!(!fs.exists(mount_path.join("BAG")).await);
 
         mount_handle.umount_and_join().await.unwrap();
     }

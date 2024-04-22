@@ -289,7 +289,10 @@ impl Fs {
     }
 
     pub async fn exists<P: AsRef<Path>>(&self, path: P) -> bool {
-        path.as_ref().exists()
+        let path = path.as_ref().to_owned();
+        tokio::task::spawn_blocking(move || path.exists())
+            .await
+            .unwrap()
     }
 
     pub async fn read_dir<P: AsRef<Path>>(&self, path: P) -> Result<ReadDir> {
