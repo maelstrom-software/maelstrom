@@ -4,6 +4,7 @@
   craneLib,
   binaryen,
   pkg-config,
+  protobuf,
   llvmPackages,
   openssl,
   libiconv,
@@ -40,6 +41,7 @@ let
       binaryen
       pkg-config
       llvmPackages.bintools
+      protobuf
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];

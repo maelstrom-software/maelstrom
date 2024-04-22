@@ -29,5 +29,4 @@ tuple.workspace = true
 maelstrom-test.workspace = true
 
 [build-dependencies]
-protoc-bin-vendored.workspace = true
 tonic-build.workspace = true
