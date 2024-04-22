@@ -8,6 +8,7 @@ pub use fuser::{FileAttr, FileType};
 use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::{self as linux, Errno};
+use maelstrom_util::r#async::await_and_every_sec;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::future::Future;
@@ -31,6 +32,8 @@ const MAX_INFLIGHT: usize = 1000;
 pub struct FuseNamespaceHandle {
     stream: linux::UnixStream,
     handle: JoinHandle<std::io::Result<()>>,
+    log: slog::Logger,
+    child: linux::Pid,
     mount_path: PathBuf,
 }
 
@@ -39,7 +42,18 @@ impl FuseNamespaceHandle {
     pub async fn umount_and_join(self) -> Result<()> {
         let _ = self.stream.shutdown();
         drop(self.stream);
-        self.handle.await.unwrap()?;
+        await_and_every_sec(
+            tokio::task::spawn_blocking(move || linux::waitpid(self.child)),
+            || slog::debug!(self.log, "waiting for child"; "child" => ?self.child),
+        )
+        .await
+        .unwrap()?;
+        await_and_every_sec(
+            self.handle,
+            || slog::debug!(self.log, "waiting for FUSE"; "child" => ?self.child),
+        )
+        .await
+        .unwrap()?;
         Ok(())
     }
 
@@ -100,14 +114,16 @@ pub async fn fuse_mount_namespace(
         let (a, b) = linux::UnixStream::pair()?;
         let uid = linux::getuid();
         let gid = linux::getgid();
-        let mut clone_args = linux::CloneArgs::default().flags(
-            linux::CloneFlags::NEWCGROUP
-                | linux::CloneFlags::NEWIPC
-                | linux::CloneFlags::NEWNET
-                | linux::CloneFlags::NEWNS
-                | linux::CloneFlags::NEWPID
-                | linux::CloneFlags::NEWUSER,
-        );
+        let mut clone_args = linux::CloneArgs::default()
+            .flags(
+                linux::CloneFlags::NEWCGROUP
+                    | linux::CloneFlags::NEWIPC
+                    | linux::CloneFlags::NEWNET
+                    | linux::CloneFlags::NEWNS
+                    | linux::CloneFlags::NEWPID
+                    | linux::CloneFlags::NEWUSER,
+            )
+            .exit_signal(linux::Signal::CHLD);
         let Some(child) = linux::clone3(&mut clone_args)? else {
             drop(a);
             run_fuse_child(b, &mount_path2, name, uid, gid);
@@ -119,18 +135,21 @@ pub async fn fuse_mount_namespace(
     })
     .await??;
 
+    let other_log = log.clone();
     let handle = task::spawn(async move {
         let mut session = crate::fuser::Session::from_fd(
             DispatchingFs::new(handler),
             fd.unwrap().into(),
             crate::fuser::SessionACL::All,
-            log,
+            other_log,
         )?;
         session.run().await
     });
     Ok(FuseNamespaceHandle {
         stream: a,
         handle,
+        child,
+        log,
         mount_path: format!("/proc/{}/root{}", child.as_i32(), mount_path.display()).into(),
     })
 }
