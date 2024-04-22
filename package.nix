@@ -4,9 +4,11 @@
   craneLib,
   binaryen,
   pkg-config,
+  protobuf,
   llvmPackages,
   openssl,
   libiconv,
+  version ? null
 }:
 
 let
@@ -19,6 +21,7 @@ let
 
   self = buildPackage {
     pname = "maelstrom";
+    inherit version;
 
     src = cleanSourceWith {
       src = path ./.;
@@ -38,6 +41,7 @@ let
       binaryen
       pkg-config
       llvmPackages.bintools
+      protobuf
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];

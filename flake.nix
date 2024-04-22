@@ -22,16 +22,24 @@
       inherit (inputs) self nixpkgs rust-overlay;
       inherit (inputs.crane) mkLib;
       inherit (inputs.flake-utils.lib) eachDefaultSystem;
-      inherit (inputs.nixpkgs.lib) importTOML;
+      inherit (inputs.nixpkgs.lib) genAttrs importTOML;
 
       cargoToml = importTOML ./Cargo.toml;
 
-      inherit (cargoToml.workspace.package) rust-version;
+      thisNixpkgs = genAttrs (import inputs.systems) (
+        system:
+        import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        }
+      );
+
+      inherit (cargoToml.workspace.package) rust-version version;
     in
     eachDefaultSystem (
       system:
       let
-        pkgs = self.legacyPackages.${system};
+        pkgs = thisNixpkgs.${system};
 
         # Use the Rust toolchain from Cargo.toml
         rustToolchain = pkgs.rust-bin.stable.${rust-version}.default.override {
@@ -42,13 +50,7 @@
         craneLib = ((mkLib pkgs).overrideToolchain rustToolchain);
       in
       {
-        # Import nixpkgs once
-        legacyPackages = import nixpkgs {
-          inherit system;
-          overlays = [ (import rust-overlay) ];
-        };
-
-        packages.default = pkgs.callPackage ./package.nix { inherit craneLib; };
+        packages.default = pkgs.callPackage ./package.nix { inherit craneLib version; };
 
         devShells.default = pkgs.callPackage ./shell.nix {
           inherit craneLib;

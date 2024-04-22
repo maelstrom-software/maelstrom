@@ -8,6 +8,7 @@
   cargo-edit,
   cargo-nextest,
   cargo-watch,
+  protobuf3_20,
   ripgrep,
   rust-analyzer,
   stgit,
@@ -28,6 +29,7 @@ craneLib.devShell {
     cargo-edit
     cargo-nextest
     cargo-watch
+    protobuf3_20
     ripgrep
     rust-analyzer
     stgit
