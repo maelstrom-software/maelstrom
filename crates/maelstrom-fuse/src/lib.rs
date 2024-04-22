@@ -89,7 +89,7 @@ fn run_fuse_child(
     let mut buf = [0; 1];
     b.recv_with_fd(&mut buf).unwrap();
 
-    std::process::exit(0)
+    linux::_exit(linux::ExitCode::from_u8(0))
 }
 
 /// Serve a FUSE connection using the provided handler and name. The FUSE connection will be
