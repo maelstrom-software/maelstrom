@@ -42,6 +42,7 @@ let
       pkg-config
       llvmPackages.bintools
       protobuf
+      mdbook
     ];
 
     buildInputs = [ openssl ] ++ optionals stdenv.isDarwin [ libiconv ];
