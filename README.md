@@ -112,7 +112,7 @@ cargo maelstrom --broker=broker-host:1234
 
 # Learn More
 
-Find our complete documentation in the [book] (https://maelstrom-software.com/book/).
+Find our complete documentation in the [book](https://maelstrom-software.com/book/).
 
 # Licensing
 
