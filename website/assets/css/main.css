@@ -188,7 +188,7 @@ input, select, textarea {
 	}
 	tt {
 		font-family: courier new;
-		padding: 0.1em 0.2em;
+		padding: 0.1em 0.2em;z
 	}
 
 	p, ul, ol, dl, table {
@@ -1836,7 +1836,7 @@ input, select, textarea {
 /* Actions */
 
 	ul.actions {
-		padding-top: 0em;
+		padding-top: 1em;
 		list-style: none;
 		padding-left: 0;
 	}
@@ -2720,8 +2720,6 @@ input, select, textarea {
 			}
 
 				#logo a {
-					border: solid 1px rgba(255, 255, 255, 0.75);
-					border-radius: 0.35em;
 					height: 3em;
 					line-height: 4em;
 				}
@@ -2825,7 +2823,7 @@ input, select, textarea {
 					}
 
 					#navButton .toggle:before {
-						background: rgba(128, 132, 136, 0.35);
+						background: #cfe5e5;
 						border-radius: 0 0 0.35em 0.35em;
 						border-top: 0;
 						color: #fff;
@@ -2855,10 +2853,10 @@ input, select, textarea {
 				-webkit-transition: -webkit-transform 0.5s ease;
 				-ms-transition: -ms-transform 0.5s ease;
 				transition: transform 0.5s ease;
-				background-image: url("images/overlay.png"), url("images/navPanel.svg"), -moz-linear-gradient(top, rgba(255, 255, 255, 0), rgba(0, 0, 0, 0.25));
-				background-image: url("images/overlay.png"), url("images/navPanel.svg"), -webkit-linear-gradient(top, rgba(255, 255, 255, 0), rgba(0, 0, 0, 0.25));
-				background-image: url("images/overlay.png"), url("images/navPanel.svg"), -ms-linear-gradient(top, rgba(255, 255, 255, 0), rgba(0, 0, 0, 0.25));
-				background-image: url("images/overlay.png"), url("images/navPanel.svg"), linear-gradient(top, rgba(255, 255, 255, 0), rgba(0, 0, 0, 0.25));
+				background-image: url("images/overlay.png"), url("images/header.svg"), -moz-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+				background-image: url("images/overlay.png"), url("images/header.svg"), -webkit-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+				background-image: url("images/overlay.png"), url("images/header.svg"), -ms-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+				background-image: url("images/overlay.png"), url("images/header.svg"), linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
 				display: block;
 				left: 0;
 				overflow-y: auto;
@@ -2879,13 +2877,13 @@ input, select, textarea {
 					display: block;
 					text-decoration: none;
 					padding: 0.75em;
-					color: #ddd;
+					color: #52575c;
 					border: 0;
-					border-top: dotted 1px rgba(255, 255, 255, 0.1);
+					border-top: dotted 1px #cfe5e5;
 				}
 
 					#navPanel .link.depth-0 {
-						color: #fff;
+						color: #52575c;
 						font-weight: 400;
 					}
 
@@ -2915,7 +2913,7 @@ input, select, textarea {
 				}
 
 				#navPanel .depth-0 {
-					color: #fff;
+					color: #52575c;
 				}
 
 			body.navPanel-visible #page-wrapper {
@@ -2978,16 +2976,16 @@ input, select, textarea {
 			}
 
 				.image.full, .image.left {
-					float: none;
+					float: center;
 					display: block;
-					width: 100%;
+					max-width: 70%;
 					margin: 0 0 1.5em 0;
 				}
 
 			.image-centered {
-				float: none;
+				float: center;
 				display: block;
-				width: 100%;
+				max-width: 70%;
 				margin: 0 0 1.5em 0;
 			}
 
@@ -3061,7 +3059,7 @@ input, select, textarea {
 		/* Footer */
 
 			#footer header.major {
-				margin-bottom: 1em;
+				margin-bottom: 4em;
 			}
 
 	}
