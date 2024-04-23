@@ -136,13 +136,13 @@ pub enum DirectoryEntryData {
 }
 
 impl DirectoryEntryData {
-    pub fn as_dir(&self) -> Option<FileId> {
+    pub fn as_dir(&self) -> Option<(FileId, bool)> {
         match self {
             Self::FileData(DirectoryEntryFileData {
                 kind: FileType::Directory,
                 file_id,
-                ..
-            }) => Some(*file_id),
+                opaque_dir,
+            }) => Some((*file_id, *opaque_dir)),
             _ => None,
         }
     }

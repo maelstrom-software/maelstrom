@@ -124,6 +124,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
         dir_reader.look_up(name).await
     }
 
+    async fn set_opaque_dir(&mut self, dir_id: FileId, name: &str, opaque: bool) -> Result<()> {
+        let dir_writer = self
+            .dir_writer_cache
+            .get_writer(&self.layer_fs, dir_id)
+            .await?;
+        dir_writer.set_opaque_dir(name, opaque).await
+    }
+
     async fn look_up_entry(
         &mut self,
         dir_id: FileId,
@@ -284,6 +292,32 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             self.add_dir(parent_id, name, attrs).await
         }
+    }
+
+    /// Set the directory at the given path to be opaque. If the given path doesn't exist, a
+    /// directory will be created there with any intermediate directories being created also.
+    ///
+    /// Errors if the given path points to something that isn't a directory.
+    pub async fn set_opaque_dir_path(&mut self, path: &Utf8Path) -> Result<()> {
+        let parent_id = if let Some(parent) = path.parent() {
+            self.ensure_path(parent).await?
+        } else {
+            FileId::root(LayerId::BOTTOM)
+        };
+        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+
+        if self.look_up(parent_id, name).await?.is_none() {
+            let attrs = FileAttributes {
+                size: 0,
+                mode: Mode(0o777),
+                mtime: self.time,
+            };
+            self.add_dir(parent_id, name, attrs).await?;
+        }
+
+        self.set_opaque_dir(parent_id, name, true).await?;
+
+        Ok(())
     }
 
     /// Add a symlink at the given path in the new layer. Creates any intermediate directories
@@ -587,19 +621,20 @@ impl<'fs> DoubleFsWalk<'fs> {
 
         match &res {
             LeftRight::Both(WalkEntry { data: left, .. }, WalkEntry { data: right, .. }) => {
-                if let Some(right_file_id) = right.as_dir() {
+                if let Some((right_file_id, right_opaque)) = right.as_dir() {
+                    let left_stream = match left.as_dir() {
+                        Some((left_file_id, _)) if !right_opaque => {
+                            Some(WalkStream::new(self.left_fs, left_file_id, right_file_id).await?)
+                        }
+                        _ => None,
+                    };
                     let right_stream =
                         WalkStream::new(self.right_fs, right_file_id, right_file_id).await?;
-                    let left_stream = if let Some(left_file_id) = left.as_dir() {
-                        Some(WalkStream::new(self.left_fs, left_file_id, right_file_id).await?)
-                    } else {
-                        None
-                    };
                     self.streams.push((left_stream, right_stream));
                 }
             }
             LeftRight::Right(WalkEntry { data: right, .. }) => {
-                if let Some(right_file_id) = right.as_dir() {
+                if let Some((right_file_id, _)) = right.as_dir() {
                     self.streams.push((
                         None,
                         WalkStream::new(self.right_fs, right_file_id, right_file_id).await?,

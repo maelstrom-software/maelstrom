@@ -1,12 +1,13 @@
 use crate::avl::{AvlNode, AvlPtr, AvlStorage, AvlTree, FlatAvlPtrOption};
 use crate::ty::{
     decode_with_rich_error, encode_with_rich_error, DirectoryEntryData, DirectoryOffset, FileId,
-    LayerFsVersion,
+    FileType, LayerFsVersion,
 };
 use crate::LayerFs;
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
 use maelstrom_util::async_fs::{File, Fs};
+use maelstrom_util::ext::BoolExt as _;
 use maelstrom_util::io::BufferedStream;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, FromInto};
@@ -206,6 +207,28 @@ impl DirectoryDataWriter {
         Ok(Self {
             tree: AvlTree::new(DirectoryEntryStorage::new(stream)),
         })
+    }
+
+    /// Update the opaque_dir bool for some existing directory entry.
+    ///
+    /// Errors if the given entry doesn't exist or isn't a directory
+    pub async fn set_opaque_dir(&mut self, entry_name: &str, opaque: bool) -> Result<()> {
+        let entry = self
+            .look_up_entry(entry_name)
+            .await?
+            .ok_or(anyhow!("set_opaque_dir on nonexistent entry"))?;
+        let DirectoryEntryData::FileData(mut data) = entry else {
+            bail!("set_opaque_dir on whiteout entry");
+        };
+        if data.kind != FileType::Directory {
+            bail!("set_opaque_dir on entry of kind {:?}", &data.kind);
+        }
+        data.opaque_dir = opaque;
+        self.tree
+            .update_if_exists(&entry_name.into(), data.into())
+            .await?
+            .assert_is_true();
+        Ok(())
     }
 
     pub async fn look_up(&mut self, entry_name: &str) -> Result<Option<FileId>> {

@@ -596,6 +596,7 @@ mod tests {
             type_: FileType,
             data: FileData,
             mode: u32,
+            opaque_dir: bool,
         },
         Link {
             target: String,
@@ -642,6 +643,7 @@ mod tests {
                     type_: FileType::RegularFile,
                     data: FileData::Empty,
                     mode,
+                    opaque_dir: false,
                 },
             }
         }
@@ -653,21 +655,27 @@ mod tests {
                     type_: FileType::RegularFile,
                     data,
                     mode,
+                    opaque_dir: false,
                 },
             }
         }
 
         fn dir(path: impl Into<String>) -> Self {
-            Self::dir_mode(path, 0o555)
+            Self::dir_args(path, 0o555, false)
         }
 
-        fn dir_mode(path: impl Into<String>, mode: u32) -> Self {
+        fn opaque_dir(path: impl Into<String>) -> Self {
+            Self::dir_args(path, 0o555, true)
+        }
+
+        fn dir_args(path: impl Into<String>, mode: u32, opaque: bool) -> Self {
             Self {
                 path: path.into(),
                 data: BuildEntryData::Regular {
                     type_: FileType::Directory,
                     data: FileData::Empty,
                     mode,
+                    opaque_dir: opaque,
                 },
             }
         }
@@ -708,6 +716,10 @@ mod tests {
             } else if s.starts_with("sym:") {
                 let mut split = s[4..].split(" -> ");
                 Self::link(split.next().unwrap(), split.next().unwrap())
+            } else if s.starts_with("opq:") {
+                let path = &s[4..];
+                assert!(path.ends_with("/"), "{path:?}");
+                Self::opaque_dir(path)
             } else if s.ends_with("/") {
                 Self::dir(s)
             } else {
@@ -762,7 +774,12 @@ mod tests {
                         .await
                         .unwrap();
                 }
-                BuildEntryData::Regular { type_, data, mode } => match type_ {
+                BuildEntryData::Regular {
+                    type_,
+                    data,
+                    mode,
+                    opaque_dir,
+                } => match type_ {
                     FileType::RegularFile => {
                         builder
                             .add_file_path(
@@ -789,6 +806,9 @@ mod tests {
                             )
                             .await
                             .unwrap();
+                        if opaque_dir {
+                            builder.set_opaque_dir_path(path.as_ref()).await.unwrap();
+                        }
                     }
                     FileType::Symlink => {}
                     other => panic!("unsupported file type {other:?}"),
@@ -1108,7 +1128,9 @@ mod tests {
         for BuildEntry { path, data } in files {
             let mut header = tokio_tar::Header::new_gnu();
             match data {
-                BuildEntryData::Regular { data, type_, mode } => {
+                BuildEntryData::Regular {
+                    data, type_, mode, ..
+                } => {
                     header.set_entry_type(match type_ {
                         FileType::RegularFile => tokio_tar::EntryType::Regular,
                         FileType::Directory => tokio_tar::EntryType::Directory,
@@ -1156,7 +1178,9 @@ mod tests {
         for BuildEntry { path, data } in files {
             let path: Utf8PathBuf = path.into();
             match data {
-                BuildEntryData::Regular { data, type_, mode } => {
+                BuildEntryData::Regular {
+                    data, type_, mode, ..
+                } => {
                     let size = match &data {
                         ty::FileData::Empty => 0,
                         ty::FileData::Inline(d) => d.len() as u64,
@@ -1274,7 +1298,7 @@ mod tests {
             BuildEntry::reg_empty("Bar/Baz"),
             BuildEntry::reg_empty("Bar/Bin"),
             BuildEntry::reg_empty("Qux/Fred"),
-            BuildEntry::dir_mode("Bar", 0o666),
+            BuildEntry::dir_args("Bar", 0o666, false),
             BuildEntry::sym("Waldo", "Foo"),
             BuildEntry::link("Thud", "/Foo"),
         ];
@@ -1608,6 +1632,29 @@ mod tests {
                 ("", vec!["Cake/"]),
                 ("Cake", vec!["Cupcakes/"]),
                 ("Cake/Cupcakes", vec!["RedVelvet/"]),
+            ],
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn two_layer_with_opaque_directory() {
+        two_layer_test(
+            vec![
+                "/Cake/Cupcakes/Sprinkle/Yellow",
+                "/Cake/Cupcakes/Sprinkle/Red",
+                "/Cake/Cupcakes/RedVelvet/",
+            ],
+            vec![
+                "opq:/Cake/Cupcakes/",
+                "/Cake/Cupcakes/CarrotCake/",
+                "/Cake/Cupcakes/Sprinkle/Orange",
+            ],
+            vec![
+                ("", vec!["Cake/"]),
+                ("Cake", vec!["Cupcakes/"]),
+                ("Cake/Cupcakes", vec!["CarrotCake/", "Sprinkle/"]),
+                ("Cake/Cupcakes/Sprinkle", vec!["Orange"]),
             ],
         )
         .await;
