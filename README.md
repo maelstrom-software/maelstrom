@@ -38,8 +38,6 @@ See the book for more information:
 
 # Getting Started
 
-
-
 ## Installing `cargo-maelstrom`
 
 To run your tests using Maelstrom, you need the `cargo-maelstrom`
