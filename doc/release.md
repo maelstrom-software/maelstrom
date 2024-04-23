@@ -114,6 +114,17 @@ Then, create the GitHub release:
 gh release create "v$VERSION" -F <(cargo xtask changelog extract-release-notes "$VERSION")
 ```
 
+## Build and Upload Build Artifacts
+
+Build the code with the release profile
+```bash
+cargo build --release
+```
+
+Use `cargo xtask distribute v$VERSION` to upload the artifacts you just built
+
+Repeat this step on all supported architectures. Make sure you are at the release revision.
+
 ## Update `CHANGELOG.md` for Unreleased Changes
 
 Use `cargo xtask changelog open` to Add the `[Unreleased]` section to `CHANGELOG.md`:
