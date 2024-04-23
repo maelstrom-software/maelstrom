@@ -121,7 +121,7 @@ Build the code with the release profile
 cargo build --release
 ```
 
-Use `cargo xtask distribute v$VERSION` to upload the artifacts you just built
+Use `cargo xtask distribute v$VERSION` to upload the artifacts you just built.
 
 Repeat this step on all supported architectures. Make sure you are at the release revision.
 
