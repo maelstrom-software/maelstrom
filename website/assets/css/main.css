@@ -17,7 +17,7 @@ form, label, legend, table, caption, tbody,
 tfoot, thead, tr, th, td, article, aside,
 canvas, details, embed, figure, figcaption,
 footer, header, hgroup, menu, nav, output, ruby,
-section, summary, time, mark, audio, video {
+section, summary, time, mark, audio, video, tt {
 	margin: 0;
 	padding: 0;
 	border: 0;
@@ -56,7 +56,7 @@ body {
 }
 
 mark {
-	background-color: transparent;
+	background-color: Transparent;
 	color: inherit;
 }
 
@@ -176,9 +176,19 @@ input, select, textarea {
 	}
 
 	blockquote {
-		border-left: solid 0.5em #c2c7cc;
-		padding: 1em 0 1em 2em;
-		font-style: italic;
+		border-left: solid 0.5em #fff;
+		padding: .2em 0 .2em 2em;
+		font-family: courier new;
+	}
+	code {
+		background-color: #f0f0f0; 
+		padding: 0.5em 1em;
+		border-radius: 10px; 
+		font-family: courier new;
+	}
+	tt {
+		font-family: courier new;
+		padding: 0.1em 0.2em;
 	}
 
 	p, ul, ol, dl, table {
@@ -1763,6 +1773,12 @@ input, select, textarea {
 			width: 100%;
 		}
 
+		.wrap {
+			float: right;
+			margin: 20px;
+			max-width: 70%;
+		}
+
 		.image.fit {
 			display: block;
 			width: 100%;
@@ -1770,8 +1786,12 @@ input, select, textarea {
 
 		.image.featured {
 			display: block;
-			width: 100%;
 			margin: 0 0 3em 0;
+		}
+
+		.image.promo {
+			float: center;
+			max-width: 70%;
 		}
 
 		.image.left {
@@ -1786,7 +1806,7 @@ input, select, textarea {
 
 			.image.centered img {
 				margin: 0 auto;
-				width: auto;
+				width: 50%;
 			}
 
 	a.image:hover {
@@ -1816,7 +1836,7 @@ input, select, textarea {
 /* Actions */
 
 	ul.actions {
-		padding-top: 1em;
+		padding-top: 0em;
 		list-style: none;
 		padding-left: 0;
 	}
@@ -2068,7 +2088,7 @@ input, select, textarea {
 		position: relative;
 		background: #fff;
 		overflow-x: hidden;
-		padding: 6em 0 6em 0;
+		padding: 3em 0 3em 0;
 	}
 
 	.image-wrapper {
@@ -2095,7 +2115,7 @@ input, select, textarea {
 
 	#header-wrapper {
 		position: relative;
-		padding: 4em 0 2em 0;
+		padding: 2em 0 1em 0;
 		background-image: url("images/overlay.png"), url("images/header.svg"), -moz-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
 		background-image: url("images/overlay.png"), url("images/header.svg"), -webkit-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
 		background-image: url("images/overlay.png"), url("images/header.svg"), -ms-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
@@ -2107,25 +2127,27 @@ input, select, textarea {
 	}
 
 	.homepage #header-wrapper {
-		padding: 10em 0 6em 0;
+		padding: 5em 0 3em 0;
 		background-size: 128px 128px, 100% 100%, auto;
 	}
 
 	#promo-wrapper {
 		position: relative;
-		background-image: url("images/overlay.png"), url("../../images/MaelstromGraphic3.png");
-		background-size: 192px 192px, cover;
+		background-image: url("images/overlay.png"), url("images/header.svg"), -moz-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+		background-image: url("images/overlay.png"), url("images/header.svg"), -webkit-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+		background-image: url("images/overlay.png"), url("images/header.svg"), -ms-linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
+		background-image: url("images/overlay.png"), url("images/header.svg"), linear-gradient(75deg, #fff 15%, #cfe5e5 55%);
 		background-position: top left, center center;
-		color: #fff;
+		color: #52575c;
 		text-align: center;
-		padding: 6em 0 6em 0;
+		padding: 1em 0 1em 0;
 	}
 
 	#footer-wrapper {
 		-webkit-transform: translate3d(0, 0, 0);
 		position: relative;
 		border-top: solid 1px #cfe5e5;
-		padding: 6em 0 6em 0;
+		padding: 2em 0 0em 0;
 		background-image: url("images/overlay.png"), url("images/footer.svg");
 		background-size: 128px 128px,				100% 100%;
 	}
@@ -2304,8 +2326,6 @@ input, select, textarea {
 
 	#promo {
 		background: rgba(255, 255, 255, 0.05);
-		border: solid 1px rgba(255, 255, 255, 0.25);
-		border-radius: 0.5em;
 		padding: 1.75em 2.5em 1.75em 2.5em;
 		display: inline-block;
 		position: relative;
@@ -2360,7 +2380,7 @@ input, select, textarea {
 	}
 
 		#footer header.major {
-			margin-bottom: 3em;
+			margin-bottom: .2em;
 		}
 
 /* Copyright */
@@ -2371,7 +2391,7 @@ input, select, textarea {
 		text-align: left;
 		border-top: solid 1px #d2d7dc;
 		color: #a2a7ac;
-		padding-top: 4em;
+		padding-top: 1em;
 		margin-top: 6em;
 	}
 
@@ -2393,23 +2413,23 @@ input, select, textarea {
 		/* Wrappers */
 
 			.wrapper {
-				padding: 5em 0 5em 0;
+				padding: 1em 0 2em 0;
 			}
 
 			#header-wrapper {
-				padding: 2em 0 2em 0;
+				padding: 2em 0 3em 0;
 			}
 
 			.homepage #header-wrapper {
-				padding: 8em 0 4em 0;
+				padding: 6em 0 2em 0;
 			}
 
 			#promo-wrapper {
-				padding: 5em 0 5em 0;
+				padding: 0em 0 0em 0;
 			}
 
 			#footer-wrapper {
-				padding: 5em 0 5em 0;
+				padding: 2em 0 1em 0;
 			}
 
 	}
@@ -2454,7 +2474,7 @@ input, select, textarea {
 			}
 
 			#footer-wrapper {
-				padding: 4em 2em 4em 2em;
+				padding: 2em 2em 2em 2em;
 			}
 
 		/* Header */

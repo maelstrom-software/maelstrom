@@ -8,6 +8,7 @@
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
 		<link rel="stylesheet" href="assets/css/main.css" />
+		<link rel="icon" type="png" href="images/Favicon.png">
 	</head>
 	<body class="homepage is-preload">
 		<div id="page-wrapper">
@@ -23,6 +24,8 @@
 							<nav id="nav">
 								<ul>
 									<li><a href="https://maelstrom-software.com/book/">Documentation</a></li>
+									<li class="icon brands fa-discord"><a href="https://discord.gg/rgeuZz6CfV">
+									<li class="icon brands fa-github"><a href="https://github.com/maelstrom-software"></a>
 								</ul>
 							</nav>
 
@@ -31,9 +34,9 @@
 					<!-- Hero -->
 						<section id="hero" class="container">
 							<header>
-								<h2>A wicked-fast, clustered test runner.
+								<h2>A clustered, hermetic test runner.
 							</header>
-							<p>Spend less time waiting for your Rust tests. </p>
+							<p>Maelstrom is a Rust test runner, built on top of a general-purpose clustered job runner. </p>
 							<ul class="actions">
 								<li><a href="https://maelstrom-software.com/book/installation.html" class="button">Get started</a></li>
 							</ul>
@@ -48,18 +51,31 @@
 						<!-- Content -->
 							<article id="content">
 								<header>
-									<h2>Meet Maelstrom</h2>
-									<p>Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners.</p>
-								</header>
-								<a href="https://maelstrom-software.com/book/" class="image featured"><img src="images/Architecture.png" alt="" /></a>
-								<p><ul><li><B> It's easy. </B> Maelstrom functions as a drop-in replacement for cargo-test, so in most cases, it just works. 
-									<li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own container and runs each test independently. No more unintended testing environment dependencies or problematic testing interactions. 
-									<li> <B> It's scalable. </B> Add more worker machines to linearly improve test throughput. 
-									<li> <B> It works everywhere. </B> Maelstrom workers are rootless containers so you can run them securely, anywhere. 
-									<li> <B> It's clean.</B> Maelstrom has a home-grown container implementation (not relying on docker or RunC), optimized to be low-overhead and start quickly. 
+									<h2>About Maelstrom</h2> 
+									</header>
+									<p>Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners, or locally on your machine. You might use Maelstrom to run your tests because:</p>
+									<a href="https://maelstrom-software.com/book/" class="wrap"><img src="images/Architecture Small.png" alt="" /></a>
+								<p><ul><li><B> It's easy. </B> Maelstrom functions as a drop-in replacement for <tt>cargo-test</tt>, so in most cases, it just works. 
+									<li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing errors caused by inter-test or implicit test-environment dependencies. 
+									<li> <B> It's scalable. </B> You can run Maelstrom as a cluster. Add more worker machines to
+										linearly improve test throughput.
+									<li> <B> It's fast.</B> In most cases, Maelstrom is faster than <tt>cargo test</tt>, even
+										without adding clustering. 
+									<li> <B> It's clean.</B> Maelstrom has a from-scratch, rootless container implementation
+										(not relying on docker or RunC), optimized to be low-overhead and start
+										quickly.
 									<li> <B> It's Rusty. </B> The whole project is built in Rust. </ul>
-									Maelstrom is currently available for Rust on Linux. C++, Typescript, Python, and Java are coming soon.
-					</p>
+									Maelstrom is currently available for Rust on Linux. C++, Typescript, Python, and Java are coming soon.</p>
+									<p>We started with a Rust test runner, but Maelstrom's underlying job
+									execution system is general-purpose. We will add support for other languages' test frameworks throughout 2024. We have also provided tools for
+									adventurous users to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.</p>
+									
+									<p>The project is currently Linux-only (x86 and ARM), as it relies on namespaces
+									to implement containers.</p>
+									
+									<p>See the book for more information:</p>
+									<ul class="actions">
+										<li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
 				</div>
 					</article>
 				</div>
@@ -67,8 +83,8 @@
 		<!-- Promo -->
 				<div id="promo-wrapper">
 					<section id="promo">
-						<h2>We want to learn about your use case.</h2>
-						<a href="https://forms.gle/5grpfgD4PB4chyhw5" class="button">Tell us about it</a>
+						<a href="https://maelstrom-software.com/book/installation.html" class="image promo"><img src="images/Maelstrom.gif" alt=""></a>
+						<ul class="actions major">
 					</section>
 				</div>
 
@@ -79,11 +95,54 @@
 						<!-- Content -->
 							<article id="content">
 								<header>
-									<h2>Watch Maelstrom work</h2>
+									<h2>Getting Started</h2>
 								</header>
-								<a href="https://maelstrom-software.com/book/installation.html" class="image featured"><img src="images/Maelstrom.gif" alt=""></a>
-						<ul class="actions major">
-							<li><a href="https://maelstrom-software.com/book/installation.html" class="button">Get Started</a></li>
+								<p><h4><b>Installing <tt>cargo-maelstrom</tt></b></h4></p>
+								<p>To run your tests using Maelstrom, you need the <tt>cargo-maelstrom</tt>
+									binary. The easiest way to get it is using <a href="https://github.com/cargo-bins/cargo-binstall">cargo-binstall.</a>
+									</p>
+									<code>cargo binstall cargo-maelstrom</code>
+									<p></p>
+									<p>This will install a pre-built binary from the <a href="https://github.com/maelstrom-software/maelstrom/releases">github releases page.</a>
+									If you don't have <tt>cargo-binstall</tt>, you can download the binary manually.
+									Check out <a href="https://maelstrom-software.com/book/install/cargo_maelstrom.html">the book</a> for more ways to get <tt>cargo-maelstrom</tt>.</p>
+							
+									<p><h4><b>Running <tt>cargo-maelstrom</tt></b></h4></p>
+								<p>To run your Rust tests, use <tt>cargo-maelstrom</tt>:</p>
+									<code>cargo maelstrom</code>
+									<p></p>
+
+									<p>This runs in "standalone" mode, meaning all tests are run locally. Each test is
+										run in its own container, configured with a few common dependencies. It may work for your project without any further configuration.</p>
+									<p>If some tests fail, however, it likely means those tests have dependencies on
+										their execution environment that aren't packaged in their containers.
+										You can remedy this by adding directives to the `maelstrom-test.toml` file. To
+										do this, run:</p>
+										<code>cargo maelstrom --init</code>
+										<p></p>
+									<p>Then edit the created `maelstrom-test.toml` file as described <a href="https://maelstrom-software.com/book/cargo_maelstrom/execution_environment.html"> in the book.</a></p>
+									
+								<p><h4><b>Setting Up a Cluster</b></h4></p>
+								<p>To get even more out of Maelstrom, you can set up a cluster to run your tests on.
+									You will need to run one copy of the broker (<tt>maelstrom-broker</tt>) somewhere, and
+									one copy of the worker (<tt>maelstrom-worker</tt>) on each node of the cluster.
+									</p>
+								<p>You can install these using <a href=https://maelstrom-software.com/book/install/clustered_job_runner.html)> multiple methods</a>,
+									including <tt>cargo-binstall</tt>:</p>
+									<code>cargo binstall maelstrom-worker maelstrom-broker</code>
+									<p></p>
+									<p>Then you can start the broker:</p>
+									<code>maelstrom-broker --port=1234</code>
+									<p></p>
+									<p>Then a few workers:</p>
+									<code>maelstrom-worker --broker=broker-host:1234</code>
+									<p></p>
+									<p>Then run 'cargo-maelstrom' against the cluster:</p>
+									<code>cargo maelstrom --broker=broker-host:12344</code>
+									<p></p>
+									<p>See the book for more information:</p>
+									<ul class="actions">
+										<li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
 						</ul> </article>
 					</div>
 				</div>
