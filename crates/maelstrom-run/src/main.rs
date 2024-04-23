@@ -11,6 +11,7 @@ use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    fs::Fs,
     process::{ExitCode, ExitCodeAccumulator},
 };
 use std::{
@@ -126,12 +127,15 @@ fn main() -> Result<ExitCode> {
     let bg_proc = ClientBgProcess::new_from_fork()?;
 
     maelstrom_util::log::run_with_logger(config.log_level, |log| {
+        let fs = Fs::new();
         let accum = Arc::new(ExitCodeAccumulator::default());
+        let cache_dir = cache_dir();
+        fs.create_dir_all(&cache_dir)?;
         let client = Client::new(
             bg_proc,
             config.broker,
             ".",
-            cache_dir(),
+            cache_dir,
             config.cache_size,
             config.inline_limit,
             config.slots,
