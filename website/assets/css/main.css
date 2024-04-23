@@ -2827,7 +2827,7 @@ input, select, textarea {
 						border-radius: 0 0 0.35em 0.35em;
 						border-top: 0;
 						color: #fff;
-						content: '\f0c9';
+						content: '\f0c4';
 						display: block;
 						font-size: 18px;
 						height: 30px;
@@ -2976,8 +2976,8 @@ input, select, textarea {
 			}
 
 				.image.full, .image.left, image.featured, image.promo, .wrap {
-					display: Block;
-					Width: 100%;
+					width: 100%;
+					height: auto;
 				}
 
 			.image-centered {
