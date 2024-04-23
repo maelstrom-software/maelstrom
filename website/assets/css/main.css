@@ -2977,9 +2977,7 @@ input, select, textarea {
 
 				.image.full, .image.left, image.featured, image.promo, .wrap {
 					float: center;
-					display: block;
 					max-width: 70%;
-					margin: 0 0 1.5em 0;
 				}
 
 			.image-centered {
