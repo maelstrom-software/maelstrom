@@ -124,25 +124,27 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
 }
 
 impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
-    fn print_job_result(&self, result_str: ColoredString) {
+    fn print_job_result(&self, result_str: ColoredString, duration_str: String) {
         if self.width > 10 {
             let case_width = self.case.width();
-            let result_width = result_str.width();
-            if case_width + result_width < self.width {
-                let dots_width = self.width - result_width - case_width;
+            let trailer_str = format!("{result_str} {duration_str:>8}");
+            let trailer_width = result_str.width() + 1 + std::cmp::max(duration_str.width(), 8);
+            if case_width + trailer_width < self.width {
+                let dots_width = self.width - trailer_width - case_width;
                 let case = self.case.bold();
+
                 self.ind.println(format!(
-                    "{case}{empty:.<dots_width$}{result_str}",
-                    empty = ""
+                    "{case}{empty:.<dots_width$}{trailer_str}",
+                    empty = "",
                 ));
             } else {
                 let (case, case_width) = self
                     .case
-                    .unicode_truncate_start(self.width - 2 - result_width);
+                    .unicode_truncate_start(self.width - 2 - trailer_width);
                 let case = case.bold();
-                let dots_width = self.width - result_width - case_width - 1;
+                let dots_width = self.width - trailer_width - case_width - 1;
                 self.ind.println(format!(
-                    "<{case}{empty:.<dots_width$}{result_str}",
+                    "<{case}{empty:.<dots_width$}{trailer_str}",
                     empty = ""
                 ));
             }
@@ -156,11 +158,15 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
         let mut test_output_lines: Vec<String> = vec![];
+        let mut duration_str = String::new();
         match result {
             Ok(JobOutcome::Completed(JobCompleted {
                 status,
-                effects: JobEffects { stderr, .. },
+                effects: JobEffects {
+                    stderr, duration, ..
+                },
             })) => {
+                duration_str = format!("{:.3}s", duration.as_secs_f64());
                 let mut job_failed = true;
                 match status {
                     JobStatus::Exited(code) => {
@@ -214,7 +220,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
         }
-        self.print_job_result(result_str);
+        self.print_job_result(result_str, duration_str);
 
         if let Some(details_str) = result_details {
             self.ind.println(details_str);
@@ -226,7 +232,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
     }
 
     pub fn job_ignored(&self) {
-        self.print_job_result("IGNORED".yellow());
+        self.print_job_result("IGNORED".yellow(), "".into());
         self.tracker.job_ignored(self.case.clone());
         self.ind.job_finished();
     }
