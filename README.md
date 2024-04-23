@@ -8,10 +8,11 @@
 Maelstrom is a fast Rust test runner built on top of a general-purpose
 clustered job runner. Maelstrom packages your Rust tests into hermetic
 micro-containers, then distributes them to be run on an arbitrarily large
-cluster of test-runners, or just runs locally on your machine. You should use
+cluster of test-runners, or locally on your machine. You might want to use
 Maelstrom to run your tests because:
 
-* It's easy. Maelstrom functions as a drop-in replacement for cargo-test, so in most cases, it just works.
+* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
+  most cases, it just works.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
   container, eliminating confusing test errors caused by inter-test or implicit
   test-environment dependencies.
@@ -24,7 +25,7 @@ Maelstrom to run your tests because:
   quickly.
 * It's Rusty. The whole project is written in Rust.
 
-While we've initially focussed on Rust tests, Maelstrom's underlying job
+We've initially focussed on Rust tests, but Maelstrom's underlying job
 execution system is general-purpose. In the near future, we will add support
 for other languages' test frameworks. Additionally, we've provided tools for
 adventurous users to run arbitrary jobs, either using a command-line tool, or
@@ -40,7 +41,7 @@ See the book for more information:
 
 To run your tests using Maelstrom, you're going to need the `cargo-maelstrom` binary. 
 
-## Installing a Pre-Built Binary
+## Installing `cargo-maelstrom`
 
 The easiest way to install `cargo-maelstrom` is using [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
@@ -50,23 +51,9 @@ cargo binstall cargo-maelstrom
 
 This will install a pre-built binary from the [github releases page](https://github.com/maelstrom-software/maelstrom/releases).
 
-If you don't have `cargo-binstall`, you can always download the binary manually
+If you don't have `cargo-binstall`, you can always download the binary manually.
 
-## Installing from Source
-
-To install from source, you can use `cargo install`:
-
-```bash
-cargo install --locked cargo-maelstrom
-```
-
-Or Nix:
-
-```bash
-nix profile install github:maelstrom-software/maelstrom
-```
-
-Or clone the repository and build using `cargo`.
+You can learn about more ways to get `cargo-maelstrom` [in the book](https://maelstrom-software.com/book/install/cargo_maelstrom.html).
 
 ## Running `cargo-maelstrom`
 
