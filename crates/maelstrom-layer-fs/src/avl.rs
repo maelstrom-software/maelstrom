@@ -149,6 +149,27 @@ where
         Ok(Some(node.value))
     }
 
+    /// Update the value for an existing key / value in the tree. The new value **must** serialize
+    /// to the same length as the existing value or the tree with be corrupted.
+    /// Returns true iff the value was updated.
+    pub async fn update_if_exists(
+        &mut self,
+        key: &StorageT::Key,
+        value: StorageT::Value,
+    ) -> Result<bool> {
+        let Some((candidate_path, ordering)) = self.binary_search(key).await? else {
+            return Ok(false);
+        };
+        if ordering != Ordering::Equal {
+            return Ok(false);
+        }
+        let candidate = *candidate_path.last().unwrap();
+        let mut node = self.storage.look_up(candidate).await?;
+        node.value = value;
+        self.storage.update(candidate, node).await?;
+        Ok(true)
+    }
+
     async fn binary_search(
         &mut self,
         key: &StorageT::Key,
@@ -659,5 +680,21 @@ mod tests {
             .unwrap()
             .assert_is_true();
         assert_eq!(tree.get(&7).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn update_if_exists() {
+        let mut tree = AvlTree::new(MemoryStorage::default());
+        tree.insert_if_not_exists(1, 4)
+            .await
+            .unwrap()
+            .assert_is_true();
+        tree.update_if_exists(&2, 5)
+            .await
+            .unwrap()
+            .assert_is_false();
+        tree.update_if_exists(&1, 7).await.unwrap().assert_is_true();
+        assert_eq!(tree.get(&1).await.unwrap(), Some(7));
+        assert_eq!(tree.get(&2).await.unwrap(), None);
     }
 }
