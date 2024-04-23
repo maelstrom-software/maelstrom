@@ -133,6 +133,7 @@ pub fn main() -> Result<ExitCode> {
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
+        &cargo_metadata.target_directory,
         config.broker,
         config.cache_size,
         config.inline_limit,

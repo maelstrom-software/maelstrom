@@ -20,6 +20,7 @@ use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    fs::Fs,
     process::ExitCode,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -548,6 +549,7 @@ impl MainAppDeps {
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
+        target_directory: &impl AsRef<Path>,
         broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -557,6 +559,7 @@ impl MainAppDeps {
         manifest_options: ManifestOptions,
         logger: Logger,
     ) -> Result<Self> {
+        let fs = Fs::new();
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
         slog::debug!(
@@ -567,7 +570,8 @@ impl MainAppDeps {
             "broker_addr" => ?broker_addr
         );
 
-        let cache_dir = workspace_root.as_ref().join("target");
+        let cache_dir = target_directory.as_ref().to_owned();
+        fs.create_dir_all(&cache_dir)?;
         let client = Client::new(
             bg_proc,
             broker_addr,
