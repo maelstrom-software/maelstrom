@@ -196,7 +196,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
             .get_writer(&self.layer_fs, parent)
             .await?;
         let inserted = dir_writer
-            .insert_entry(name, DirectoryEntryFileData { file_id, kind })
+            .insert_entry(
+                name,
+                DirectoryEntryFileData {
+                    file_id,
+                    kind,
+                    opaque_dir: false,
+                },
+            )
             .await?;
         Ok(inserted)
     }

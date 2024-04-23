@@ -126,6 +126,7 @@ impl TryFrom<i64> for DirectoryOffset {
 pub struct DirectoryEntryFileData {
     pub file_id: FileId,
     pub kind: FileType,
+    pub opaque_dir: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, From)]
@@ -140,6 +141,7 @@ impl DirectoryEntryData {
             Self::FileData(DirectoryEntryFileData {
                 kind: FileType::Directory,
                 file_id,
+                ..
             }) => Some(*file_id),
             _ => None,
         }
