@@ -35,12 +35,12 @@ pub trait Deps {
     type JobHandle;
 
     /// Start a new job. The dispatcher expects a [`Message::JobCompleted`] message when the job
-    /// completes. The dispatcher can call [`cancel_job`] if it wants the job to stop immediately.
+    /// completes.
     fn start_job(&mut self, jid: JobId, spec: JobSpec, path: PathBuf) -> Self::JobHandle;
 
     /// The timer handle should cancel an outstanding timer when it is dropped. It must be safe to
     /// drop this handle after the timer has completed. Dropping this handle may or may not result
-    /// in no [`Message::JobTime`] message. The dispatcher must be prepared to handle the case
+    /// in no [`Message::JobTimer`] message. The dispatcher must be prepared to handle the case
     /// where the message arrives even after this handle has been dropped.
     type TimerHandle;
 

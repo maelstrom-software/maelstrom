@@ -18,8 +18,8 @@ const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
 
 const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
 
-/// Write out [`DEFAULT_TEST_METADATA`] to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing
-/// exists there already.
+/// Write out a default config file to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing exists
+/// there already.
 pub fn maybe_write_default_test_metadata(workspace_root: &impl AsRef<Path>) -> Result<()> {
     let path = workspace_root.as_ref().join(MAELSTROM_TEST_TOML);
     let fs = Fs::new();
