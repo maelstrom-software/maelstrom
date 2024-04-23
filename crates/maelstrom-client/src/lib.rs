@@ -116,11 +116,20 @@ pub struct Client {
     log: slog::Logger,
 }
 
+fn map_tonic_error(error: tonic::Status) -> anyhow::Error {
+    // We use this error code to serialize application errors.
+    if error.code() == tonic::Code::Unknown {
+        anyhow::Error::msg(format!("Remote Error:\n{}", error.message()))
+    } else {
+        error.into()
+    }
+}
+
 fn flatten_rpc_result<ProtRetT>(res: TonicResponse<ProtRetT>) -> Result<ProtRetT::Output>
 where
     ProtRetT: IntoResult,
 {
-    res?.into_inner().into_result()
+    res.map_err(map_tonic_error)?.into_inner().into_result()
 }
 
 impl Client {
