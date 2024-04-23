@@ -3,6 +3,7 @@
   stdenv,
   craneLib,
   binaryen,
+  mdbook,
   pkg-config,
   protobuf,
   llvmPackages,
