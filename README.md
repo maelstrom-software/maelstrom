@@ -76,7 +76,7 @@ cargo maelstrom --init
 
 Then edit the created `maelstrom-test.toml` file as described [in the book](https://maelstrom-software.com/book/cargo_maelstrom/execution_environment.html).
 
-## Setting Up a Cluster
+# Setting Up a Cluster
 
 To get more out of Maelstrom, you can set up a cluster to run your tests on.
 You'll need to run one copy of the broker (`maelstrom-broker`) somewhere, plus
