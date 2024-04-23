@@ -15,7 +15,11 @@ use maelstrom_linux::{
     Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
     SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
-use maelstrom_util::{config::common::InlineLimit, sync::EventReceiver};
+use maelstrom_util::{
+    config::common::InlineLimit,
+    sync::EventReceiver,
+    time::{Clock, ClockInstant as _},
+};
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
@@ -94,7 +98,7 @@ impl JobSpec {
     }
 }
 
-pub struct Executor {
+pub struct Executor<'clock, ClockT> {
     user: UserId,
     group: GroupId,
     mount_dir: CString,
@@ -105,10 +109,11 @@ pub struct Executor {
     comma_upperdir_comma_workdir: String,
     netlink_socket_addr: NetlinkSocketAddr,
     netlink_message: Box<[u8]>,
+    clock: &'clock ClockT,
 }
 
-impl Executor {
-    pub fn new(mount_dir: PathBuf, tmpfs_dir: PathBuf) -> Result<Self> {
+impl<'clock, ClockT> Executor<'clock, ClockT> {
+    pub fn new(mount_dir: PathBuf, tmpfs_dir: PathBuf, clock: &'clock ClockT) -> Result<Self> {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
@@ -172,11 +177,12 @@ impl Executor {
             comma_upperdir_comma_workdir,
             netlink_socket_addr,
             netlink_message: buffer,
+            clock,
         })
     }
 }
 
-impl Executor {
+impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
     /// Run a process (i.e. job).
     ///
     /// On success, this function returns when the process has completed, with a [`JobCompleted`].
@@ -326,7 +332,7 @@ fn bump_c_str_from_bytes<'bump>(bump: &'bump Bump, bytes: &[u8]) -> Result<&'bum
     CStr::from_bytes_with_nul(vec.into_bump_slice()).map_err(Error::new)
 }
 
-impl Executor {
+impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
     fn run_job_inner(
         &self,
         spec: &JobSpec,
@@ -773,6 +779,8 @@ impl Executor {
             ));
         }
 
+        let start = self.clock.now();
+
         // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
         // that we don't cause a deadlock on one while we're reading the other one.
         //
@@ -801,6 +809,7 @@ impl Executor {
             effects: JobEffects {
                 stdout: read_from_receiver(stdout_receiver)?,
                 stderr: read_from_receiver(stderr_receiver)?,
+                duration: start.elapsed(),
             },
         })
     }
@@ -821,7 +830,7 @@ mod tests {
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
-    use maelstrom_util::{async_fs, log::test_logger, sync};
+    use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::sync::Mutex;
@@ -887,7 +896,9 @@ mod tests {
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
+        expected_duration: std::time::Duration,
         mount: TarMount,
+        clock: TickingClock,
     }
 
     impl Test {
@@ -898,7 +909,9 @@ mod tests {
                 expected_status: JobStatus::Exited(0),
                 expected_stdout: JobOutputResult::None,
                 expected_stderr: JobOutputResult::None,
+                expected_duration: std::time::Duration::from_secs(1),
                 mount,
+                clock: TickingClock::new(),
             }
         }
 
@@ -931,12 +944,18 @@ mod tests {
         async fn run(self) {
             let JobCompleted {
                 status,
-                effects: JobEffects { stdout, stderr },
+                effects:
+                    JobEffects {
+                        stdout,
+                        stderr,
+                        duration,
+                    },
             } = tokio::task::spawn_blocking(move || {
                 let (_kill_event_sender, kill_event_receiver) = sync::event();
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
+                    &self.clock,
                 )
                 .unwrap()
                 .run_job(
@@ -954,6 +973,7 @@ mod tests {
             assert_eq!(status, self.expected_status);
             assert_eq!(stdout, self.expected_stdout);
             assert_eq!(stderr, self.expected_stderr);
+            assert_eq!(duration, self.expected_duration);
         }
     }
 
@@ -1538,6 +1558,7 @@ mod tests {
     }
 
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
+        let clock = TickingClock::new();
         let mount = TarMount::new().await;
         let spec = JobSpec::from_spec(spec);
         let (_kill_event_sender, kill_event_receiver) = sync::event();
@@ -1546,6 +1567,7 @@ mod tests {
                 Executor::new(
                     tempfile::tempdir().unwrap().into_path(),
                     tempfile::tempdir().unwrap().into_path(),
+                    &clock,
                 )
                 .unwrap()
                 .run_job(

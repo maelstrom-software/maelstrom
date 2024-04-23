@@ -316,13 +316,14 @@ impl Debug for JobOutputResult {
     }
 }
 
-/// The output of a job that ran for some amount of time. This is generated regardless of how the
-/// job terminated. From our point of view, it doesn't matter. We ran the job until it was
-/// terminated, and gathered its output.
+/// The output and duration of a job that ran for some amount of time. This is generated regardless
+/// of how the job terminated. From our point of view, it doesn't matter. We ran the job until it
+/// was terminated, and gathered its output.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobEffects {
     pub stdout: JobOutputResult,
     pub stderr: JobOutputResult,
+    pub duration: Duration,
 }
 
 /// The outcome of a completed job. That is, a job that ran to completion, instead of timing out,

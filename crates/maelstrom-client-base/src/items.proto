@@ -188,9 +188,15 @@ message JobOutputResult {
     }
 }
 
+message Duration {
+    uint64 seconds = 1;
+    uint32 nano_seconds = 2;
+}
+
 message JobEffects {
     JobOutputResult stdout = 1;
     JobOutputResult stderr = 2;
+    Duration duration = 3;
 }
 
 message JobCompleted {

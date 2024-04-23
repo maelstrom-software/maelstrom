@@ -1092,6 +1092,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1203,6 +1204,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(BottomFsLayer, digest!(41)),
@@ -1265,6 +1267,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
@@ -1325,6 +1328,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1355,6 +1359,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
@@ -1417,6 +1422,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(41)),
@@ -1438,6 +1444,7 @@ mod tests {
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 },
             }),
         ));
@@ -1460,6 +1467,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed(base::JobCompleted {
@@ -1467,6 +1475,7 @@ mod tests {
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             })))),
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1521,6 +1530,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1528,6 +1538,7 @@ mod tests {
             SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::TimedOut(JobEffects {
                 stdout: JobOutputResult::Inline(boxed_u8!(b"stdout")),
                 stderr: JobOutputResult::Inline(boxed_u8!(b"stderr")),
+                duration: std::time::Duration::from_secs(1),
             })))),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
         };
@@ -1556,6 +1567,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1566,6 +1578,7 @@ mod tests {
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             })))),
             JobHandleDropped(jid!(1)),
@@ -1602,6 +1615,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1697,6 +1711,7 @@ mod tests {
             effects: JobEffects {
                 stdout: JobOutputResult::None,
                 stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
             }
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
@@ -1707,6 +1722,7 @@ mod tests {
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 },
             })))),
             JobHandleDropped(jid!(1)),

@@ -28,6 +28,7 @@ use maelstrom_util::{
     manifest::AsyncManifestReader,
     net,
     sync::{self, EventReceiver, EventSender},
+    time::SystemMonotonicClock,
 };
 use slog::{debug, error, info, o, Logger};
 use std::{
@@ -149,7 +150,7 @@ pub struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
     inline_limit: InlineLimit,
     log: Logger,
-    executor: Arc<Executor>,
+    executor: Arc<Executor<'static, SystemMonotonicClock>>,
     blob_cache_dir: PathBuf,
     layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
     manifest_digest_cache: ManifestDigestCache,
@@ -170,7 +171,11 @@ impl DispatcherAdapter {
         fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
             inline_limit,
-            executor: Arc::new(Executor::new(mount_dir, tmpfs_dir.clone())?),
+            executor: Arc::new(Executor::new(
+                mount_dir,
+                tmpfs_dir.clone(),
+                &SystemMonotonicClock,
+            )?),
             blob_cache_dir,
             layer_fs_cache: Arc::new(tokio::sync::Mutex::new(
                 maelstrom_layer_fs::ReaderCache::new(),

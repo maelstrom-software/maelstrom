@@ -77,6 +77,7 @@ macro_rules! outcome {
                 effects: maelstrom_base::JobEffects {
                     stdout: maelstrom_base::JobOutputResult::None,
                     stderr: maelstrom_base::JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             }
         ))
@@ -88,6 +89,7 @@ macro_rules! outcome {
                 effects: maelstrom_base::JobEffects {
                     stdout: maelstrom_base::JobOutputResult::None,
                     stderr: maelstrom_base::JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             }
         ))
@@ -99,6 +101,7 @@ macro_rules! outcome {
                 effects: maelstrom_base::JobEffects {
                     stdout: maelstrom_base::JobOutputResult::None,
                     stderr: maelstrom_base::JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             }
         ))
@@ -110,6 +113,7 @@ macro_rules! outcome {
                 effects: maelstrom_base::JobEffects {
                     stdout: maelstrom_base::JobOutputResult::None,
                     stderr: maelstrom_base::JobOutputResult::None,
+                    duration: std::time::Duration::from_secs(1),
                 }
             }
         ))

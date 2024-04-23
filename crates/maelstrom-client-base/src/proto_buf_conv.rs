@@ -194,6 +194,25 @@ impl<K: TryFromProtoBuf + Eq + Hash, V: TryFromProtoBuf> TryFromProtoBuf for Has
     }
 }
 
+impl IntoProtoBuf for std::time::Duration {
+    type ProtoBufType = proto::Duration;
+
+    fn into_proto_buf(self) -> proto::Duration {
+        proto::Duration {
+            seconds: self.as_secs(),
+            nano_seconds: self.subsec_nanos(),
+        }
+    }
+}
+
+impl TryFromProtoBuf for std::time::Duration {
+    type ProtoBufType = proto::Duration;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        Ok(Self::new(v.seconds, v.nano_seconds))
+    }
+}
+
 //  _____         _                        _
 // |___ / _ __ __| |      _ __   __ _ _ __| |_ _   _
 //   |_ \| '__/ _` |_____| '_ \ / _` | '__| __| | | |

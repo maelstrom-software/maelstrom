@@ -55,7 +55,14 @@ pub struct Config {
     pub slots: Slots,
 }
 
-fn print_effects(cjid: ClientJobId, JobEffects { stdout, stderr }: JobEffects) -> Result<()> {
+fn print_effects(
+    cjid: ClientJobId,
+    JobEffects {
+        stdout,
+        stderr,
+        duration: _,
+    }: JobEffects,
+) -> Result<()> {
     match stdout {
         JobOutputResult::None => {}
         JobOutputResult::Inline(bytes) => {
