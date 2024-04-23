@@ -37,13 +37,11 @@ to implement containers.
 See the book for more information:
 [Maelstrom Book](https://maelstrom-software.com/book/)
 
-# Getting Started
+# Installing `cargo-maelstrom`
 
-To run your tests using Maelstrom, you're going to need the `cargo-maelstrom` binary. 
-
-## Installing `cargo-maelstrom`
-
-The easiest way to install `cargo-maelstrom` is using [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+To run your tests using Maelstrom, you're going to need the `cargo-maelstrom`
+binary. The easiest way to get it is using
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
 ```bash
 cargo binstall cargo-maelstrom
@@ -55,7 +53,7 @@ If you don't have `cargo-binstall`, you can always download the binary manually.
 
 You can learn about more ways to get `cargo-maelstrom` [in the book](https://maelstrom-software.com/book/install/cargo_maelstrom.html).
 
-## Running `cargo-maelstrom`
+# Running `cargo-maelstrom`
 
 To run your Rust tests just use `cargo-maelstrom`:
 
@@ -84,13 +82,13 @@ To get more out of Maelstrom, you can set up a cluster to run your tests on.
 You'll need to run one copy of the broker (`maelstrom-broker`) somewhere, plus
 one copy of the worker (`maelstrom-worker`) on each node of the cluster.
 
-These can be installed using any of the methods described above, including `cargo-binstall`:
+These can be installed using [many
+methods](https://maelstrom-software.com/book/install/clustered_job_runner.html),
+including `cargo-binstall`:
 
 ```bash
 cargo binstall maelstrom-worker maelstrom-broker
 ```
-
-If you installed `cargo-maelstrom` using Nix, these will also both be installed.
 
 You can now start the broker:
 
@@ -110,7 +108,7 @@ And then run `cargo-maelstrom` against the cluster:
 cargo maelstrom --broker=broker-host:1234
 ```
 
-## Learning More
+# Learning More
 
 There is much more documentation in the [book] (https://maelstrom-software.com/book/).
 
