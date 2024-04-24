@@ -975,7 +975,10 @@ mod tests {
                 let mut header = tokio_tar::Header::new_gnu();
                 match data {
                     BuildEntryData::Regular {
-                        data, type_, mode, ..
+                        data,
+                        type_,
+                        mode,
+                        opaque_dir,
                     } => {
                         header.set_entry_type(match type_ {
                             FileType::RegularFile => tokio_tar::EntryType::Regular,
@@ -989,7 +992,19 @@ mod tests {
                         };
                         header.set_size(data.len() as u64);
                         header.set_mode(mode);
-                        ar.append_data(&mut header, path, &data[..]).await.unwrap();
+                        ar.append_data(&mut header, &path, &data[..]).await.unwrap();
+
+                        if opaque_dir {
+                            assert_eq!(type_, FileType::Directory);
+                            header.set_entry_type(tokio_tar::EntryType::Regular);
+                            header.set_size(0);
+                            header.set_mode(0o555);
+                            let mut path = PathBuf::from(path);
+                            path.push(".wh..wh..opq");
+                            ar.append_data(&mut header, path, tokio::io::empty())
+                                .await
+                                .unwrap();
+                        }
                     }
                     BuildEntryData::Link { hard, target } => {
                         header.set_entry_type(if hard {
@@ -1003,7 +1018,16 @@ mod tests {
                             .await
                             .unwrap();
                     }
-                    other => panic!("unsupported builder entry for tar {other:?}"),
+                    BuildEntryData::Whiteout => {
+                        header.set_size(0);
+                        header.set_mode(0o555);
+                        let mut path = PathBuf::from(path);
+                        let existing_filename = path.file_name().unwrap().to_str().unwrap();
+                        path.set_file_name(format!(".wh.{existing_filename}"));
+                        ar.append_data(&mut header, path, tokio::io::empty())
+                            .await
+                            .unwrap();
+                    }
                 }
             }
             ar.finish().await.unwrap();
@@ -1430,6 +1454,52 @@ mod tests {
     async fn layer_from_manifest() {
         layer_from_tar_or_manifest(|fix, input| {
             Box::pin(async move { fix.build_bottom_layer_from_manifest(input).await })
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    async fn layer_from_tar_or_manifest_with_whiteout_and_opaque_dir(
+        mut populate_fn: impl for<'a> FnMut(
+            &'a mut Fixture,
+            Vec<BuildEntry>,
+        ) -> Pin<Box<dyn Future<Output = LayerFs> + 'a>>,
+    ) {
+        let mut fix = Fixture::new().await;
+
+        let input = vec![
+            BuildEntry::reg_empty("Foo"),
+            BuildEntry::reg_empty("Bar/Baz"),
+            BuildEntry::reg_empty("Bar/Bin"),
+        ];
+        let layer_fs1 = populate_fn(&mut fix, input).await;
+
+        let input = vec![
+            BuildEntry::whiteout("Foo"),
+            BuildEntry::opaque_dir("Bar/"),
+            BuildEntry::reg_empty("Bar/Qux"),
+        ];
+        let layer_fs2 = populate_fn(&mut fix, input).await;
+
+        let layer_fs = fix.build_upper_layer(&layer_fs1, &layer_fs2).await;
+
+        let mount_handle = fix.mount(layer_fs).await;
+        let mount_path = mount_handle.mount_path();
+
+        let expectations = vec![
+            Expect::Entries("", vec!["Bar/"]),
+            Expect::Entries("Bar", vec!["Qux"]),
+        ];
+
+        assert_expectations(&fix.fs, &mount_path, expectations).await;
+
+        mount_handle.umount_and_join().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn layer_from_tar_with_whiteout_and_opaque_dir() {
+        layer_from_tar_or_manifest_with_whiteout_and_opaque_dir(|fix, input| {
+            Box::pin(async move { fix.build_bottom_layer_from_tar(input).await })
         })
         .await
     }

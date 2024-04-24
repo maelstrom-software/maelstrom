@@ -408,6 +408,20 @@ impl<'fs> BottomLayerBuilder<'fs> {
             let path = Utf8Path::new("/").join(utf8_path);
             match header.entry_type() {
                 EntryType::Regular => {
+                    let file_name = path.file_name().unwrap();
+                    if let Some(stripped_name) = file_name.strip_prefix(".wh.") {
+                        if file_name == ".wh..wh..opq" {
+                            let parent = path.parent().unwrap();
+                            self.set_opaque_dir_path(parent).await?;
+                            continue;
+                        }
+
+                        let mut path = path.clone();
+                        path.set_file_name(stripped_name);
+                        self.add_whiteout_path(&path).await?;
+                        continue;
+                    }
+
                     self.add_file_path(
                         &path,
                         FileAttributes {
