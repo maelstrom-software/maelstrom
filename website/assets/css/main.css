@@ -3070,7 +3070,7 @@ input, select, textarea {
 		/* Footer */
 
 			#footer header.major {
-				margin-bottom: 4em;
+				margin-bottom: 0em;
 			}
 
 	}
