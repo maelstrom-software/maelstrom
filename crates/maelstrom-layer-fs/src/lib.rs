@@ -753,6 +753,18 @@ mod tests {
         );
     }
 
+    enum Expect {
+        Entries(&'static str, Vec<&'static str>),
+    }
+
+    async fn assert_expectations(fs: &Fs, root: &Path, expected: Vec<Expect>) {
+        for expect in expected {
+            match expect {
+                Expect::Entries(d, entries) => assert_entries(fs, &root.join(d), entries).await,
+            }
+        }
+    }
+
     struct Fixture {
         fs: Fs,
         temp: tempfile::TempDir,
@@ -1364,7 +1376,7 @@ mod tests {
         .await
     }
 
-    async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<(&str, Vec<&str>)>) {
+    async fn two_layer_test(lower: Vec<&str>, upper: Vec<&str>, expected: Vec<Expect>) {
         let mut fix = Fixture::new().await;
 
         let layer_fs1 = fix
@@ -1380,9 +1392,7 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        for (d, entries) in expected {
-            assert_entries(&fix.fs, &mount_path.join(d), entries).await;
-        }
+        assert_expectations(&fix.fs, &mount_path, expected).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1391,7 +1401,7 @@ mod tests {
         lowest: Vec<&str>,
         lower: Vec<&str>,
         upper: Vec<&str>,
-        expected: Vec<(&str, Vec<&str>)>,
+        expected: Vec<Expect>,
     ) {
         let mut fix = Fixture::new().await;
 
@@ -1414,9 +1424,7 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        for (d, entries) in expected {
-            assert_entries(&fix.fs, &mount_path.join(d), entries).await;
-        }
+        assert_expectations(&fix.fs, &mount_path, expected).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1427,10 +1435,10 @@ mod tests {
             vec![],
             vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
             vec![
-                ("", vec!["Cake/", "Cookies/", "Pie/"]),
-                ("Cake", vec!["Birthday"]),
-                ("Pie", vec!["KeyLime"]),
-                ("Cookies", vec!["Snickerdoodle"]),
+                Expect::Entries("", vec!["Cake/", "Cookies/", "Pie/"]),
+                Expect::Entries("Cake", vec!["Birthday"]),
+                Expect::Entries("Pie", vec!["KeyLime"]),
+                Expect::Entries("Cookies", vec!["Snickerdoodle"]),
             ],
         )
         .await;
@@ -1442,10 +1450,10 @@ mod tests {
             vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
             vec![],
             vec![
-                ("", vec!["Cake/", "Cookies/", "Pie/"]),
-                ("Cake", vec!["Birthday"]),
-                ("Pie", vec!["KeyLime"]),
-                ("Cookies", vec!["Snickerdoodle"]),
+                Expect::Entries("", vec!["Cake/", "Cookies/", "Pie/"]),
+                Expect::Entries("Cake", vec!["Birthday"]),
+                Expect::Entries("Pie", vec!["KeyLime"]),
+                Expect::Entries("Cookies", vec!["Snickerdoodle"]),
             ],
         )
         .await;
@@ -1456,7 +1464,10 @@ mod tests {
         two_layer_test(
             vec!["/a/b/c/d/e/f"],
             vec!["/a/g"],
-            vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+            vec![
+                Expect::Entries("a", vec!["b/", "g"]),
+                Expect::Entries("a/b/c/d/e", vec!["f"]),
+            ],
         )
         .await;
     }
@@ -1466,7 +1477,10 @@ mod tests {
         two_layer_test(
             vec!["/a/g"],
             vec!["/a/b/c/d/e/f"],
-            vec![("a", vec!["b/", "g"]), ("a/b/c/d/e", vec!["f"])],
+            vec![
+                Expect::Entries("a", vec!["b/", "g"]),
+                Expect::Entries("a/b/c/d/e", vec!["f"]),
+            ],
         )
         .await;
     }
@@ -1477,11 +1491,11 @@ mod tests {
             vec!["/Pie/Apple", "/Cake/Chocolate", "/Cake/Cupcakes/Sprinkle"],
             vec!["/Pie/KeyLime", "/Cake/Birthday", "/Cookies/Snickerdoodle"],
             vec![
-                ("", vec!["Cake/", "Cookies/", "Pie/"]),
-                ("Cake", vec!["Birthday", "Chocolate", "Cupcakes/"]),
-                ("Cake/Cupcakes", vec!["Sprinkle"]),
-                ("Pie", vec!["Apple", "KeyLime"]),
-                ("Cookies", vec!["Snickerdoodle"]),
+                Expect::Entries("", vec!["Cake/", "Cookies/", "Pie/"]),
+                Expect::Entries("Cake", vec!["Birthday", "Chocolate", "Cupcakes/"]),
+                Expect::Entries("Cake/Cupcakes", vec!["Sprinkle"]),
+                Expect::Entries("Pie", vec!["Apple", "KeyLime"]),
+                Expect::Entries("Cookies", vec!["Snickerdoodle"]),
             ],
         )
         .await;
@@ -1492,7 +1506,10 @@ mod tests {
         two_layer_test(
             vec!["/Cake/Cupcakes/Sprinkle"],
             vec!["/Cake/Cupcakes"],
-            vec![("", vec!["Cake/"]), ("Cake", vec!["Cupcakes"])],
+            vec![
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Cupcakes"]),
+            ],
         )
         .await;
     }
@@ -1503,9 +1520,9 @@ mod tests {
             vec!["/Cake/Cupcakes"],
             vec!["/Cake/Cupcakes/Sprinkle"],
             vec![
-                ("", vec!["Cake/"]),
-                ("Cake", vec!["Cupcakes/"]),
-                ("Cake/Cupcakes", vec!["Sprinkle"]),
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Cupcakes/"]),
+                Expect::Entries("Cake/Cupcakes", vec!["Sprinkle"]),
             ],
         )
         .await;
@@ -1517,9 +1534,9 @@ mod tests {
             vec!["/Cake/Cupcakes/Sprinkle", "/Cake/Cupcakes/RedVelvet"],
             vec!["wh:/Cake/Cupcakes/Sprinkle"],
             vec![
-                ("", vec!["Cake/"]),
-                ("Cake", vec!["Cupcakes/"]),
-                ("Cake/Cupcakes", vec!["RedVelvet"]),
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Cupcakes/"]),
+                Expect::Entries("Cake/Cupcakes", vec!["RedVelvet"]),
             ],
         )
         .await;
@@ -1530,7 +1547,10 @@ mod tests {
         two_layer_test(
             vec!["/Cake/Cupcakes", "hl:/Cake/Muffins -> /Cake/Cupcakes"],
             vec!["wh:/Cake/Cupcakes"],
-            vec![("", vec!["Cake/"]), ("Cake", vec!["Muffins"])],
+            vec![
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Muffins"]),
+            ],
         )
         .await;
     }
@@ -1545,9 +1565,9 @@ mod tests {
             ],
             vec!["wh:/Cake/Cupcakes/Sprinkle"],
             vec![
-                ("", vec!["Cake/"]),
-                ("Cake", vec!["Cupcakes/"]),
-                ("Cake/Cupcakes", vec!["RedVelvet/"]),
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Cupcakes/"]),
+                Expect::Entries("Cake/Cupcakes", vec!["RedVelvet/"]),
             ],
         )
         .await;
@@ -1567,10 +1587,10 @@ mod tests {
                 "/Cake/Cupcakes/Sprinkle/Orange",
             ],
             vec![
-                ("", vec!["Cake/"]),
-                ("Cake", vec!["Cupcakes/"]),
-                ("Cake/Cupcakes", vec!["CarrotCake/", "Sprinkle/"]),
-                ("Cake/Cupcakes/Sprinkle", vec!["Orange"]),
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Cupcakes/"]),
+                Expect::Entries("Cake/Cupcakes", vec!["CarrotCake/", "Sprinkle/"]),
+                Expect::Entries("Cake/Cupcakes/Sprinkle", vec!["Orange"]),
             ],
         )
         .await;
@@ -1583,8 +1603,8 @@ mod tests {
             vec!["/Cake/Chocolate/"],
             vec!["/Cake/Chocolate/"],
             vec![
-                ("", vec!["Cake/"]),
-                ("Cake", vec!["Chocolate/", "Cupcakes/"]),
+                Expect::Entries("", vec!["Cake/"]),
+                Expect::Entries("Cake", vec!["Chocolate/", "Cupcakes/"]),
             ],
         )
         .await;
