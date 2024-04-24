@@ -788,9 +788,8 @@ mod tests {
             data_dir
         }
 
-        async fn build_bottom_layer(&mut self, files: Vec<BuildEntry>) -> LayerFs {
-            let data_dir = self.new_data_dir().await;
-            let mut builder = BottomLayerBuilder::new(
+        async fn bottom_layer_builder(&self, data_dir: &Path) -> BottomLayerBuilder {
+            BottomLayerBuilder::new(
                 self.log.clone(),
                 &self.fs,
                 &data_dir,
@@ -798,7 +797,12 @@ mod tests {
                 ARBITRARY_TIME,
             )
             .await
-            .unwrap();
+            .unwrap()
+        }
+
+        async fn build_bottom_layer(&mut self, files: Vec<BuildEntry>) -> LayerFs {
+            let data_dir = self.new_data_dir().await;
+            let mut builder = self.bottom_layer_builder(&data_dir).await;
 
             for BuildEntry { path, data } in files {
                 let size = match &data {
@@ -1251,14 +1255,7 @@ mod tests {
             &'a mut BottomLayerBuilder,
         ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     ) {
-        let temp = tempfile::tempdir().unwrap();
-        let data_dir = temp.path().join("data");
-        let cache_dir = temp.path().join("cache");
-
-        let fs = Fs::new();
-        fs.create_dir(&data_dir).await.unwrap();
-        fs.create_dir(&cache_dir).await.unwrap();
-
+        let mut fix = Fixture::new().await;
         let input = vec![
             BuildEntry::reg("Foo", b"hello world"),
             BuildEntry::dir("Qux"),
@@ -1270,54 +1267,69 @@ mod tests {
             BuildEntry::link("Thud", "/Foo"),
         ];
 
-        let log = test_logger();
-        let mut builder =
-            BottomLayerBuilder::new(log.clone(), &fs, &data_dir, &cache_dir, ARBITRARY_TIME)
-                .await
-                .unwrap();
+        let data_dir = fix.new_data_dir().await;
+        let mut builder = fix.bottom_layer_builder(&data_dir).await;
 
-        populate_fn(&fs, &cache_dir, input, &mut builder).await;
+        populate_fn(&fix.fs, &fix.cache_dir, input, &mut builder).await;
 
         let layer_fs = builder.finish().await.unwrap();
 
         let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(log, cache).await.unwrap();
+        let mount_handle = layer_fs.mount(fix.log.clone(), cache).await.unwrap();
         let mount_path = mount_handle.mount_path();
 
-        let contents = fs.read_to_string(mount_path.join("Foo")).await.unwrap();
+        let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
-        let contents = fs.read_to_string(mount_path.join("Thud")).await.unwrap();
+        let contents = fix
+            .fs
+            .read_to_string(mount_path.join("Thud"))
+            .await
+            .unwrap();
         assert_eq!(contents, "hello world");
 
-        assert!(fs
+        assert!(fix
+            .fs
             .symlink_metadata(mount_path.join("Waldo"))
             .await
             .unwrap()
             .is_symlink());
-        let contents = fs.read_to_string(mount_path.join("Waldo")).await.unwrap();
+        let contents = fix
+            .fs
+            .read_to_string(mount_path.join("Waldo"))
+            .await
+            .unwrap();
         assert_eq!(contents, "hello world");
 
-        let contents = fs.read_to_string(mount_path.join("Bar/Baz")).await.unwrap();
+        let contents = fix
+            .fs
+            .read_to_string(mount_path.join("Bar/Baz"))
+            .await
+            .unwrap();
         assert_eq!(contents, "");
 
         assert_entries(
-            &fs,
+            &fix.fs,
             &mount_path,
             vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
         )
         .await;
-        assert_entries(&fs, &mount_path.join("Bar"), vec!["Baz", "Bin"]).await;
-        assert_entries(&fs, &mount_path.join("Qux"), vec!["Fred"]).await;
+        assert_entries(&fix.fs, &mount_path.join("Bar"), vec!["Baz", "Bin"]).await;
+        assert_entries(&fix.fs, &mount_path.join("Qux"), vec!["Fred"]).await;
 
         for p in [
             "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
         ] {
-            let mode = fs.metadata(mount_path.join(p)).await.unwrap().mode();
+            let mode = fix.fs.metadata(mount_path.join(p)).await.unwrap().mode();
             assert_eq!(Mode(mode & 0o777), Mode(0o555));
         }
 
-        let mode = fs.metadata(mount_path.join("Bar")).await.unwrap().mode();
+        let mode = fix
+            .fs
+            .metadata(mount_path.join("Bar"))
+            .await
+            .unwrap()
+            .mode();
         assert_eq!(Mode(mode & 0o777), Mode(0o666));
 
         mount_handle.umount_and_join().await.unwrap();
