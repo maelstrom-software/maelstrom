@@ -2992,9 +2992,9 @@ input, select, textarea {
 					max-width: 100%;
 					float: center;
 				}
-				
+
 			.rightimg.wrap {
-				max-width: fit-content;
+				max-width: 100%;
 				float: center
 			}
 		/* Actions */
