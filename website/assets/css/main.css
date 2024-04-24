@@ -2997,6 +2997,7 @@ input, select, textarea {
 				max-width: 100%;
 				height: auto;
 				float: center;
+				margin: 0 0 0 0;
 				
 			}
 		/* Actions */
