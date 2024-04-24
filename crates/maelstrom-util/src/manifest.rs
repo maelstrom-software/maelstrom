@@ -248,7 +248,7 @@ impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
             self.add_entry(&meta, dest, ManifestEntryData::File(data))
                 .await
         } else if meta.is_dir() {
-            self.add_entry(&meta, dest, ManifestEntryData::Directory)
+            self.add_entry(&meta, dest, ManifestEntryData::Directory { opaque: false })
                 .await
         } else if meta.is_symlink() {
             let data = self.fs.read_link(source.as_ref()).await?;
@@ -384,7 +384,7 @@ mod tests {
             false, /* follow_symlinks */
             "foo/bar",
             0,
-            ManifestEntryData::Directory,
+            ManifestEntryData::Directory { opaque: false },
         )
         .await;
     }

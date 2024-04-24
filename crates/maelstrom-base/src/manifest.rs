@@ -66,10 +66,11 @@ pub struct ManifestEntryMetadata {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ManifestEntryData {
-    Directory,
+    Directory { opaque: bool },
     File(Option<Sha256Digest>),
     Symlink(Vec<u8>),
     Hardlink(Utf8PathBuf),
+    Whiteout,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

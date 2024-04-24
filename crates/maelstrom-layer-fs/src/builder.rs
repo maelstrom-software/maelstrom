@@ -490,8 +490,11 @@ impl<'fs> BottomLayerBuilder<'fs> {
             };
             let path = Utf8Path::new("/").join(&entry.path);
             match entry.data {
-                ManifestEntryData::Directory => {
+                ManifestEntryData::Directory { opaque } => {
                     self.add_dir_path(&path, attrs).await?;
+                    if opaque {
+                        self.set_opaque_dir_path(&path).await?;
+                    }
                 }
                 ManifestEntryData::File(data) => {
                     let data = match data {
@@ -509,6 +512,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
                 ManifestEntryData::Hardlink(target) => {
                     self.add_link_path(&path, &target).await?;
+                }
+                ManifestEntryData::Whiteout => {
+                    self.add_whiteout_path(&path).await?;
                 }
             }
         }

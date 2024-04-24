@@ -1048,7 +1048,10 @@ mod tests {
                 let path: Utf8PathBuf = path.into();
                 match data {
                     BuildEntryData::Regular {
-                        data, type_, mode, ..
+                        data,
+                        type_,
+                        mode,
+                        opaque_dir,
                     } => {
                         let size = match &data {
                             ty::FileData::Empty => 0,
@@ -1065,7 +1068,7 @@ mod tests {
                                 .write_entry(&ManifestEntry {
                                     path,
                                     metadata,
-                                    data: ManifestEntryData::Directory,
+                                    data: ManifestEntryData::Directory { opaque: opaque_dir },
                                 })
                                 .await
                                 .unwrap(),
@@ -1123,7 +1126,21 @@ mod tests {
                             .await
                             .unwrap();
                     }
-                    other => panic!("unsupported builder entry for manifest {other:?}"),
+                    BuildEntryData::Whiteout => {
+                        let metadata = ManifestEntryMetadata {
+                            size: 0,
+                            mode: Mode(0o777),
+                            mtime: ARBITRARY_TIME,
+                        };
+                        builder
+                            .write_entry(&ManifestEntry {
+                                path,
+                                metadata,
+                                data: ManifestEntryData::Whiteout,
+                            })
+                            .await
+                            .unwrap();
+                    }
                 }
             }
             drop(builder);
@@ -1500,6 +1517,14 @@ mod tests {
     async fn layer_from_tar_with_whiteout_and_opaque_dir() {
         layer_from_tar_or_manifest_with_whiteout_and_opaque_dir(|fix, input| {
             Box::pin(async move { fix.build_bottom_layer_from_tar(input).await })
+        })
+        .await
+    }
+
+    #[tokio::test]
+    async fn layer_from_manifest_with_whiteout_and_opaque_dir() {
+        layer_from_tar_or_manifest_with_whiteout_and_opaque_dir(|fix, input| {
+            Box::pin(async move { fix.build_bottom_layer_from_manifest(input).await })
         })
         .await
     }

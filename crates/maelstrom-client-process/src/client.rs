@@ -196,7 +196,7 @@ impl ClientState {
             path_hasher.hash_path(&stub);
             let is_dir = stub.as_str().ends_with('/');
             let data = if is_dir {
-                ManifestEntryData::Directory
+                ManifestEntryData::Directory { opaque: false }
             } else {
                 ManifestEntryData::File(None)
             };
