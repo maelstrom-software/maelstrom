@@ -1809,6 +1809,22 @@ input, select, textarea {
 				margin: 0 auto;
 				width: 50%;
 			}
+	
+	.rightimg {
+		-moz-transition: opacity 0.25s ease-in-out;
+		-webkit-transition: opacity 0.25s ease-in-out;
+		-ms-transition: opacity 0.25s ease-in-out;
+		transition: opacity 0.25s ease-in-out;
+		float: right;
+		outline: 0;
+		border: 0;
+	}
+
+		.rightimg.wrap {
+			float: right;
+			max width: 100%;
+			margin: 0 0 2em 2em
+		}
 
 	a.image:hover {
 		opacity: 0.85;
@@ -2107,7 +2123,7 @@ input, select, textarea {
 			width: 2000%;
 			height: 100%;
 			position: absolute;
-			left: -1000%;
+			left: 0;
 			top: 0;
 			z-index: 1;
 			box-shadow: inset 0px 0px 0px 1px #e8e8e8;
