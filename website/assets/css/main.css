@@ -2965,6 +2965,7 @@ input, select, textarea {
 			body, input, textarea, select {
 				font-size: 12pt;
 				letter-spacing: 0;
+				overflow-x: auto;
 			}
 
 			.feature {
@@ -2994,9 +2995,7 @@ input, select, textarea {
 				}
 
 			.rightimg.wrap {
-				display: block;
 				max-width: 100%;
-				float: center;
 				height: auto;
 				
 			}
