@@ -1,4 +1,4 @@
-# Without any `filter` this directive applies to all tests.
+# Because it has no `filter` field, this directive applies to all tests.
 [[directives]]
 # Copy any shared libraries the test depends on along with the binary.
 include_shared_libraries = true
@@ -16,7 +16,8 @@ working_directory = "/"
 user = 0
 group = 0
 
-# This layer just include files and directories for mounting the following file-systems and devices.
+# This layer just includes files and directories for mounting the following
+# file-systems and devices.
 layers = [
     { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
 ]
