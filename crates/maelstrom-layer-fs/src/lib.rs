@@ -586,7 +586,6 @@ mod tests {
     use std::future::Future;
     use std::os::unix::fs::MetadataExt as _;
     use std::pin::Pin;
-    use tokio::io::AsyncWriteExt as _;
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -781,6 +780,17 @@ mod tests {
             }
         }
 
+        async fn add_to_cache(&self, data: &[u8]) -> Sha256Digest {
+            let temp_path = self.cache_dir.join("temp");
+            self.fs.write(&temp_path, data).await.unwrap();
+            let digest = calc_digest(&self.fs, &temp_path).await;
+            self.fs
+                .rename(temp_path, self.cache_dir.join(digest.to_string()))
+                .await
+                .unwrap();
+            digest
+        }
+
         async fn new_data_dir(&mut self) -> PathBuf {
             let index = self.data_dir_index;
             self.data_dir_index += 1;
@@ -889,6 +899,177 @@ mod tests {
                     .await
                     .unwrap();
             builder.fill_from_bottom_layer(upper).await.unwrap();
+            builder.finish().await.unwrap()
+        }
+
+        async fn build_tar(&self, files: Vec<BuildEntry>) -> (Sha256Digest, PathBuf) {
+            let tar_path = self.cache_dir.join("temp.tar");
+            let f = self.fs.create_file(&tar_path).await.unwrap();
+            let mut ar = tokio_tar::Builder::new(f.into_inner());
+            for BuildEntry { path, data } in files {
+                let mut header = tokio_tar::Header::new_gnu();
+                match data {
+                    BuildEntryData::Regular {
+                        data, type_, mode, ..
+                    } => {
+                        header.set_entry_type(match type_ {
+                            FileType::RegularFile => tokio_tar::EntryType::Regular,
+                            FileType::Directory => tokio_tar::EntryType::Directory,
+                            other => panic!("unsupported entry type {other:?}"),
+                        });
+                        let data = match data {
+                            ty::FileData::Empty => vec![],
+                            ty::FileData::Inline(d) => d,
+                            _ => panic!(),
+                        };
+                        header.set_size(data.len() as u64);
+                        header.set_mode(mode);
+                        ar.append_data(&mut header, path, &data[..]).await.unwrap();
+                    }
+                    BuildEntryData::Link { hard, target } => {
+                        header.set_entry_type(if hard {
+                            tokio_tar::EntryType::Link
+                        } else {
+                            tokio_tar::EntryType::Symlink
+                        });
+                        header.set_size(0);
+                        header.set_link_name(target).unwrap();
+                        ar.append_data(&mut header, path, tokio::io::empty())
+                            .await
+                            .unwrap();
+                    }
+                    other => panic!("unsupported builder entry for tar {other:?}"),
+                }
+            }
+            ar.finish().await.unwrap();
+
+            let digest = calc_digest(&self.fs, &tar_path).await;
+
+            let final_path = self.cache_dir.join(digest.to_string());
+            self.fs.rename(tar_path, &final_path).await.unwrap();
+
+            (digest, final_path)
+        }
+
+        async fn build_manifest(&self, files: Vec<BuildEntry>) -> PathBuf {
+            let manifest_path = self.cache_dir.join("temp.manifest");
+            let f = self.fs.create_file(&manifest_path).await.unwrap();
+            let mut builder = AsyncManifestWriter::new(f).await.unwrap();
+            for BuildEntry { path, data } in files {
+                let path: Utf8PathBuf = path.into();
+                match data {
+                    BuildEntryData::Regular {
+                        data, type_, mode, ..
+                    } => {
+                        let size = match &data {
+                            ty::FileData::Empty => 0,
+                            ty::FileData::Inline(d) => d.len() as u64,
+                            ty::FileData::Digest { length, .. } => *length,
+                        };
+                        let metadata = ManifestEntryMetadata {
+                            size,
+                            mode: Mode(mode),
+                            mtime: ARBITRARY_TIME,
+                        };
+                        match type_ {
+                            FileType::Directory => builder
+                                .write_entry(&ManifestEntry {
+                                    path,
+                                    metadata,
+                                    data: ManifestEntryData::Directory,
+                                })
+                                .await
+                                .unwrap(),
+                            FileType::RegularFile => {
+                                let data = match data {
+                                    ty::FileData::Empty => None,
+                                    ty::FileData::Inline(d) => Some(self.add_to_cache(&d).await),
+                                    ty::FileData::Digest { digest, offset, .. } => {
+                                        assert_eq!(offset, 0);
+                                        Some(digest)
+                                    }
+                                };
+                                builder
+                                    .write_entry(&ManifestEntry {
+                                        path,
+                                        metadata,
+                                        data: ManifestEntryData::File(data),
+                                    })
+                                    .await
+                                    .unwrap();
+                            }
+                            other => panic!("unsupported entry type {other:?}"),
+                        }
+                    }
+                    BuildEntryData::Link { hard: true, target } => {
+                        let metadata = ManifestEntryMetadata {
+                            size: 0,
+                            mode: Mode(0o777),
+                            mtime: ARBITRARY_TIME,
+                        };
+                        builder
+                            .write_entry(&ManifestEntry {
+                                path,
+                                metadata,
+                                data: ManifestEntryData::Hardlink(target.into()),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    BuildEntryData::Link {
+                        hard: false,
+                        target,
+                    } => {
+                        let metadata = ManifestEntryMetadata {
+                            size: 0,
+                            mode: Mode(0o777),
+                            mtime: ARBITRARY_TIME,
+                        };
+                        builder
+                            .write_entry(&ManifestEntry {
+                                path,
+                                metadata,
+                                data: ManifestEntryData::Symlink(target.into()),
+                            })
+                            .await
+                            .unwrap();
+                    }
+                    other => panic!("unsupported builder entry for manifest {other:?}"),
+                }
+            }
+            drop(builder);
+
+            let digest = calc_digest(&self.fs, &manifest_path).await;
+
+            let final_path = self.cache_dir.join(digest.to_string());
+            self.fs.rename(manifest_path, &final_path).await.unwrap();
+
+            final_path
+        }
+
+        async fn build_bottom_layer_from_tar(&mut self, input: Vec<BuildEntry>) -> LayerFs {
+            let data_dir = self.new_data_dir().await;
+            let mut builder = self.bottom_layer_builder(&data_dir).await;
+
+            let (tar_digest, tar_path) = self.build_tar(input).await;
+            builder
+                .add_from_tar(tar_digest, self.fs.open_file(tar_path).await.unwrap())
+                .await
+                .unwrap();
+
+            builder.finish().await.unwrap()
+        }
+
+        async fn build_bottom_layer_from_manifest(&mut self, input: Vec<BuildEntry>) -> LayerFs {
+            let data_dir = self.new_data_dir().await;
+            let mut builder = self.bottom_layer_builder(&data_dir).await;
+
+            let manifest_path = self.build_manifest(input).await;
+            builder
+                .add_from_manifest(self.fs.open_file(manifest_path).await.unwrap())
+                .await
+                .unwrap();
+
             builder.finish().await.unwrap()
         }
 
@@ -1058,15 +1239,7 @@ mod tests {
     async fn read_digest() {
         let mut fix = Fixture::new().await;
 
-        let temp_path = fix.cache_dir.join("temp");
-        let mut f = fix.fs.create_file(&temp_path).await.unwrap();
-        f.write_all(b"hello world").await.unwrap();
-        drop(f);
-        let digest = calc_digest(&fix.fs, &temp_path).await;
-        fix.fs
-            .rename(temp_path, fix.cache_dir.join(digest.to_string()))
-            .await
-            .unwrap();
+        let digest = fix.add_to_cache(b"hello world").await;
 
         let layer_fs = fix
             .build_bottom_layer(vec![
@@ -1094,168 +1267,12 @@ mod tests {
         hasher.finalize().1
     }
 
-    async fn build_tar(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> Sha256Digest {
-        let tar_path = cache_path.join("temp.tar");
-        let f = fs.create_file(&tar_path).await.unwrap();
-        let mut ar = tokio_tar::Builder::new(f.into_inner());
-        for BuildEntry { path, data } in files {
-            let mut header = tokio_tar::Header::new_gnu();
-            match data {
-                BuildEntryData::Regular {
-                    data, type_, mode, ..
-                } => {
-                    header.set_entry_type(match type_ {
-                        FileType::RegularFile => tokio_tar::EntryType::Regular,
-                        FileType::Directory => tokio_tar::EntryType::Directory,
-                        other => panic!("unsupported entry type {other:?}"),
-                    });
-                    let data = match data {
-                        ty::FileData::Empty => vec![],
-                        ty::FileData::Inline(d) => d,
-                        _ => panic!(),
-                    };
-                    header.set_size(data.len() as u64);
-                    header.set_mode(mode);
-                    ar.append_data(&mut header, path, &data[..]).await.unwrap();
-                }
-                BuildEntryData::Link { hard, target } => {
-                    header.set_entry_type(if hard {
-                        tokio_tar::EntryType::Link
-                    } else {
-                        tokio_tar::EntryType::Symlink
-                    });
-                    header.set_size(0);
-                    header.set_link_name(target).unwrap();
-                    ar.append_data(&mut header, path, tokio::io::empty())
-                        .await
-                        .unwrap();
-                }
-                other => panic!("unsupported builder entry for tar {other:?}"),
-            }
-        }
-        ar.finish().await.unwrap();
-
-        let digest = calc_digest(fs, &tar_path).await;
-
-        fs.rename(tar_path, cache_path.join(digest.to_string()))
-            .await
-            .unwrap();
-
-        digest
-    }
-
-    async fn build_manifest(fs: &Fs, cache_path: &Path, files: Vec<BuildEntry>) -> PathBuf {
-        let manifest_path = cache_path.join("temp.manifest");
-        let f = fs.create_file(&manifest_path).await.unwrap();
-        let mut builder = AsyncManifestWriter::new(f).await.unwrap();
-        for BuildEntry { path, data } in files {
-            let path: Utf8PathBuf = path.into();
-            match data {
-                BuildEntryData::Regular {
-                    data, type_, mode, ..
-                } => {
-                    let size = match &data {
-                        ty::FileData::Empty => 0,
-                        ty::FileData::Inline(d) => d.len() as u64,
-                        ty::FileData::Digest { length, .. } => *length,
-                    };
-                    let metadata = ManifestEntryMetadata {
-                        size,
-                        mode: Mode(mode),
-                        mtime: ARBITRARY_TIME,
-                    };
-                    match type_ {
-                        FileType::Directory => builder
-                            .write_entry(&ManifestEntry {
-                                path,
-                                metadata,
-                                data: ManifestEntryData::Directory,
-                            })
-                            .await
-                            .unwrap(),
-                        FileType::RegularFile => {
-                            let data = match data {
-                                ty::FileData::Empty => None,
-                                ty::FileData::Inline(d) => {
-                                    let temp_path = cache_path.join("temp.bin");
-                                    fs.write(&temp_path, d).await.unwrap();
-                                    let digest = calc_digest(fs, &temp_path).await;
-                                    fs.rename(temp_path, cache_path.join(digest.to_string()))
-                                        .await
-                                        .unwrap();
-                                    Some(digest)
-                                }
-                                ty::FileData::Digest { digest, offset, .. } => {
-                                    assert_eq!(offset, 0);
-                                    Some(digest)
-                                }
-                            };
-                            builder
-                                .write_entry(&ManifestEntry {
-                                    path,
-                                    metadata,
-                                    data: ManifestEntryData::File(data),
-                                })
-                                .await
-                                .unwrap();
-                        }
-                        other => panic!("unsupported entry type {other:?}"),
-                    }
-                }
-                BuildEntryData::Link { hard: true, target } => {
-                    let metadata = ManifestEntryMetadata {
-                        size: 0,
-                        mode: Mode(0o777),
-                        mtime: ARBITRARY_TIME,
-                    };
-                    builder
-                        .write_entry(&ManifestEntry {
-                            path,
-                            metadata,
-                            data: ManifestEntryData::Hardlink(target.into()),
-                        })
-                        .await
-                        .unwrap();
-                }
-                BuildEntryData::Link {
-                    hard: false,
-                    target,
-                } => {
-                    let metadata = ManifestEntryMetadata {
-                        size: 0,
-                        mode: Mode(0o777),
-                        mtime: ARBITRARY_TIME,
-                    };
-                    builder
-                        .write_entry(&ManifestEntry {
-                            path,
-                            metadata,
-                            data: ManifestEntryData::Symlink(target.into()),
-                        })
-                        .await
-                        .unwrap();
-                }
-                other => panic!("unsupported builder entry for manifest {other:?}"),
-            }
-        }
-        drop(builder);
-
-        let digest = calc_digest(fs, &manifest_path).await;
-
-        let final_path = cache_path.join(digest.to_string());
-        fs.rename(manifest_path, &final_path).await.unwrap();
-
-        final_path
-    }
-
     #[cfg(test)]
     async fn layer_from_tar_or_manifest(
         populate_fn: impl for<'a> FnOnce(
-            &'a Fs,
-            &'a Path,
+            &'a mut Fixture,
             Vec<BuildEntry>,
-            &'a mut BottomLayerBuilder,
-        ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
+        ) -> Pin<Box<dyn Future<Output = LayerFs> + 'a>>,
     ) {
         let mut fix = Fixture::new().await;
         let input = vec![
@@ -1269,12 +1286,7 @@ mod tests {
             BuildEntry::link("Thud", "/Foo"),
         ];
 
-        let data_dir = fix.new_data_dir().await;
-        let mut builder = fix.bottom_layer_builder(&data_dir).await;
-
-        populate_fn(&fix.fs, &fix.cache_dir, input, &mut builder).await;
-
-        let layer_fs = builder.finish().await.unwrap();
+        let layer_fs = populate_fn(&mut fix, input).await;
 
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
@@ -1338,30 +1350,16 @@ mod tests {
 
     #[tokio::test]
     async fn layer_from_tar() {
-        layer_from_tar_or_manifest(|fs, cache_dir, input, builder| {
-            Box::pin(async move {
-                let tar_digest = build_tar(&fs, &cache_dir, input).await;
-                let tar_path = cache_dir.join(tar_digest.to_string());
-
-                builder
-                    .add_from_tar(tar_digest, fs.open_file(tar_path).await.unwrap())
-                    .await
-                    .unwrap();
-            })
+        layer_from_tar_or_manifest(|fix, input| {
+            Box::pin(async move { fix.build_bottom_layer_from_tar(input).await })
         })
         .await
     }
 
     #[tokio::test]
     async fn layer_from_manifest() {
-        layer_from_tar_or_manifest(|fs, cache_dir, input, builder| {
-            Box::pin(async move {
-                let manifest_path = build_manifest(&fs, &cache_dir, input).await;
-                builder
-                    .add_from_manifest(fs.open_file(manifest_path).await.unwrap())
-                    .await
-                    .unwrap();
-            })
+        layer_from_tar_or_manifest(|fix, input| {
+            Box::pin(async move { fix.build_bottom_layer_from_manifest(input).await })
         })
         .await
     }
