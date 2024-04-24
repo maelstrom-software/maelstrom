@@ -1792,7 +1792,7 @@ input, select, textarea {
 
 		.image.promo {
 			float: center;
-			max-width: 90%;
+			max-width: 100%;
 		}
 
 		.image.left {
@@ -2965,7 +2965,6 @@ input, select, textarea {
 			body, input, textarea, select {
 				font-size: 12pt;
 				letter-spacing: 0;
-				overflow-x: auto;
 			}
 
 			.feature {
@@ -2994,7 +2993,7 @@ input, select, textarea {
 					float: center;
 				}
 
-			.rightimg.wrap {
+			.rightimg.wrap img{
 				max-width: 100%;
 				height: auto;
 				
