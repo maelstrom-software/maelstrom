@@ -2989,8 +2989,7 @@ input, select, textarea {
 		/* Image */
 
 			.image.full, .image.left, image.featured, image.promo, image.wrap, .rightimg.wrap {
-					display: inline-flex;
-					max-width: 100%;
+					max-width: fit-content;
 					float: center;
 				}
 
