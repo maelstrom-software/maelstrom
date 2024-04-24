@@ -192,6 +192,7 @@ input, select, textarea {
 	}
 
 	p, ul, ol, dl, table {
+		margin-top: 1.5em;
 		margin-bottom: 1.5em;
 	}
 
@@ -1773,10 +1774,10 @@ input, select, textarea {
 			width: 100%;
 		}
 
-		.wrap {
-			float: right;
-			margin: 20px;
-			max-width: 70%;
+		image.wrap {
+			display: block;
+			float: center;
+			max-width: 100%;
 		}
 
 		.image.fit {
@@ -1791,7 +1792,7 @@ input, select, textarea {
 
 		.image.promo {
 			float: center;
-			max-width: 70%;
+			max-width: 80%;
 		}
 
 		.image.left {
@@ -2670,7 +2671,7 @@ input, select, textarea {
 
 			h2 {
 				font-size: 1.5em;
-				line-height: 1.25em;
+				line-height: 1.5em;
 			}
 
 		/* Sections/Article */
@@ -2733,7 +2734,7 @@ input, select, textarea {
 		/* Footer */
 
 			#footer ul.divided {
-				margin: 0;
+				margin: .75em;
 			}
 
 				#footer ul.divided li:first-child {
