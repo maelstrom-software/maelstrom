@@ -2989,7 +2989,7 @@ input, select, textarea {
 		/* Image */
 
 			.image.full, .image.left, image.featured, image.promo, image.wrap, .rightimg.wrap {
-					max-width: fit-content;
+					max-width: 480px;
 					float: center;
 				}
 
