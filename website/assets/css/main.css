@@ -2994,8 +2994,11 @@ input, select, textarea {
 				}
 
 			.rightimg.wrap {
-				max-width: 50%;
-				float: center
+				display: block;
+				max-width: 100%;
+				float: center;
+				height: auto;
+				
 			}
 		/* Actions */
 
