@@ -2988,11 +2988,15 @@ input, select, textarea {
 
 		/* Image */
 
-			.image.full, .image.left, image.featured, image.promo, image.wrap, .rightimg.wrap {
-					max-width: 480px;
+			.image.full, .image.left, image.featured, image.promo, image.wrap {
+					max-width: 100%;
 					float: center;
 				}
-
+				
+			.rightimg.wrap {
+				max-width: fit-content;
+				float: center
+			}
 		/* Actions */
 
 			ul.actions li {
