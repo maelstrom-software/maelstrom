@@ -761,6 +761,7 @@ mod tests {
         cache_dir: PathBuf,
         log: slog::Logger,
         data_dir_index: usize,
+        cache: Arc<Mutex<ReaderCache>>,
     }
 
     impl Fixture {
@@ -776,6 +777,7 @@ mod tests {
                 cache_dir,
                 log: test_logger(),
                 data_dir_index: 1,
+                cache: Arc::new(Mutex::new(ReaderCache::new())),
             }
         }
 
@@ -889,6 +891,13 @@ mod tests {
             builder.fill_from_bottom_layer(upper).await.unwrap();
             builder.finish().await.unwrap()
         }
+
+        async fn mount(&self, layer_fs: LayerFs) -> maelstrom_fuse::FuseNamespaceHandle {
+            layer_fs
+                .mount(self.log.clone(), self.cache.clone())
+                .await
+                .unwrap()
+        }
     }
 
     #[tokio::test]
@@ -904,8 +913,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         assert_entries(&fix.fs, &mount_path, vec!["Bar", "Baz", "Foo"]).await;
@@ -930,8 +938,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         assert_entries(&fix.fs, &mount_path, vec!["Foo/"]).await;
@@ -953,8 +960,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         for name in ["Foo", "Bar", "Baz"] {
@@ -979,8 +985,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         let foo_attrs = fix.fs.metadata(mount_path.join("Foo")).await.unwrap();
@@ -1008,8 +1013,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
@@ -1032,8 +1036,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
@@ -1072,8 +1075,7 @@ mod tests {
             ])
             .await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(test_logger(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
@@ -1274,8 +1276,7 @@ mod tests {
 
         let layer_fs = builder.finish().await.unwrap();
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(fix.log.clone(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
@@ -1378,8 +1379,7 @@ mod tests {
 
         let layer_fs = fix.build_upper_layer(&layer_fs1, &layer_fs2).await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(fix.log.clone(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         for (d, entries) in expected {
@@ -1413,8 +1413,7 @@ mod tests {
 
         let layer_fs = fix.build_upper_layer(&upper_layer_fs, &layer_fs3).await;
 
-        let cache = Arc::new(Mutex::new(ReaderCache::new()));
-        let mount_handle = layer_fs.mount(fix.log.clone(), cache).await.unwrap();
+        let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
         for (d, entries) in expected {
