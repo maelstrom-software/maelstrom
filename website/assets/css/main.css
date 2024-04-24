@@ -2994,7 +2994,7 @@ input, select, textarea {
 				}
 
 			.rightimg.wrap {
-				max-width: 100%;
+				max-width: 50%;
 				float: center
 			}
 		/* Actions */
