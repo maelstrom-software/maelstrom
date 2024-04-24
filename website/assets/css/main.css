@@ -2972,10 +2972,9 @@ input, select, textarea {
 
 		/* Image */
 
-			.image.full, .image.left, image.featured, image.promo, .wrap {
+			.image.full, .image.left, image.featured, image.promo, image.wrap {
 					width: 100%;
 					float: center;
-					height: auto;
 				}
 
 		/* Actions */
