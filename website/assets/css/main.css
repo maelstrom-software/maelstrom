@@ -2471,7 +2471,7 @@ input, select, textarea {
 			}
 
 			#promo-wrapper {
-				padding: 2em;
+				padding: 2em 0 2em 0;
 			}
 
 			#footer-wrapper {
@@ -2526,7 +2526,7 @@ input, select, textarea {
 
 				#promo h2 {
 					display: block;
-					margin: 0 0 1em 0;
+					margin: 0 0 0 0;
 					font-size: 1.5em;
 				}
 
@@ -2707,7 +2707,7 @@ input, select, textarea {
 			}
 
 			#promo-wrapper {
-				padding: 20px;
+				padding: 10px;
 			}
 
 			#footer-wrapper {
@@ -3029,7 +3029,7 @@ input, select, textarea {
 		/* Promo */
 
 			#promo {
-				padding: 20px;
+				padding: 10px;
 			}
 
 		/* Content */
