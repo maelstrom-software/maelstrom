@@ -2150,7 +2150,7 @@ input, select, textarea {
 		border-top: solid 1px #cfe5e5;
 		padding: 2em 0 0em 0;
 		background-image: url("images/overlay.png"), url("images/footer.svg");
-		background-size: 128px 128px,				100% 100%;
+		background-size: 100% 100%;
 	}
 
 /* Header */
