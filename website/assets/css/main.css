@@ -2958,12 +2958,12 @@ input, select, textarea {
 		/* Sections/Article */
 
 			section, article {
-				margin-bottom: 2em;
+				margin-bottom: 1em;
 			}
 
 			.row > section,
 			.row > article {
-				margin-bottom: 2em;
+				margin-bottom: 1em;
 			}
 
 			header.major {
