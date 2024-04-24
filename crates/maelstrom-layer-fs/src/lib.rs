@@ -576,6 +576,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use maelstrom_base::manifest::UnixTimestamp;
     use maelstrom_base::{
         manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode},
         Utf8PathBuf,
@@ -587,8 +588,7 @@ mod tests {
     use std::os::unix::fs::MetadataExt as _;
     use std::pin::Pin;
 
-    const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
-        maelstrom_base::manifest::UnixTimestamp(1705000271);
+    const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
     #[derive(Debug)]
     enum BuildEntryData {
@@ -753,14 +753,67 @@ mod tests {
         );
     }
 
+    #[derive(Clone, Default)]
+    struct ExpectedAttrs {
+        len: Option<u64>,
+        mode: Option<Mode>,
+        mtime: Option<UnixTimestamp>,
+        ino: Option<u64>,
+    }
+
+    impl From<Mode> for ExpectedAttrs {
+        fn from(m: Mode) -> Self {
+            Self {
+                mode: Some(m),
+                ..Default::default()
+            }
+        }
+    }
+
+    impl ExpectedAttrs {
+        async fn assert(&self, fs: &Fs, path: &Path) {
+            let attrs = fs.metadata(path).await.unwrap();
+            if let Some(len) = &self.len {
+                assert_eq!(attrs.len(), *len);
+            }
+            if let Some(mode) = &self.mode {
+                assert_eq!(Mode(attrs.mode() & 0o777), *mode);
+            }
+            if let Some(mtime) = &self.mtime {
+                assert_eq!(attrs.mtime(), (*mtime).into());
+            }
+            if let Some(ino) = &self.ino {
+                assert_eq!(attrs.ino(), *ino);
+            }
+        }
+    }
+
+    async fn assert_contents(fs: &Fs, path: &Path, expected: &str) {
+        let actual = fs.read_to_string(path).await.unwrap();
+        assert_eq!(actual, expected);
+    }
+
     enum Expect {
         Entries(&'static str, Vec<&'static str>),
+        Exists(&'static str),
+        NotExists(&'static str),
+        Attrs(&'static str, ExpectedAttrs),
+        Contents(&'static str, &'static str),
+        IsSymlink(&'static str),
     }
 
     async fn assert_expectations(fs: &Fs, root: &Path, expected: Vec<Expect>) {
         for expect in expected {
             match expect {
-                Expect::Entries(d, entries) => assert_entries(fs, &root.join(d), entries).await,
+                Expect::Entries(e, entries) => assert_entries(fs, &root.join(e), entries).await,
+                Expect::Exists(e) => assert!(fs.exists(&root.join(e)).await, "/{e}"),
+                Expect::NotExists(e) => assert!(!fs.exists(&root.join(e)).await, "/{e}"),
+                Expect::Attrs(e, attrs) => attrs.assert(fs, &root.join(e)).await,
+                Expect::Contents(e, contents) => assert_contents(fs, &root.join(e), contents).await,
+                Expect::IsSymlink(e) => {
+                    let sym_meta = fs.symlink_metadata(root.join(e)).await.unwrap();
+                    assert!(sym_meta.is_symlink(), "/{e}");
+                }
             }
         }
     }
@@ -1109,12 +1162,18 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        assert_entries(&fix.fs, &mount_path, vec!["Bar", "Baz", "Foo"]).await;
-
-        fix.fs.metadata(mount_path.join("Bar")).await.unwrap();
-        fix.fs.metadata(mount_path.join("Baz")).await.unwrap();
-        fix.fs.metadata(mount_path.join("Foo")).await.unwrap();
-        assert!(!fix.fs.exists(mount_path.join("BAG")).await);
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            vec![
+                Expect::Entries("", vec!["Bar", "Baz", "Foo"]),
+                Expect::Exists("Bar"),
+                Expect::Exists("Baz"),
+                Expect::Exists("Foo"),
+                Expect::NotExists("Qux"),
+            ],
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1134,9 +1193,16 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        assert_entries(&fix.fs, &mount_path, vec!["Foo/"]).await;
-        assert_entries(&fix.fs, &mount_path.join("Foo"), vec!["Bar/", "Bin"]).await;
-        assert_entries(&fix.fs, &mount_path.join("Foo/Bar"), vec!["Baz", "Qux"]).await;
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            vec![
+                Expect::Entries("", vec!["Foo/"]),
+                Expect::Entries("Foo", vec!["Bar/", "Bin"]),
+                Expect::Entries("Foo/Bar", vec!["Baz", "Qux"]),
+            ],
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1156,12 +1222,21 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        for name in ["Foo", "Bar", "Baz"] {
-            let attrs = fix.fs.metadata(mount_path.join(name)).await.unwrap();
-            assert_eq!(attrs.len(), 0);
-            assert_eq!(Mode(attrs.mode()), Mode(0o100555));
-            assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
-        }
+        let expected_attrs = ExpectedAttrs {
+            len: Some(0),
+            mode: Some(Mode(0o555)),
+            mtime: Some(ARBITRARY_TIME),
+            ino: None,
+        };
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            ["Foo", "Bar", "Baz"]
+                .into_iter()
+                .map(|d| Expect::Attrs(d, expected_attrs.clone()))
+                .collect(),
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1183,13 +1258,21 @@ mod tests {
 
         let foo_attrs = fix.fs.metadata(mount_path.join("Foo")).await.unwrap();
 
-        for name in ["Foo", "Bar", "Baz"] {
-            let attrs = fix.fs.metadata(mount_path.join(name)).await.unwrap();
-            assert_eq!(attrs.len(), 0);
-            assert_eq!(Mode(attrs.mode()), Mode(0o100555));
-            assert_eq!(attrs.mtime(), ARBITRARY_TIME.into());
-            assert_eq!(attrs.ino(), foo_attrs.ino());
-        }
+        let expected_attrs = ExpectedAttrs {
+            len: Some(0),
+            mode: Some(Mode(0o555)),
+            mtime: Some(ARBITRARY_TIME),
+            ino: Some(foo_attrs.ino()),
+        };
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            ["Foo", "Bar", "Baz"]
+                .into_iter()
+                .map(|d| Expect::Attrs(d, expected_attrs.clone()))
+                .collect(),
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1209,11 +1292,15 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
-        assert_eq!(contents, "hello world");
-
-        let contents = fix.fs.read_to_string(mount_path.join("Bar")).await.unwrap();
-        assert_eq!(contents, "");
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            vec![
+                Expect::Contents("Foo", "hello world"),
+                Expect::Contents("Bar", ""),
+            ],
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1235,14 +1322,15 @@ mod tests {
         let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
         assert_eq!(contents, "hello world");
 
-        assert!(fix
-            .fs
-            .symlink_metadata(mount_path.join("Bar"))
-            .await
-            .unwrap()
-            .is_symlink());
-        let contents = fix.fs.read_to_string(mount_path.join("Bar")).await.unwrap();
-        assert_eq!(contents, "hello world");
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            vec![
+                Expect::IsSymlink("Bar"),
+                Expect::Contents("Bar", "hello world"),
+            ],
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1263,11 +1351,15 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
-        assert_eq!(contents, "hello");
-
-        let contents = fix.fs.read_to_string(mount_path.join("Bar")).await.unwrap();
-        assert_eq!(contents, "world");
+        assert_expectations(
+            &fix.fs,
+            &mount_path,
+            vec![
+                Expect::Contents("Foo", "hello"),
+                Expect::Contents("Bar", "world"),
+            ],
+        )
+        .await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1303,59 +1395,25 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        let contents = fix.fs.read_to_string(mount_path.join("Foo")).await.unwrap();
-        assert_eq!(contents, "hello world");
+        let mut expectations = vec![
+            Expect::Contents("Foo", "hello world"),
+            Expect::Contents("Thud", "hello world"),
+            Expect::IsSymlink("Waldo"),
+            Expect::Contents("Waldo", "hello world"),
+            Expect::Contents("Bar/Baz", ""),
+            Expect::Entries("", vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"]),
+            Expect::Entries("Bar", vec!["Baz", "Bin"]),
+            Expect::Entries("Qux", vec!["Fred"]),
+            Expect::Attrs("Bar", Mode(0o666).into()),
+        ];
 
-        let contents = fix
-            .fs
-            .read_to_string(mount_path.join("Thud"))
-            .await
-            .unwrap();
-        assert_eq!(contents, "hello world");
-
-        assert!(fix
-            .fs
-            .symlink_metadata(mount_path.join("Waldo"))
-            .await
-            .unwrap()
-            .is_symlink());
-        let contents = fix
-            .fs
-            .read_to_string(mount_path.join("Waldo"))
-            .await
-            .unwrap();
-        assert_eq!(contents, "hello world");
-
-        let contents = fix
-            .fs
-            .read_to_string(mount_path.join("Bar/Baz"))
-            .await
-            .unwrap();
-        assert_eq!(contents, "");
-
-        assert_entries(
-            &fix.fs,
-            &mount_path,
-            vec!["Bar/", "Foo", "Qux/", "Thud", "Waldo"],
-        )
-        .await;
-        assert_entries(&fix.fs, &mount_path.join("Bar"), vec!["Baz", "Bin"]).await;
-        assert_entries(&fix.fs, &mount_path.join("Qux"), vec!["Fred"]).await;
-
-        for p in [
+        for e in [
             "Foo", "Qux", "Bar/Baz", "Bar/Bin", "Qux/Fred", "Waldo", "Thud",
         ] {
-            let mode = fix.fs.metadata(mount_path.join(p)).await.unwrap().mode();
-            assert_eq!(Mode(mode & 0o777), Mode(0o555));
+            expectations.push(Expect::Attrs(e, Mode(0o555).into()));
         }
 
-        let mode = fix
-            .fs
-            .metadata(mount_path.join("Bar"))
-            .await
-            .unwrap()
-            .mode();
-        assert_eq!(Mode(mode & 0o777), Mode(0o666));
+        assert_expectations(&fix.fs, &mount_path, expectations).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
