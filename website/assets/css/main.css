@@ -2958,7 +2958,7 @@ input, select, textarea {
 
 /* Mobile (Portrait) */
 
-	@media screen and (max-width: 480px) {
+	@media screen and (max-width: 100%) {
 
 		/* Basic */
 
