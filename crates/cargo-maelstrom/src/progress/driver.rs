@@ -14,9 +14,8 @@ use std::{
 };
 
 pub trait ProgressDriver<'scope> {
-    fn drive<'dep, ProgressIndicatorT>(&mut self, deps: &'dep MainAppDeps, ind: ProgressIndicatorT)
+    fn drive<'dep>(&mut self, deps: &'dep impl MainAppDeps, ind: impl ProgressIndicator)
     where
-        ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope;
 
     fn stop(&mut self) -> Result<()>;
@@ -89,9 +88,8 @@ impl Drop for UploadProgressBarTracker {
 }
 
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
-    fn drive<'dep, ProgressIndicatorT>(&mut self, deps: &'dep MainAppDeps, ind: ProgressIndicatorT)
+    fn drive<'dep>(&mut self, deps: &'dep impl MainAppDeps, ind: impl ProgressIndicator)
     where
-        ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
     {
         let canceled = self.canceled.clone();

@@ -138,7 +138,7 @@ pub struct GeneratedArtifacts {
 }
 
 pub fn add_generated_artifacts(
-    deps: &MainAppDeps,
+    deps: &impl MainAppDeps,
     binary_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {

@@ -9,9 +9,7 @@ pub mod visitor;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use cargo::{
-    CompilationOptions, FeatureSelectionOptions, ManifestOptions, TestArtifactStream, WaitHandle,
-};
+use cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::TermLike;
@@ -141,10 +139,10 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueuing<'a, ProgressIndicatorT> {
+struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState,
-    deps: &'a MainAppDeps,
+    deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
     artifact: CargoArtifact,
@@ -162,17 +160,14 @@ struct TestListingResult {
     ignored_cases: HashSet<String>,
 }
 
-fn list_test_cases<ProgressIndicatorT>(
-    deps: &MainAppDeps,
+fn list_test_cases(
+    deps: &impl MainAppDeps,
     log: slog::Logger,
     queuing_state: &JobQueuingState,
-    ind: &ProgressIndicatorT,
+    ind: &impl ProgressIndicator,
     artifact: &CargoArtifact,
     package_name: &str,
-) -> Result<TestListingResult>
-where
-    ProgressIndicatorT: ProgressIndicator,
-{
+) -> Result<TestListingResult> {
     ind.update_enqueue_status(format!("getting test list for {package_name}"));
 
     slog::debug!(log, "listing ignored tests"; "binary" => ?artifact.executable);
@@ -196,7 +191,7 @@ where
 }
 
 fn generate_artifacts(
-    deps: &MainAppDeps,
+    deps: &impl MainAppDeps,
     artifact: &CargoArtifact,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
@@ -204,15 +199,16 @@ fn generate_artifacts(
     artifacts::add_generated_artifacts(deps, &binary, log)
 }
 
-impl<'a, ProgressIndicatorT> ArtifactQueuing<'a, ProgressIndicatorT>
+impl<'a, ProgressIndicatorT, MainAppDepsT> ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
+    MainAppDepsT: MainAppDeps,
 {
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
         queuing_state: &'a JobQueuingState,
-        deps: &'a MainAppDeps,
+        deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
         artifact: CargoArtifact,
@@ -401,27 +397,29 @@ where
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
-struct JobQueuing<'a, ProgressIndicatorT> {
+struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState,
-    deps: &'a MainAppDeps,
+    deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
-    wait_handle: Option<WaitHandle>,
+    wait_handle: Option<MainAppDepsT::CargoWaitHandle>,
     package_match: bool,
-    artifacts: Option<TestArtifactStream>,
-    artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT>>,
+    artifacts: Option<MainAppDepsT::CargoTestArtifactStream>,
+    artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
 }
 
-impl<'a, ProgressIndicatorT: ProgressIndicator> JobQueuing<'a, ProgressIndicatorT>
+impl<'a, ProgressIndicatorT: ProgressIndicator, MainAppDepsT>
+    JobQueuing<'a, ProgressIndicatorT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
+    MainAppDepsT: MainAppDeps,
 {
     fn new(
         log: slog::Logger,
         queuing_state: &'a JobQueuingState,
-        deps: &'a MainAppDeps,
+        deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
@@ -532,11 +530,53 @@ where
     }
 }
 
-pub struct MainAppDeps {
+pub trait Wait {
+    fn wait(self) -> Result<()>;
+}
+
+impl Wait for cargo::WaitHandle {
+    fn wait(self) -> Result<()> {
+        cargo::WaitHandle::wait(self)
+    }
+}
+
+pub trait MainAppDeps: Sync {
+    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
+
+    fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>>;
+
+    fn get_job_state_counts(&self) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>>;
+
+    fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage>;
+
+    fn add_job(
+        &self,
+        spec: JobSpec,
+        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+    ) -> Result<()>;
+
+    fn wait_for_outstanding_jobs(&self) -> Result<()>;
+
+    type CargoWaitHandle: Wait;
+    type CargoTestArtifactStream: Iterator<Item = Result<CargoArtifact>>;
+
+    fn run_cargo_test(
+        &self,
+        color: bool,
+        feature_selection_options: &FeatureSelectionOptions,
+        compilation_options: &CompilationOptions,
+        manifest_options: &ManifestOptions,
+        packages: Vec<String>,
+    ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)>;
+
+    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>>;
+}
+
+pub struct DefaultMainAppDeps {
     client: Client,
 }
 
-impl MainAppDeps {
+impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
@@ -567,26 +607,26 @@ impl MainAppDeps {
         )?;
         Ok(Self { client })
     }
+}
 
-    pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+impl MainAppDeps for DefaultMainAppDeps {
+    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         self.client.add_layer(layer)
     }
 
-    pub fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
+    fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
         self.client.get_artifact_upload_progress()
     }
 
-    pub fn get_job_state_counts(
-        &self,
-    ) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
+    fn get_job_state_counts(&self) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
         self.client.get_job_state_counts()
     }
 
-    pub fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
+    fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         self.client.get_container_image(name, tag)
     }
 
-    pub fn add_job(
+    fn add_job(
         &self,
         spec: JobSpec,
         handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
@@ -594,18 +634,21 @@ impl MainAppDeps {
         self.client.add_job(spec, handler)
     }
 
-    pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
+    fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.client.wait_for_outstanding_jobs()
     }
 
-    pub fn run_cargo_test(
+    type CargoWaitHandle = cargo::WaitHandle;
+    type CargoTestArtifactStream = cargo::TestArtifactStream;
+
+    fn run_cargo_test(
         &self,
         color: bool,
         feature_selection_options: &FeatureSelectionOptions,
         compilation_options: &CompilationOptions,
         manifest_options: &ManifestOptions,
         packages: Vec<String>,
-    ) -> Result<(WaitHandle, TestArtifactStream)> {
+    ) -> Result<(cargo::WaitHandle, cargo::TestArtifactStream)> {
         cargo::run_cargo_test(
             color,
             feature_selection_options,
@@ -615,26 +658,22 @@ impl MainAppDeps {
         )
     }
 
-    pub fn get_cases_from_binary(
-        &self,
-        binary: &Path,
-        filter: &Option<String>,
-    ) -> Result<Vec<String>> {
+    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
         cargo::get_cases_from_binary(binary, filter)
     }
 }
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
-pub struct MainAppState {
-    deps: MainAppDeps,
+pub struct MainAppState<MainAppDepsT> {
+    deps: MainAppDepsT,
     queuing_state: JobQueuingState,
     cache_dir: PathBuf,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
 
-impl MainAppState {
+impl<MainAppDepsT> MainAppState<MainAppDepsT> {
     /// Creates a new `MainAppState`
     ///
     /// `bg_proc`: handle to background client process
@@ -649,7 +688,7 @@ impl MainAppState {
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        deps: MainAppDeps,
+        deps: MainAppDepsT,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
@@ -749,20 +788,20 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT> {
-    state: &'state MainAppState,
-    queuing: JobQueuing<'state, ProgressIndicatorT>,
+struct MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
+    state: &'state MainAppState<MainAppDepsT>,
+    queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: TermT,
 }
 
-impl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps>
+    MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
 {
     fn new(
-        state: &'state MainAppState,
-        queuing: JobQueuing<'state, ProgressIndicatorT>,
+        state: &'state MainAppState<MainAppDepsT>,
+        queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: TermT,
@@ -777,12 +816,13 @@ impl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'state, 'scope, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'state, 'scope, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT> MainApp
+    for MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
     ProgressDriverT: ProgressDriver<'scope>,
+    MainAppDepsT: MainAppDeps,
 {
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
         self.queuing.enqueue_one()
@@ -911,8 +951,8 @@ impl Logger {
     }
 }
 
-fn new_helper<'state, 'scope, ProgressIndicatorT, TermT>(
-    state: &'state MainAppState,
+fn new_helper<'state, 'scope, ProgressIndicatorT, TermT, MainAppDepsT>(
+    state: &'state MainAppState<MainAppDepsT>,
     prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
@@ -921,6 +961,7 @@ fn new_helper<'state, 'scope, ProgressIndicatorT, TermT>(
 where
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
+    MainAppDepsT: MainAppDeps,
     'state: 'scope,
 {
     let width = term.width() as usize;
@@ -965,8 +1006,8 @@ where
 /// `quiet`: indicates whether quiet mode should be used or not
 /// `term`: represents the terminal
 /// `driver`: drives the background work needed for updating the progress bars
-pub fn main_app_new<'state, 'scope, TermT>(
-    state: &'state MainAppState,
+pub fn main_app_new<'state, 'scope, TermT, MainAppDepsT>(
+    state: &'state MainAppState<MainAppDepsT>,
     stdout_tty: bool,
     quiet: Quiet,
     term: TermT,
@@ -975,6 +1016,7 @@ pub fn main_app_new<'state, 'scope, TermT>(
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    MainAppDepsT: MainAppDeps,
     'state: 'scope,
 {
     if state.queuing_state.list_action.is_some() {

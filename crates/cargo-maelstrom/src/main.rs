@@ -1,8 +1,8 @@
 use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
     cargo::CargoBuildError, config::Config, main_app_new,
-    metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver, ListAction,
-    Logger, LoggingOutput, MainAppDeps, MainAppState,
+    metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver,
+    DefaultMainAppDeps, ListAction, Logger, LoggingOutput, MainAppState,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Args};
@@ -132,7 +132,7 @@ pub fn main() -> Result<ExitCode> {
     let target_dir = &cargo_metadata.target_directory;
     fs.create_dir_all(target_dir)?;
 
-    let deps = MainAppDeps::new(
+    let deps = DefaultMainAppDeps::new(
         bg_proc,
         target_dir,
         &cargo_metadata.workspace_root,
