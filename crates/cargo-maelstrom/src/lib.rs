@@ -539,7 +539,7 @@ pub trait MainAppDeps: Sync {
 
     fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>>;
 
-    fn get_job_state_counts(&self) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>>;
+    fn get_job_state_counts(&self) -> Result<JobStateCounts>;
 
     fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig>;
 
@@ -612,7 +612,7 @@ impl MainAppDeps for DefaultMainAppDeps {
         self.client.get_artifact_upload_progress()
     }
 
-    fn get_job_state_counts(&self) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
+    fn get_job_state_counts(&self) -> Result<JobStateCounts> {
         self.client.get_job_state_counts()
     }
 

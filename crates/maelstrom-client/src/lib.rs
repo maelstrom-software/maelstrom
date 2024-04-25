@@ -289,10 +289,8 @@ impl Client {
         Ok(())
     }
 
-    pub fn get_job_state_counts(
-        &self,
-    ) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
-        self.send_async(move |mut client| async move {
+    pub fn get_job_state_counts(&self) -> Result<JobStateCounts> {
+        self.send_sync(move |mut client| async move {
             let res = client.get_job_state_counts(proto::Void {}).await?;
             Ok(res.map(|v| TryFromProtoBuf::try_from_proto_buf(v.into_result()?)))
         })

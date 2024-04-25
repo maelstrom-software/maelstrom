@@ -106,7 +106,7 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                     upload_bar_tracker.update(&ind, upload_state);
 
                     let counts = deps.get_job_state_counts()?;
-                    if !ind.update_job_states(counts.recv()??)? {
+                    if !ind.update_job_states(counts)? {
                         break;
                     }
 
