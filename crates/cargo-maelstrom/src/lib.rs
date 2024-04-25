@@ -79,8 +79,8 @@ fn filter_case(
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
 ///
-/// This object is separate from `MainAppDeps` because it is lent to `JobQueuing`
-struct JobQueuingDeps {
+/// This object is separate from `MainAppState` because it is lent to `JobQueuing`
+struct JobQueuingState {
     cargo: String,
     packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
@@ -96,7 +96,7 @@ struct JobQueuingDeps {
     manifest_options: ManifestOptions,
 }
 
-impl JobQueuingDeps {
+impl JobQueuingState {
     #[allow(clippy::too_many_arguments)]
     fn new(
         cargo: String,
@@ -141,7 +141,7 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 /// currently enqueuing from.
 struct ArtifactQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
-    queuing_deps: &'a JobQueuingDeps,
+    queuing_state: &'a JobQueuingState,
     client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
@@ -162,7 +162,7 @@ struct TestListingResult {
 
 fn list_test_cases<ProgressIndicatorT>(
     log: slog::Logger,
-    queuing_deps: &JobQueuingDeps,
+    queuing_state: &JobQueuingState,
     ind: &ProgressIndicatorT,
     artifact: &CargoArtifact,
     package_name: &str,
@@ -181,10 +181,10 @@ where
     slog::debug!(log, "listing tests"; "binary" => ?artifact.executable);
     let mut cases = get_cases_from_binary(&binary, &None)?;
 
-    let mut listing = queuing_deps.test_listing.lock().unwrap();
+    let mut listing = queuing_state.test_listing.lock().unwrap();
     listing.add_cases(package_name, artifact, &cases[..]);
 
-    cases.retain(|c| filter_case(package_name, artifact, c, &queuing_deps.filter));
+    cases.retain(|c| filter_case(package_name, artifact, c, &queuing_state.filter));
     Ok(TestListingResult {
         cases,
         ignored_cases,
@@ -207,7 +207,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps,
+        queuing_state: &'a JobQueuingState,
         client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
@@ -217,9 +217,9 @@ where
     ) -> Result<Self> {
         let binary = PathBuf::from(artifact.executable.clone().unwrap());
 
-        let running_tests = queuing_deps.list_action.is_none();
+        let running_tests = queuing_state.list_action.is_none();
 
-        let listing = list_test_cases(log.clone(), queuing_deps, &ind, &artifact, &package_name)?;
+        let listing = list_test_cases(log.clone(), queuing_state, &ind, &artifact, &package_name)?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
         slog::debug!(
@@ -233,7 +233,7 @@ where
 
         Ok(Self {
             log,
-            queuing_deps,
+            queuing_state,
             client,
             width,
             ind,
@@ -287,7 +287,7 @@ where
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
-        if self.queuing_deps.list_action.is_some() {
+        if self.queuing_state.list_action.is_some() {
             self.ind.println(case_str);
             return Ok(EnqueueResult::Listed);
         }
@@ -316,7 +316,7 @@ where
         };
 
         let test_metadata = self
-            .queuing_deps
+            .queuing_state
             .test_metadata
             .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
         self.ind
@@ -325,14 +325,17 @@ where
         let layers = self.calculate_job_layers(&test_metadata)?;
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
-        let count = self.queuing_deps.jobs_queued.fetch_add(1, Ordering::AcqRel);
+        let count = self
+            .queuing_state
+            .jobs_queued
+            .fetch_add(1, Ordering::AcqRel);
         self.ind.update_length(std::cmp::max(
-            self.queuing_deps.expected_job_count,
+            self.queuing_state.expected_job_count,
             count + 1,
         ));
 
         let visitor = JobStatusVisitor::new(
-            self.queuing_deps.tracker.clone(),
+            self.queuing_state.tracker.clone(),
             case_str.clone(),
             self.width,
             self.ind.clone(),
@@ -389,7 +392,7 @@ where
 /// next thing when asked.
 struct JobQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
-    queuing_deps: &'a JobQueuingDeps,
+    queuing_state: &'a JobQueuingState,
     client: &'a Client,
     width: usize,
     ind: ProgressIndicatorT,
@@ -406,29 +409,32 @@ where
 {
     fn new(
         log: slog::Logger,
-        queuing_deps: &'a JobQueuingDeps,
+        queuing_state: &'a JobQueuingState,
         client: &'a Client,
         width: usize,
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let package_names: Vec<_> = queuing_deps
+        let package_names: Vec<_> = queuing_state
             .packages
             .values()
             .map(|p| format!("{}@{}", &p.name, &p.version))
             .collect();
 
         let building_tests = !package_names.is_empty()
-            && matches!(queuing_deps.list_action, None | Some(ListAction::ListTests));
+            && matches!(
+                queuing_state.list_action,
+                None | Some(ListAction::ListTests)
+            );
 
         let (wait_handle, artifacts) = building_tests
             .then(|| {
                 run_cargo_test(
-                    &queuing_deps.cargo,
-                    queuing_deps.stderr_color,
-                    &queuing_deps.feature_selection_options,
-                    &queuing_deps.compilation_options,
-                    &queuing_deps.manifest_options,
+                    &queuing_state.cargo,
+                    queuing_state.stderr_color,
+                    &queuing_state.feature_selection_options,
+                    &queuing_state.compilation_options,
+                    &queuing_state.manifest_options,
                     package_names,
                 )
             })
@@ -437,7 +443,7 @@ where
 
         Ok(Self {
             log,
-            queuing_deps,
+            queuing_state,
             client,
             width,
             ind,
@@ -463,7 +469,7 @@ where
 
         slog::debug!(self.log, "got artifact"; "artifact" => ?artifact);
         let package_name = &self
-            .queuing_deps
+            .queuing_state
             .packages
             .get(&artifact.package_id)
             .expect("artifact for unknown package")
@@ -471,7 +477,7 @@ where
 
         self.artifact_queuing = Some(ArtifactQueuing::new(
             self.log.clone(),
-            self.queuing_deps,
+            self.queuing_state,
             self.client,
             self.width,
             self.ind.clone(),
@@ -518,16 +524,16 @@ where
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
-pub struct MainAppDeps {
+pub struct MainAppState {
     pub client: Client,
-    queuing_deps: JobQueuingDeps,
+    queuing_state: JobQueuingState,
     cache_dir: PathBuf,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
 
-impl MainAppDeps {
-    /// Creates a new `MainAppDeps`
+impl MainAppState {
+    /// Creates a new `MainAppState`
     ///
     /// `bg_proc`: handle to background client process
     /// `cargo`: the command to run when invoking cargo
@@ -601,7 +607,7 @@ impl MainAppDeps {
 
         Ok(Self {
             client,
-            queuing_deps: JobQueuingDeps::new(
+            queuing_state: JobQueuingState::new(
                 cargo,
                 selected_packages,
                 filter,
@@ -661,26 +667,26 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT> {
-    deps: &'deps MainAppDeps,
-    queuing: JobQueuing<'deps, ProgressIndicatorT>,
+struct MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT> {
+    state: &'state MainAppState,
+    queuing: JobQueuing<'state, ProgressIndicatorT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
     term: TermT,
 }
 
-impl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
-    MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
+    MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
 {
     fn new(
-        deps: &'deps MainAppDeps,
-        queuing: JobQueuing<'deps, ProgressIndicatorT>,
+        state: &'state MainAppState,
+        queuing: JobQueuing<'state, ProgressIndicatorT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
         term: TermT,
     ) -> Self {
         Self {
-            deps,
+            state,
             queuing,
             prog_driver,
             prog,
@@ -689,8 +695,8 @@ impl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
     }
 }
 
-impl<'deps, 'scope, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
-    for MainAppImpl<'deps, TermT, ProgressIndicatorT, ProgressDriverT>
+impl<'state, 'scope, TermT, ProgressIndicatorT, ProgressDriverT> MainApp
+    for MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT>
 where
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
@@ -703,7 +709,7 @@ where
     fn drain(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "draining");
         self.prog
-            .update_length(self.deps.queuing_deps.jobs_queued.load(Ordering::Acquire));
+            .update_length(self.state.queuing_state.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
         self.prog_driver.stop()?;
         Ok(())
@@ -711,23 +717,23 @@ where
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.deps.client.wait_for_outstanding_jobs()?;
+        self.state.client.wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
-        if self.deps.queuing_deps.list_action.is_none() {
+        if self.state.queuing_state.list_action.is_none() {
             let width = self.term.width() as usize;
-            self.deps
-                .queuing_deps
+            self.state
+                .queuing_state
                 .tracker
                 .print_summary(width, self.term.clone())?;
         }
 
         write_test_listing(
-            &self.deps.cache_dir.join(LAST_TEST_LISTING_NAME),
-            &self.deps.queuing_deps.test_listing.lock().unwrap(),
+            &self.state.cache_dir.join(LAST_TEST_LISTING_NAME),
+            &self.state.queuing_state.test_listing.lock().unwrap(),
         )?;
 
-        Ok(self.deps.queuing_deps.tracker.exit_code())
+        Ok(self.state.queuing_state.tracker.exit_code())
     }
 }
 
@@ -823,8 +829,8 @@ impl Logger {
     }
 }
 
-fn new_helper<'deps, 'scope, ProgressIndicatorT, TermT>(
-    deps: &'deps MainAppDeps,
+fn new_helper<'state, 'scope, ProgressIndicatorT, TermT>(
+    state: &'state MainAppState,
     prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
     term: TermT,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
@@ -833,35 +839,36 @@ fn new_helper<'deps, 'scope, ProgressIndicatorT, TermT>(
 where
     ProgressIndicatorT: ProgressIndicator,
     TermT: TermLike + Clone + 'static,
-    'deps: 'scope,
+    'state: 'scope,
 {
     let width = term.width() as usize;
     let prog = prog_factory(term.clone());
 
-    prog_driver.drive(&deps.client, prog.clone());
-    prog.update_length(deps.queuing_deps.expected_job_count);
+    prog_driver.drive(&state.client, prog.clone());
+    prog.update_length(state.queuing_state.expected_job_count);
 
-    deps.logging_output
+    state
+        .logging_output
         .update(progress::ProgressWriteAdapter::new(prog.clone()));
-    slog::debug!(deps.log, "main app created");
+    slog::debug!(state.log, "main app created");
 
-    match deps.queuing_deps.list_action {
-        Some(ListAction::ListPackages) => list_packages(&prog, &deps.queuing_deps.packages),
+    match state.queuing_state.list_action {
+        Some(ListAction::ListPackages) => list_packages(&prog, &state.queuing_state.packages),
 
-        Some(ListAction::ListBinaries) => list_binaries(&prog, &deps.queuing_deps.packages),
+        Some(ListAction::ListBinaries) => list_binaries(&prog, &state.queuing_state.packages),
         _ => {}
     }
 
     let queuing = JobQueuing::new(
-        deps.log.clone(),
-        &deps.queuing_deps,
-        &deps.client,
+        state.log.clone(),
+        &state.queuing_state,
+        &state.client,
         width,
         prog.clone(),
         timeout_override,
     )?;
     Ok(Box::new(MainAppImpl::new(
-        deps,
+        state,
         queuing,
         prog_driver,
         prog,
@@ -871,13 +878,13 @@ where
 
 /// Construct a `MainApp`
 ///
-/// `deps`: a collection of dependencies
+/// `state`: The shared state for the main app
 /// `stdout_tty`: should terminal color codes be printed to stdout (provided via `term`)
 /// `quiet`: indicates whether quiet mode should be used or not
 /// `term`: represents the terminal
 /// `driver`: drives the background work needed for updating the progress bars
-pub fn main_app_new<'deps, 'scope, TermT>(
-    deps: &'deps MainAppDeps,
+pub fn main_app_new<'state, 'scope, TermT>(
+    state: &'state MainAppState,
     stdout_tty: bool,
     quiet: Quiet,
     term: TermT,
@@ -886,12 +893,12 @@ pub fn main_app_new<'deps, 'scope, TermT>(
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
-    'deps: 'scope,
+    'state: 'scope,
 {
-    if deps.queuing_deps.list_action.is_some() {
+    if state.queuing_state.list_action.is_some() {
         return if stdout_tty {
             Ok(new_helper(
-                deps,
+                state,
                 TestListingProgress::new,
                 term,
                 driver,
@@ -899,7 +906,7 @@ where
             )?)
         } else {
             Ok(new_helper(
-                deps,
+                state,
                 TestListingProgressNoSpinner::new,
                 term,
                 driver,
@@ -910,28 +917,28 @@ where
 
     match (stdout_tty, quiet.into_inner()) {
         (true, true) => Ok(new_helper(
-            deps,
+            state,
             QuietProgressBar::new,
             term,
             driver,
             timeout_override,
         )?),
         (true, false) => Ok(new_helper(
-            deps,
+            state,
             MultipleProgressBars::new,
             term,
             driver,
             timeout_override,
         )?),
         (false, true) => Ok(new_helper(
-            deps,
+            state,
             QuietNoBar::new,
             term,
             driver,
             timeout_override,
         )?),
         (false, false) => Ok(new_helper(
-            deps,
+            state,
             NoBar::new,
             term,
             driver,

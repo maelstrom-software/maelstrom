@@ -2,7 +2,7 @@ use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
     cargo::CargoBuildError, config::Config, main_app_new,
     metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver, ListAction,
-    Logger, MainAppDeps,
+    Logger, MainAppState,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Args};
@@ -124,7 +124,7 @@ pub fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let deps = MainAppDeps::new(
+    let deps = MainAppState::new(
         bg_proc,
         "cargo".into(),
         extra_options.include,
