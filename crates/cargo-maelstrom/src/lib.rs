@@ -20,7 +20,6 @@ use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
 use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    fs::Fs,
     process::ExitCode,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -142,7 +141,7 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 struct ArtifactQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState,
-    client: &'a Client,
+    deps: &'a MainAppDeps,
     width: usize,
     ind: ProgressIndicatorT,
     artifact: CargoArtifact,
@@ -192,12 +191,12 @@ where
 }
 
 fn generate_artifacts(
-    client: &Client,
+    deps: &MainAppDeps,
     artifact: &CargoArtifact,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    artifacts::add_generated_artifacts(client, &binary, log)
+    artifacts::add_generated_artifacts(deps, &binary, log)
 }
 
 impl<'a, ProgressIndicatorT> ArtifactQueuing<'a, ProgressIndicatorT>
@@ -208,7 +207,7 @@ where
     fn new(
         log: slog::Logger,
         queuing_state: &'a JobQueuingState,
-        client: &'a Client,
+        deps: &'a MainAppDeps,
         width: usize,
         ind: ProgressIndicatorT,
         artifact: CargoArtifact,
@@ -228,13 +227,13 @@ where
             "package_name" => &package_name,
             "artifact" => ?artifact);
         let generated_artifacts = running_tests
-            .then(|| generate_artifacts(client, &artifact, log.clone()))
+            .then(|| generate_artifacts(deps, &artifact, log.clone()))
             .transpose()?;
 
         Ok(Self {
             log,
             queuing_state,
-            client,
+            deps,
             width,
             ind,
             artifact,
@@ -256,7 +255,7 @@ where
             .iter()
             .map(|layer| {
                 slog::debug!(self.log, "adding layer"; "layer" => ?layer);
-                self.client.add_layer(layer.clone())
+                self.deps.client.add_layer(layer.clone())
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
@@ -301,7 +300,7 @@ where
                 "image" => &image,
                 "version" => &version,
             );
-            let image = self.client.get_container_image(image, version)?;
+            let image = self.deps.client.get_container_image(image, version)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
@@ -350,7 +349,7 @@ where
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
-        self.client.add_job(
+        self.deps.client.add_job(
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
@@ -393,7 +392,7 @@ where
 struct JobQueuing<'a, ProgressIndicatorT> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState,
-    client: &'a Client,
+    deps: &'a MainAppDeps,
     width: usize,
     ind: ProgressIndicatorT,
     wait_handle: Option<WaitHandle>,
@@ -410,7 +409,7 @@ where
     fn new(
         log: slog::Logger,
         queuing_state: &'a JobQueuingState,
-        client: &'a Client,
+        deps: &'a MainAppDeps,
         width: usize,
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
@@ -444,7 +443,7 @@ where
         Ok(Self {
             log,
             queuing_state,
-            client,
+            deps,
             width,
             ind,
             package_match: false,
@@ -478,7 +477,7 @@ where
         self.artifact_queuing = Some(ArtifactQueuing::new(
             self.log.clone(),
             self.queuing_state,
-            self.client,
+            self.deps,
             self.width,
             self.ind.clone(),
             artifact,
@@ -522,10 +521,47 @@ where
     }
 }
 
+pub struct MainAppDeps {
+    client: Client,
+}
+
+impl MainAppDeps {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        bg_proc: ClientBgProcess,
+        target_dir: &impl AsRef<Path>,
+        workspace_root: &impl AsRef<Path>,
+        broker_addr: Option<BrokerAddr>,
+        cache_size: CacheSize,
+        inline_limit: InlineLimit,
+        slots: Slots,
+        log: slog::Logger,
+    ) -> Result<Self> {
+        slog::debug!(
+            log, "creating app dependencies";
+            "broker_addr" => ?broker_addr,
+            "cache_size" => ?cache_size,
+            "inline_limit" => ?inline_limit,
+            "slots" => ?slots,
+        );
+        let client = Client::new(
+            bg_proc,
+            broker_addr,
+            workspace_root,
+            target_dir,
+            cache_size,
+            inline_limit,
+            slots,
+            log,
+        )?;
+        Ok(Self { client })
+    }
+}
+
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppState {
-    pub client: Client,
+    deps: MainAppDeps,
     queuing_state: JobQueuingState,
     cache_dir: PathBuf,
     logging_output: LoggingOutput,
@@ -547,8 +583,7 @@ impl MainAppState {
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        bg_proc: ClientBgProcess,
-        cargo: String,
+        deps: MainAppDeps,
         include_filter: Vec<String>,
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
@@ -556,38 +591,20 @@ impl MainAppState {
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
         target_directory: &impl AsRef<Path>,
-        broker_addr: Option<BrokerAddr>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
-        logger: Logger,
+        logging_output: LoggingOutput,
+        log: slog::Logger,
     ) -> Result<Self> {
-        let fs = Fs::new();
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
         slog::debug!(
-            log, "creating app dependencies";
+            log, "creating app state";
             "include_filter" => ?include_filter,
             "exclude_filter" => ?exclude_filter,
             "list_action" => ?list_action,
-            "broker_addr" => ?broker_addr
         );
 
         let cache_dir = target_directory.as_ref().to_owned();
-        fs.create_dir_all(&cache_dir)?;
-        let client = Client::new(
-            bg_proc,
-            broker_addr,
-            workspace_root,
-            cache_dir.clone(),
-            cache_size,
-            inline_limit,
-            slots,
-            log.clone(),
-        )?;
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let mut test_listing =
             load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
@@ -606,9 +623,9 @@ impl MainAppState {
         );
 
         Ok(Self {
-            client,
+            deps,
             queuing_state: JobQueuingState::new(
-                cargo,
+                "cargo".into(),
                 selected_packages,
                 filter,
                 stderr_color,
@@ -717,7 +734,7 @@ where
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.state.client.wait_for_outstanding_jobs()?;
+        self.state.deps.client.wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
         if self.state.queuing_state.list_action.is_none() {
@@ -778,7 +795,7 @@ struct LoggingOutputInner {
 }
 
 #[derive(Clone, Default)]
-struct LoggingOutput {
+pub struct LoggingOutput {
     inner: Arc<Mutex<LoggingOutputInner>>,
 }
 
@@ -815,7 +832,7 @@ pub enum Logger {
 }
 
 impl Logger {
-    fn build(&self, out: LoggingOutput) -> slog::Logger {
+    pub fn build(&self, out: LoggingOutput) -> slog::Logger {
         match self {
             Self::DefaultLogger(level) => {
                 let decorator = slog_term::PlainDecorator::new(out);
@@ -844,7 +861,7 @@ where
     let width = term.width() as usize;
     let prog = prog_factory(term.clone());
 
-    prog_driver.drive(&state.client, prog.clone());
+    prog_driver.drive(&state.deps.client, prog.clone());
     prog.update_length(state.queuing_state.expected_job_count);
 
     state
@@ -862,7 +879,7 @@ where
     let queuing = JobQueuing::new(
         state.log.clone(),
         &state.queuing_state,
-        &state.client,
+        &state.deps,
         width,
         prog.clone(),
         timeout_override,

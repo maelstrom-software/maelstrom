@@ -2,14 +2,14 @@ use anyhow::{Context as _, Result};
 use cargo_maelstrom::{
     cargo::CargoBuildError, config::Config, main_app_new,
     metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver, ListAction,
-    Logger, MainAppState,
+    Logger, LoggingOutput, MainAppDeps, MainAppState,
 };
 use cargo_metadata::Metadata as CargoMetadata;
 use clap::{command, Args};
 use console::Term;
 use maelstrom_base::Timeout;
 use maelstrom_client::ClientBgProcess;
-use maelstrom_util::process::ExitCode;
+use maelstrom_util::{fs::Fs, process::ExitCode};
 use std::{env, io::IsTerminal as _, process};
 
 #[derive(Args)]
@@ -94,8 +94,15 @@ pub fn main() -> Result<ExitCode> {
         args.remove(1);
     }
 
+    let bg_proc = ClientBgProcess::new_from_fork()?;
+    let fs = Fs::new();
+
     let (config, extra_options): (_, ExtraCommandLineOptions) =
         Config::new_with_extra_from_args("maelstrom/cargo-maelstrom", "CARGO_MAELSTROM", args)?;
+
+    let logging_output = LoggingOutput::default();
+    let logger = Logger::DefaultLogger(config.log_level);
+    let log = logger.build(logging_output.clone());
 
     let list_action = match (
         extra_options.list.tests,
@@ -107,8 +114,6 @@ pub fn main() -> Result<ExitCode> {
         (_, _, true) => Some(ListAction::ListPackages),
         (_, _, _) => None,
     };
-
-    let bg_proc = ClientBgProcess::new_from_fork()?;
 
     let cargo_metadata = process::Command::new("cargo")
         .args(["metadata", "--format-version=1"])
@@ -124,9 +129,22 @@ pub fn main() -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
 
-    let deps = MainAppState::new(
+    let target_dir = &cargo_metadata.target_directory;
+    fs.create_dir_all(target_dir)?;
+
+    let deps = MainAppDeps::new(
         bg_proc,
-        "cargo".into(),
+        target_dir,
+        &cargo_metadata.workspace_root,
+        config.broker,
+        config.cache_size,
+        config.inline_limit,
+        config.slots,
+        log.clone(),
+    )?;
+
+    let state = MainAppState::new(
+        deps,
         extra_options.include,
         extra_options.exclude,
         list_action,
@@ -134,20 +152,17 @@ pub fn main() -> Result<ExitCode> {
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
         &cargo_metadata.target_directory,
-        config.broker,
-        config.cache_size,
-        config.inline_limit,
-        config.slots,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,
         config.cargo_manifest_options,
-        Logger::DefaultLogger(config.log_level),
+        logging_output,
+        log,
     )?;
 
     let stdout_tty = std::io::stdout().is_terminal();
     let res = std::thread::scope(|scope| {
         let mut app = main_app_new(
-            &deps,
+            &state,
             stdout_tty,
             config.quiet,
             Term::buffered_stdout(),
@@ -158,6 +173,6 @@ pub fn main() -> Result<ExitCode> {
         app.drain()?;
         app.finish()
     });
-    drop(deps);
+    drop(state);
     maybe_print_build_error(res)
 }

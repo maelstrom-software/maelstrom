@@ -1,10 +1,8 @@
+use crate::MainAppDeps;
 use anyhow::{bail, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
-use maelstrom_client::{
-    spec::{Layer, PrefixOptions},
-    Client,
-};
+use maelstrom_client::spec::{Layer, PrefixOptions};
 use maelstrom_util::fs::Fs;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt as _;
@@ -140,14 +138,16 @@ pub struct GeneratedArtifacts {
 }
 
 pub fn add_generated_artifacts(
-    client: &Client,
+    deps: &MainAppDeps,
     binary_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
-    let (binary_artifact, _) =
-        client.add_layer(create_artifact_for_binary(binary_path, log.clone())?)?;
-    let (deps_artifact, _) =
-        client.add_layer(create_artifact_for_binary_deps(binary_path, log)?)?;
+    let (binary_artifact, _) = deps
+        .client
+        .add_layer(create_artifact_for_binary(binary_path, log.clone())?)?;
+    let (deps_artifact, _) = deps
+        .client
+        .add_layer(create_artifact_for_binary_deps(binary_path, log)?)?;
     Ok(GeneratedArtifacts {
         binary: binary_artifact,
         deps: deps_artifact,
