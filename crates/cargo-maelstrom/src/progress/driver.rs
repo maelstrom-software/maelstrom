@@ -1,7 +1,8 @@
 use super::ProgressIndicator;
+use crate::MainAppDeps;
 use anyhow::Result;
 use indicatif::ProgressBar;
-use maelstrom_client::{ArtifactUploadProgress, Client};
+use maelstrom_client::ArtifactUploadProgress;
 use std::collections::{HashMap, HashSet};
 use std::{
     sync::{
@@ -13,7 +14,7 @@ use std::{
 };
 
 pub trait ProgressDriver<'scope> {
-    fn drive<'dep, ProgressIndicatorT>(&mut self, client: &'dep Client, ind: ProgressIndicatorT)
+    fn drive<'dep, ProgressIndicatorT>(&mut self, deps: &'dep MainAppDeps, ind: ProgressIndicatorT)
     where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope;
@@ -88,7 +89,7 @@ impl Drop for UploadProgressBarTracker {
 }
 
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
-    fn drive<'dep, ProgressIndicatorT>(&mut self, client: &'dep Client, ind: ProgressIndicatorT)
+    fn drive<'dep, ProgressIndicatorT>(&mut self, deps: &'dep MainAppDeps, ind: ProgressIndicatorT)
     where
         ProgressIndicatorT: ProgressIndicator,
         'dep: 'scope,
@@ -103,10 +104,10 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                 });
                 let mut upload_bar_tracker = UploadProgressBarTracker::default();
                 while !canceled.load(Ordering::Acquire) {
-                    let upload_state = client.get_artifact_upload_progress()?;
+                    let upload_state = deps.get_artifact_upload_progress()?;
                     upload_bar_tracker.update(&ind, upload_state);
 
-                    let counts = client.get_job_state_counts()?;
+                    let counts = deps.get_job_state_counts()?;
                     if !ind.update_job_states(counts.recv()??)? {
                         break;
                     }

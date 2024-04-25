@@ -16,8 +16,15 @@ use cargo::{
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::TermLike;
-use maelstrom_base::{ArtifactType, JobSpec, NonEmpty, Sha256Digest, Timeout};
-use maelstrom_client::{spec::ImageConfig, Client, ClientBgProcess};
+use maelstrom_base::{
+    stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, NonEmpty,
+    Sha256Digest, Timeout,
+};
+use maelstrom_client::{
+    spec::{ImageConfig, Layer},
+    ArtifactUploadProgress, Client, ClientBgProcess,
+};
+use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     process::ExitCode,
@@ -255,7 +262,7 @@ where
             .iter()
             .map(|layer| {
                 slog::debug!(self.log, "adding layer"; "layer" => ?layer);
-                self.deps.client.add_layer(layer.clone())
+                self.deps.add_layer(layer.clone())
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
@@ -300,7 +307,7 @@ where
                 "image" => &image,
                 "version" => &version,
             );
-            let image = self.deps.client.get_container_image(image, version)?;
+            let image = self.deps.get_container_image(image, version)?;
             Ok(ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
@@ -349,7 +356,7 @@ where
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
-        self.deps.client.add_job(
+        self.deps.add_job(
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
@@ -385,7 +392,7 @@ where
     }
 }
 
-/// Enqueues tests as jobs in the given client.
+/// Enqueues tests as jobs using the given deps.
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
@@ -555,6 +562,36 @@ impl MainAppDeps {
             log,
         )?;
         Ok(Self { client })
+    }
+
+    pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        self.client.add_layer(layer)
+    }
+
+    pub fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
+        self.client.get_artifact_upload_progress()
+    }
+
+    pub fn get_job_state_counts(
+        &self,
+    ) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>> {
+        self.client.get_job_state_counts()
+    }
+
+    pub fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
+        self.client.get_container_image(name, tag)
+    }
+
+    pub fn add_job(
+        &self,
+        spec: JobSpec,
+        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+    ) -> Result<()> {
+        self.client.add_job(spec, handler)
+    }
+
+    pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
+        self.client.wait_for_outstanding_jobs()
     }
 }
 
@@ -734,7 +771,7 @@ where
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.state.deps.client.wait_for_outstanding_jobs()?;
+        self.state.deps.wait_for_outstanding_jobs()?;
         self.prog.finished()?;
 
         if self.state.queuing_state.list_action.is_none() {
@@ -861,7 +898,7 @@ where
     let width = term.width() as usize;
     let prog = prog_factory(term.clone());
 
-    prog_driver.drive(&state.deps.client, prog.clone());
+    prog_driver.drive(&state.deps, prog.clone());
     prog.update_length(state.queuing_state.expected_job_count);
 
     state
