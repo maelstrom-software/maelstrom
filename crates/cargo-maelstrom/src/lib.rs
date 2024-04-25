@@ -10,8 +10,7 @@ pub mod visitor;
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use cargo::{
-    get_cases_from_binary, run_cargo_test, CompilationOptions, FeatureSelectionOptions,
-    ManifestOptions, TestArtifactStream, WaitHandle,
+    CompilationOptions, FeatureSelectionOptions, ManifestOptions, TestArtifactStream, WaitHandle,
 };
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
@@ -87,7 +86,6 @@ fn filter_case(
 ///
 /// This object is separate from `MainAppState` because it is lent to `JobQueuing`
 struct JobQueuingState {
-    cargo: String,
     packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
     stderr_color: bool,
@@ -105,7 +103,6 @@ struct JobQueuingState {
 impl JobQueuingState {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        cargo: String,
         packages: BTreeMap<PackageId, CargoPackage>,
         filter: pattern::Pattern,
         stderr_color: bool,
@@ -119,7 +116,6 @@ impl JobQueuingState {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
         Self {
-            cargo,
             packages,
             filter,
             stderr_color,
@@ -167,6 +163,7 @@ struct TestListingResult {
 }
 
 fn list_test_cases<ProgressIndicatorT>(
+    deps: &MainAppDeps,
     log: slog::Logger,
     queuing_state: &JobQueuingState,
     ind: &ProgressIndicatorT,
@@ -180,12 +177,13 @@ where
 
     slog::debug!(log, "listing ignored tests"; "binary" => ?artifact.executable);
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    let ignored_cases: HashSet<_> = get_cases_from_binary(&binary, &Some("--ignored".into()))?
+    let ignored_cases: HashSet<_> = deps
+        .get_cases_from_binary(&binary, &Some("--ignored".into()))?
         .into_iter()
         .collect();
 
     slog::debug!(log, "listing tests"; "binary" => ?artifact.executable);
-    let mut cases = get_cases_from_binary(&binary, &None)?;
+    let mut cases = deps.get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_state.test_listing.lock().unwrap();
     listing.add_cases(package_name, artifact, &cases[..]);
@@ -225,7 +223,14 @@ where
 
         let running_tests = queuing_state.list_action.is_none();
 
-        let listing = list_test_cases(log.clone(), queuing_state, &ind, &artifact, &package_name)?;
+        let listing = list_test_cases(
+            deps,
+            log.clone(),
+            queuing_state,
+            &ind,
+            &artifact,
+            &package_name,
+        )?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
         slog::debug!(
@@ -435,8 +440,7 @@ where
 
         let (wait_handle, artifacts) = building_tests
             .then(|| {
-                run_cargo_test(
-                    &queuing_state.cargo,
+                deps.run_cargo_test(
                     queuing_state.stderr_color,
                     &queuing_state.feature_selection_options,
                     &queuing_state.compilation_options,
@@ -593,6 +597,31 @@ impl MainAppDeps {
     pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.client.wait_for_outstanding_jobs()
     }
+
+    pub fn run_cargo_test(
+        &self,
+        color: bool,
+        feature_selection_options: &FeatureSelectionOptions,
+        compilation_options: &CompilationOptions,
+        manifest_options: &ManifestOptions,
+        packages: Vec<String>,
+    ) -> Result<(WaitHandle, TestArtifactStream)> {
+        cargo::run_cargo_test(
+            color,
+            feature_selection_options,
+            compilation_options,
+            manifest_options,
+            packages,
+        )
+    }
+
+    pub fn get_cases_from_binary(
+        &self,
+        binary: &Path,
+        filter: &Option<String>,
+    ) -> Result<Vec<String>> {
+        cargo::get_cases_from_binary(binary, filter)
+    }
 }
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
@@ -662,7 +691,6 @@ impl MainAppState {
         Ok(Self {
             deps,
             queuing_state: JobQueuingState::new(
-                "cargo".into(),
                 selected_packages,
                 filter,
                 stderr_color,

@@ -85,14 +85,13 @@ impl Iterator for TestArtifactStream {
 }
 
 pub fn run_cargo_test(
-    cargo: &str,
     color: bool,
     feature_selection_options: &FeatureSelectionOptions,
     compilation_options: &CompilationOptions,
     manifest_options: &ManifestOptions,
     packages: Vec<String>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
-    let mut cmd = Command::new(cargo);
+    let mut cmd = Command::new("cargo");
     cmd.arg("test")
         .arg("--no-run")
         .arg("--message-format=json-render-diagnostics")
