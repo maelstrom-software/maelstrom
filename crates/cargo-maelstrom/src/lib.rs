@@ -7,6 +7,9 @@ pub mod progress;
 pub mod test_listing;
 pub mod visitor;
 
+#[cfg(test)]
+mod tests;
+
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};

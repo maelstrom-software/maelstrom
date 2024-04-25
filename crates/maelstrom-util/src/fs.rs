@@ -118,6 +118,10 @@ impl DirEntry {
         self.inner.path()
     }
 
+    pub fn file_name(&self) -> std::ffi::OsString {
+        self.inner.file_name()
+    }
+
     pub fn metadata(&self) -> Result<Metadata> {
         self.inner
             .metadata()
@@ -265,6 +269,14 @@ impl Fs {
 
     pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<()> {
         fs_trampoline!(std::fs::rename, from, to)
+    }
+
+    pub fn copy<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<u64> {
+        fs_trampoline!(std::fs::copy, from, to)
+    }
+
+    pub fn hard_link<P: AsRef<Path>, Q: AsRef<Path>>(&self, original: P, link: Q) -> Result<()> {
+        fs_trampoline!(std::fs::hard_link, original, link)
     }
 
     pub fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<()> {

@@ -13,22 +13,12 @@ mounts = [
 devices = ["fuse", "full", "null", "random", "tty", "urandom", "zero"]
 
 [[directives]]
-filter = "package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)"
+filter = """
+(package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)) ||
+package.equals(cargo-maelstrom)"""
 layers = [{ stubs = ["/proc/", "/tmp/"] }]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
-]
-
-[[directives]]
-filter = "package.equals(cargo-maelstrom)"
-image.name = "rust"
-image.use = ["layers", "environment"]
-enable_loopback = true
-added_layers = [{ stubs = ["/dev/null"] }]
-mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "tmp", mount_point = "/root" },
     { fs_type = "proc", mount_point = "/proc" },
 ]
 
@@ -58,17 +48,6 @@ mounts = [
 working_directory = "/root"
 added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }]
 added_devices = ["null", "fuse"]
-
-[[directives]]
-filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
-image.name = "alpine"
-image.use = ["layers", "environment"]
-enable_loopback = true
-mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "tmp", mount_point = "/root" },
-    { fs_type = "proc", mount_point = "/proc" },
-]
 
 [[directives]]
 added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }
