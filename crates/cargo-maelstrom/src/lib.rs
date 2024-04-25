@@ -21,7 +21,6 @@ use maelstrom_client::{
     spec::{ImageConfig, Layer},
     ArtifactUploadProgress, Client, ClientBgProcess,
 };
-use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     process::ExitCode,
@@ -308,12 +307,7 @@ where
                 "image" => &image,
                 "version" => &version,
             );
-            let image = self.deps.get_container_image(image, version)?;
-            Ok(ImageConfig {
-                layers: image.layers.clone(),
-                environment: image.env().cloned(),
-                working_directory: image.working_dir().map(From::from),
-            })
+            self.deps.get_container_image(image, version)
         };
 
         let filter_context = pattern::Context {
@@ -547,7 +541,7 @@ pub trait MainAppDeps: Sync {
 
     fn get_job_state_counts(&self) -> Result<std::sync::mpsc::Receiver<Result<JobStateCounts>>>;
 
-    fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage>;
+    fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig>;
 
     fn add_job(
         &self,
@@ -622,8 +616,13 @@ impl MainAppDeps for DefaultMainAppDeps {
         self.client.get_job_state_counts()
     }
 
-    fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        self.client.get_container_image(name, tag)
+    fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig> {
+        let image = self.client.get_container_image(name, tag)?;
+        Ok(ImageConfig {
+            layers: image.layers.clone(),
+            environment: image.env().cloned(),
+            working_directory: image.working_dir().map(From::from),
+        })
     }
 
     fn add_job(
