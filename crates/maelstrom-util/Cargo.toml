@@ -25,6 +25,7 @@ futures.workspace = true
 globset.workspace = true
 heck.workspace = true
 indoc.workspace = true
+lddtree.workspace = true
 lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }

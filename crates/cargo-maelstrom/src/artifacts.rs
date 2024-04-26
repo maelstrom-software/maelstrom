@@ -3,11 +3,11 @@ use anyhow::{bail, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
 use maelstrom_client::spec::{Layer, PrefixOptions};
+use maelstrom_util::elf::read_shared_libraries;
 use maelstrom_util::fs::Fs;
 use std::ffi::OsString;
 use std::os::unix::ffi::OsStringExt as _;
 use std::{
-    collections::{BTreeSet, HashMap},
     io,
     path::{Path, PathBuf},
 };
@@ -72,51 +72,21 @@ fn create_artifact_for_binary(binary_path: &Path, log: slog::Logger) -> Result<L
     })
 }
 
-fn read_shared_libraries(fs: &Fs, path: &Path, log: slog::Logger) -> Result<Vec<PathBuf>> {
-    if let Some(paths) = check_for_cached_so_listing(fs, path)? {
-        slog::debug!(log, "found cached shared libraries"; "path" => ?path);
-        return Ok(paths);
-    }
-
-    slog::debug!(log, "reading shared libraries"; "path" => ?path);
-
-    let dep_tree = lddtree::DependencyAnalyzer::new("/".into());
-    let deps = dep_tree.analyze(path)?;
-
-    let mut paths = BTreeSet::new();
-    if let Some(p) = deps.interpreter {
-        if let Some(lib) = deps.libraries.get(&p) {
-            paths.insert(lib.path.clone());
-        }
-    }
-
-    fn walk_deps(
-        deps: &[String],
-        libraries: &HashMap<String, lddtree::Library>,
-        paths: &mut BTreeSet<PathBuf>,
-    ) {
-        for dep in deps {
-            if let Some(lib) = libraries.get(dep) {
-                paths.insert(lib.path.clone());
-            }
-            if let Some(lib) = libraries.get(dep) {
-                walk_deps(&lib.needed, libraries, paths);
-            }
-        }
-    }
-    walk_deps(&deps.needed, &deps.libraries, &mut paths);
-
-    Ok(paths.into_iter().collect())
-}
-
 fn create_artifact_for_binary_deps(binary_path: &Path, log: slog::Logger) -> Result<Layer> {
     let fs = Fs::new();
 
-    let paths = read_shared_libraries(&fs, binary_path, log.clone())?;
-    encode_paths(
-        &paths,
-        fs.create_file(so_listing_path_from_binary_path(binary_path))?,
-    )?;
+    let paths = if let Some(paths) = check_for_cached_so_listing(&fs, binary_path)? {
+        slog::debug!(log, "found cached shared libraries"; "path" => ?binary_path);
+        paths
+    } else {
+        slog::debug!(log, "reading shared libraries"; "path" => ?binary_path);
+        let paths = read_shared_libraries(binary_path)?;
+        encode_paths(
+            &paths,
+            fs.create_file(so_listing_path_from_binary_path(binary_path))?,
+        )?;
+        paths
+    };
 
     slog::debug!(log, "adding layer for binary deps"; "binary" => ?binary_path);
     Ok(Layer::Paths {

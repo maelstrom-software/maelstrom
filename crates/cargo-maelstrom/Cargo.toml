@@ -23,7 +23,6 @@ derive_more.workspace = true
 enumset.workspace = true
 globset.workspace = true
 indicatif.workspace = true
-lddtree.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
 maelstrom-macro.workspace = true
