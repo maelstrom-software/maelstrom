@@ -1,4 +1,4 @@
-# Fields
+# Directive Fields
 
 This chapter specifies all of the possible fields for a directive. Most, but
 not all, of these fields have an obvious mapping to [job-spec
@@ -343,5 +343,4 @@ timeout = 60
 ```
 
 This field sets the [`timeout`](../../spec.md#timeout) field of the
-job spec. It must be an unsigned, 32-bit integer. It indicates the timeout
-value in seconds. A value of 0 indicates no timeout.
+job spec. It must be an unsigned, 32-bit integer.

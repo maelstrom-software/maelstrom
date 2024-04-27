@@ -180,4 +180,4 @@ Job don't have any supplemental GIDs, nor is there any way to provide them.
 
 This specifies an optional timeout for the job, in seconds. If the job takes
 longer than the timeout, Maelstrom will terminate it and return the partial
-results.
+results. A value of 0 indicates an infinite timeout.

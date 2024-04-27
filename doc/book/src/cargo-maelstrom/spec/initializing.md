@@ -9,5 +9,6 @@ you:
 cargo maelstrom --init
 ```
 
-The resulting `maelstrom-test.toml` will match the default configuration. It
-will also include some commented-out examples that may be useful.
+This will create a `maelstrom-test.toml` file, unless one already exists, then
+exit. The resulting `maelstrom-test.toml` will match the default configuration.
+It will also include some commented-out examples that may be useful.
