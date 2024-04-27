@@ -144,7 +144,7 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
 
 #[derive(Config, Debug, Default)]
 pub struct FeatureSelectionOptions {
-    /// Comma separated list of features to activate.
+    /// Comma-separated list of features to activate.
     #[config(
         option,
         short = 'F',
