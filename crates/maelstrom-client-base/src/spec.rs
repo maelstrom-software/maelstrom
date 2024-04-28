@@ -10,6 +10,7 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
+use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -111,6 +112,32 @@ pub enum Layer {
     Stubs { stubs: Vec<String> },
     #[proto(other_type = proto::SymlinksLayer)]
     Symlinks { symlinks: Vec<SymlinkSpec> },
+}
+
+impl Layer {
+    pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
+        match self {
+            Self::Tar { path } => *path = replace_template_vars(path.as_str(), vars)?.into(),
+            Self::Glob { glob, .. } => *glob = replace_template_vars(glob, vars)?,
+            Self::Paths { paths, .. } => {
+                for path in paths {
+                    *path = replace_template_vars(path.as_str(), vars)?.into();
+                }
+            }
+            Self::Stubs { stubs, .. } => {
+                for stub in stubs {
+                    *stub = replace_template_vars(stub, vars)?;
+                }
+            }
+            Self::Symlinks { symlinks } => {
+                for SymlinkSpec { link, target } in symlinks {
+                    *link = replace_template_vars(link.as_str(), vars)?.into();
+                    *target = replace_template_vars(target.as_str(), vars)?.into();
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// An enum and struct (`EnumSet<ImageUse>`) used for deserializing "image use" statements in JSON,

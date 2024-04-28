@@ -8,7 +8,7 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, Layer, PossiblyImage};
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{fs::Fs, template::TemplateVars};
 use serde::Deserialize;
 use std::{collections::BTreeMap, path::Path, str};
 
@@ -268,6 +268,17 @@ fn pattern_match(filter: &pattern::Pattern, context: &pattern::Context) -> bool 
 }
 
 impl AllMetadata {
+    pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
+        for directive in &mut self.directives {
+            if let Some(PossiblyImage::Explicit(layers)) = &mut directive.layers {
+                for layer in layers {
+                    layer.replace_template_vars(vars)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn get_metadata_for_test(
         &self,
         context: &pattern::Context,

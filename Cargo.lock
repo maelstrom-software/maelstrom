@@ -895,6 +895,7 @@ dependencies = [
  "maelstrom-test",
  "maelstrom-util",
  "maelstrom-worker",
+ "maplit",
  "regex",
  "regex-macro",
  "serde",

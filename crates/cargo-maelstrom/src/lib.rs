@@ -27,6 +27,7 @@ use maelstrom_client::{
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     process::ExitCode,
+    template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
@@ -80,6 +81,16 @@ fn filter_case(
     pattern::interpret_pattern(p, &c).expect("case is provided")
 }
 
+fn do_template_replacement(
+    test_metadata: &mut AllMetadata,
+    compilation_options: &CompilationOptions,
+) -> Result<()> {
+    let profile = compilation_options.profile.clone().unwrap_or("dev".into());
+    let vars = TemplateVars::new().with_var("profile", profile).unwrap();
+    test_metadata.replace_template_vars(&vars)?;
+    Ok(())
+}
+
 /// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
@@ -106,16 +117,17 @@ impl JobQueuingState {
         packages: BTreeMap<PackageId, CargoPackage>,
         filter: pattern::Pattern,
         stderr_color: bool,
-        test_metadata: AllMetadata,
+        mut test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
-    ) -> Self {
+    ) -> Result<Self> {
         let expected_job_count = test_listing.expected_job_count(&filter);
+        do_template_replacement(&mut test_metadata, &compilation_options)?;
 
-        Self {
+        Ok(Self {
             packages,
             filter,
             stderr_color,
@@ -128,7 +140,7 @@ impl JobQueuingState {
             feature_selection_options,
             compilation_options,
             manifest_options,
-        }
+        })
     }
 }
 
@@ -741,7 +753,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 feature_selection_options,
                 compilation_options,
                 manifest_options,
-            ),
+            )?,
             cache_dir,
             logging_output,
             log,
