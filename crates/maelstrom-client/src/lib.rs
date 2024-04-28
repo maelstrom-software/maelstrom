@@ -100,11 +100,14 @@ impl ClientBgProcess {
 
 impl Drop for Client {
     fn drop(&mut self) {
+        slog::debug!(self.log, "dropping Client");
         drop(self.requester.take());
+        slog::debug!(self.log, "Client::drop: waiting for dispatcher");
         print_error(
             "dispatcher",
             self.dispatcher_handle.take().unwrap().join().unwrap(),
         );
+        slog::debug!(self.log, "Client::drop: waiting for child process");
         self.process_handle.wait().unwrap();
     }
 }
@@ -154,6 +157,7 @@ impl Client {
             dispatcher_handle: Some(dispatcher_handle),
             log,
         };
+        slog::debug!(s.log, "finding maelstrom container dir");
 
         let container_image_depot_cache_dir = BaseDirectories::with_prefix("maelstrom/container")
             .with_context(|| "finding container image depot cache dir")?
