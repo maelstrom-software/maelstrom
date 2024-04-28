@@ -376,12 +376,41 @@ impl Fs {
         path.as_ref().exists()
     }
 
+    pub fn walk<P: AsRef<Path>>(&self, path: P) -> Walker {
+        Walker::new(self, path.as_ref())
+    }
+
     pub fn glob_walk<'fs, 'glob, P: AsRef<Path>>(
         &'fs self,
         path: P,
         glob: &'glob globset::GlobSet,
     ) -> GlobWalker<'fs, 'glob> {
         GlobWalker::new(self, path.as_ref(), glob)
+    }
+}
+
+pub struct Walker<'fs> {
+    inner: walkdir::IntoIter,
+    _fs: &'fs Fs,
+}
+
+impl<'fs> Walker<'fs> {
+    fn new(fs: &'fs Fs, path: &Path) -> Self {
+        Self {
+            inner: walkdir::WalkDir::new(path).into_iter(),
+            _fs: fs,
+        }
+    }
+}
+
+impl<'fs> Iterator for Walker<'fs> {
+    type Item = Result<PathBuf>;
+
+    fn next(&mut self) -> Option<Result<PathBuf>> {
+        match self.inner.next()? {
+            Ok(entry) => Some(Ok(entry.into_path())),
+            Err(err) => Some(Err(err.into())),
+        }
     }
 }
 
