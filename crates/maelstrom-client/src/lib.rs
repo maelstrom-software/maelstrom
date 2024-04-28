@@ -1,5 +1,3 @@
-pub mod test;
-
 pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
 
 use anyhow::{anyhow, bail, Context as _, Result};

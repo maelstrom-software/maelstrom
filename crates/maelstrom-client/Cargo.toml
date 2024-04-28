@@ -13,7 +13,6 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-assert_matches.workspace = true
 indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client-base.workspace = true
