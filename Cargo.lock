@@ -3135,6 +3135,7 @@ dependencies = [
  "num_cpus",
  "pin-project",
  "rand",
+ "regex",
  "serde",
  "serde_with",
  "sha2",

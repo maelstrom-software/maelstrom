@@ -31,6 +31,7 @@ maelstrom-base.workspace = true
 maelstrom-linux = { workspace = true, features = ["std"] }
 num_cpus.workspace = true
 pin-project.workspace = true
+regex.workspace = true
 serde.workspace = true
 serde_with.workspace = true
 sha2.workspace = true
