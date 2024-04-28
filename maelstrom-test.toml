@@ -23,8 +23,20 @@ mounts = [
 ]
 
 [[directives]]
+filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
+layers = [
+    { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
+    { paths = ["target/<profile>/maelstrom-client"], canonicalize = true }
+]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "proc", mount_point = "/proc" },
+]
+devices = ["null", "fuse"]
+environment = { HOME = "/tmp" }
+
+[[directives]]
 filter = """
-package.equals(maelstrom-client) ||
 package.equals(maelstrom-client-process) ||
 package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||

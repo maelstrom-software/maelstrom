@@ -2,7 +2,7 @@ pub mod test;
 
 pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
 
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{
     stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
@@ -13,7 +13,17 @@ use maelstrom_client_base::{
 use maelstrom_container::ContainerImage;
 use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, Slots};
 use spec::Layer;
-use std::{future::Future, os::unix::net::UnixStream, path::Path, pin::Pin, process, thread};
+use std::os::linux::net::SocketAddrExt as _;
+use std::{
+    future::Future,
+    io::{BufRead as _, BufReader},
+    os::unix::net::{SocketAddr, UnixStream},
+    path::Path,
+    pin::Pin,
+    process,
+    process::{Command, Stdio},
+    thread,
+};
 use xdg::BaseDirectories;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -87,6 +97,32 @@ impl ClientBgProcess {
                 }
             }
         }
+    }
+
+    pub fn new_from_bin(bin_path: &Path) -> Result<Self> {
+        let mut proc = Command::new(bin_path)
+            .stderr(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()?;
+        let stderr = proc.stderr.take().unwrap();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stderr).lines() {
+                let Ok(line) = line else { break };
+                println!("client bg-process: {line}");
+            }
+        });
+        let mut address = String::new();
+        BufReader::new(proc.stdout.take().unwrap()).read_line(&mut address)?;
+        let trimmed_address = address.trim();
+        if trimmed_address.is_empty() {
+            bail!("process didn't return any address")
+        }
+        let sock =
+            UnixStream::connect_addr(&SocketAddr::from_abstract_name(trimmed_address.as_bytes())?)?;
+        Ok(Self {
+            handle: ClientBgHandle(proc.into()),
+            sock: Some(sock),
+        })
     }
 
     fn take_socket(&mut self) -> UnixStream {

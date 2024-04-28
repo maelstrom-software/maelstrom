@@ -8,6 +8,8 @@ pub fn main() -> Result<()> {
         let listener = UnixListener::bind_addr(&SocketAddr::from_abstract_name(name.as_bytes())?)?;
         slog::info!(log, "listening on unix-abstract:{name}");
 
+        println!("{name}");
+
         let (sock, addr) = listener.accept()?;
         slog::info!(log, "got connection"; "address" => ?addr);
 

@@ -400,6 +400,13 @@ impl Pid {
     }
 }
 
+#[cfg(any(test, feature = "std"))]
+impl From<std::process::Child> for Pid {
+    fn from(p: std::process::Child) -> Self {
+        Self(p.id().try_into().unwrap())
+    }
+}
+
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct PollEvents(c_short);
 
