@@ -123,6 +123,23 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     }
 }
 
+fn format_test_output(res: &JobOutputResult, name: &str, cjid: ClientJobId) -> Vec<String> {
+    let mut test_output_lines = vec![];
+    match res {
+        JobOutputResult::None => {}
+        JobOutputResult::Inline(bytes) => {
+            test_output_lines.push(String::from_utf8_lossy(bytes).into());
+        }
+        JobOutputResult::Truncated { first, truncated } => {
+            test_output_lines.push(String::from_utf8_lossy(first).into());
+            test_output_lines.push(format!(
+                "job {cjid}: {name} truncated, {truncated} bytes lost"
+            ));
+        }
+    }
+    test_output_lines
+}
+
 impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
     fn print_job_result(&self, result_str: ColoredString, duration_str: String) {
         if self.width > 10 {
@@ -157,14 +174,19 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
     pub fn job_finished(&self, cjid: ClientJobId, result: JobOutcomeResult) {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
-        let mut test_output_lines: Vec<String> = vec![];
+        let mut test_output_stderr: Vec<String> = vec![];
+        let mut test_output_stdout: Vec<String> = vec![];
         let mut duration_str = String::new();
         match result {
             Ok(JobOutcome::Completed(JobCompleted {
                 status,
-                effects: JobEffects {
-                    stderr, duration, ..
-                },
+                effects:
+                    JobEffects {
+                        stdout,
+                        stderr,
+                        duration,
+                        ..
+                    },
             })) => {
                 duration_str = format!("{:.3}s", duration.as_secs_f64());
                 let mut job_failed = true;
@@ -187,25 +209,17 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     }
                 };
                 if job_failed {
-                    match stderr {
-                        JobOutputResult::None => {}
-                        JobOutputResult::Inline(bytes) => {
-                            test_output_lines.push(String::from_utf8_lossy(&bytes).into());
-                        }
-                        JobOutputResult::Truncated { first, truncated } => {
-                            test_output_lines.push(String::from_utf8_lossy(&first).into());
-                            test_output_lines.push(format!(
-                                "job {cjid}: stderr truncated, {truncated} bytes lost"
-                            ));
-                        }
-                    }
+                    test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
+                    test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
                 }
             }
-            Ok(JobOutcome::TimedOut(_)) => {
+            Ok(JobOutcome::TimedOut(JobEffects { stdout, stderr, .. })) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
                 self.tracker
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
+                test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
+                test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
             }
             Err(JobError::Execution(err)) => {
                 result_str = "ERR".yellow();
@@ -225,7 +239,10 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         if let Some(details_str) = result_details {
             self.ind.println(details_str);
         }
-        for line in test_output_lines {
+        for line in test_output_stdout {
+            self.ind.println(line);
+        }
+        for line in test_output_stderr {
             self.ind.eprintln(line);
         }
         self.ind.job_finished();
