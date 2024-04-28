@@ -80,7 +80,7 @@ jobs:
           echo `pwd`/mdbook >> $GITHUB_PATH
       - name: Build Documentation
         run: |
-          (cd doc/book && mdbook build --dest-dir ../../website/doc)
+          mdbook build --dest-dir ../../../../website/book doc/book
       - name: Set up Pages
         uses: actions/configure-pages@v4
       - name: Upload Artifact
