@@ -26,7 +26,7 @@ mounts = [
 filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
 layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
-    { paths = ["target/<profile>/maelstrom-client"], canonicalize = true }
+    { paths = ["<build_dir>/maelstrom-client"], canonicalize = true }
 ]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },

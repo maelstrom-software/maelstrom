@@ -10,7 +10,7 @@ pub mod visitor;
 #[cfg(test)]
 mod tests;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use artifacts::GeneratedArtifacts;
 use cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
@@ -84,9 +84,20 @@ fn filter_case(
 fn do_template_replacement(
     test_metadata: &mut AllMetadata,
     compilation_options: &CompilationOptions,
+    target_dir: &Path,
 ) -> Result<()> {
     let profile = compilation_options.profile.clone().unwrap_or("dev".into());
-    let vars = TemplateVars::new().with_var("profile", profile).unwrap();
+    let mut target = target_dir.to_owned();
+    match profile.as_str() {
+        "dev" => target.push("debug"),
+        other => target.push(other),
+    }
+    let build_dir = target
+        .to_str()
+        .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
+    let vars = TemplateVars::new()
+        .with_var("build_dir", build_dir)
+        .unwrap();
     test_metadata.replace_template_vars(&vars)?;
     Ok(())
 }
@@ -120,12 +131,17 @@ impl JobQueuingState {
         mut test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
+        target_directory: impl AsRef<Path>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
     ) -> Result<Self> {
         let expected_job_count = test_listing.expected_job_count(&filter);
-        do_template_replacement(&mut test_metadata, &compilation_options)?;
+        do_template_replacement(
+            &mut test_metadata,
+            &compilation_options,
+            target_directory.as_ref(),
+        )?;
 
         Ok(Self {
             packages,
@@ -750,6 +766,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 test_metadata,
                 test_listing,
                 list_action,
+                target_directory,
                 feature_selection_options,
                 compilation_options,
                 manifest_options,
