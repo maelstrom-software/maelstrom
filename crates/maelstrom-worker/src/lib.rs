@@ -562,9 +562,11 @@ fn mimic_child_death(status: WaitStatus) -> ! {
 /// in the gen 2 process if and only if it returns `Ok(())`. It'll be in the gen 0 or gen 1 process
 /// if and only if it return `Err(_)`.
 ///
-/// WARNING: This function must only be called while the program is single-threaded, which is why
-/// it's marked unsafe.
+/// WARNING: This function must only be called while the program is single-threaded. We check this
+/// and will panic if called when there is more than one thread.
 pub fn clone_into_pid_and_user_namespace() -> Result<()> {
+    maelstrom_util::thread::assert_single_threaded()?;
+
     let gen_0_uid = linux::getuid();
     let gen_0_gid = linux::getgid();
 

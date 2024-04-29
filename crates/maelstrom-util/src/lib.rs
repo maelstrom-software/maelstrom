@@ -17,4 +17,5 @@ pub mod net;
 pub mod process;
 pub mod sync;
 pub mod template;
+pub mod thread;
 pub mod time;
