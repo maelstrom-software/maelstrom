@@ -1,4 +1,4 @@
-# Running as systemd Service
+# Running as `systemd` Service
 
 You may choose to run `maelstrom-worker` in the background as a
 [systemd](https://systemd.io/) service. This chapter covers one way to do that.

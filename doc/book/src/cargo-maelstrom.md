@@ -48,7 +48,7 @@ Listing](#test-listing)
 # Terminal Output
 By default `cargo-maelstrom` prints the name of the tests that have been
 completed to stdout. It also displays four progress bars indicating the state of
-jobs. See [Job States](../clustered_job_runner_management/job_states.md).
+jobs. See [Job States](../job-states.md).
 
 When tests fail, their stderr is printed out after the name (also to stdout.)
 

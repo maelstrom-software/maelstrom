@@ -1,9 +1,9 @@
 # maelstrom-broker
 
 The `maelstrom-broker` is the coordinator and scheduler for a Mealstrom
-cluster. In order to have a cluster, there must first be a broker. The broker
-must be started before clients and workers, as the clients and workers connect
-to the broker, and will exit if they can't establish a connection.
+cluster. In order to have a cluster, there must be a broker. The broker must be
+started before clients and workers, as the clients and workers connect to the
+broker, and will exit if they can't establish a connection.
 
 The broker doesn't consume much CPU, so it can be run on any machine, including
 a worker machine. Ideally, whatever machine it runs on should have good
