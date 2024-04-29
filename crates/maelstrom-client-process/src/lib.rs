@@ -33,7 +33,7 @@ async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn main_after_fork(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+pub async fn main_after_clone(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
@@ -48,5 +48,5 @@ pub async fn main_after_fork(sock: StdUnixStream, log: Option<Logger>) -> Result
 
 pub fn main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     clone_into_pid_and_user_namespace()?;
-    main_after_fork(sock, log)
+    main_after_clone(sock, log)
 }

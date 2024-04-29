@@ -15,7 +15,7 @@ pub fn main() -> Result<()> {
         let (sock, addr) = listener.accept()?;
         slog::info!(log, "got connection"; "address" => ?addr);
 
-        let res = maelstrom_client_process::main_after_fork(sock, Some(log.clone()));
+        let res = maelstrom_client_process::main_after_clone(sock, Some(log.clone()));
         slog::info!(log, "shutting down"; "res" => ?res);
         res
     })
