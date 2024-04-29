@@ -13,10 +13,10 @@ when the client is connected to a cluster.
 
 Client with local workers share these configuration values:
 
-Value                                                    | Type    | Description                                             | Default
----------------------------------------------------------|---------|---------------------------------------------------------|-----------------
-<span style="white-space: nowrap;">`cache-root`</span>   | string  | [cache directory](#cache-root)                                | `$XDG_CACHE_HOME/maelstrom/worker/`
+Value                                                    | Type    | Description                                                   | Default
+---------------------------------------------------------|---------|---------------------------------------------------------------|----------
 <span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size)                  | `"1 GB"`
+<span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured stdout and stderr](#inline-limit) | `"1 MB"`
 `slots`                                                  | number  | [job slots available](#slots)                                 | 1 per CPU
 
 ## `cache-size`
