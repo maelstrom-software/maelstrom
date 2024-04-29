@@ -156,7 +156,7 @@ pub struct Client {
 fn map_tonic_error(error: tonic::Status) -> anyhow::Error {
     // We use this error code to serialize application errors.
     if error.code() == tonic::Code::Unknown {
-        anyhow::Error::msg(format!("Remote Error:\n{}", error.message()))
+        anyhow::Error::msg(format!("Client process error:\n{}", error.message()))
     } else {
         error.into()
     }
@@ -240,7 +240,8 @@ impl Client {
                 Box::pin(async move {
                     let _ = send.send(flatten_rpc_result(builder(client).await));
                 })
-            }))?;
+            }))
+            .with_context(|| "sending RPC request to client process")?;
         Ok(recv)
     }
 
@@ -253,7 +254,9 @@ impl Client {
         ProtRetT: IntoResult,
         ProtRetT::Output: Send + 'static,
     {
-        self.send_async(builder)?.recv()?
+        self.send_async(builder)?
+            .recv()
+            .with_context(|| "receiving RPC response from client process")?
     }
 
     pub fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
@@ -261,22 +264,29 @@ impl Client {
         let msg = proto::AddArtifactRequest {
             path: path.into_proto_buf(),
         };
-        let digest =
-            self.send_sync(move |mut client| async move { client.add_artifact(msg).await })?;
+        let digest = self
+            .send_sync(move |mut client| async move { client.add_artifact(msg).await })
+            .with_context(|| format!("adding artifact {}", path.to_string_lossy()))?;
         slog::debug!(self.log, "client.add_artifact complete");
-        Ok(digest.try_into()?)
+        Ok(digest
+            .try_into()
+            .with_context(|| "converting artifact digest from protobuf")?)
     }
 
     pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         slog::debug!(self.log, "client.add_layer"; "layer" => ?layer);
         let msg = proto::AddLayerRequest {
-            layer: Some(layer.into_proto_buf()),
+            layer: Some(layer.clone().into_proto_buf()),
         };
-        let spec = self.send_sync(move |mut client| async move { client.add_layer(msg).await })?;
+        let spec = self
+            .send_sync(move |mut client| async move { client.add_layer(msg).await })
+            .with_context(|| format!("adding layer {layer:#?}"))?;
         slog::debug!(self.log, "client.add_layer complete");
         Ok((
-            TryFromProtoBuf::try_from_proto_buf(spec.digest)?,
-            TryFromProtoBuf::try_from_proto_buf(spec.r#type)?,
+            TryFromProtoBuf::try_from_proto_buf(spec.digest)
+                .with_context(|| "converting artifact digest from protobuf")?,
+            TryFromProtoBuf::try_from_proto_buf(spec.r#type)
+                .with_context(|| "converting artifact type from protobuf")?,
         ))
     }
 
@@ -285,8 +295,9 @@ impl Client {
             name: name.into(),
             tag: tag.into(),
         };
-        let img =
-            self.send_sync(move |mut client| async move { client.get_container_image(msg).await })?;
+        let img = self
+            .send_sync(move |mut client| async move { client.get_container_image(msg).await })
+            .with_context(|| format!("getting container image {name}:{tag}"))?;
         TryFromProtoBuf::try_from_proto_buf(img)
     }
 
@@ -296,7 +307,7 @@ impl Client {
         handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
     ) -> Result<()> {
         let msg = proto::AddJobRequest {
-            spec: Some(spec.into_proto_buf()),
+            spec: Some(spec.clone().into_proto_buf()),
         };
         self.requester
             .as_ref()
@@ -305,8 +316,10 @@ impl Client {
                 Box::pin(async move {
                     let inner = async move {
                         let res = client.add_job(msg).await?.into_inner();
-                        let result: proto::JobOutcomeResult =
-                            res.result.ok_or(anyhow!("malformed AddJobResponse"))?;
+                        let result: proto::JobOutcomeResult = res
+                            .result
+                            .ok_or(anyhow!("malformed AddJobResponse"))
+                            .with_context(|| format!("adding job {spec:#?}"))?;
                         Result::<_, anyhow::Error>::Ok((
                             TryFromProtoBuf::try_from_proto_buf(res.client_job_id)?,
                             TryFromProtoBuf::try_from_proto_buf(result)?,
@@ -323,7 +336,8 @@ impl Client {
     pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
         self.send_sync(move |mut client| async move {
             client.wait_for_outstanding_jobs(proto::Void {}).await
-        })?;
+        })
+        .with_context(|| "waiting for outstanding jobs")?;
         Ok(())
     }
 
