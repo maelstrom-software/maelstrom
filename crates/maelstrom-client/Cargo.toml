@@ -32,8 +32,11 @@ xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
+regex.workspace = true
+serde_json.workspace = true
 slog-async.workspace = true
 slog-term.workspace = true
+tar.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true
 nonempty.workspace = true

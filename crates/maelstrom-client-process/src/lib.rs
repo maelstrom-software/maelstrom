@@ -5,6 +5,8 @@ mod router;
 mod rpc;
 mod stream_wrapper;
 
+pub use maelstrom_worker::clone_into_pid_and_user_namespace;
+
 use anyhow::Result;
 use client::Client;
 use futures::stream::StreamExt as _;
@@ -31,7 +33,7 @@ async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-async fn main_inner(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+pub async fn main_after_fork(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
@@ -45,6 +47,6 @@ async fn main_inner(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
 }
 
 pub fn main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
-    maelstrom_worker::clone_into_pid_and_user_namespace()?;
-    main_inner(sock, log)
+    clone_into_pid_and_user_namespace()?;
+    main_after_fork(sock, log)
 }
