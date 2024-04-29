@@ -268,9 +268,7 @@ impl Client {
             .send_sync(move |mut client| async move { client.add_artifact(msg).await })
             .with_context(|| format!("adding artifact {}", path.to_string_lossy()))?;
         slog::debug!(self.log, "client.add_artifact complete");
-        digest
-            .try_into()
-            .with_context(|| "converting artifact digest from protobuf")
+        Ok(digest.try_into()?)
     }
 
     pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
@@ -283,10 +281,8 @@ impl Client {
             .with_context(|| format!("adding layer {layer:#?}"))?;
         slog::debug!(self.log, "client.add_layer complete");
         Ok((
-            TryFromProtoBuf::try_from_proto_buf(spec.digest)
-                .with_context(|| "converting artifact digest from protobuf")?,
-            TryFromProtoBuf::try_from_proto_buf(spec.r#type)
-                .with_context(|| "converting artifact type from protobuf")?,
+            TryFromProtoBuf::try_from_proto_buf(spec.digest)?,
+            TryFromProtoBuf::try_from_proto_buf(spec.r#type)?,
         ))
     }
 
