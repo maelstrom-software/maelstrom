@@ -131,7 +131,7 @@ fn cache_dir() -> PathBuf {
 fn main() -> Result<ExitCode> {
     let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
 
-    let bg_proc = ClientBgProcess::new_from_fork()?;
+    let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
     maelstrom_util::log::run_with_logger(config.log_level, |log| {
         let fs = Fs::new();

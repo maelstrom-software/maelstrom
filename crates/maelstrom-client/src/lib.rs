@@ -9,7 +9,10 @@ use maelstrom_client_base::{
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_container::ContainerImage;
-use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, Slots};
+use maelstrom_util::{
+    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    log::LoggerFactory,
+};
 use spec::Layer;
 use std::os::linux::net::SocketAddrExt as _;
 use std::{
@@ -79,7 +82,7 @@ pub struct ClientBgProcess {
 }
 
 impl ClientBgProcess {
-    pub fn new_from_fork() -> Result<Self> {
+    pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
         let (sock1, sock2) = UnixStream::pair()?;
         if let Some(pid) = maelstrom_linux::fork().map_err(|e| anyhow!("fork failed: {e}"))? {
             Ok(Self {
@@ -87,7 +90,7 @@ impl ClientBgProcess {
                 sock: Some(sock1),
             })
         } else {
-            match maelstrom_client_process::main(sock2, None) {
+            match maelstrom_client_process::main(sock2, LoggerFactory::FromLevel(log_level)) {
                 Ok(()) => process::exit(0),
                 Err(err) => {
                     eprintln!("exiting because of error: {err}");

@@ -12,9 +12,8 @@ use client::Client;
 use futures::stream::StreamExt as _;
 use maelstrom_base::Sha256Digest;
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
-use maelstrom_util::{async_fs, io::Sha256Stream};
+use maelstrom_util::{async_fs, io::Sha256Stream, log::LoggerFactory};
 use rpc::Handler;
-use slog::Logger;
 use std::{error, os::unix::net::UnixStream as StdUnixStream, path::Path, time::SystemTime};
 use stream_wrapper::StreamWrapper;
 use tokio::net::UnixStream as TokioUnixStream;
@@ -33,7 +32,7 @@ async fn calculate_digest(path: &Path) -> Result<(SystemTime, Sha256Digest)> {
 type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
-pub async fn main_after_clone(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+pub async fn main_after_clone(sock: StdUnixStream, log: LoggerFactory) -> Result<()> {
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
@@ -46,7 +45,7 @@ pub async fn main_after_clone(sock: StdUnixStream, log: Option<Logger>) -> Resul
     Ok(())
 }
 
-pub fn main(sock: StdUnixStream, log: Option<Logger>) -> Result<()> {
+pub fn main(sock: StdUnixStream, log: LoggerFactory) -> Result<()> {
     clone_into_pid_and_user_namespace()?;
     main_after_clone(sock, log)
 }

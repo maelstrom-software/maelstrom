@@ -94,11 +94,11 @@ pub fn main() -> Result<ExitCode> {
         args.remove(1);
     }
 
-    let bg_proc = ClientBgProcess::new_from_fork()?;
-    let fs = Fs::new();
-
     let (config, extra_options): (_, ExtraCommandLineOptions) =
         Config::new_with_extra_from_args("maelstrom/cargo-maelstrom", "CARGO_MAELSTROM", args)?;
+
+    let fs = Fs::new();
+    let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
     let logging_output = LoggingOutput::default();
     let logger = Logger::DefaultLogger(config.log_level);

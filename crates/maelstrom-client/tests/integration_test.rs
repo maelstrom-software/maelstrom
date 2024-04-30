@@ -5,8 +5,9 @@ use maelstrom_base::{
 };
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_client_base::spec::{Layer, PrefixOptions};
-use maelstrom_util::elf::read_shared_libraries;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{
+    config::common::LogLevel, elf::read_shared_libraries, fs::Fs, log::LoggerFactory,
+};
 use regex::Regex;
 use slog::Drain as _;
 use std::panic::Location;
@@ -27,7 +28,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
     // code in some code-path which won't execute but the compiler won't optimize out.
     if std::env::args().next().unwrap() == "not_going_to_happen" {
         let (a, _) = std::os::unix::net::UnixStream::pair().unwrap();
-        maelstrom_client_process::main(a, None).unwrap();
+        maelstrom_client_process::main(a, LoggerFactory::FromLevel(LogLevel::Debug)).unwrap();
     }
 
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-client"));

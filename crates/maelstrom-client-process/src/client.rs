@@ -22,8 +22,9 @@ use maelstrom_client_base::{
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheRoot, CacheSize, InlineLimit, Slots},
+    config::common::{BrokerAddr, CacheRoot, CacheSize, InlineLimit, LogLevel, Slots},
     ext::BoolExt,
+    log::LoggerFactory,
     manifest::{AsyncManifestWriter, ManifestBuilder},
     net, sync,
 };
@@ -104,7 +105,7 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
 pub struct Client {
-    state_machine: Arc<StateMachine<Option<Logger>, ClientState>>,
+    state_machine: Arc<StateMachine<LoggerFactory, ClientState>>,
 }
 
 struct ClientState {
@@ -341,7 +342,7 @@ impl ClientState {
 }
 
 impl Client {
-    pub fn new(log: Option<Logger>) -> Self {
+    pub fn new(log: LoggerFactory) -> Self {
         Self {
             state_machine: Arc::new(StateMachine::new(log)),
         }
@@ -358,17 +359,22 @@ impl Client {
         inline_limit: InlineLimit,
         slots: Slots,
     ) -> Result<()> {
-        async fn file_logger(fs: &async_fs::Fs, cache_dir: &Path) -> Result<Logger> {
+        async fn file_logger(
+            log_level: LogLevel,
+            fs: &async_fs::Fs,
+            cache_dir: &Path,
+        ) -> Result<Logger> {
             let log_file = fs
                 .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
                 .await?;
             Ok(maelstrom_util::log::file_logger(
+                log_level,
                 log_file.into_inner().into_std().await,
             ))
         }
 
         async fn try_to_start(
-            log: Option<Logger>,
+            log: LoggerFactory,
             broker_addr: Option<BrokerAddr>,
             project_dir: PathBuf,
             cache_dir: PathBuf,
@@ -383,8 +389,10 @@ impl Client {
             // logger will have been provided. Otherwise, open a log file in the cache directory
             // and log there.
             let log = match log {
-                Some(log) => log,
-                None => file_logger(&fs, cache_dir.as_ref()).await?,
+                LoggerFactory::FromLogger(log) => log,
+                LoggerFactory::FromLevel(level) => {
+                    file_logger(level, &fs, cache_dir.as_ref()).await?
+                }
             };
             debug!(log, "client starting");
 
