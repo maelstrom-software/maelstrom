@@ -30,5 +30,5 @@
     - [Running as `systemd` Service](worker/systemd-service.md)
 - [`maelstrom-run`](run.md)
     - [Job Specification]()
-    - [Configuration Values]()
+    - [Configuration Values](run/config.md)
     - [Command-Line Reference]()

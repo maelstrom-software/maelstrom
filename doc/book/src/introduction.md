@@ -1,50 +1,38 @@
 # What is Maelstrom?
-Maelstrom is a tool for encapsulating and running large collections of jobs
-both locally and on clusters. We've initally focussed on running Rust tests as
-jobs. In the near future, we hope to add support for other languages' test
-frameworks. Additionally, we've provided tools for adventurous users to run
-arbitrary jobs, either using a command-line tool, or using a gRPC-based SDK.
 
-In other words, today Maelstrom is an alternative Rust test runner.
+Maelstrom is a Rust test runner, built on top of a general-purpose
+clustered job runner. Maelstrom packages your Rust tests into hermetic
+micro-containers, then distributes them to be run on an arbitrarily large
+cluster of test-runners, or locally on your machine. You might use
+Maelstrom to run your tests because:
 
-We've put an initial emphasis on running tests as jobs, but jobs can be
-any program. Today, we only have fleshed-out support for Rust tests, but in the
-future we hope to add other languages' test frameworks.
+* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
+  most cases, it just works.
+* It's reliable. Maelstrom runs every test hermetically in its own lightweight
+  container, eliminating confusing errors caused by inter-test or implicit
+  test-environment dependencies.
+* It's scalable. Maelstrom can be run as a cluster. You can add more worker machines to
+  linearly improve test throughput.
+* It's fast. In most cases, Maelstrom is faster than `cargo test`, even
+  without adding clustering.
+* It's clean. Maelstrom has a from-scratch, rootless container implementation
+  (not relying on docker or RunC), optimized to be low-overhead and start
+  quickly.
+* It's Rusty. The whole project is written in Rust.
 
-Practially, Maelstrom is a test runner for Rust projects that:
+We started with a Rust test runner, but Maelstrom's underlying job execution
+system is general-purpose. We will add support for other languages' test
+frameworks in the near future. We have also provided tools for adventurous users
+to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.
 
-Maelstrom is a job execution framework with an emphasis on running tests.
-Currently, the main ephasis is running Rust tests, but we hope to bring support
-more languages' test frameworks
+The project is currently Linux-only (x86 and ARM), as it relies on namespaces
+to implement containers.
 
-Maelstrom is a Rust test runner built on top of a general-purpose clustered job
-runner.
+## Structure of This Book
 
-It can be used as an alternate way to run tests for your Rust project that uses
-cargo. It provides some advantages over using plain cargo alone.
-
-- Parallelization. Many more tests are run in parallel.
-- Distributed. Compute from many machines can be utilized.
-- Isolation. Tests are run in their own lightweight containers.
-
-Maelstrom itself is split up into a few different pieces of software.
-
-- **The Broker**. This is the central brain of the clustered job runner. Clients
-  and Workers connect to it.
-- **The Worker**. There are one or many instances of these. This is what runs
-  the actual job (or test.)
-- **The Client**. There are one or many instances of these. This is what
-  connects to the broker and submits jobs.
-- [`cargo-maelstrom`](cargo-maelstrom.md). This is our cargo test
-  replacement which submits tests as jobs by acting as a client.
-
-# What will this book cover?
-This guide will attempt to cover the following topics:
-
-- Basic Install. How do you install and configure this for your own projects.
-  Both setting up the clustered job runner and using cargo-maelstrom
-- `cargo-maelstrom` configuration. Sometimes extra configuration is needed to make
-  tests run successfully, this will cover how to do that.
-- Clustered job runner management. How clustered job runner works, how to
-  configured it, and how to use the
-    [web UI](broker/web-ui.md).
+This book will start out convering how to [install](installation.md) Maelstrom.
+Next, it will cover [common concepts](common.md) that are applicable to all
+Maelstrom components. After that, there are in-depth sections for each of the
+four binaries: [`cargo-maelstrom`](carog-maelstrom.md),
+[`maelstrom-broker`](broker.md), [`maelstrom-worker`](worker.md), and
+[`maelstrom-run`](run.md).

@@ -27,6 +27,6 @@ multiple larger than the largest working set.
 
 ## Command-Line Options
 
-The `maelstrom-worker` supports the [standard command-line
-options](../standard-cli.md), as well as a number of [configuration values](worker/config.md),
-which are covered in the next chapter.
+`maelstrom-worker` supports the [standard command-line
+options](../standard-cli.md), as well as a number of [configuration
+values](worker/config.md), which are covered in the next chapter.

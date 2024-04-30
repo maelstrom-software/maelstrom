@@ -26,9 +26,10 @@ Maelstrom to run your tests because:
   quickly.
 * It's Rusty. The whole project is written in Rust.
 
-We started with a Rust test runner, but Maelstrom's underlying job
-execution system is general-purpose. We will add support for other languages' test frameworks throughout 2024. We have also provided tools for
-adventurous users to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.
+We started with a Rust test runner, but Maelstrom's underlying job execution
+system is general-purpose. We will add support for other languages' test
+frameworks in the near future. We have also provided tools for adventurous users
+to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.
 
 The project is currently Linux-only (x86 and ARM), as it relies on namespaces
 to implement containers.
