@@ -33,8 +33,7 @@ adventurous users to run arbitrary jobs, either using a command-line tool or a g
 The project is currently Linux-only (x86 and ARM), as it relies on namespaces
 to implement containers.
 
-See the book for more information:
-[Maelstrom Book](https://maelstrom-software.com/book/)
+See the [book](https://maelstrom-software.com/book/) for more information.
 
 # Getting Started
 
@@ -52,7 +51,7 @@ This will install a pre-built binary from the [github releases page](https://git
 
 If you don't have `cargo-binstall`, you can download the binary manually.
 
-Check out [the book](https://maelstrom-software.com/book/install/cargo_maelstrom.html) for more ways to get `cargo-maelstrom`.
+Check out the [book](https://maelstrom-software.com/book/installation.html) for more ways to get `cargo-maelstrom`.
 
 ## Running `cargo-maelstrom`
 
@@ -74,7 +73,7 @@ do this, run:
 cargo maelstrom --init
 ```
 
-Then edit the created `maelstrom-test.toml` file as described [in the book](https://maelstrom-software.com/book/cargo_maelstrom/execution_environment.html).
+Then edit the created `maelstrom-test.toml` file as described in the [book](https://maelstrom-software.com/book/cargo-maelstrom/spec.html).
 
 ## Setting Up a Cluster
 
@@ -83,7 +82,7 @@ You will need to run one copy of the broker (`maelstrom-broker`) somewhere, and
 one copy of the worker (`maelstrom-worker`) on each node of the cluster.
 
 You can install these using [multiple
-methods](https://maelstrom-software.com/book/install/clustered_job_runner.html),
+methods](https://maelstrom-software.com/book/installation.html),
 including `cargo-binstall`:
 
 ```bash
