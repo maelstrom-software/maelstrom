@@ -37,7 +37,7 @@ Here are some example value socket addresses:
 
 See [here](../log-levels.md).
 
-`cargo-maelstrom` always prints log message to stderr.
+`cargo-maelstrom` always prints log message to stdout.
 
 ## `quiet`
 

@@ -107,11 +107,19 @@ message PathsLayer {
 }
 ```
 
-The `paths` layer type will recursively include all of the files in each of the
+The `paths` layer type will include each file referenced by the
 specified paths. This is executed by the client relative to the [project
 directory](../project-dir.md). Relative and absolute paths may be used.
 
 The `prefix_options` are applied to every matching path, as [described above](#prefix_options).
+
+If a path points to a file, the file is included in the layer. If the path
+points to a symlink, either the symlink or the pointed-to-file gets included,
+depending on [`prefix_options.follow_symlinks`](#follow_symlinks). If the path points to a
+directory, an empty directory is included.
+
+To include a directory and all of its contents, use the [`glob`](#glob) layer
+type.
 
 ## `stubs`
 ```protobuf
