@@ -20,7 +20,7 @@ size of this cache directory.
 ## Manifest Files
 
 `cargo-maelstrom` uses "manifest files" for non-tar layers. These are like tar
-file, but without the actual data contents. These files are stored in `maelstrom-manifests/` in the target directory.
+files, but without the actual data contents. These files are stored in `maelstrom-manifests/` in the target directory.
 
 ## Client Log File
 

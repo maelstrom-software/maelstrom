@@ -1,6 +1,6 @@
 # Job States
 
-Jobs transition through a number of states in their journey. These chapter explains those states.
+Jobs transition through a number of states in their journey. This chapter explains those states.
 
 ## Waiting for Artifacts
 

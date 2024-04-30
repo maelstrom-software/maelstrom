@@ -1,10 +1,10 @@
 # Directives
 
 The `maelstrom-test.toml` file consists of a list of "directives" which are
-applied in order. Each directive has a some optional fields, one of which may
+applied in order. Each directive has some optional fields, one of which may
 be `filter`. To compute the job spec for a test, `cargo-maelstrom` starts with
 a default spec, then iterates over all the directives in order. If a
-directive's `filter` matches the test, the directive is applied to the tests's
+directive's `filter` matches the test, the directive is applied to the test's
 job spec. Directives without a `filter` apply to all tests. When it reaches the
 end of the configuration, it pushes one or two more layers containing the test
 executable, and optionally all shared library dependencies (see [here](fields.md#include_shared_libraries) for
@@ -27,7 +27,7 @@ added_mounts = [{ fs_type = "proc", mount_point = "/proc" }]
 added_layers = [{ stubs = [ "proc/" ] }]
 ```
 
-The first directive applies to all test, since it has no `filter`. It sets the
+The first directive applies to all tests, since it has no `filter`. It sets the
 `include_shared_libraries` psuedo-field in the job spec. The second directive
 only applies to a single test named `io::splicer` in the `maelstrom-util`
 package. It adds a layer and a mount to that test's job spec.

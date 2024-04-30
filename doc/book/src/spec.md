@@ -174,7 +174,7 @@ permissions within the container, which may be undesirable for some jobs.
 
 The specifies the GID the program is run as. See [`user`](#user) for more information.
 
-Job don't have any supplemental GIDs, nor is there any way to provide them.
+Jobs don't have any supplemental GIDs, nor is there any way to provide them.
 
 ## `timeout`
 

@@ -2,8 +2,8 @@
 
 `cargo-maelstrom` is a replacement for `cargo test` which runs tests in
 lightweight containers, either locally or on a distributed cluster.
-Since each test runs in its own container, it is isolated from computer it is
-running on and from other tests.
+Since each test runs in its own container, it is isolated from the computer it
+is running on and from other tests.
 
 `cargo-maelstrom` is designed to be run as a [custom Cargo
 subcommand](https://doc.rust-lang.org/book/ch14-05-extending-cargo.html). One

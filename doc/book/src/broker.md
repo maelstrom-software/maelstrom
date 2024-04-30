@@ -10,7 +10,7 @@ a worker machine. Ideally, whatever machine it runs on should have good
 throughput with the clients and workers, as all artifacts are first transferred
 from the clients to the broker, and then from the broker to workers.
 
-Clients can be run in [standalone mode](../local-worker.md) where they
+Clients can be run in [standalone mode](local-worker.md) where they
 don't need access to a cluster. In that case, there is no need to run a broker.
 
 ## Cache
@@ -28,5 +28,5 @@ Ideally, it should be at least a few multiples of the working set size.
 ## Command-Line Options
 
 `maelstrom-broker` supports the [standard command-line
-options](../standard-cli.md), as well as a number of [configuration
+options](standard-cli.md), as well as a number of [configuration
 values](broker/config.md), which are covered in the next chapter.

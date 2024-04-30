@@ -30,7 +30,7 @@ to implement containers.
 
 ## Structure of This Book
 
-This book will start out convering how to [install](installation.md) Maelstrom.
+This book will start out covering how to [install](installation.md) Maelstrom.
 Next, it will cover [common concepts](common.md) that are applicable to all
 Maelstrom components. After that, there are in-depth sections for each of the
 four binaries: [`cargo-maelstrom`](cargo-maelstrom.md),

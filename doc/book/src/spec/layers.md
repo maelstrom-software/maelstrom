@@ -1,6 +1,6 @@
 # Layers
 
-At the lowest level, a layer is just a tar file or a manifest. A manifests is a
+At the lowest level, a layer is just a tar file or a manifest. A manifest is a
 Maelstrom-specific file format that allows for file data to be transferred
 separately from file metadata. But for our purposes here, they're essentially the
 same.

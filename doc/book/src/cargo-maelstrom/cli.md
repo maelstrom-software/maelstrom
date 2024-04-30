@@ -35,7 +35,7 @@ This option can be combined with [`--include` and `--exclude`](#include_and_excl
 
 ## `--include` and `--exclude` {#include_and_exclude}
 
-The `--include` (`-i`) and `--exclude` (`-x) command-line options control which tests
+The `--include` (`-i`) and `--exclude` (`-x`) command-line options control which tests
 `cargo-maelstrom` runs or lists.
 
 These options take a [test filter pattern](filter.md). The `--include` option

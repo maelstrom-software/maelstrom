@@ -5,8 +5,8 @@ All Maelstrom programs support a standard base set of command-line options.
 ## `--help`
 
 The `--help` (or `-h`) command-line option will print out the program's
-command-line options, configuration value (including their associated
-environment variables)s, and configuration-file search path, then exit.
+command-line options, configuration values (including their associated
+environment variables), and configuration-file search path, then exit.
 
 ## `--version`
 

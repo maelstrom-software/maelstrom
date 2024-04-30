@@ -7,7 +7,7 @@ The system is designed to require only one worker per node in the cluster. The
 worker will then run as many jobs in parallel as it has "slots". By default, it
 will have one slot per CPU, but it can be configured otherwise.
 
-Clients can be run in [standalone mode](../local-worker.md) where they
+Clients can be run in [standalone mode](local-worker.md) where they
 don't need access to a cluster. In that case, they will have a internal, local
 copy of the worker.
 
@@ -28,5 +28,5 @@ multiple larger than the largest working set.
 ## Command-Line Options
 
 `maelstrom-worker` supports the [standard command-line
-options](../standard-cli.md), as well as a number of [configuration
+options](standard-cli.md), as well as a number of [configuration
 values](worker/config.md), which are covered in the next chapter.
