@@ -802,7 +802,14 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         // Wait for everything and return the result.
         fn read_from_receiver<T>(receiver: oneshot::Receiver<Result<T>>) -> JobResult<T, Error> {
-            receiver.blocking_recv().unwrap().map_err(syserr)
+            receiver
+                .blocking_recv()
+                .unwrap_or_else(|e| {
+                    Err(anyhow!(
+                        "unexpected error receiving from oneshot receiver: {e}"
+                    ))
+                })
+                .map_err(syserr)
         }
         Ok(JobCompleted {
             status: read_from_receiver(status_receiver)?,
