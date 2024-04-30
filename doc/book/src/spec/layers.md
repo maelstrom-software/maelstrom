@@ -92,8 +92,8 @@ message GlobLayer {
 ```
 
 The `glob` layer type will include the files specified by the glob pattern in
-the layer. The glob pattern is executed by the client from its working
-directory. The glob pattern must use relative paths. The
+the layer. The glob pattern is executed by the client relative to the [project
+directory](project-dir.md). The glob pattern must use relative paths. The
 [`globset`](https://docs.rs/globset/latest/globset/) crate is used for glob
 pattern matching.
 
@@ -108,8 +108,8 @@ message PathsLayer {
 ```
 
 The `paths` layer type will recursively include all of the files in each of the
-specified paths. This is executed by the client from its working directory.
-Relative and absolute paths may be used.
+specified paths. This is executed by the client relative to the [project
+directory](project-dir.md). Relative and absolute paths may be used.
 
 The `prefix_options` are applied to every matching path, as [described above](#prefix_options).
 

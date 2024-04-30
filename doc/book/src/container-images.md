@@ -14,9 +14,9 @@ specification for the job.
 Images can be specified with tags. If no tag is provided, the `latest` tag is
 used.
 
-For the purposes of hermetic testing, `cargo-maelstrom` will resolve and "lock"
-a tag, so that tests always specify an exact image that doesn't change over time.
-See [this chapter](cargo-maelstrom/container-tags-lock-file.md) for more details.
+For the purposes of reproducable jobs, clients will resolve and "lock" a tag,
+so that jobs always specify an exact image that doesn't change over time. See
+[this section](#lock-file) for more details.
 
 ## Cached Container Images
 
@@ -26,3 +26,18 @@ non-empty. Otherwise, it uses `~/.cache/maelstrom/containers`. See the [XDG Base
 Directories
 specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html)
 for more information.
+
+## Lock File
+
+When a client first resolves a container registry tag, it stores the result in
+a local lock file. Subsequently, it will use the exact image specified in the
+lock file instead of resolving the tag again. This guarantees that subsequent
+runs use the same images as previous runs.
+
+The local lock file is `maelstrom-container-tags.lock`, stored in the [project
+directory](project_dir.md). It is recommended that this file be committed to
+revision control, so that others in the project, and CI, use the same images
+when running tests.
+
+To update a tag to the latest version, remove the corresponding line from the
+lock file and then run the client.

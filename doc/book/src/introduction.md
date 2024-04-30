@@ -16,7 +16,7 @@ Maelstrom to run your tests because:
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
   without using clustering.
 * It's clean. Maelstrom has a from-scratch, rootless container implementation
-  (not relying on docker or RunC), optimized to be low-overhead and start
+  (not relying on Docker or RunC), optimized to be low-overhead and start
   quickly.
 * It's Rusty. The whole project is written in Rust.
 
@@ -36,3 +36,6 @@ Maelstrom components. After that, there are in-depth sections for each of the
 four binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
 [`maelstrom-broker`](broker.md), [`maelstrom-worker`](worker.md), and
 [`maelstrom-run`](run.md).
+
+There is no documentation yet for the gRPC API. Contact us if you're interested
+in using it, and we'll help get you started.

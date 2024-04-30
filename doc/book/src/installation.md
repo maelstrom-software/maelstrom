@@ -52,11 +52,12 @@ We have a `nix.flake` file, so you can install all Maelstrom binaries with somet
 nix profile install github:maelstrom-software/maelstrom
 ```
 
-Our Nix flake doesn't currently have the ability to install individual binaries yet.
+Our Nix flake doesn't currently have the ability to install individual binaries.
 
 ## Installing From Source With `cargo install`
 
-Maelstrom binaries can be built from source using [`cargo install`]:
+Maelstrom binaries can be built from source using [`cargo
+install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html):
 
 ```bash
 cargo install cargo-maelstrom
@@ -71,11 +72,4 @@ before it can be built from source:
 rustup target add wasm32-unknown-unknown
 cargo install wasm-opt
 cargo install maelstrom-broker
-```
-
-Now we can compile the broker
-
-```bash
-export GITHUB_URL="https://github.com/maelstrom-software/maelstrom.git"
-cargo install --git $GITHUB_URL maelstrom-broker
 ```

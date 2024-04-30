@@ -2,9 +2,9 @@
 
 All Maelstrom executables are configured through "configuration values".
 Configuration values can be set through commmand-line options, environment
-variables, or config files.
+variables, or configuration files.
 
-Each configuration value has a type, which is either: string, number, or
+Each configuration value has a type, which is either string, number, or
 boolean.
 
 Imagine a configuration value named `config-value` in a program called

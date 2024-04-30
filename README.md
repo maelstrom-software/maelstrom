@@ -22,7 +22,7 @@ Maelstrom to run your tests because:
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
   without using clustering.
 * It's clean. Maelstrom has a from-scratch, rootless container implementation
-  (not relying on docker or RunC), optimized to be low-overhead and start
+  (not relying on Docker or RunC), optimized to be low-overhead and start
   quickly.
 * It's Rusty. The whole project is written in Rust.
 

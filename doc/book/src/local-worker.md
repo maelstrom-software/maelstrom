@@ -11,7 +11,8 @@ Currently, clients won't use the local worker if they are connected to a cluster
 We will change this in the future so that the local worker is utilized even
 when the client is connected to a cluster.
 
-Client with local workers share these configuration values:
+Clients have the following configuration values to configure their local
+workers:
 
 Value                                                    | Type    | Description                                                   | Default
 ---------------------------------------------------------|---------|---------------------------------------------------------------|----------

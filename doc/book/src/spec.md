@@ -104,8 +104,8 @@ enum JobDevice {
 These are the device files from `/dev` to add to the job's environment. Any subset can be specified.
 
 Any specified device will be mounted in `/dev` based on its name. For example,
-`Null` would be mounted at `/dev/null`. **For this to work, there must be a
-file located at the expected location in the underlying file system.** In other
+`Null` would be mounted at `/dev/null`. For this to work, there must be a
+file located at the expected location in the container file system. In other
 words, if your job is going to specify `Null`, it also needs to have an empty
 file at `/dev/null` for the system to mount the device onto. This is one of the
 use cases for the "stubs" layer type.
