@@ -18,9 +18,9 @@ Maelstrom to run your tests because:
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
 * It's scalable. Maelstrom can be run as a cluster. You can add more worker machines to
-  linearly improve test throughput.
+  linearly increase test throughput.
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
-  without adding clustering.
+  without using clustering.
 * It's clean. Maelstrom has a from-scratch, rootless container implementation
   (not relying on docker or RunC), optimized to be low-overhead and start
   quickly.

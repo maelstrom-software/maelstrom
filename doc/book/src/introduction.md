@@ -12,9 +12,9 @@ Maelstrom to run your tests because:
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
 * It's scalable. Maelstrom can be run as a cluster. You can add more worker machines to
-  linearly improve test throughput.
+  linearly increase test throughput.
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
-  without adding clustering.
+  without using clustering.
 * It's clean. Maelstrom has a from-scratch, rootless container implementation
   (not relying on docker or RunC), optimized to be low-overhead and start
   quickly.
@@ -33,6 +33,6 @@ to implement containers.
 This book will start out convering how to [install](installation.md) Maelstrom.
 Next, it will cover [common concepts](common.md) that are applicable to all
 Maelstrom components. After that, there are in-depth sections for each of the
-four binaries: [`cargo-maelstrom`](carog-maelstrom.md),
+four binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
 [`maelstrom-broker`](broker.md), [`maelstrom-worker`](worker.md), and
 [`maelstrom-run`](run.md).
