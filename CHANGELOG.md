@@ -17,19 +17,23 @@ present may now need to escape these characters.
 - Add printing of the time each test took.
 - Use the target directory `cargo metadata` says instead of always using `target/`, also create the
 target directory if it doesn't exist.
+- Removed -v short options for version
 
 ### `maelstrom-worker`
 - Implemented support for white-out entries and opaque directories. The manifest format has been
 updated to add support, and OCI whiteout / opaque directory entries in tar files are interpreted.
 - Added test duration to `JobEffects`.
+- Removed -v short options for version
 
 ### `maelstrom-run`
 - Fixed bug where we weren't creating cache directory if it didn't exist.
 \[[230](https://github.com/maelstrom-software/maelstrom/issues/230)\]
+- Removed -v short options for version
 
 ### `maelstrom-client`
 - Fixed issue where we weren't accepting certain OCI images from dockerhub that had the
   `vnd.oci.image.manifest.v1+json` manifest type.
+- Removed -v short options for version
 
 ## [0.7.0] - 2024-04-19
 ### High-Level

@@ -232,7 +232,6 @@ impl CommandBuilder {
             .arg(
                 Arg::new("version")
                     .long("version")
-                    .short('v')
                     .action(ArgAction::Version)
                     .help("Print version and exit."),
             )
