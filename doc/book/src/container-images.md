@@ -35,7 +35,7 @@ lock file instead of resolving the tag again. This guarantees that subsequent
 runs use the same images as previous runs.
 
 The local lock file is `maelstrom-container-tags.lock`, stored in the [project
-directory](project_dir.md). It is recommended that this file be committed to
+directory](project-dir.md). It is recommended that this file be committed to
 revision control, so that others in the project, and CI, use the same images
 when running tests.
 
