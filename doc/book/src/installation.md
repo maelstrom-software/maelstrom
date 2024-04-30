@@ -1,7 +1,7 @@
 # Installation
 
 Maelstrom consists of the following binaries:
-  - [`cargo-maelstrom`](cargo-maelstrom.md): An alternative Rust test runner. This can be run in
+  - [`cargo-maelstrom`](cargo-maelstrom.md): A Rust test runner. This can be run in
     standalone mode &mdash; where tests will be executed on the local machine
     &mdash; or in clustered mode. In standalone mode, no other Maelstrom
     binaries need be installed, but in clustered mode, there must be a broker
@@ -10,16 +10,16 @@ Maelstrom consists of the following binaries:
     these per Maelstrom cluster.
   - [`maelstrom-worker`](worker.md): The Maelstrom cluster worker. This must be
     installed on the machines in the cluster that will actually run jobs
-    (tests).
+    (i.e. tests).
   - [`maelstrom-run`](run.md): A Maelstrom client for running arbitrary commands on a
     Maelstrom cluster. While this binary can run in standalone mode, it's only really
     useful in clustered mode.
 
-The installation process for all binaries is virtually identical. We'll show
-how to install all the binaries in the following sections. You can pick and
-choose which ones you actually want to install.
+The installation process is virtually identical for all binaries. We'll
+demonstrate how to install all the binaries in the following sections. You can
+pick and choose which ones you actually want to install.
 
-Maelstrom only supports Linux currently.
+Maelstrom currently only supports Linux.
 
 ## Installing From Pre-Built Binaries
 
