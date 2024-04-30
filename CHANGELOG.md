@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `cargo-maelstrom`
+- Add default test configuration when there is no `maelstrom-test.toml` file present.
+- Add `--init` flag that writes default configuration if no `maelstrom-test.toml` file is present.
+- Add experimental path templating to paths in test configuration. Existing paths with `<` or `>`
+present may now need to escape these characters.
+- When a test fails, print stdout in addition to stderr for that test.
+- When a test timesout, print stdout and stderr for that test.
+- Add printing of the time each test took.
+- Use the target directory `cargo metadata` says instead of always using `target/`, also create the
+target directory if it doesn't exist.
+
+### `maelstrom-worker`
+- Implemented support for white-out entries and opaque directories. The manifest format has been
+updated to add support, and OCI whiteout / opaque directory entries in tar files are interpreted.
+- Added test duration to `JobEffects`.
+
+### `maelstrom-run`
+- Fixed bug where we weren't creating cache directory if it didn't exist.
+\[[230](https://github.com/maelstrom-software/maelstrom/issues/230)\]
+
+### `maelstrom-client`
+- Fixed issue where we weren't accepting certain OCI images from dockerhub that had the
+  `vnd.oci.image.manifest.v1+json` manifest type.
+
 ## [0.7.0] - 2024-04-19
 ### High-Level
 This release was focused on two things: fixing performance regressions and
