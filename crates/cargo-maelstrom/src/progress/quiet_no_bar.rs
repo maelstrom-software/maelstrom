@@ -23,7 +23,6 @@ where
     }
 
     fn finished(&self) -> Result<()> {
-        self.term.write_line("all jobs completed")?;
         self.term.flush()?;
         Ok(())
     }

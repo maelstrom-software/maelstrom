@@ -531,7 +531,6 @@ fn no_tests_all_tests_sync() {
             vec![]
         ),
         "\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         0\n\
@@ -593,7 +592,6 @@ fn two_tests_all_tests_sync() {
         "\
         bar test_it............................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
@@ -693,7 +691,6 @@ fn four_tests_filtered_sync() {
         "\
         bar test_it2...........................OK   1.000s\n\
         foo test_it............................OK   1.000s\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
@@ -801,7 +798,6 @@ fn three_tests_single_package_sync() {
         ),
         "\
         foo test_it............................OK   1.000s\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         1\n\
@@ -854,7 +850,6 @@ fn three_tests_single_package_filtered_sync() {
         ),
         "\
         foo test_it............................OK   1.000s\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         1\n\
@@ -904,7 +899,6 @@ fn ignored_test_sync() {
         bar test_it............................OK   1.000s\n\
         baz test_it............................OK   1.000s\n\
         foo test_it.......................IGNORED\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
@@ -945,7 +939,6 @@ fn two_tests_all_tests_sync_quiet() {
             vec![]
         ),
         "\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         2\n\
@@ -1011,7 +1004,6 @@ fn failed_tests() {
         stderr: error output\n\
         foo test_it..........................FAIL   1.000s\n\
         stderr: error output\n\
-        all jobs completed\n\
         \n\
         ================== Test Summary ==================\n\
         Successful Tests:         0\n\
