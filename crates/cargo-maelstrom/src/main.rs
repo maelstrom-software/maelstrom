@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result};
+use anyhow::{bail, Context as _, Result};
 use cargo_maelstrom::{
     cargo::CargoBuildError, config::Config, main_app_new,
     metadata::maybe_write_default_test_metadata, progress::DefaultProgressDriver,
@@ -115,14 +115,21 @@ pub fn main() -> Result<ExitCode> {
         (_, _, _) => None,
     };
 
-    let cargo_metadata = process::Command::new("cargo")
+    let output = process::Command::new("cargo")
         .args(["metadata", "--format-version=1"])
         .args(config.cargo_feature_selection_options.iter())
         .args(config.cargo_manifest_options.iter())
         .output()
         .context("getting cargo metadata")?;
+    if !output.status.success() {
+        bail!(String::from_utf8(output.stderr)
+            .context("reading stderr")?
+            .trim_end()
+            .trim_start_matches("error: ")
+            .to_owned());
+    }
     let cargo_metadata: CargoMetadata =
-        serde_json::from_slice(&cargo_metadata.stdout).context("parsing cargo metadata")?;
+        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
 
     if extra_options.test_metadata.init {
         maybe_write_default_test_metadata(&cargo_metadata.workspace_root)?;
