@@ -1,10 +1,10 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
     ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec,
-    JobStatus, Sha256Digest, UserId, Utf8PathBuf,
+    JobStatus, Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{Client, ClientBgProcess};
-use maelstrom_client_base::spec::{Layer, PrefixOptions};
+use maelstrom_client_base::spec::{Layer, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{
     config::common::LogLevel,
     elf::read_shared_libraries,
@@ -208,27 +208,17 @@ fn tar_test_job() {
     println!("{contents}");
 }
 
-fn paths_test(
-    fix: &ClientFixture,
-    input: &[&str],
-    prefix_options: PrefixOptions,
-    expected: &[&str],
-) {
-    let t = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
+fn paths_test(fix: &ClientFixture, create: &[&str], layer: Layer, expected: &[&str]) {
+    let root = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
 
-    let mut paths = vec![];
-    for i in input {
-        let path = t.join(i);
-        fix.fs.write(&path, b"").unwrap();
-        paths.push(path);
+    for path in create {
+        let path = Utf8Path::new(path);
+        if let Some(parent) = path.parent() {
+            fix.fs.create_dir_all(root.join(parent)).unwrap();
+        }
+        fix.fs.write(root.join(path), b"").unwrap();
     }
-    let layer = fix
-        .client
-        .add_layer(Layer::Paths {
-            paths,
-            prefix_options,
-        })
-        .unwrap();
+    let layer = fix.client.add_layer(layer).unwrap();
 
     let mut output: Vec<String> = serde_json::from_str(&fix.run_job(vec![layer])).unwrap();
     output.sort();
@@ -242,42 +232,112 @@ fn paths_test(
 fn paths_test_job() {
     let fs = Fs::new();
 
-    let paths: Vec<String> = fs
-        .walk("/")
-        .map(|e| String::from(e.unwrap().to_str().unwrap()))
-        .collect();
-    println!("{}", serde_json::to_string(&paths).unwrap());
+    let mut output = vec![];
+
+    for e in fs.walk("/") {
+        let e = e.unwrap();
+        let path = e.to_str().unwrap();
+        if path == "/" {
+            continue;
+        }
+        let mut str_e = path.to_owned();
+        let meta = fs.symlink_metadata(&path).unwrap();
+        if meta.is_symlink() {
+            let data = fs.read_link(&path).unwrap();
+            str_e += &format!(" => {}", data.to_str().unwrap());
+        } else if meta.is_dir() {
+            str_e += "/";
+        }
+        output.push(str_e);
+    }
+    println!("{}", serde_json::to_string(&output).unwrap());
 }
 
 fn paths_test_strip_prefix(fix: &ClientFixture) {
-    let temp = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
     paths_test(
         fix,
-        &["foo.bin", "bar.bin"],
-        PrefixOptions {
-            strip_prefix: Some(temp),
-            ..Default::default()
+        &["project/a/foo.bin", "project/a/bar.bin"],
+        Layer::Paths {
+            paths: vec!["a/foo.bin".into(), "a/bar.bin".into()],
+            prefix_options: PrefixOptions {
+                strip_prefix: Some("a".into()),
+                ..Default::default()
+            },
         },
-        &["/", "/bar.bin", "/foo.bin"],
+        &["/bar.bin", "/foo.bin"],
     )
 }
 
 fn paths_test_prepend_prefix(fix: &ClientFixture) {
-    let temp = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
     paths_test(
         fix,
-        &["foo2.bin", "bar2.bin"],
-        PrefixOptions {
-            strip_prefix: Some(temp),
-            prepend_prefix: Some("/baz".into()),
-            ..Default::default()
+        &["project/foo2.bin", "project/bar2.bin"],
+        Layer::Paths {
+            paths: vec!["foo2.bin".into(), "bar2.bin".into()],
+            prefix_options: PrefixOptions {
+                prepend_prefix: Some("/baz".into()),
+                ..Default::default()
+            },
         },
-        &["/", "/baz", "/baz/bar2.bin", "/baz/foo2.bin"],
+        &["/baz/", "/baz/bar2.bin", "/baz/foo2.bin"],
     )
 }
 
-/// Starting up the local-worker in the dev profile can be slow, so just run all the tests with
-/// the one local-worker to speed things up.
+fn paths_test_absolute(fix: &ClientFixture) {
+    let root = Utf8PathBuf::from_path_buf(fix.temp_dir.path().into()).unwrap();
+    paths_test(
+        fix,
+        &["foo3.bin", "bar3.bin"],
+        Layer::Paths {
+            paths: vec![root.join("foo3.bin"), root.join("bar3.bin")],
+            prefix_options: PrefixOptions {
+                strip_prefix: Some(root),
+                ..Default::default()
+            },
+        },
+        &["/bar3.bin", "/foo3.bin"],
+    )
+}
+
+fn glob_test(fix: &ClientFixture) {
+    paths_test(
+        fix,
+        &["project/foo.txt", "project/bar.bin"],
+        Layer::Glob {
+            glob: "*.txt".into(),
+            prefix_options: Default::default(),
+        },
+        &["/foo.txt"],
+    )
+}
+
+fn stubs_test(fix: &ClientFixture) {
+    paths_test(
+        fix,
+        &[],
+        Layer::Stubs {
+            stubs: vec!["/foo/{bar,baz}".into(), "/foo/qux/".into()],
+        },
+        &["/foo/", "/foo/bar", "/foo/baz", "/foo/qux/"],
+    )
+}
+
+fn symlinks_test(fix: &ClientFixture) {
+    paths_test(
+        fix,
+        &[],
+        Layer::Symlinks {
+            symlinks: vec![SymlinkSpec {
+                link: "/foo".into(),
+                target: "/bar".into(),
+            }],
+        },
+        &["/foo => /bar"],
+    )
+}
+
+/// Starting up the local-worker in the dev profile can be slow, so just run all the tests with the
+/// one local-worker to speed things up.
 #[test]
 fn single_test() {
     let mut fix = Fixture::new();
@@ -285,4 +345,8 @@ fn single_test() {
     fix.run_test(|fix| tar_test(fix), || tar_test_job());
     fix.run_test(|fix| paths_test_strip_prefix(fix), || paths_test_job());
     fix.run_test(|fix| paths_test_prepend_prefix(fix), || paths_test_job());
+    fix.run_test(|fix| paths_test_absolute(fix), || paths_test_job());
+    fix.run_test(|fix| glob_test(fix), || paths_test_job());
+    fix.run_test(|fix| stubs_test(fix), || paths_test_job());
+    fix.run_test(|fix| symlinks_test(fix), || paths_test_job());
 }
