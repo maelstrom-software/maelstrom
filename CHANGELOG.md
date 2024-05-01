@@ -13,27 +13,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add experimental path templating to paths in test configuration. Existing paths with `<` or `>`
 present may now need to escape these characters.
 - When a test fails, print stdout in addition to stderr for that test.
-- When a test timesout, print stdout and stderr for that test.
+- When a test times out, print stdout and stderr for that test.
 - Add printing of the time each test took.
-- Use the target directory `cargo metadata` says instead of always using `target/`, also create the
-target directory if it doesn't exist.
-- Removed -v short options for version
+- Use the target directory `cargo metadata` says instead of always using
+  `target/`, also create the target directory if it doesn't exist.
+- Changed `--inline-limit`'s short option to `-I` so it doesn't conflict with
+  `--include`. \[[220](https://github.com/maelstrom-software/maelstrom/issues/220)\]
+- Cleaned up error messages so that it's more clear what went wrong when things go wrong.
+  \[[229](https://github.com/maelstrom-software/maelstrom/issues/229)\]
+- Fixed a bug where hostnames weren't supported for the `broker` configuration
+  value, but only in configuration files.
+  \[[235](https://github.com/maelstrom-software/maelstrom/issues/235)\]
+- Clarified error message when `cargo-maelstrom` is run outside of a Rust workspace.
 
 ### `maelstrom-worker`
 - Implemented support for white-out entries and opaque directories. The manifest format has been
-updated to add support, and OCI whiteout / opaque directory entries in tar files are interpreted.
+  updated to add support, and OCI whiteout / opaque directory entries in tar
+  files are interpreted.
 - Added test duration to `JobEffects`.
-- Removed -v short options for version
 
 ### `maelstrom-run`
 - Fixed bug where we weren't creating cache directory if it didn't exist.
-\[[230](https://github.com/maelstrom-software/maelstrom/issues/230)\]
-- Removed -v short options for version
+  \[[230](https://github.com/maelstrom-software/maelstrom/issues/230)\]
+- Cleaned up error messages so that it's more clear what went wrong when things go wrong.
+  \[[229](https://github.com/maelstrom-software/maelstrom/issues/229)\]
 
 ### `maelstrom-client`
 - Fixed issue where we weren't accepting certain OCI images from dockerhub that had the
   `vnd.oci.image.manifest.v1+json` manifest type.
-- Removed -v short options for version
+
+### All Binaries
+- Removed -v short option for version.
+
+### General
+- Updated README.md and documentation substantially.
 
 ## [0.7.0] - 2024-04-19
 ### High-Level
