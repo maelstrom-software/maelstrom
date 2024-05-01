@@ -520,7 +520,7 @@ impl<
             // canceled, and there's nothing to do here.
             self.broker_sender.send_message_to_broker(WorkerToBroker(
                 jid,
-                Err(JobError::System(format!("{msg} {digest}: {err}"))),
+                Err(JobError::System(format!("{msg} {digest}: {err:?}"))),
             ));
             for cache::Key { kind, digest } in entry.tracker.into_cache_keys() {
                 self.cache.decrement_ref_count(kind, &digest);
