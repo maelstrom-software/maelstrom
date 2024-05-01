@@ -175,7 +175,11 @@ release, as appropriate.
 
 Finally, close the milestone for the just-released version.
 
-## Announce the Release on Discord
+## Announce the Release
 
 Go to the [`#general` channel on the community discord
 server](https://discord.gg/nyaGuzJr). Announce the release.
+
+Go to the [discussions page](https://github.com/maelstrom-software/maelstrom/discussions).
+Announce the release. Pin the new release announcement and unpin the old
+release announcement.
