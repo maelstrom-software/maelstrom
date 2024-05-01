@@ -6,20 +6,16 @@ use maelstrom_base::{
 use maelstrom_client::{Client, ClientBgProcess};
 use maelstrom_client_base::spec::{Layer, PrefixOptions};
 use maelstrom_util::{
-    config::common::LogLevel, elf::read_shared_libraries, fs::Fs, log::LoggerFactory,
+    config::common::LogLevel,
+    elf::read_shared_libraries,
+    fs::Fs,
+    log::{test_logger, LoggerFactory},
 };
 use regex::Regex;
 use slog::Drain as _;
 use std::panic::Location;
 use std::path::PathBuf;
 use tempfile::tempdir;
-
-fn test_logger() -> slog::Logger {
-    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, slog::o!())
-}
 
 fn spawn_bg_proc() -> ClientBgProcess {
     // XXX cargo-maelstrom doesn't add shared-library dependencies for additional binaries.

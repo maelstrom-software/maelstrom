@@ -728,13 +728,6 @@ mod tests {
         }
     }
 
-    fn test_logger() -> slog::Logger {
-        let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
-        let drain = slog_term::FullFormat::new(decorator).build().fuse();
-        let drain = slog_async::Async::new(drain).build().fuse();
-        slog::Logger::root(drain, slog::o!())
-    }
-
     async fn assert_entries(fs: &Fs, path: &Path, expected: Vec<&str>) {
         let mut entry_stream = fs.read_dir(path).await.unwrap();
         let mut entries = vec![];
@@ -839,7 +832,7 @@ mod tests {
                 temp,
                 data_dirs: HashMap::new(),
                 cache_dir,
-                log: test_logger(),
+                log: maelstrom_util::log::test_logger(),
                 data_dir_index: 1,
                 cache: Arc::new(Mutex::new(ReaderCache::new())),
             }

@@ -22,7 +22,7 @@ use maelstrom_client::{
     ArtifactUploadProgress,
 };
 use maelstrom_test::digest;
-use maelstrom_util::fs::Fs;
+use maelstrom_util::{fs::Fs, log::test_logger};
 use slog::Drain as _;
 use std::collections::HashSet;
 use std::{
@@ -239,13 +239,6 @@ impl<'scope> TestProgressDriver<'scope> {
     fn update(&self, states: JobStateCounts) -> Result<bool> {
         (self.update_func.borrow_mut().as_mut().unwrap())(states)
     }
-}
-
-fn test_logger() -> slog::Logger {
-    let decorator = slog_term::PlainSyncDecorator::new(slog_term::TestStdoutWriter);
-    let drain = slog_term::FullFormat::new(decorator).build().fuse();
-    let drain = slog_async::Async::new(drain).build().fuse();
-    slog::Logger::root(drain, slog::o!())
 }
 
 struct WaitForNothing;
