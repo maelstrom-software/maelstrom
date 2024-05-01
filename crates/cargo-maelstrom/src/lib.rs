@@ -605,7 +605,7 @@ impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
-        target_dir: &impl AsRef<Path>,
+        cache_dir: &impl AsRef<Path>,
         workspace_root: &impl AsRef<Path>,
         broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
@@ -624,7 +624,7 @@ impl DefaultMainAppDeps {
             bg_proc,
             broker_addr,
             workspace_root,
-            target_dir,
+            cache_dir,
             cache_size,
             inline_limit,
             slots,
@@ -725,6 +725,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         stderr_color: bool,
         workspace_root: &impl AsRef<Path>,
         workspace_packages: &[&CargoPackage],
+        cache_directory: &impl AsRef<Path>,
         target_directory: &impl AsRef<Path>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
@@ -739,10 +740,10 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
             "list_action" => ?list_action,
         );
 
-        let cache_dir = target_directory.as_ref().to_owned();
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let mut test_listing =
-            load_test_listing(&cache_dir.join(LAST_TEST_LISTING_NAME))?.unwrap_or_default();
+            load_test_listing(&cache_directory.as_ref().join(LAST_TEST_LISTING_NAME))?
+                .unwrap_or_default();
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
@@ -771,7 +772,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 compilation_options,
                 manifest_options,
             )?,
-            cache_dir,
+            cache_dir: cache_directory.as_ref().to_owned(),
             logging_output,
             log,
         })

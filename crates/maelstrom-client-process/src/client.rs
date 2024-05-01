@@ -365,7 +365,7 @@ impl Client {
             cache_dir: &Path,
         ) -> Result<Logger> {
             let log_file = fs
-                .open_or_create_file(cache_dir.join("maelstrom-client-process.log"))
+                .open_or_create_file(cache_dir.join("client-process.log"))
                 .await?;
             Ok(maelstrom_util::log::file_logger(
                 log_level,
@@ -385,6 +385,9 @@ impl Client {
         ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
 
+            // Make sure the cache dir exists before we try to put a log file in.
+            fs.create_dir_all(&cache_dir).await?;
+
             // Ensure we have a logger. If this program was started by a user on the shell, then a
             // logger will have been provided. Otherwise, open a log file in the cache directory
             // and log there.
@@ -394,17 +397,20 @@ impl Client {
                     file_logger(level, &fs, cache_dir.as_ref()).await?
                 }
             };
-            debug!(log, "client starting");
+            debug!(log, "client starting";
+                "broker_addr" => ?broker_addr,
+                "project_dir" => ?project_dir,
+                "cache_dir" => ?cache_dir,
+                "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
+                "cache_size" => ?cache_size,
+                "inline_limit" => ?inline_limit,
+                "slots" => ?slots,
+            );
 
             // Ensure all of the appropriate subdirectories have been created in the cache
             // directory.
-            const LOCAL_WORKER_DIR: &str = "maelstrom-local-worker";
-            for d in [
-                MANIFEST_DIR,
-                STUB_MANIFEST_DIR,
-                SYMLINK_MANIFEST_DIR,
-                LOCAL_WORKER_DIR,
-            ] {
+            const LOCAL_WORKER_DIR: &str = "local-worker";
+            for d in [STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR, LOCAL_WORKER_DIR] {
                 fs.create_dir_all(cache_dir.join(d)).await?;
             }
 

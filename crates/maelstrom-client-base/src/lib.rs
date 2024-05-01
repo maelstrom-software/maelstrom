@@ -14,9 +14,9 @@ use anyhow::{anyhow, Result};
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
-pub const MANIFEST_DIR: &str = "maelstrom-manifests";
-pub const STUB_MANIFEST_DIR: &str = "maelstrom-manifests/stubs";
-pub const SYMLINK_MANIFEST_DIR: &str = "maelstrom-manifests/symlinks";
+pub const MANIFEST_DIR: &str = "manifests";
+pub const STUB_MANIFEST_DIR: &str = "manifests/stubs";
+pub const SYMLINK_MANIFEST_DIR: &str = "manifests/symlinks";
 
 impl From<proto::Error> for anyhow::Error {
     fn from(e: proto::Error) -> Self {

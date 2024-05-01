@@ -377,6 +377,7 @@ fn run_app(
         false, // stderr_color
         &workspace_root,
         &Vec::from_iter(packages.iter()),
+        &target_directory.join("maelstrom"),
         &target_directory,
         FeatureSelectionOptions::default(),
         CompilationOptions::default(),
@@ -1223,7 +1224,7 @@ fn expected_count_updates_packages() {
 
     let path = tmp_dir
         .path()
-        .join("workspace/target")
+        .join("workspace/target/maelstrom")
         .join(LAST_TEST_LISTING_NAME);
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
@@ -1274,7 +1275,7 @@ fn expected_count_updates_cases() {
 
     let path = tmp_dir
         .path()
-        .join("workspace/target")
+        .join("workspace/target/maelstrom")
         .join(LAST_TEST_LISTING_NAME);
     let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
@@ -1321,9 +1322,9 @@ fn filtering_none_does_not_build() {
     );
 
     let fs = Fs::new();
-    let target_dir = tmp_dir.path().join("workspace/target");
+    let cache_dir = tmp_dir.path().join("workspace/target/maelstrom");
     let mut entries: Vec<_> = fs
-        .read_dir(target_dir)
+        .read_dir(cache_dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();

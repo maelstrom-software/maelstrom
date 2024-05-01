@@ -123,7 +123,7 @@ fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccum
 }
 
 fn cache_dir() -> PathBuf {
-    BaseDirectories::with_prefix("maelstrom/client")
+    BaseDirectories::with_prefix("maelstrom/run")
         .expect("failed to find cache dir")
         .get_cache_file("")
 }

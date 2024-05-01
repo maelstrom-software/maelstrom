@@ -148,7 +148,7 @@ impl TestListing {
     }
 }
 
-pub const LAST_TEST_LISTING_NAME: &str = "maelstrom-test-listing.toml";
+pub const LAST_TEST_LISTING_NAME: &str = "test-listing.toml";
 
 pub fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
     let fs = Fs::new();

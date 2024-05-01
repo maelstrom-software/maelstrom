@@ -137,11 +137,12 @@ pub fn main() -> Result<ExitCode> {
     }
 
     let target_dir = &cargo_metadata.target_directory;
-    fs.create_dir_all(target_dir)?;
+    let cache_dir = target_dir.join("maelstrom");
+    fs.create_dir_all(&cache_dir)?;
 
     let deps = DefaultMainAppDeps::new(
         bg_proc,
-        target_dir,
+        &cache_dir,
         &cargo_metadata.workspace_root,
         config.broker,
         config.cache_size,
@@ -158,7 +159,8 @@ pub fn main() -> Result<ExitCode> {
         std::io::stderr().is_terminal(),
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
-        &cargo_metadata.target_directory,
+        &cache_dir,
+        target_dir,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,
         config.cargo_manifest_options,

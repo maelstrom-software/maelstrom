@@ -44,7 +44,7 @@ impl DigestRepositoryContents {
     }
 }
 
-const CACHED_IMAGE_FILE_NAME: &str = "maelstrom-cached-digests.toml";
+const CACHED_IMAGE_FILE_NAME: &str = "cached-digests.toml";
 
 pub struct DigestRepository {
     fs: Fs,
