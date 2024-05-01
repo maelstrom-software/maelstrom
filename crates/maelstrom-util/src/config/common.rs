@@ -411,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn broker_serialize_and_deserialize_human_readable() {
+    fn broker_addr_serialize_and_deserialize_human_readable() {
         assert_tokens(
             &BrokerAddr::new(LOCALHOST4).readable(),
             &[Token::String("127.0.0.1:1234")],
@@ -423,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn broker_serialize_and_deserialize_compact() {
+    fn broker_addr_serialize_and_deserialize_compact() {
         assert_tokens(
             &BrokerAddr::new(LOCALHOST4).compact(),
             &[
@@ -475,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn broker_deserialize_from_string() {
+    fn broker_addr_deserialize_from_string() {
         assert_de_tokens(
             &BrokerAddr::new(LOCALHOST4).readable(),
             &[Token::String("127.0.0.1:1234")],
@@ -487,7 +487,7 @@ mod tests {
     }
 
     #[test]
-    fn broker_deserialize_from_hostname_string() {
+    fn broker_addr_deserialize_from_hostname_string() {
         assert_de_tokens(
             &BrokerAddr::new(LOCALHOST4).readable(),
             &[Token::String("localhost:1234")],

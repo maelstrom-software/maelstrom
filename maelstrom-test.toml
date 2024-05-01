@@ -52,9 +52,11 @@ added_mounts = [
 added_layers = [{ stubs = [ "proc/" ] }]
 
 [[directives]]
-filter = "package.equals(maelstrom-util) && name.starts_with(config::common::tests::)"
-[[directives.added_layers]]
-stubs = [ "/etc" ]
+filter = """
+package.equals(maelstrom-util) && (
+    name.equals(config::common::tests::broker_addr_deserialize_from_hostname_string) ||
+    name.equals(config::common::tests::broker_addr_from_str)
+)"""
 [[directives.added_layers]]
 paths = [ "crates/maelstrom-util/src/config/hosts" ]
 strip_prefix = "crates/maelstrom-util/src/config/"
