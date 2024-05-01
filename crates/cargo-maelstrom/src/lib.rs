@@ -897,7 +897,7 @@ fn list_packages<ProgressIndicatorT>(
     ProgressIndicatorT: ProgressIndicator,
 {
     for pkg in packages.values() {
-        ind.println(format!("package {}", &pkg.name));
+        ind.println(pkg.name.to_string());
     }
 }
 
@@ -916,10 +916,7 @@ fn list_binaries<ProgressIndicatorT>(
                     binary_name += " ";
                     binary_name += &tgt.name;
                 }
-                ind.println(format!(
-                    "binary {}{} ({})",
-                    &pkg.name, binary_name, pkg_kind
-                ));
+                ind.println(format!("{}{} ({})", &pkg.name, binary_name, pkg_kind));
             }
         }
     }

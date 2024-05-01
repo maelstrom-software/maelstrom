@@ -554,8 +554,8 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        "package foo",
-        "binary foo (library)",
+        "foo",
+        "foo (library)",
         "",
     );
 }
@@ -628,12 +628,12 @@ fn two_tests_all_tests_sync_listing() {
         vec!["all".into()],
         vec![],
         "\
-        package bar\n\
-        package foo\
+        bar\n\
+        foo\
         ",
         "\
-        binary bar (library)\n\
-        binary foo (library)\
+        bar (library)\n\
+        foo (library)\
         ",
         "\
         bar test_it\n\
@@ -744,14 +744,14 @@ fn four_tests_filtered_sync_listing() {
         ],
         vec!["package.equals(bin)".into()],
         "\
-        package bar\n\
-        package baz\n\
-        package foo\
+        bar\n\
+        baz\n\
+        foo\
         ",
         "\
-        binary bar (library)\n\
-        binary baz (library)\n\
-        binary foo (library)\
+        bar (library)\n\
+        baz (library)\n\
+        foo (library)\
         ",
         "\
         bar test_it2\n\
