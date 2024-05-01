@@ -1,8 +1,10 @@
 use bytesize::ByteSize;
 use clap::ValueEnum;
 use derive_more::From;
-use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde::{
+    de::{self, Deserializer, Visitor},
+    Deserialize, Serialize,
+};
 use slog::Level;
 use std::{
     error,
@@ -16,9 +18,9 @@ use std::{
 };
 use strum::EnumString;
 
-#[serde_as]
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-pub struct BrokerAddr(#[serde_as(as = "DisplayFromStr")] SocketAddr);
+#[derive(Clone, Copy, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct BrokerAddr(SocketAddr);
 
 impl BrokerAddr {
     pub fn new(inner: SocketAddr) -> Self {
@@ -60,6 +62,34 @@ impl Display for BrokerAddr {
 impl Debug for BrokerAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         Debug::fmt(&self.0, f)
+    }
+}
+
+impl<'de> Deserialize<'de> for BrokerAddr {
+    fn deserialize<D>(deserializer: D) -> Result<BrokerAddr, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct BrokerAddrVisitor;
+        impl<'de> Visitor<'de> for BrokerAddrVisitor {
+            type Value = BrokerAddr;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a socket address")
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                BrokerAddr::from_str(v).map_err(de::Error::custom)
+            }
+        }
+        if deserializer.is_human_readable() {
+            deserializer.deserialize_str(BrokerAddrVisitor)
+        } else {
+            SocketAddr::deserialize(deserializer).map(BrokerAddr::new)
+        }
     }
 }
 
@@ -324,7 +354,7 @@ impl error::Error for SlotsFromStrError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_test::{assert_de_tokens, assert_tokens, Token};
+    use serde_test::{assert_de_tokens, assert_tokens, Configure, Token};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
     const LOCALHOST4: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234);
@@ -381,19 +411,65 @@ mod tests {
     }
 
     #[test]
-    fn broker_serialize_and_deserialize() {
+    fn broker_serialize_and_deserialize_human_readable() {
         assert_tokens(
-            &BrokerAddr::new(LOCALHOST4),
+            &BrokerAddr::new(LOCALHOST4).readable(),
+            &[Token::String("127.0.0.1:1234")],
+        );
+        assert_tokens(
+            &BrokerAddr::new(LOCALHOST6).readable(),
+            &[Token::String("[::1]:1234")],
+        );
+    }
+
+    #[test]
+    fn broker_serialize_and_deserialize_compact() {
+        assert_tokens(
+            &BrokerAddr::new(LOCALHOST4).compact(),
             &[
-                Token::NewtypeStruct { name: "BrokerAddr" },
-                Token::String("127.0.0.1:1234"),
+                Token::NewtypeVariant {
+                    name: "SocketAddr",
+                    variant: "V4",
+                },
+                Token::Tuple { len: 2 },
+                Token::Tuple { len: 4 },
+                Token::U8(127),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(1),
+                Token::TupleEnd,
+                Token::U16(1234),
+                Token::TupleEnd,
             ],
         );
         assert_tokens(
-            &BrokerAddr::new(LOCALHOST6),
+            &BrokerAddr::new(LOCALHOST6).compact(),
             &[
-                Token::NewtypeStruct { name: "BrokerAddr" },
-                Token::String("[::1]:1234"),
+                Token::NewtypeVariant {
+                    name: "SocketAddr",
+                    variant: "V6",
+                },
+                Token::Tuple { len: 2 },
+                Token::Tuple { len: 16 },
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(0),
+                Token::U8(1),
+                Token::TupleEnd,
+                Token::U16(1234),
+                Token::TupleEnd,
             ],
         );
     }
@@ -401,18 +477,24 @@ mod tests {
     #[test]
     fn broker_deserialize_from_string() {
         assert_de_tokens(
-            &BrokerAddr::new(LOCALHOST4),
-            &[
-                Token::NewtypeStruct { name: "BrokerAddr" },
-                Token::String("127.0.0.1:1234"),
-            ],
+            &BrokerAddr::new(LOCALHOST4).readable(),
+            &[Token::String("127.0.0.1:1234")],
         );
         assert_de_tokens(
-            &BrokerAddr::new(LOCALHOST6),
-            &[
-                Token::NewtypeStruct { name: "BrokerAddr" },
-                Token::String("[::1]:1234"),
-            ],
+            &BrokerAddr::new(LOCALHOST6).readable(),
+            &[Token::String("[::1]:1234")],
+        );
+    }
+
+    #[test]
+    fn broker_deserialize_from_hostname_string() {
+        assert_de_tokens(
+            &BrokerAddr::new(LOCALHOST4).readable(),
+            &[Token::String("localhost:1234")],
+        );
+        assert_de_tokens(
+            &BrokerAddr::new(LOCALHOST6).readable(),
+            &[Token::String("ipv6-localhost:1234")],
         );
     }
 
