@@ -26,7 +26,7 @@ Here are some example value socket addresses:
 
 See [here](../log-levels.md).
 
-The worker always prints log message to stderr.
+The worker always prints log messages to stderr.
 
 ## `cache-root`
 

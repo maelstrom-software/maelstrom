@@ -25,7 +25,7 @@ Here are some example value socket addresses:
 
 See [here](../log-levels.md).
 
-`maelstrom-run` always prints log message to stderr.
+`maelstrom-run` always prints log messages to stderr.
 
 ## `cache-size`
 

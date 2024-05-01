@@ -14,7 +14,7 @@ Value                                                    | Type    | Description
 
 See [here](../log-levels.md).
 
-The broker always prints log message to stderr.
+The broker always prints log messages to stderr.
 
 ## `cache-root`
 
