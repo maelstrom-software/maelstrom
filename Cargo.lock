@@ -3141,6 +3141,7 @@ dependencies = [
  "rand",
  "regex",
  "serde",
+ "serde_test",
  "serde_with",
  "sha2",
  "slog",

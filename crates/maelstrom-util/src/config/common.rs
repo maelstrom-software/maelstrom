@@ -17,7 +17,7 @@ use std::{
 use strum::EnumString;
 
 #[serde_as]
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct BrokerAddr(#[serde_as(as = "DisplayFromStr")] SocketAddr);
 
 impl BrokerAddr {
@@ -324,6 +324,97 @@ impl error::Error for SlotsFromStrError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_test::{assert_de_tokens, assert_tokens, Token};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+
+    const LOCALHOST4: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 1234);
+    const LOCALHOST6: SocketAddr = SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 1234);
+
+    #[test]
+    fn broker_addr_from_str() {
+        assert_eq!(
+            BrokerAddr::from_str("127.0.0.1:1234").unwrap(),
+            BrokerAddr::new(LOCALHOST4),
+        );
+        assert_eq!(
+            BrokerAddr::from_str("localhost:1234").unwrap(),
+            BrokerAddr::new(LOCALHOST4),
+        );
+        assert_eq!(
+            BrokerAddr::from_str("[::1]:1234").unwrap(),
+            BrokerAddr::new(LOCALHOST6),
+        );
+        assert_eq!(
+            BrokerAddr::from_str("ipv6-localhost:1234").unwrap(),
+            BrokerAddr::new(LOCALHOST6),
+        );
+    }
+
+    #[test]
+    fn broker_addr_into_string() {
+        assert_eq!(String::from(BrokerAddr::new(LOCALHOST4)), "127.0.0.1:1234");
+        assert_eq!(String::from(BrokerAddr::new(LOCALHOST6)), "[::1]:1234");
+    }
+
+    #[test]
+    fn broker_addr_display() {
+        assert_eq!(
+            format!("{}", BrokerAddr::new(LOCALHOST4)),
+            format!("{LOCALHOST4}")
+        );
+        assert_eq!(
+            format!("{}", BrokerAddr::new(LOCALHOST6)),
+            format!("{LOCALHOST6}")
+        );
+    }
+
+    #[test]
+    fn broker_addr_debug() {
+        assert_eq!(
+            format!("{:?}", BrokerAddr::new(LOCALHOST4)),
+            format!("{LOCALHOST4:?}")
+        );
+        assert_eq!(
+            format!("{:?}", BrokerAddr::new(LOCALHOST6)),
+            format!("{LOCALHOST6:?}")
+        );
+    }
+
+    #[test]
+    fn broker_serialize_and_deserialize() {
+        assert_tokens(
+            &BrokerAddr::new(LOCALHOST4),
+            &[
+                Token::NewtypeStruct { name: "BrokerAddr" },
+                Token::String("127.0.0.1:1234"),
+            ],
+        );
+        assert_tokens(
+            &BrokerAddr::new(LOCALHOST6),
+            &[
+                Token::NewtypeStruct { name: "BrokerAddr" },
+                Token::String("[::1]:1234"),
+            ],
+        );
+    }
+
+    #[test]
+    fn broker_deserialize_from_string() {
+        assert_de_tokens(
+            &BrokerAddr::new(LOCALHOST4),
+            &[
+                Token::NewtypeStruct { name: "BrokerAddr" },
+                Token::String("127.0.0.1:1234"),
+            ],
+        );
+        assert_de_tokens(
+            &BrokerAddr::new(LOCALHOST6),
+            &[
+                Token::NewtypeStruct { name: "BrokerAddr" },
+                Token::String("[::1]:1234"),
+            ],
+        );
+    }
 
     #[derive(Debug, Deserialize, Eq, PartialEq)]
     struct TwoCacheSizes {

@@ -52,6 +52,15 @@ added_mounts = [
 added_layers = [{ stubs = [ "proc/" ] }]
 
 [[directives]]
+filter = "package.equals(maelstrom-util) && name.starts_with(config::common::tests::)"
+[[directives.added_layers]]
+stubs = [ "/etc" ]
+[[directives.added_layers]]
+paths = [ "crates/maelstrom-util/src/config/hosts" ]
+strip_prefix = "crates/maelstrom-util/src/config/"
+prepend_prefix = "/etc/"
+
+[[directives]]
 filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
