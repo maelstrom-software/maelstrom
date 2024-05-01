@@ -12,7 +12,6 @@ use maelstrom_util::{
     log::{test_logger, LoggerFactory},
 };
 use regex::Regex;
-use slog::Drain as _;
 use std::panic::Location;
 use std::path::PathBuf;
 use tempfile::tempdir;

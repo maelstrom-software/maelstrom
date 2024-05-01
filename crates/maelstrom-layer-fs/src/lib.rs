@@ -582,7 +582,6 @@ mod tests {
         Utf8PathBuf,
     };
     use maelstrom_util::manifest::AsyncManifestWriter;
-    use slog::Drain as _;
     use std::collections::HashMap;
     use std::future::Future;
     use std::os::unix::fs::MetadataExt as _;

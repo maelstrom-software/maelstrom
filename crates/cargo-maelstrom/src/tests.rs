@@ -23,7 +23,6 @@ use maelstrom_client::{
 };
 use maelstrom_test::digest;
 use maelstrom_util::{fs::Fs, log::test_logger};
-use slog::Drain as _;
 use std::collections::HashSet;
 use std::{
     cell::RefCell,
