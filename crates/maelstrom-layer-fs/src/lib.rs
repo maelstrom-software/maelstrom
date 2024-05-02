@@ -1038,7 +1038,7 @@ mod tests {
             let final_path = self.blob_dir.join(digest.to_string());
             self.fs.rename(tar_path, &final_path).await.unwrap();
 
-            (digest, final_path.into_inner())
+            (digest, final_path.into_path_buf())
         }
 
         async fn build_manifest(&self, files: Vec<BuildEntry>) -> PathBuf {
@@ -1151,7 +1151,7 @@ mod tests {
             let final_path = self.blob_dir.join(digest.to_string());
             self.fs.rename(manifest_path, &final_path).await.unwrap();
 
-            final_path.into_inner()
+            final_path.into_path_buf()
         }
 
         async fn build_bottom_layer_from_tar(&mut self, input: Vec<BuildEntry>) -> LayerFs {

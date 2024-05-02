@@ -82,10 +82,10 @@ impl<T: ?Sized> RootBuf<T> {
     }
 
     pub fn transmute<U>(self) -> RootBuf<U> {
-        RootBuf::new(self.into_inner())
+        RootBuf::new(self.into_path_buf())
     }
 
-    pub fn into_inner(self) -> PathBuf {
+    pub fn into_path_buf(self) -> PathBuf {
         self.inner
     }
 

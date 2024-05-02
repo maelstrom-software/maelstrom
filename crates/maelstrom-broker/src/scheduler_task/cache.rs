@@ -242,7 +242,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// incorporate them into the new cache. If there are garbage files in the directories, likely
     /// from incomplete downloads in the previous instance, this function will remove them.
     pub fn new(mut fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: slog::Logger) -> Self {
-        let root = root.into_inner();
+        let root = root.into_path_buf();
         let mut path = root.clone();
 
         path.push("tmp");

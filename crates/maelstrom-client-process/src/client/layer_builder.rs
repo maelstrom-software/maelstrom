@@ -97,21 +97,21 @@ impl LayerBuilder {
         self.cache_dir
             .join(MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_inner()
+            .into_path_buf()
     }
 
     fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(STUB_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_inner()
+            .into_path_buf()
     }
 
     fn build_symlink_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(SYMLINK_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_inner()
+            .into_path_buf()
     }
 
     async fn build_manifest(
@@ -133,7 +133,7 @@ impl LayerBuilder {
             let mut path = maybe_path?.as_ref().to_owned();
             let input_path_relative = path.is_relative();
             if input_path_relative {
-                path = project_dir.join(path).into_inner();
+                path = project_dir.join(path).into_path_buf();
             }
             let utf8_path = Utf8Path::from_path(&path).ok_or_else(|| anyhow!("non-utf8 path"))?;
             path_hasher.hash_path(utf8_path);

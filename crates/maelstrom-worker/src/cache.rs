@@ -230,7 +230,7 @@ impl<FsT: Fs> Cache<FsT> {
     /// larger than this size, but then shrink back down to this size. Ideally, the cache would use
     /// this as a hard upper bound, but that's not how it currently works.
     pub fn new(mut fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: Logger) -> Self {
-        let root = root.into_inner();
+        let root = root.into_path_buf();
         let mut path = root.clone();
 
         path.push("removing");

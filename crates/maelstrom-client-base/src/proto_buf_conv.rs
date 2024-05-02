@@ -637,7 +637,7 @@ impl<T> IntoProtoBuf for maelstrom_util::root::RootBuf<T> {
     type ProtoBufType = <PathBuf as IntoProtoBuf>::ProtoBufType;
 
     fn into_proto_buf(self) -> Self::ProtoBufType {
-        self.into_inner().into_proto_buf()
+        self.into_path_buf().into_proto_buf()
     }
 }
 
