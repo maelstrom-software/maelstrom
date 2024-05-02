@@ -142,12 +142,15 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
             linux::dup2(stdin_read_fd.as_fd(), Fd::STDIN)?;
         }
 
+        struct OverlayFsUpperDir;
+        struct OverlayFsWorkDir;
+
         let user = UserId::from(linux::getuid().as_u32());
         let group = GroupId::from(linux::getgid().as_u32());
         let root_mode = std::fs::metadata(&mount_dir)?.mode();
         let mount_dir = CString::new(mount_dir.as_os_str().as_bytes())?;
-        let upper_dir = tmpfs_dir.join("upper");
-        let work_dir = tmpfs_dir.join("work");
+        let upper_dir = tmpfs_dir.join::<OverlayFsUpperDir>("upper");
+        let work_dir = tmpfs_dir.join::<OverlayFsWorkDir>("work");
         let tmpfs_dir = CString::new(tmpfs_dir.as_os_str().as_bytes())?;
         let comma_upperdir_comma_workdir = format!(
             ",upperdir={},workdir={}",
@@ -870,7 +873,8 @@ mod tests {
             let blob_dir = RootBuf::<BlobDir>::new(temp_dir.path().join("cache"));
             fs.create_dir(&blob_dir).await.unwrap();
             let tar_bytes = include_bytes!("executor-test-deps.tar");
-            let tar_path = blob_dir.join(format!("{}", digest!(42)));
+            struct BlobFile;
+            let tar_path = blob_dir.join::<BlobFile>(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
             let mut builder =
                 BottomLayerBuilder::new(test_logger(), &fs, &data_path, &blob_dir, ARBITRARY_TIME)

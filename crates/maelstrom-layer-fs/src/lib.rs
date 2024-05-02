@@ -598,6 +598,8 @@ mod tests {
 
     const ARBITRARY_TIME: UnixTimestamp = UnixTimestamp(1705000271);
 
+    struct BlobFile;
+
     #[derive(Debug)]
     enum BuildEntryData {
         Regular {
@@ -847,11 +849,14 @@ mod tests {
         }
 
         async fn add_to_cache(&self, data: &[u8]) -> Sha256Digest {
-            let temp_path = self.blob_dir.join("temp");
+            let temp_path = self.blob_dir.join::<BlobFile>("temp");
             self.fs.write(&temp_path, data).await.unwrap();
             let digest = calc_digest(&self.fs, &temp_path).await;
             self.fs
-                .rename(temp_path, self.blob_dir.join(digest.to_string()))
+                .rename(
+                    temp_path,
+                    self.blob_dir.join::<BlobFile>(digest.to_string()),
+                )
                 .await
                 .unwrap();
             digest
@@ -969,7 +974,7 @@ mod tests {
         }
 
         async fn build_tar(&self, files: Vec<BuildEntry>) -> (Sha256Digest, PathBuf) {
-            let tar_path = self.blob_dir.join("temp.tar");
+            let tar_path = self.blob_dir.join::<BlobFile>("temp.tar");
             let f = self.fs.create_file(&tar_path).await.unwrap();
             let mut ar = tokio_tar::Builder::new(f.into_inner());
             for BuildEntry { path, data } in files {
@@ -1035,14 +1040,14 @@ mod tests {
 
             let digest = calc_digest(&self.fs, &tar_path).await;
 
-            let final_path = self.blob_dir.join(digest.to_string());
+            let final_path = self.blob_dir.join::<BlobFile>(digest.to_string());
             self.fs.rename(tar_path, &final_path).await.unwrap();
 
             (digest, final_path.into_path_buf())
         }
 
         async fn build_manifest(&self, files: Vec<BuildEntry>) -> PathBuf {
-            let manifest_path = self.blob_dir.join("temp.manifest");
+            let manifest_path = self.blob_dir.join::<BlobFile>("temp.manifest");
             let f = self.fs.create_file(&manifest_path).await.unwrap();
             let mut builder = AsyncManifestWriter::new(f).await.unwrap();
             for BuildEntry { path, data } in files {
@@ -1148,7 +1153,7 @@ mod tests {
 
             let digest = calc_digest(&self.fs, &manifest_path).await;
 
-            let final_path = self.blob_dir.join(digest.to_string());
+            let final_path = self.blob_dir.join::<BlobFile>(digest.to_string());
             self.fs.rename(manifest_path, &final_path).await.unwrap();
 
             final_path.into_path_buf()

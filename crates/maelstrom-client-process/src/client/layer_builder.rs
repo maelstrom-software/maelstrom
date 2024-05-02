@@ -94,24 +94,21 @@ impl LayerBuilder {
     }
 
     fn build_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
-        self.cache_dir
+        (**self.cache_dir)
             .join(MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_path_buf()
     }
 
     fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
-        self.cache_dir
+        (**self.cache_dir)
             .join(STUB_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_path_buf()
     }
 
     fn build_symlink_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
-        self.cache_dir
+        (**self.cache_dir)
             .join(SYMLINK_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
-            .into_path_buf()
     }
 
     async fn build_manifest(
@@ -121,7 +118,6 @@ impl LayerBuilder {
         data_upload: impl DataUpload,
     ) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
-        let project_dir = self.project_dir.clone();
         let tmp_file_path = self.build_manifest_path(&".temp");
         let mut manifest_file = fs.create_file(&tmp_file_path).await?;
         let follow_symlinks = prefix_options.follow_symlinks;
@@ -133,17 +129,18 @@ impl LayerBuilder {
             let mut path = maybe_path?.as_ref().to_owned();
             let input_path_relative = path.is_relative();
             if input_path_relative {
-                path = project_dir.join(path).into_path_buf();
+                path = (**self.project_dir).join(path);
             }
             let utf8_path = Utf8Path::from_path(&path).ok_or_else(|| anyhow!("non-utf8 path"))?;
             path_hasher.hash_path(utf8_path);
 
             let entry_path = if input_path_relative {
-                utf8_path.strip_prefix(&project_dir).unwrap()
+                utf8_path.strip_prefix(&self.project_dir).unwrap()
             } else {
                 utf8_path
             };
-            let dest = calculate_manifest_entry_path(entry_path, &project_dir, &prefix_options)?;
+            let dest =
+                calculate_manifest_entry_path(entry_path, &self.project_dir, &prefix_options)?;
             builder.add_file(utf8_path, dest).await?;
         }
         drop(builder);

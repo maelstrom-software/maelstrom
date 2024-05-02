@@ -185,7 +185,7 @@ impl Client {
             // directory.
             const LOCAL_WORKER_DIR: &str = "local-worker";
             for d in [STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR, LOCAL_WORKER_DIR] {
-                fs.create_dir_all(cache_dir.join(d)).await?;
+                fs.create_dir_all((**cache_dir).join(d)).await?;
             }
 
             // Create standalone sub-components.
@@ -281,21 +281,11 @@ impl Client {
 
             // Start the local_worker.
             {
-                let cache_root = cache_dir
-                    .join(LOCAL_WORKER_DIR)
-                    .transmute::<local_worker::WorkerCacheDir>();
-                let mount_dir = cache_root
-                    .join("mount")
-                    .transmute::<local_worker::MountDir>();
-                let tmpfs_dir = cache_root
-                    .join("upper")
-                    .transmute::<local_worker::TmpfsDir>();
-                let cache_root = cache_root
-                    .join("artifacts")
-                    .transmute::<local_worker::CacheDir>();
-                let blob_dir = cache_root
-                    .join("blob/sha256")
-                    .transmute::<local_worker::BlobDir>();
+                let cache_root = cache_dir.join::<local_worker::WorkerCacheDir>(LOCAL_WORKER_DIR);
+                let mount_dir = cache_root.join::<local_worker::MountDir>("mount");
+                let tmpfs_dir = cache_root.join::<local_worker::TmpfsDir>("upper");
+                let cache_root = cache_root.join::<local_worker::CacheDir>("artifacts");
+                let blob_dir = cache_root.join::<local_worker::BlobDir>("blob/sha256");
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.

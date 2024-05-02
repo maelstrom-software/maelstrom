@@ -629,7 +629,7 @@ impl DefaultMainAppDeps {
         let client = Client::new(
             bg_proc,
             broker_addr,
-            workspace_root.as_ref().transmute::<ProjectDir>(),
+            Root::<ProjectDir>::new(workspace_root.as_ref()),
             cache_dir,
             cache_size,
             inline_limit,

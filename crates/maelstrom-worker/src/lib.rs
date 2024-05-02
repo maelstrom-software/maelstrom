@@ -386,10 +386,10 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
     log: Logger,
 ) {
-    let mount_dir = config.cache_root.join("mount").transmute::<MountDir>();
-    let tmpfs_dir = config.cache_root.join("upper").transmute::<TmpfsDir>();
-    let cache_root = config.cache_root.join("artifacts").transmute::<CacheDir>();
-    let blob_dir = cache_root.join("blob/sha256").transmute::<BlobDir>();
+    let mount_dir = config.cache_root.join::<MountDir>("mount");
+    let tmpfs_dir = config.cache_root.join::<TmpfsDir>("upper");
+    let cache_root = config.cache_root.join::<CacheDir>("artifacts");
+    let blob_dir = cache_root.join::<BlobDir>("blob/sha256");
 
     let broker_sender = BrokerSender::new(broker_socket_sender);
     let cache = Cache::new(StdFs, cache_root, config.cache_size, log.clone());

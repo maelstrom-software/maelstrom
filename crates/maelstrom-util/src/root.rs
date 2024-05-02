@@ -20,10 +20,6 @@ impl<T: ?Sized> Root<T> {
         unsafe { &*ptr }
     }
 
-    pub fn transmute<U>(&self) -> &Root<U> {
-        Root::new(&self.inner)
-    }
-
     pub fn join(&self, path: impl AsRef<Path>) -> RootBuf<T> {
         RootBuf::new(self.inner.join(path.as_ref()))
     }
@@ -81,16 +77,12 @@ impl<T: ?Sized> RootBuf<T> {
         }
     }
 
-    pub fn transmute<U>(self) -> RootBuf<U> {
-        RootBuf::new(self.into_path_buf())
-    }
-
     pub fn into_path_buf(self) -> PathBuf {
         self.inner
     }
 
-    pub fn join(&self, path: impl AsRef<Path>) -> Self {
-        Self::new(self.inner.join(path.as_ref()))
+    pub fn join<U>(&self, path: impl AsRef<Path>) -> RootBuf<U> {
+        RootBuf::new(self.inner.join(path.as_ref()))
     }
 
     pub fn as_root(&self) -> &Root<T> {
