@@ -356,10 +356,10 @@ impl Client {
 }
 
 pub fn bg_proc_main() -> Result<()> {
+    let name = format!("maelstrom-client-{}", std::process::id());
     maelstrom_client_process::clone_into_pid_and_user_namespace()?;
 
     maelstrom_util::log::run_with_logger(maelstrom_util::config::common::LogLevel::Debug, |log| {
-        let name = format!("maelstrom-client-{}", std::process::id());
         let listener = UnixListener::bind_addr(&SocketAddr::from_abstract_name(name.as_bytes())?)?;
         slog::info!(log, "listening on unix-abstract:{name}");
 
