@@ -17,6 +17,7 @@ use sha2::{Digest as _, Sha256};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::pin::pin;
+use tokio::io::AsyncWriteExt as _;
 
 /// Having some deterministic time-stamp for files we create in manifests is useful for testing and
 /// potentially caching.
@@ -118,9 +119,10 @@ impl LayerBuilder {
         let fs = async_fs::Fs::new();
         let project_dir = self.project_dir.clone();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let manifest_file = fs.create_file(&tmp_file_path).await?;
+        let mut manifest_file = fs.create_file(&tmp_file_path).await?;
         let follow_symlinks = prefix_options.follow_symlinks;
-        let mut builder = ManifestBuilder::new(manifest_file, follow_symlinks, data_upload).await?;
+        let mut builder =
+            ManifestBuilder::new(&mut manifest_file, follow_symlinks, data_upload).await?;
         let mut path_hasher = PathHasher::new();
         let mut pinned_paths = pin!(paths);
         while let Some(maybe_path) = pinned_paths.next().await {
@@ -141,6 +143,7 @@ impl LayerBuilder {
             builder.add_file(utf8_path, dest).await?;
         }
         drop(builder);
+        manifest_file.flush().await?;
 
         let manifest_path = self.build_manifest_path(&path_hasher.finish());
         fs.rename(tmp_file_path, &manifest_path).await?;
@@ -150,7 +153,8 @@ impl LayerBuilder {
     async fn build_stub_manifest(&self, stubs: Vec<String>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
+        let mut file = fs.create_file(&tmp_file_path).await?;
+        let mut writer = AsyncManifestWriter::new(&mut file).await?;
         let mut path_hasher = PathHasher::new();
         for maybe_stub in stubs.iter().map(|s| expand_braces(s)).flatten_ok() {
             let stub = Utf8PathBuf::from(maybe_stub?);
@@ -173,6 +177,7 @@ impl LayerBuilder {
             };
             writer.write_entry(&entry).await?;
         }
+        file.flush().await?;
 
         let manifest_path = self.build_stub_manifest_path(&path_hasher.finish());
         fs.rename(tmp_file_path, &manifest_path).await?;
@@ -182,7 +187,8 @@ impl LayerBuilder {
     async fn build_symlink_manifest(&self, symlinks: Vec<SymlinkSpec>) -> Result<PathBuf> {
         let fs = async_fs::Fs::new();
         let tmp_file_path = self.build_manifest_path(&".temp");
-        let mut writer = AsyncManifestWriter::new(fs.create_file(&tmp_file_path).await?).await?;
+        let mut file = fs.create_file(&tmp_file_path).await?;
+        let mut writer = AsyncManifestWriter::new(&mut file).await?;
         let mut path_hasher = PathHasher::new();
         for SymlinkSpec { link, target } in symlinks {
             path_hasher.hash_path(&link);
@@ -200,6 +206,7 @@ impl LayerBuilder {
             };
             writer.write_entry(&entry).await?;
         }
+        file.flush().await?;
 
         let manifest_path = self.build_symlink_manifest_path(&path_hasher.finish());
         fs.rename(tmp_file_path, &manifest_path).await?;
