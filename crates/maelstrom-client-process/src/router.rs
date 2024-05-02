@@ -6,6 +6,7 @@ use maelstrom_base::{
     ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_util::{config::common::Slots, ext::OptionExt as _, fs::Fs, sync};
+use maelstrom_worker::local_worker;
 use std::{
     collections::{HashMap, VecDeque},
     path::{Path, PathBuf},
@@ -33,7 +34,7 @@ pub trait Deps {
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path);
 
     // Only in standalone mode.
-    fn send_message_to_local_worker(&mut self, message: maelstrom_worker::dispatcher::Message);
+    fn send_message_to_local_worker(&mut self, message: local_worker::Message);
     fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64>;
 }
 
@@ -106,15 +107,16 @@ impl<DepsT: Deps> Router<DepsT> {
                     } else {
                         self.counts[JobState::Pending] += 1;
                     }
-                    self.deps.send_message_to_local_worker(
-                        maelstrom_worker::dispatcher::Message::Broker(BrokerToWorker::EnqueueJob(
-                            JobId {
-                                cid: ClientId::from(0),
-                                cjid,
-                            },
-                            spec,
-                        )),
-                    );
+                    self.deps
+                        .send_message_to_local_worker(local_worker::Message::Broker(
+                            BrokerToWorker::EnqueueJob(
+                                JobId {
+                                    cid: ClientId::from(0),
+                                    cjid,
+                                },
+                                spec,
+                            ),
+                        ));
                 } else {
                     self.deps
                         .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec));
@@ -169,7 +171,7 @@ impl<DepsT: Deps> Router<DepsT> {
             }
             Message::LocalWorkerStartArtifactFetch(digest, path) => {
                 assert!(self.standalone);
-                let response = maelstrom_worker::dispatcher::Message::ArtifactFetchCompleted(
+                let response = local_worker::Message::ArtifactFetchCompleted(
                     digest.clone(),
                     match self.artifacts.get(&digest) {
                         None => Err(anyhow!("no artifact found for digest {digest}")),
@@ -235,7 +237,7 @@ impl Deps for Adapter {
         });
     }
 
-    fn send_message_to_local_worker(&mut self, message: maelstrom_worker::dispatcher::Message) {
+    fn send_message_to_local_worker(&mut self, message: local_worker::Message) {
         let _ = self.local_worker_sender.send(message);
     }
 

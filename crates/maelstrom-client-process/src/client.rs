@@ -25,6 +25,7 @@ use maelstrom_util::{
     log::LoggerFactory,
     net, sync,
 };
+use maelstrom_worker::local_worker;
 use slog::{debug, Logger};
 use state_machine::StateMachine;
 use std::{
@@ -285,15 +286,15 @@ impl Client {
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
-                let local_worker_cache = maelstrom_worker::cache::Cache::new(
-                    maelstrom_worker::cache::StdFs,
+                let local_worker_cache = local_worker::Cache::new(
+                    local_worker::StdFs,
                     CacheRoot::from(cache_root),
                     cache_size,
                     log.clone(),
                 );
 
                 // Create the local_worker's deps. This the same adapter as the "real" worker uses.
-                let local_worker_dispatcher_adapter = maelstrom_worker::DispatcherAdapter::new(
+                let local_worker_dispatcher_adapter = local_worker::DispatcherAdapter::new(
                     local_worker_sender,
                     inline_limit,
                     log.clone(),
@@ -305,7 +306,7 @@ impl Client {
                 // Create an ArtifactFetcher for the local_worker that just forwards requests to
                 // the router.
                 struct ArtifactFetcher(router::Sender);
-                impl maelstrom_worker::dispatcher::ArtifactFetcher for ArtifactFetcher {
+                impl local_worker::ArtifactFetcher for ArtifactFetcher {
                     fn start_artifact_fetch(&mut self, digest: Sha256Digest, path: PathBuf) {
                         self.0
                             .send(router::Message::LocalWorkerStartArtifactFetch(digest, path))
@@ -317,7 +318,7 @@ impl Client {
                 // Create a BrokerSender for the local_worker that just forwards messages to
                 // the router.
                 struct BrokerSender(router::Sender);
-                impl maelstrom_worker::dispatcher::BrokerSender for BrokerSender {
+                impl local_worker::BrokerSender for BrokerSender {
                     fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
                         self.0.send(router::Message::LocalWorker(msg)).ok();
                     }
@@ -325,7 +326,7 @@ impl Client {
                 let worker_broker_sender = BrokerSender(local_broker_sender.clone());
 
                 // Create the actual local_worker.
-                let mut worker_dispatcher = maelstrom_worker::dispatcher::Dispatcher::new(
+                let mut worker_dispatcher = local_worker::Dispatcher::new(
                     local_worker_dispatcher_adapter,
                     local_worker_artifact_fetcher,
                     worker_broker_sender,

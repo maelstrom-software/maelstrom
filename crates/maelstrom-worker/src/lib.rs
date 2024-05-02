@@ -1,11 +1,12 @@
 //! Code for the worker binary.
 
-pub mod cache;
+mod cache;
 pub mod config;
-pub mod dispatcher;
+mod dispatcher;
 mod executor;
 mod fetcher;
 mod layer_fs;
+pub mod local_worker;
 
 use anyhow::{Context as _, Result};
 use cache::{Cache, StdFs};
