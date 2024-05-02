@@ -174,6 +174,10 @@ impl Fs {
         fs_trampoline!(tokio::fs::rename, from, to)
     }
 
+    pub async fn copy<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> Result<u64> {
+        fs_trampoline!(tokio::fs::copy, from, to)
+    }
+
     pub async fn remove_dir<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         fs_trampoline!(tokio::fs::remove_dir, path)
     }
@@ -191,6 +195,10 @@ impl Fs {
         tokio::fs::write(path, contents)
             .await
             .with_context(|| format!("write(\"{}\")", path.display()))
+    }
+
+    pub async fn read<P: AsRef<Path>>(&self, path: P) -> Result<Vec<u8>> {
+        fs_trampoline!(tokio::fs::read, path)
     }
 
     pub async fn read_to_string<P: AsRef<Path>>(&self, path: P) -> Result<String> {
