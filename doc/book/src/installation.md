@@ -1,30 +1,34 @@
 # Installation
 
+## Requirements
+
+Maelstrom currently only supports Linux.
+
+...presumably there are also kernel version requirements?
+
+## Installed Binaries
+
 Maelstrom consists of the following binaries:
   - [`cargo-maelstrom`](cargo-maelstrom.md): A Rust test runner. This can be run in
     standalone mode &mdash; where tests will be executed on the local machine
     &mdash; or in clustered mode. In standalone mode, no other Maelstrom
     binaries need be installed, but in clustered mode, there must be a broker
     and some workers available on the network.
-  - [`maelstrom-broker`](broker.md): The Maelstrom cluster scheduler. There must be one of
+  - [`maelstrom-broker`](broker.md): The Maelstrom cluster broker. This component is
+    responsible for scheduling work onto nodes in the cluster. There must be one of
     these per Maelstrom cluster.
   - [`maelstrom-worker`](worker.md): The Maelstrom cluster worker. This must be
     installed on the machines in the cluster that will actually run jobs
     (i.e. tests).
   - [`maelstrom-run`](run.md): A Maelstrom client for running arbitrary commands on a
-    Maelstrom cluster. While this binary can run in standalone mode, it's only really
-    useful in clustered mode.
-
-The installation process is virtually identical for all binaries. We'll
-demonstrate how to install all the binaries in the following sections. You can
-pick and choose which ones you actually want to install.
-
-Maelstrom currently only supports Linux.
+    Maelstrom cluster. While this binary can run in standalone mode, it's only
+    necessary in clustered mode.
 
 ## Installing From Pre-Built Binaries
 
 The easiest way to install Maelstrom binaries is to use
-[cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall), which allows you to
+pick and choose the binaries you want to install:
 
 ```bash
 cargo binstall cargo-maelstrom
@@ -35,24 +39,24 @@ cargo binstall maelstrom-run
 
 These commands retrieve the pre-built binaries from the [Maelstrom GitHub
 release page](https://github.com/maelstrom-software/maelstrom/releases). If you
-don't have `cargo-binstall`, you can just manually install the binaries from the
-releases page. For example:
+don't have `cargo-binstall`, you can directly install the pre-built binaries by
+simply untarring the release artifacts. For example:
 
 ```bash
 wget -q -O - https://github.com/maelstrom-software/maelstrom/releases/latest/download/cargo-maelstrom-x86_64-unknown-linux-gnu.tgz | tar xzf -
 ```
 
-This will download and extract the latest release of `cargo-maelstrom` for x86 Linux.
+This will download and extract the latest release of `cargo-maelstrom` for Linux on the x86-64 architecture.
 
 ## Installing Using Nix
 
-We have a `nix.flake` file, so you can install all Maelstrom binaries with something like:
+Maelstrom includes a `nix.flake` file, so you can install all Maelstrom binaries with `nix profile install`:
 
 ```bash
 nix profile install github:maelstrom-software/maelstrom
 ```
 
-Our Nix flake doesn't currently have the ability to install individual binaries.
+The Nix flake doesn't currently support installing individual binaries.
 
 ## Installing From Source With `cargo install`
 
