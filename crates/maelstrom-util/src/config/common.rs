@@ -375,7 +375,7 @@ mod tests {
             BrokerAddr::new(LOCALHOST6),
         );
         assert_eq!(
-            BrokerAddr::from_str("ipv6-localhost:1234").unwrap(),
+            BrokerAddr::from_str("ip6-localhost:1234").unwrap(),
             BrokerAddr::new(LOCALHOST6),
         );
     }
@@ -494,7 +494,7 @@ mod tests {
         );
         assert_de_tokens(
             &BrokerAddr::new(LOCALHOST6).readable(),
-            &[Token::String("ipv6-localhost:1234")],
+            &[Token::String("ip6-localhost:1234")],
         );
     }
 
