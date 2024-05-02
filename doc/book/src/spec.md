@@ -1,3 +1,7 @@
+v---- I kind of felt knocked over the head by this section. It seems to be too early in the book. Like, what even is a "job"? Why am I all of the sudden reading Protobuf specs?
+
+I think you need a "general architecture" section or something that sort of introduces the "life of a test run" or something and has some nice diagrams that help me understand the data/execution flow between the different components. We had a brief introduction to the different components back in `Installation`, of all places, but I'm not really sure how they fit together yet. Once I understand a bit more at a higher level, I'd be more interested to learn more about the job spec.
+
 # The Job Specification
 
 Each job run by Maelstrom is defined by a **Job Specification**, or "job spec"
