@@ -7,12 +7,6 @@ variables, or configuration files.
 Each configuration value has a type, which is either string, number, or
 boolean.
 
-Imagine a configuration value named `config-value` in a program called
-`maelstrom-prog`. This configuration value can be specified via:
-  - The `--config-value` command-line option.
-  - The `MAELSTROM_PROG_CONFIG_VALUE` environment variable.
-  - The `config-value` key in a configuration file.
-
 ## Command-Line Options
 
 Configuration values set on the command line override settings from environment
@@ -36,15 +30,16 @@ configuration files, but are overridden by command-line options.
 
 The environment variable name is created by converting the configuration value
 to ["screaming snake case"](https://en.wikipedia.org/wiki/Snake_case), and
-prepending a program-specific prefix. Image that we're evaluating configuration
-values for a program name "maelstrom-prog":
+prepending a program-specific prefix. To set configuration values
+values for "maelstrom-broker", for example, you'd prepend `MAELSTROM_BROKER_`,
+to the environment variable name, like so:
 
 Type    | Example
 --------|----------------------
-string  | `MAELSTROM_PROG_FROB_NAME=string`
-number  | `MAELSTROM_PROG_FROB_SIZE=42`
-boolean | `MAELSTROM_PROG_ENABLE_FROBS=true`
-boolean | `MAELSTROM_PROG_ENABLE_FROBS=false`
+string  | `MAELSTROM_BROKER_FROB_NAME=string`
+number  | `MAELSTROM_BROKER_FROB_SIZE=42`
+boolean | `MAELSTROM_BROKER_ENABLE_FROBS=true`
+boolean | `MAELSTROM_BROKER_ENABLE_FROBS=false`
 
 Note that you don't need to put quotation marks around string values. You also
 can set boolean values to either `true` or `false`.
@@ -79,7 +74,7 @@ set, or is empty, then `~/.config/` is used. Similiarly, if `XDG_CONFIG_DIRS`
 is not set, or is empty, then `/etc/xdg/` is used.
 
 Each program has a program-specific suffix that it appends to the directory it
-gets from XDG. This has the form `maelstrom/prog`, where `prog` is
+gets from XDG. This has the form `maelstrom/<prog>`, where `<prog>` is
 program-specific.
 
 Finally, the program looks for a file named `config.toml` in these directories.
@@ -104,7 +99,12 @@ Maelstrom programs also support the `--config-file` (`-c`) command-line option.
 If this option is provided, the specified configuration file, and only that
 file, will be used.
 
+v---- Interesting. I suppose I would have assumed `-` would mean "read config from stdin".
+
 If `--config-file` is given `-` as an argument, then no configuration file is used.
+
+v---- I find the use of `maelstrom-prog` here a little confusing, since it's not a real
+      thing. But I don't have a better suggestion.
 
 Command Line                                   | Configuration File(s)
 -----------------------------------------------|----------------------
