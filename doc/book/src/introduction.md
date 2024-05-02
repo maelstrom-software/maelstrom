@@ -6,8 +6,6 @@ micro-containers, then distributes them to be run on an arbitrarily large
 cluster of test-runners, or locally on your machine. You might use
 Maelstrom to run your tests because:
 
-* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
-  most cases, it just works.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
@@ -18,6 +16,8 @@ Maelstrom to run your tests because:
 * It's clean. Maelstrom has a from-scratch, rootless container implementation
   (not relying on Docker or RunC), optimized to be low-overhead and start
   quickly.
+* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
+  most cases, it just works.
 * It's Rusty. The whole project is written in Rust.
 
 We started with a Rust test runner, but Maelstrom's underlying job execution
