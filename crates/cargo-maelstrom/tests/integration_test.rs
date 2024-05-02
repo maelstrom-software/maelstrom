@@ -37,13 +37,12 @@ fn cmd(args: &[&str], current_dir: &Path) {
     assert!(cmd.status().unwrap().success(), "{cmd:?} failed");
 }
 
-#[test]
-fn empty_cargo_project() {
-    let bg_proc = spawn_bg_proc();
-
-    let _fs = Fs::new();
+fn do_cargo_maelstrom_test(source_contents: &str) -> String {
+    let fs = Fs::new();
     let temp_dir = tempdir().unwrap();
     cmd(&["cargo", "new", "project"], temp_dir.path());
+    fs.write(temp_dir.path().join("project/src/lib.rs"), source_contents)
+        .unwrap();
 
     let config = Config {
         broker: None,
@@ -55,10 +54,13 @@ fn empty_cargo_project() {
         slots: Slots::default(),
         cargo_feature_selection_options: FeatureSelectionOptions::default(),
         cargo_compilation_options: CompilationOptions::default(),
-        cargo_manifest_options: ManifestOptions::default(),
+        cargo_manifest_options: ManifestOptions {
+            manifest_path: Some(temp_dir.path().join("project/Cargo.toml")),
+            ..Default::default()
+        },
     };
     let extra_options = ExtraCommandLineOptions {
-        include: vec![],
+        include: vec!["all".into()],
         exclude: vec![],
         list: ListOptions {
             tests: false,
@@ -72,7 +74,7 @@ fn empty_cargo_project() {
     let log = maelstrom_util::log::test_logger();
     let logger = Logger::GivenLogger(log.clone());
 
-    std::env::set_current_dir(temp_dir.path().join("project")).unwrap();
+    let bg_proc = spawn_bg_proc();
     cargo_maelstrom::main(
         config,
         extra_options,
@@ -84,12 +86,45 @@ fn empty_cargo_project() {
     )
     .unwrap();
 
-    assert_eq!(
-        term.contents(),
-        "\n\
+    term.contents()
+}
+
+#[test]
+fn empty_cargo_project() {
+    let contents = do_cargo_maelstrom_test("");
+    let expected = "\n\
         ================== Test Summary ==================\n\
         Successful Tests:         0\n\
         Failed Tests    :         0\
-    "
+    ";
+    assert_eq!(contents, expected);
+}
+
+#[test]
+fn few_tests() {
+    let contents = do_cargo_maelstrom_test(
+        "
+        #[test]
+        fn foo() {}
+
+        #[test]
+        fn bar() {}
+        ",
+    );
+    assert!(
+        contents.contains("project foo............................OK"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("project bar............................OK"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("Successful Tests:         2"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("Failed Tests    :         0"),
+        "{contents}"
     );
 }

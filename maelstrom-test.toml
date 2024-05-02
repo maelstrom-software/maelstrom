@@ -77,14 +77,15 @@ filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
 image.name = "rust"
 image.use = ["layers", "environment"]
 added_layers = [
-    { stubs = ["/dev/{fuse,null}"] },
+    { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
     { paths = ["<build_dir>/client-bg-proc"], canonicalize = true }
 ]
-devices = ["null", "fuse"]
+devices = ["full", "fuse", "null", "urandom", "random", "zero"]
 mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "tmp", mount_point = "/root" },
     { fs_type = "proc", mount_point = "/proc" },
+    { fs_type = "sys", mount_point = "/sys" },
 ]
 
 [[directives]]
