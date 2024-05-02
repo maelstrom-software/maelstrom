@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod cargo;
+pub mod cli;
 pub mod config;
 pub mod metadata;
 pub mod pattern;
@@ -10,10 +11,12 @@ pub mod visitor;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use artifacts::GeneratedArtifacts;
 use cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
-use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
+use cargo_metadata::{
+    Artifact as CargoArtifact, Metadata as CargoMetadata, Package as CargoPackage, PackageId,
+};
 use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{
@@ -26,6 +29,7 @@ use maelstrom_client::{
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    fs::Fs,
     process::ExitCode,
     template::TemplateVars,
 };
@@ -1098,4 +1102,116 @@ where
             timeout_override,
         )?),
     }
+}
+
+fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
+    if let Err(e) = &res {
+        if let Some(e) = e.downcast_ref::<cargo::CargoBuildError>() {
+            eprintln!("{}", &e.stderr);
+            return Ok(e.exit_code);
+        }
+    }
+    res
+}
+
+fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
+    let output = std::process::Command::new("cargo")
+        .args(["metadata", "--format-version=1"])
+        .args(config.cargo_feature_selection_options.iter())
+        .args(config.cargo_manifest_options.iter())
+        .output()
+        .context("getting cargo metadata")?;
+    if !output.status.success() {
+        bail!(String::from_utf8(output.stderr)
+            .context("reading stderr")?
+            .trim_end()
+            .trim_start_matches("error: ")
+            .to_owned());
+    }
+    let cargo_metadata: CargoMetadata =
+        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
+    Ok(cargo_metadata)
+}
+
+pub fn main<TermT>(
+    config: config::Config,
+    extra_options: cli::ExtraCommandLineOptions,
+    bg_proc: ClientBgProcess,
+    logger: Logger,
+    stderr_is_tty: bool,
+    stdout_is_tty: bool,
+    terminal: TermT,
+) -> Result<ExitCode>
+where
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+{
+    let logging_output = LoggingOutput::default();
+    let log = logger.build(logging_output.clone());
+
+    let list_action = match (
+        extra_options.list.tests,
+        extra_options.list.binaries,
+        extra_options.list.packages,
+    ) {
+        (true, _, _) => Some(ListAction::ListTests),
+        (_, true, _) => Some(ListAction::ListBinaries),
+        (_, _, true) => Some(ListAction::ListPackages),
+        (_, _, _) => None,
+    };
+
+    let cargo_metadata = read_cargo_metadata(&config)?;
+
+    if extra_options.test_metadata.init {
+        metadata::maybe_write_default_test_metadata(&cargo_metadata.workspace_root)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let fs = Fs::new();
+    let target_dir = &cargo_metadata.target_directory;
+    let cache_dir = target_dir.join("maelstrom");
+    fs.create_dir_all(&cache_dir)?;
+
+    let deps = DefaultMainAppDeps::new(
+        bg_proc,
+        &cache_dir,
+        &cargo_metadata.workspace_root,
+        config.broker,
+        config.cache_size,
+        config.inline_limit,
+        config.slots,
+        log.clone(),
+    )?;
+
+    let state = MainAppState::new(
+        deps,
+        extra_options.include,
+        extra_options.exclude,
+        list_action,
+        stderr_is_tty,
+        &cargo_metadata.workspace_root,
+        &cargo_metadata.workspace_packages(),
+        &cache_dir,
+        target_dir,
+        config.cargo_feature_selection_options,
+        config.cargo_compilation_options,
+        config.cargo_manifest_options,
+        logging_output,
+        log,
+    )?;
+
+    let res = std::thread::scope(|scope| {
+        let mut app = main_app_new(
+            &state,
+            stdout_is_tty,
+            config.quiet,
+            terminal,
+            progress::DefaultProgressDriver::new(scope),
+            config.timeout.map(Timeout::new),
+        )?;
+        while !app.enqueue_one()?.is_done() {}
+        app.drain()?;
+        app.finish()
+    });
+    drop(state);
+    maybe_print_build_error(res)
 }
