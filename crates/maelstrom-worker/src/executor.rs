@@ -17,6 +17,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     config::common::InlineLimit,
+    root::RootBuf,
     sync::EventReceiver,
     time::{Clock, ClockInstant as _},
 };
@@ -31,7 +32,7 @@ use std::{
     io::Read as _,
     iter, mem,
     os::{fd, unix::ffi::OsStrExt as _},
-    path::{Path, PathBuf},
+    path::Path,
     pin::Pin,
     task::{Context, Poll},
 };
@@ -98,6 +99,9 @@ impl JobSpec {
     }
 }
 
+pub struct MountDir;
+pub struct TmpfsDir;
+
 pub struct Executor<'clock, ClockT> {
     user: UserId,
     group: GroupId,
@@ -113,7 +117,11 @@ pub struct Executor<'clock, ClockT> {
 }
 
 impl<'clock, ClockT> Executor<'clock, ClockT> {
-    pub fn new(mount_dir: PathBuf, tmpfs_dir: PathBuf, clock: &'clock ClockT) -> Result<Self> {
+    pub fn new(
+        mount_dir: RootBuf<MountDir>,
+        tmpfs_dir: RootBuf<TmpfsDir>,
+        clock: &'clock ClockT,
+    ) -> Result<Self> {
         // Set up stdin to be a file that will always return EOF. We could do something similar
         // by opening /dev/null but then we would depend on /dev being mounted. The fewer
         // dependencies, the better.
@@ -836,9 +844,10 @@ mod tests {
     use assert_matches::*;
     use bytesize::ByteSize;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
+    use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::sync::Arc;
+    use std::{path::PathBuf, sync::Arc};
     use tempfile::TempDir;
     use tokio::sync::Mutex;
 
@@ -848,8 +857,8 @@ mod tests {
     struct TarMount {
         _temp_dir: TempDir,
         data_path: PathBuf,
-        cache_path: PathBuf,
-        cache: Arc<Mutex<maelstrom_layer_fs::ReaderCache>>,
+        blob_dir: RootBuf<BlobDir>,
+        cache: Arc<Mutex<ReaderCache>>,
     }
 
     impl TarMount {
@@ -857,39 +866,32 @@ mod tests {
             let fs = async_fs::Fs::new();
             let temp_dir = TempDir::new().unwrap();
             let data_path = temp_dir.path().join("data");
-            let cache_path = temp_dir.path().join("cache");
-            for p in [&data_path, &cache_path] {
-                fs.create_dir(p).await.unwrap();
-            }
+            fs.create_dir(&data_path).await.unwrap();
+            let blob_dir = RootBuf::<BlobDir>::new(temp_dir.path().join("cache"));
+            fs.create_dir(&blob_dir).await.unwrap();
             let tar_bytes = include_bytes!("executor-test-deps.tar");
-            let tar_path = cache_path.join(format!("{}", digest!(42)));
+            let tar_path = blob_dir.join(format!("{}", digest!(42)));
             fs.write(&tar_path, &tar_bytes).await.unwrap();
-            let mut builder = maelstrom_layer_fs::BottomLayerBuilder::new(
-                test_logger(),
-                &fs,
-                &data_path,
-                &cache_path,
-                ARBITRARY_TIME,
-            )
-            .await
-            .unwrap();
+            let mut builder =
+                BottomLayerBuilder::new(test_logger(), &fs, &data_path, &blob_dir, ARBITRARY_TIME)
+                    .await
+                    .unwrap();
             builder
                 .add_from_tar(digest!(42), fs.open_file(&tar_path).await.unwrap())
                 .await
                 .unwrap();
             let _ = builder.finish().await.unwrap();
-            let cache = Arc::new(Mutex::new(maelstrom_layer_fs::ReaderCache::new()));
+            let cache = Arc::new(Mutex::new(ReaderCache::new()));
             Self {
                 _temp_dir: temp_dir,
                 cache,
                 data_path,
-                cache_path,
+                blob_dir,
             }
         }
 
         fn spawn(&self, fd: linux::OwnedFd) {
-            let layer_fs =
-                maelstrom_layer_fs::LayerFs::from_path(&self.data_path, &self.cache_path).unwrap();
+            let layer_fs = LayerFs::from_path(&self.data_path, &self.blob_dir).unwrap();
             let cache = self.cache.clone();
             tokio::task::spawn(async move {
                 layer_fs.run_fuse(test_logger(), cache, fd).await.unwrap()
@@ -960,8 +962,8 @@ mod tests {
             } = tokio::task::spawn_blocking(move || {
                 let (_kill_event_sender, kill_event_receiver) = sync::event();
                 Executor::new(
-                    tempfile::tempdir().unwrap().into_path(),
-                    tempfile::tempdir().unwrap().into_path(),
+                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
                     &self.clock,
                 )
                 .unwrap()
@@ -1572,8 +1574,8 @@ mod tests {
         assert_matches!(
             tokio::task::spawn_blocking(move || {
                 Executor::new(
-                    tempfile::tempdir().unwrap().into_path(),
-                    tempfile::tempdir().unwrap().into_path(),
+                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
                     &clock,
                 )
                 .unwrap()

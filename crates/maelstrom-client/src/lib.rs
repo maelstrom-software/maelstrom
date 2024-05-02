@@ -1,4 +1,4 @@
-pub use maelstrom_client_base::{spec, ArtifactUploadProgress, MANIFEST_DIR};
+pub use maelstrom_client_base::{spec, ArtifactUploadProgress, ProjectDir, MANIFEST_DIR};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{
@@ -12,6 +12,7 @@ use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
+    root::{CacheDir, Root},
 };
 use spec::Layer;
 use std::os::linux::net::SocketAddrExt as _;
@@ -177,8 +178,8 @@ impl Client {
     pub fn new(
         mut process_handle: ClientBgProcess,
         broker_addr: Option<BrokerAddr>,
-        project_dir: impl AsRef<Path>,
-        cache_dir: impl AsRef<Path>,
+        project_dir: impl AsRef<Root<ProjectDir>>,
+        cache_dir: impl AsRef<Root<CacheDir>>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
@@ -201,8 +202,8 @@ impl Client {
             .get_cache_file("");
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,
-            "project_dir" => ?project_dir.as_ref(),
-            "cache_dir" => ?cache_dir.as_ref(),
+            "project_dir" => ?project_dir.as_ref().as_path(),
+            "cache_dir" => ?cache_dir.as_ref().as_path(),
             "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
             "cache_size" => ?cache_size,
             "inline_limit" => ?inline_limit,

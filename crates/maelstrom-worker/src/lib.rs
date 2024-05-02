@@ -12,13 +12,14 @@ use anyhow::{Context as _, Result};
 use cache::{Cache, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
-use executor::Executor;
+use executor::{Executor, MountDir, TmpfsDir};
 use lru::LruCache;
 use maelstrom_base::{
     manifest::ManifestEntryData,
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobError, JobId, JobSpec, Sha256Digest,
 };
+use maelstrom_layer_fs::{BlobDir, LayerFs, ReaderCache};
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, PollEvents, PollFd, Signal, WaitStatus,
 };
@@ -28,6 +29,7 @@ use maelstrom_util::{
     fs::Fs,
     manifest::AsyncManifestReader,
     net,
+    root::{CacheDir, Root, RootBuf},
     sync::{self, EventReceiver, EventSender},
     time::SystemMonotonicClock,
 };
@@ -152,8 +154,8 @@ pub struct DispatcherAdapter {
     inline_limit: InlineLimit,
     log: Logger,
     executor: Arc<Executor<'static, SystemMonotonicClock>>,
-    blob_cache_dir: PathBuf,
-    layer_fs_cache: Arc<tokio::sync::Mutex<maelstrom_layer_fs::ReaderCache>>,
+    blob_dir: RootBuf<BlobDir>,
+    layer_fs_cache: Arc<tokio::sync::Mutex<ReaderCache>>,
     manifest_digest_cache: ManifestDigestCache,
 }
 
@@ -163,24 +165,18 @@ impl DispatcherAdapter {
         dispatcher_sender: DispatcherSender,
         inline_limit: InlineLimit,
         log: Logger,
-        mount_dir: PathBuf,
-        tmpfs_dir: PathBuf,
-        blob_cache_dir: PathBuf,
+        mount_dir: RootBuf<MountDir>,
+        tmpfs_dir: RootBuf<TmpfsDir>,
+        blob_dir: RootBuf<BlobDir>,
     ) -> Result<Self> {
         let fs = Fs::new();
         fs.create_dir_all(&mount_dir)?;
         fs.create_dir_all(&tmpfs_dir)?;
         Ok(DispatcherAdapter {
             inline_limit,
-            executor: Arc::new(Executor::new(
-                mount_dir,
-                tmpfs_dir.clone(),
-                &SystemMonotonicClock,
-            )?),
-            blob_cache_dir,
-            layer_fs_cache: Arc::new(tokio::sync::Mutex::new(
-                maelstrom_layer_fs::ReaderCache::new(),
-            )),
+            executor: Arc::new(Executor::new(mount_dir, tmpfs_dir, &SystemMonotonicClock)?),
+            blob_dir,
+            layer_fs_cache: Arc::new(tokio::sync::Mutex::new(ReaderCache::new())),
             manifest_digest_cache: ManifestDigestCache::new(
                 dispatcher_sender.clone(),
                 log.clone(),
@@ -203,8 +199,7 @@ impl DispatcherAdapter {
             .new(o!("jid" => format!("{jid:?}"), "spec" => format!("{spec:?}")));
         debug!(log, "job starting");
 
-        let layer_fs =
-            maelstrom_layer_fs::LayerFs::from_path(&layer_fs_path, &self.blob_cache_dir)?;
+        let layer_fs = LayerFs::from_path(&layer_fs_path, self.blob_dir.as_root())?;
         let layer_fs_cache = self.layer_fs_cache.clone();
         let fuse_spawn = move |fd| {
             tokio::spawn(async move {
@@ -280,13 +275,13 @@ impl Deps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let blob_cache_dir = self.blob_cache_dir.clone();
+        let blob_dir = self.blob_dir.clone();
         task::spawn(async move {
             debug!(log, "building bottom FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_bottom_layer(
                 log.clone(),
                 layer_path.clone(),
-                &blob_cache_dir,
+                blob_dir.as_root(),
                 digest.clone(),
                 artifact_type,
                 artifact_path,
@@ -308,13 +303,13 @@ impl Deps for DispatcherAdapter {
     ) {
         let sender = self.dispatcher_sender.clone();
         let log = self.log.clone();
-        let blob_cache_dir = self.blob_cache_dir.clone();
+        let blob_dir = self.blob_dir.clone();
         task::spawn(async move {
             debug!(log, "building upper FS layer"; "layer_path" => ?layer_path);
             let result = layer_fs::build_upper_layer(
                 log.clone(),
                 layer_path.clone(),
-                &blob_cache_dir,
+                blob_dir.as_root(),
                 lower_layer_path,
                 upper_layer_path,
             )
@@ -389,15 +384,16 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
     log: Logger,
 ) {
-    let mount_dir = config.cache_root.inner().join("mount");
-    let tmpfs_dir = config.cache_root.inner().join("upper");
-    let cache_root = config.cache_root.inner().join("artifacts");
-    let blob_cache_dir = cache_root.join("blob/sha256");
+    let cache_root = Root::<CacheDir>::new(config.cache_root.inner());
+    let mount_dir = cache_root.join("mount").transmute::<MountDir>();
+    let tmpfs_dir = cache_root.join("upper").transmute::<TmpfsDir>();
+    let cache_root = cache_root.join("artifacts");
+    let blob_dir = cache_root.join("blob/sha256").transmute::<BlobDir>();
 
     let broker_sender = BrokerSender::new(broker_socket_sender);
     let cache = Cache::new(
         StdFs,
-        CacheRoot::from(cache_root),
+        CacheRoot::from(cache_root.into_inner()),
         config.cache_size,
         log.clone(),
     );
@@ -409,7 +405,7 @@ async fn dispatcher_main(
         log.clone(),
         mount_dir,
         tmpfs_dir,
-        blob_cache_dir,
+        blob_dir,
     ) {
         Err(err) => {
             error!(log, "could not start executor"; "err" => ?err);

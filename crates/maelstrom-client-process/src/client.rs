@@ -15,7 +15,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::Layer, ArtifactUploadProgress, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    spec::Layer, ArtifactUploadProgress, ProjectDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
@@ -23,7 +23,9 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheRoot, CacheSize, InlineLimit, LogLevel, Slots},
     ext::BoolExt,
     log::LoggerFactory,
-    net, sync,
+    net,
+    root::{CacheDir, RootBuf},
+    sync,
 };
 use maelstrom_worker::local_worker;
 use slog::{debug, Logger};
@@ -123,8 +125,8 @@ impl Client {
     pub async fn start(
         &self,
         broker_addr: Option<BrokerAddr>,
-        project_dir: PathBuf,
-        cache_dir: PathBuf,
+        project_dir: RootBuf<ProjectDir>,
+        cache_dir: RootBuf<CacheDir>,
         container_image_depot_cache_dir: PathBuf,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -147,8 +149,8 @@ impl Client {
         async fn try_to_start(
             log: LoggerFactory,
             broker_addr: Option<BrokerAddr>,
-            project_dir: PathBuf,
-            cache_dir: PathBuf,
+            project_dir: RootBuf<ProjectDir>,
+            cache_dir: RootBuf<CacheDir>,
             container_image_depot_cache_dir: PathBuf,
             cache_size: CacheSize,
             inline_limit: InlineLimit,
@@ -170,8 +172,8 @@ impl Client {
             };
             debug!(log, "client starting";
                 "broker_addr" => ?broker_addr,
-                "project_dir" => ?project_dir,
-                "cache_dir" => ?cache_dir,
+                "project_dir" => ?project_dir.as_path(),
+                "cache_dir" => ?cache_dir.as_path(),
                 "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
                 "cache_size" => ?cache_size,
                 "inline_limit" => ?inline_limit,
@@ -279,16 +281,22 @@ impl Client {
             // Start the local_worker.
             {
                 let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
-                let mount_dir = cache_root.join("mount");
-                let tmpfs_dir = cache_root.join("upper");
+                let mount_dir = cache_root
+                    .join("mount")
+                    .transmute::<local_worker::MountDir>();
+                let tmpfs_dir = cache_root
+                    .join("upper")
+                    .transmute::<local_worker::TmpfsDir>();
                 let cache_root = cache_root.join("artifacts");
-                let blob_cache_dir = cache_root.join("blob/sha256");
+                let blob_dir = cache_root
+                    .join("blob/sha256")
+                    .transmute::<local_worker::BlobDir>();
 
                 // Create the local_worker's cache. This is the same cache as the "real" worker
                 // uses.
                 let local_worker_cache = local_worker::Cache::new(
                     local_worker::StdFs,
-                    CacheRoot::from(cache_root),
+                    CacheRoot::from(cache_root.into_inner()),
                     cache_size,
                     log.clone(),
                 );
@@ -300,7 +308,7 @@ impl Client {
                     log.clone(),
                     mount_dir,
                     tmpfs_dir,
-                    blob_cache_dir,
+                    blob_dir,
                 )?;
 
                 // Create an ArtifactFetcher for the local_worker that just forwards requests to

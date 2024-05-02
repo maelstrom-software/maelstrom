@@ -4,7 +4,7 @@ use crate::ty::{
     DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileData, FileId, FileType,
     LayerId, LayerSuper,
 };
-use crate::LayerFs;
+use crate::{BlobDir, LayerFs};
 use anyhow::bail;
 use anyhow::{anyhow, Result};
 use anyhow_trace::anyhow_trace;
@@ -14,7 +14,7 @@ use maelstrom_base::{
     manifest::{ManifestEntryData, Mode, UnixTimestamp},
     Sha256Digest, Utf8Component, Utf8Path,
 };
-use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader};
+use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader, root::Root};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::Path;
@@ -79,10 +79,10 @@ impl<'fs> BottomLayerBuilder<'fs> {
         _log: slog::Logger,
         data_fs: &'fs Fs,
         data_dir: &Path,
-        cache_path: &Path,
+        blob_dir: &Root<BlobDir>,
         time: UnixTimestamp,
     ) -> Result<Self> {
-        let layer_fs = LayerFs::new(data_dir, cache_path, LayerSuper::default()).await?;
+        let layer_fs = LayerFs::new(data_dir, blob_dir, LayerSuper::default()).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM).await?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM).await?;
 
@@ -726,7 +726,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
     pub async fn new(
         _log: slog::Logger,
         data_dir: &Path,
-        cache_dir: &Path,
+        blob_dir: &Root<BlobDir>,
         lower: &'fs LayerFs,
     ) -> Result<Self> {
         let lower_id = lower.layer_super().await?.layer_id;
@@ -737,7 +737,7 @@ impl<'fs> UpperLayerBuilder<'fs> {
             .lower_layers
             .insert(lower_id, lower.top_layer_path.clone());
 
-        let upper = LayerFs::new(data_dir, cache_dir, upper_super).await?;
+        let upper = LayerFs::new(data_dir, blob_dir, upper_super).await?;
 
         Ok(Self { upper, lower })
     }

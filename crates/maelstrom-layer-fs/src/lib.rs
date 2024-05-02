@@ -116,7 +116,10 @@ use maelstrom_fuse::{
     ReadResponse, Request,
 };
 use maelstrom_linux::Errno;
-use maelstrom_util::async_fs::Fs;
+use maelstrom_util::{
+    async_fs::Fs,
+    root::{Root, RootBuf},
+};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -179,20 +182,22 @@ impl LazyLayerSuper {
     }
 }
 
+pub struct BlobDir;
+
 /// The in-memory representation of a mountable `LayerFs` layer. This can be either a bottom layer
 /// or upper layer.
 pub struct LayerFs {
     data_fs: Fs,
     top_layer_path: PathBuf,
     layer_super: LazyLayerSuper,
-    cache_path: PathBuf,
+    blob_dir: RootBuf<BlobDir>,
 }
 
 #[anyhow_trace]
 impl LayerFs {
     /// Instantiate a `LayerFs` with the given path to its data structures. `cache_path` should
     /// contain a path to a directory that can be used to look-up file-data via digest.
-    pub fn from_path(data_dir: &Path, cache_path: &Path) -> Result<Self> {
+    pub fn from_path(data_dir: &Path, blob_dir: &Root<BlobDir>) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -200,11 +205,15 @@ impl LayerFs {
             data_fs,
             layer_super: LazyLayerSuper::not_cached(data_dir.join("super.bin")),
             top_layer_path: data_dir,
-            cache_path: cache_path.to_owned(),
+            blob_dir: blob_dir.to_owned(),
         })
     }
 
-    async fn new(data_dir: &Path, cache_path: &Path, layer_super: LayerSuper) -> Result<Self> {
+    async fn new(
+        data_dir: &Path,
+        blob_dir: &Root<BlobDir>,
+        layer_super: LayerSuper,
+    ) -> Result<Self> {
         let data_fs = Fs::new();
         let data_dir = data_dir.to_owned();
 
@@ -216,7 +225,7 @@ impl LayerFs {
             data_fs,
             top_layer_path: data_dir,
             layer_super: LazyLayerSuper::cached(layer_super),
-            cache_path: cache_path.to_owned(),
+            blob_dir: blob_dir.to_owned(),
         })
     }
 
@@ -263,8 +272,8 @@ impl LayerFs {
         Ok(self.layer_super().await?.layer_id)
     }
 
-    fn cache_entry(&self, digest: &Sha256Digest) -> PathBuf {
-        self.cache_path.join(digest.to_string())
+    fn cache_entry(&self, digest: &Sha256Digest) -> RootBuf<BlobDir> {
+        self.blob_dir.join(digest.to_string())
     }
 
     /// Mount the file-system in a child process. It can then be accessed via a path in `/proc`.
@@ -814,7 +823,7 @@ mod tests {
         fs: Fs,
         temp: tempfile::TempDir,
         data_dirs: HashMap<usize, PathBuf>,
-        cache_dir: PathBuf,
+        blob_dir: RootBuf<BlobDir>,
         log: slog::Logger,
         data_dir_index: usize,
         cache: Arc<Mutex<ReaderCache>>,
@@ -824,13 +833,13 @@ mod tests {
         async fn new() -> Self {
             let fs = Fs::new();
             let temp = tempfile::tempdir().unwrap();
-            let cache_dir = temp.path().join("cache");
-            fs.create_dir(&cache_dir).await.unwrap();
+            let blob_dir = RootBuf::new(temp.path().join("cache"));
+            fs.create_dir(&blob_dir).await.unwrap();
             Self {
                 fs,
                 temp,
                 data_dirs: HashMap::new(),
-                cache_dir,
+                blob_dir,
                 log: maelstrom_util::log::test_logger(),
                 data_dir_index: 1,
                 cache: Arc::new(Mutex::new(ReaderCache::new())),
@@ -838,11 +847,11 @@ mod tests {
         }
 
         async fn add_to_cache(&self, data: &[u8]) -> Sha256Digest {
-            let temp_path = self.cache_dir.join("temp");
+            let temp_path = self.blob_dir.join("temp");
             self.fs.write(&temp_path, data).await.unwrap();
             let digest = calc_digest(&self.fs, &temp_path).await;
             self.fs
-                .rename(temp_path, self.cache_dir.join(digest.to_string()))
+                .rename(temp_path, self.blob_dir.join(digest.to_string()))
                 .await
                 .unwrap();
             digest
@@ -862,7 +871,7 @@ mod tests {
                 self.log.clone(),
                 &self.fs,
                 &data_dir,
-                &self.cache_dir,
+                &self.blob_dir,
                 ARBITRARY_TIME,
             )
             .await
@@ -952,7 +961,7 @@ mod tests {
         async fn build_upper_layer(&mut self, lower: &LayerFs, upper: &LayerFs) -> LayerFs {
             let data_dir = self.new_data_dir().await;
             let mut builder =
-                UpperLayerBuilder::new(self.log.clone(), &data_dir, &self.cache_dir, lower)
+                UpperLayerBuilder::new(self.log.clone(), &data_dir, &self.blob_dir, lower)
                     .await
                     .unwrap();
             builder.fill_from_bottom_layer(upper).await.unwrap();
@@ -960,7 +969,7 @@ mod tests {
         }
 
         async fn build_tar(&self, files: Vec<BuildEntry>) -> (Sha256Digest, PathBuf) {
-            let tar_path = self.cache_dir.join("temp.tar");
+            let tar_path = self.blob_dir.join("temp.tar");
             let f = self.fs.create_file(&tar_path).await.unwrap();
             let mut ar = tokio_tar::Builder::new(f.into_inner());
             for BuildEntry { path, data } in files {
@@ -1026,14 +1035,14 @@ mod tests {
 
             let digest = calc_digest(&self.fs, &tar_path).await;
 
-            let final_path = self.cache_dir.join(digest.to_string());
+            let final_path = self.blob_dir.join(digest.to_string());
             self.fs.rename(tar_path, &final_path).await.unwrap();
 
-            (digest, final_path)
+            (digest, final_path.into_inner())
         }
 
         async fn build_manifest(&self, files: Vec<BuildEntry>) -> PathBuf {
-            let manifest_path = self.cache_dir.join("temp.manifest");
+            let manifest_path = self.blob_dir.join("temp.manifest");
             let f = self.fs.create_file(&manifest_path).await.unwrap();
             let mut builder = AsyncManifestWriter::new(f).await.unwrap();
             for BuildEntry { path, data } in files {
@@ -1139,10 +1148,10 @@ mod tests {
 
             let digest = calc_digest(&self.fs, &manifest_path).await;
 
-            let final_path = self.cache_dir.join(digest.to_string());
+            let final_path = self.blob_dir.join(digest.to_string());
             self.fs.rename(manifest_path, &final_path).await.unwrap();
 
-            final_path
+            final_path.into_inner()
         }
 
         async fn build_bottom_layer_from_tar(&mut self, input: Vec<BuildEntry>) -> LayerFs {

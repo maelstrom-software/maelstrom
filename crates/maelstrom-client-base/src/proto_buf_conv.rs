@@ -625,6 +625,30 @@ impl TryFromProtoBuf for maelstrom_util::config::common::Slots {
     }
 }
 
+impl<'a, T> IntoProtoBuf for &'a maelstrom_util::root::Root<T> {
+    type ProtoBufType = <&'a Path as IntoProtoBuf>::ProtoBufType;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.as_path().into_proto_buf()
+    }
+}
+
+impl<T> IntoProtoBuf for maelstrom_util::root::RootBuf<T> {
+    type ProtoBufType = <PathBuf as IntoProtoBuf>::ProtoBufType;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.into_inner().into_proto_buf()
+    }
+}
+
+impl<T> TryFromProtoBuf for maelstrom_util::root::RootBuf<T> {
+    type ProtoBufType = <PathBuf as TryFromProtoBuf>::ProtoBufType;
+
+    fn try_from_proto_buf(pbt: Self::ProtoBufType) -> Result<Self> {
+        Ok(Self::new(PathBuf::try_from_proto_buf(pbt)?))
+    }
+}
+
 //                       _     _
 //  _ __ ___   __ _  ___| |___| |_ _ __ ___  _ __ ___
 // | '_ ` _ \ / _` |/ _ \ / __| __| '__/ _ \| '_ ` _ \ _____

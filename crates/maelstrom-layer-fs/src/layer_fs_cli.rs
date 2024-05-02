@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use maelstrom_layer_fs::{DirectoryDataReader, FileId, FileMetadataReader, FileType, LayerFs};
+use maelstrom_util::root::Root;
 use std::env;
 
 #[tokio::main]
@@ -12,7 +13,7 @@ async fn main() -> Result<()> {
         .ok_or(anyhow!("expected file offset"))?
         .parse()?;
 
-    let layer_fs = LayerFs::from_path(path.as_ref(), "/dev/null".as_ref())?;
+    let layer_fs = LayerFs::from_path(path.as_ref(), Root::new("/dev/null".as_ref()))?;
     let layer_id = layer_fs.layer_id().await?;
 
     let mut reader = FileMetadataReader::new(&layer_fs, layer_id).await?;

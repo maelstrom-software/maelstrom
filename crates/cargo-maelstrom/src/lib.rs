@@ -25,12 +25,13 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, Client, ClientBgProcess,
+    ArtifactUploadProgress, Client, ClientBgProcess, ProjectDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
+    root::{CacheDir, Root},
     template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -604,12 +605,14 @@ pub struct DefaultMainAppDeps {
     client: Client,
 }
 
+pub struct WorkspaceDir;
+
 impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
-        cache_dir: &impl AsRef<Path>,
-        workspace_root: &impl AsRef<Path>,
+        cache_dir: impl AsRef<Root<CacheDir>>,
+        workspace_root: impl AsRef<Root<WorkspaceDir>>,
         broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -626,7 +629,7 @@ impl DefaultMainAppDeps {
         let client = Client::new(
             bg_proc,
             broker_addr,
-            workspace_root,
+            workspace_root.as_ref().transmute::<ProjectDir>(),
             cache_dir,
             cache_size,
             inline_limit,
@@ -1168,8 +1171,8 @@ where
 
     let deps = DefaultMainAppDeps::new(
         bg_proc,
-        &cache_dir,
-        &cargo_metadata.workspace_root,
+        Root::<CacheDir>::new(cache_dir.as_std_path()),
+        Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_path().as_std_path()),
         config.broker,
         config.cache_size,
         config.inline_limit,

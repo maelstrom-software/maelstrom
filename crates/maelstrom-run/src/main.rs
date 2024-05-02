@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
-    Client, ClientBgProcess,
+    Client, ClientBgProcess, ProjectDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -13,10 +13,10 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::{ExitCode, ExitCodeAccumulator},
+    root::{CacheDir, Root, RootBuf},
 };
 use std::{
     io::{self, Read, Write as _},
-    path::PathBuf,
     sync::Arc,
 };
 use xdg::BaseDirectories;
@@ -122,10 +122,12 @@ fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccum
     }
 }
 
-fn cache_dir() -> PathBuf {
-    BaseDirectories::with_prefix("maelstrom/run")
-        .expect("failed to find cache dir")
-        .get_cache_file("")
+fn cache_dir() -> RootBuf<CacheDir> {
+    RootBuf::new(
+        BaseDirectories::with_prefix("maelstrom/run")
+            .expect("failed to find cache dir")
+            .get_cache_file(""),
+    )
 }
 
 fn main() -> Result<ExitCode> {
@@ -141,7 +143,7 @@ fn main() -> Result<ExitCode> {
         let client = Client::new(
             bg_proc,
             config.broker,
-            ".",
+            Root::<ProjectDir>::new(".".as_ref()),
             cache_dir,
             config.cache_size,
             config.inline_limit,

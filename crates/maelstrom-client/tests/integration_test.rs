@@ -3,9 +3,14 @@ use maelstrom_base::{
     ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec,
     JobStatus, Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
 };
-use maelstrom_client::{Client, ClientBgProcess};
+use maelstrom_client::{Client, ClientBgProcess, ProjectDir};
 use maelstrom_client_base::spec::{Layer, PrefixOptions, SymlinkSpec};
-use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger};
+use maelstrom_util::{
+    elf::read_shared_libraries,
+    fs::Fs,
+    log::test_logger,
+    root::{CacheDir, Root},
+};
 use regex::Regex;
 use std::panic::Location;
 use std::path::PathBuf;
@@ -49,8 +54,8 @@ impl ClientFixture {
         let client = Client::new(
             bg_proc,
             None, /* broker_addr */
-            &project_dir,
-            &cache_dir,
+            Root::<ProjectDir>::new(&project_dir),
+            Root::<CacheDir>::new(&cache_dir),
             "1mb".parse().unwrap(), /* cache_size */
             "1mb".parse().unwrap(), /* inline_limit */
             2u16.try_into().unwrap(),

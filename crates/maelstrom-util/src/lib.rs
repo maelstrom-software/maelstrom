@@ -15,6 +15,7 @@ pub mod log;
 pub mod manifest;
 pub mod net;
 pub mod process;
+pub mod root;
 pub mod sync;
 pub mod template;
 pub mod thread;

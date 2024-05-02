@@ -7,11 +7,12 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
     async_fs,
     manifest::{AsyncManifestWriter, DataUpload, ManifestBuilder},
+    root::{CacheDir, RootBuf},
 };
 use sha2::{Digest as _, Sha256};
 use std::fmt;
@@ -80,12 +81,12 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 }
 
 pub struct LayerBuilder {
-    cache_dir: PathBuf,
-    project_dir: PathBuf,
+    cache_dir: RootBuf<CacheDir>,
+    project_dir: RootBuf<ProjectDir>,
 }
 
 impl LayerBuilder {
-    pub fn new(cache_dir: PathBuf, project_dir: PathBuf) -> Self {
+    pub fn new(cache_dir: RootBuf<CacheDir>, project_dir: RootBuf<ProjectDir>) -> Self {
         Self {
             cache_dir,
             project_dir,
@@ -96,18 +97,21 @@ impl LayerBuilder {
         self.cache_dir
             .join(MANIFEST_DIR)
             .join(format!("{name}.manifest"))
+            .into_inner()
     }
 
     fn build_stub_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(STUB_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
+            .into_inner()
     }
 
     fn build_symlink_manifest_path(&self, name: &impl fmt::Display) -> PathBuf {
         self.cache_dir
             .join(SYMLINK_MANIFEST_DIR)
             .join(format!("{name}.manifest"))
+            .into_inner()
     }
 
     async fn build_manifest(
@@ -129,7 +133,7 @@ impl LayerBuilder {
             let mut path = maybe_path?.as_ref().to_owned();
             let input_path_relative = path.is_relative();
             if input_path_relative {
-                path = project_dir.join(path);
+                path = project_dir.join(path).into_inner();
             }
             let utf8_path = Utf8Path::from_path(&path).ok_or_else(|| anyhow!("non-utf8 path"))?;
             path_hasher.hash_path(utf8_path);
@@ -399,7 +403,10 @@ mod tests {
             }
 
             let uploader = TestUploader::new(artifact_dir.clone());
-            let builder = LayerBuilder::new(cache_dir, artifact_dir.clone());
+            let builder = LayerBuilder::new(
+                RootBuf::<CacheDir>::new(cache_dir),
+                RootBuf::<ProjectDir>::new(artifact_dir.clone()),
+            );
             Self {
                 _temp_dir: temp_dir,
                 builder,
