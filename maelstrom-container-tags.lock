@@ -1,0 +1,4 @@
+version = 0
+
+[rust]
+latest = "sha256:de6e081a4e9c10e70731071cec6f629892da1bbaa24b478a96bdc59060674117"

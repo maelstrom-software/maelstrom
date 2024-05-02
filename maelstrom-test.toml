@@ -73,4 +73,19 @@ added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }
 added_devices = ["null", "fuse"]
 
 [[directives]]
+filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
+image.name = "rust"
+image.use = ["layers", "environment"]
+added_layers = [
+    { stubs = ["/dev/{fuse,null}"] },
+    { paths = ["<build_dir>/client-bg-proc"], canonicalize = true }
+]
+devices = ["null", "fuse"]
+mounts = [
+    { fs_type = "tmp", mount_point = "/tmp" },
+    { fs_type = "tmp", mount_point = "/root" },
+    { fs_type = "proc", mount_point = "/proc" },
+]
+
+[[directives]]
 added_environment = { RUST_BACKTRACE = "$env{RUST_BACKTRACE:-0}" }

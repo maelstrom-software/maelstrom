@@ -51,3 +51,7 @@ tempfile.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
+
+[[bin]]
+name = "client-bg-proc"
+path = "src/bg_proc_main.rs"
