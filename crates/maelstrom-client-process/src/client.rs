@@ -172,8 +172,8 @@ impl Client {
             };
             debug!(log, "client starting";
                 "broker_addr" => ?broker_addr,
-                "project_dir" => ?project_dir.as_path(),
-                "cache_dir" => ?cache_dir.as_path(),
+                "project_dir" => ?project_dir,
+                "cache_dir" => ?cache_dir,
                 "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
                 "cache_size" => ?cache_size,
                 "inline_limit" => ?inline_limit,

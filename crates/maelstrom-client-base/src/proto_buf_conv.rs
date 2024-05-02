@@ -629,7 +629,7 @@ impl<'a, T> IntoProtoBuf for &'a maelstrom_util::root::Root<T> {
     type ProtoBufType = <&'a Path as IntoProtoBuf>::ProtoBufType;
 
     fn into_proto_buf(self) -> Self::ProtoBufType {
-        self.as_path().into_proto_buf()
+        (**self).into_proto_buf()
     }
 }
 

@@ -26,19 +26,15 @@ impl<T: ?Sized> Root<T> {
         Root::new(&self.inner)
     }
 
-    pub fn as_path(&self) -> &Path {
-        &self.inner
-    }
-
     pub fn join(&self, path: impl AsRef<Path>) -> RootBuf<T> {
-        RootBuf::new(self.as_path().join(path.as_ref()))
+        RootBuf::new(self.inner.join(path.as_ref()))
     }
 }
 
 impl<T> Deref for Root<T> {
     type Target = Path;
     fn deref(&self) -> &Self::Target {
-        self.as_path()
+        &self.inner
     }
 }
 
@@ -50,7 +46,7 @@ impl<T> AsRef<Root<T>> for Root<T> {
 
 impl<T> AsRef<Path> for Root<T> {
     fn as_ref(&self) -> &Path {
-        self.as_path()
+        &self.inner
     }
 }
 
@@ -58,18 +54,18 @@ impl<T> ToOwned for Root<T> {
     type Owned = RootBuf<T>;
 
     fn to_owned(&self) -> Self::Owned {
-        Self::Owned::new(self.as_path().to_owned())
+        Self::Owned::new(self.inner.to_owned())
     }
 
     // Provided method
     fn clone_into(&self, target: &mut Self::Owned) {
-        self.as_path().clone_into(&mut target.inner)
+        self.inner.clone_into(&mut target.inner)
     }
 }
 
 impl<T> Debug for Root<T> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.as_path().fmt(f)
+        self.inner.fmt(f)
     }
 }
 
