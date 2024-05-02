@@ -15,7 +15,8 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::Layer, ArtifactUploadProgress, ProjectDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    spec::Layer, ArtifactUploadProgress, CacheDir, ProjectDir, STUB_MANIFEST_DIR,
+    SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
@@ -24,7 +25,7 @@ use maelstrom_util::{
     ext::BoolExt,
     log::LoggerFactory,
     net,
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
     sync,
 };
 use maelstrom_worker::local_worker;
@@ -280,14 +281,18 @@ impl Client {
 
             // Start the local_worker.
             {
-                let cache_root = cache_dir.join(LOCAL_WORKER_DIR);
+                let cache_root = cache_dir
+                    .join(LOCAL_WORKER_DIR)
+                    .transmute::<local_worker::WorkerCacheDir>();
                 let mount_dir = cache_root
                     .join("mount")
                     .transmute::<local_worker::MountDir>();
                 let tmpfs_dir = cache_root
                     .join("upper")
                     .transmute::<local_worker::TmpfsDir>();
-                let cache_root = cache_root.join("artifacts");
+                let cache_root = cache_root
+                    .join("artifacts")
+                    .transmute::<local_worker::CacheDir>();
                 let blob_dir = cache_root
                     .join("blob/sha256")
                     .transmute::<local_worker::BlobDir>();

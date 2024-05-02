@@ -5,7 +5,7 @@ use maelstrom_base::{JobId, Sha256Digest};
 use maelstrom_util::{
     config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
 };
 use slog::{debug, Logger};
 use std::{
@@ -203,6 +203,8 @@ impl HeapDeps for Map {
         };
     }
 }
+
+pub struct CacheDir;
 
 /// Manage a directory of downloaded, extracted artifacts. Coordinate fetching of these artifacts,
 /// and removing them when they are no longer in use and the amount of space used by the directory

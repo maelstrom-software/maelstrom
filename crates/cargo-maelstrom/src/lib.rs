@@ -25,13 +25,13 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, Client, ClientBgProcess, ProjectDir,
+    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ProjectDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
-    root::{CacheDir, Root},
+    root::Root,
     template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};

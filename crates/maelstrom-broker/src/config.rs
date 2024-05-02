@@ -1,9 +1,10 @@
+use crate::scheduler_task::CacheDir;
 use anyhow::Result;
 use derive_more::From;
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{CacheSize, LogLevel},
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
 };
 use serde::Deserialize;
 use std::{

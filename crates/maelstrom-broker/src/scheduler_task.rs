@@ -1,13 +1,10 @@
 mod cache;
 mod scheduler;
 
+pub use cache::CacheDir;
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use maelstrom_base::proto::{BrokerToClient, BrokerToWorker};
-use maelstrom_util::{
-    config::common::CacheSize,
-    root::{CacheDir, RootBuf},
-    sync,
-};
+use maelstrom_util::{config::common::CacheSize, root::RootBuf, sync};
 use scheduler::{Message, Scheduler, SchedulerDeps};
 use slog::Logger;
 use std::{

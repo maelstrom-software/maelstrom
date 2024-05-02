@@ -1,4 +1,4 @@
-pub use maelstrom_client_base::{spec, ArtifactUploadProgress, ProjectDir, MANIFEST_DIR};
+pub use maelstrom_client_base::{spec, ArtifactUploadProgress, CacheDir, ProjectDir, MANIFEST_DIR};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{
@@ -12,7 +12,7 @@ use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
-    root::{CacheDir, Root},
+    root::Root,
 };
 use spec::Layer;
 use std::os::linux::net::SocketAddrExt as _;

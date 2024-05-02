@@ -7,12 +7,12 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{Layer, PrefixOptions, SymlinkSpec},
-    ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    CacheDir, ProjectDir, MANIFEST_DIR, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_util::{
     async_fs,
     manifest::{AsyncManifestWriter, DataUpload, ManifestBuilder},
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
 };
 use sha2::{Digest as _, Sha256};
 use std::fmt;

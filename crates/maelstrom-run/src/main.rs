@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
-    Client, ClientBgProcess, ProjectDir,
+    CacheDir, Client, ClientBgProcess, ProjectDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -13,7 +13,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::{ExitCode, ExitCodeAccumulator},
-    root::{CacheDir, Root, RootBuf},
+    root::{Root, RootBuf},
 };
 use std::{
     io::{self, Read, Write as _},

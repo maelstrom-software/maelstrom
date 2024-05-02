@@ -11,7 +11,7 @@ use maelstrom_util::{
     config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
     manifest::ManifestReader,
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
 };
 use slog::debug;
 use std::{
@@ -216,6 +216,8 @@ fn try_read_cache_file(fs: &mut impl CacheFs, path: &Path) -> Result<(Sha256Dige
     let size = fs.file_size(path);
     Ok((digest, size))
 }
+
+pub struct CacheDir;
 
 /// The actual cache.
 ///

@@ -8,8 +8,6 @@ use std::{
     str::FromStr,
 };
 
-pub struct CacheDir;
-
 #[repr(transparent)]
 pub struct Root<T: ?Sized> {
     phantom: PhantomData<T>,

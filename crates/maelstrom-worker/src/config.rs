@@ -1,7 +1,8 @@
+use crate::WorkerCacheDir;
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    root::{CacheDir, RootBuf},
+    root::RootBuf,
 };
 use xdg::BaseDirectories;
 
@@ -21,7 +22,7 @@ pub struct Config {
         value_name = "PATH",
         default = "|bd: &BaseDirectories| bd.get_cache_home().into_os_string().into_string().unwrap()"
     )]
-    pub cache_root: RootBuf<CacheDir>,
+    pub cache_root: RootBuf<WorkerCacheDir>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.

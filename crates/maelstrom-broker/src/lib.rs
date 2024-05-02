@@ -10,11 +10,8 @@ mod scheduler_task;
 use anyhow::{Context as _, Result};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use maelstrom_util::{
-    config::common::CacheSize,
-    root::{CacheDir, RootBuf},
-};
-use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
+use maelstrom_util::{config::common::CacheSize, root::RootBuf};
+use scheduler_task::{CacheDir, SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
 use std::{
     net::{Ipv6Addr, SocketAddrV6},

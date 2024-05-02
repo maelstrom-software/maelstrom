@@ -3,14 +3,9 @@ use maelstrom_base::{
     ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec,
     JobStatus, Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
 };
-use maelstrom_client::{Client, ClientBgProcess, ProjectDir};
+use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir};
 use maelstrom_client_base::spec::{Layer, PrefixOptions, SymlinkSpec};
-use maelstrom_util::{
-    elf::read_shared_libraries,
-    fs::Fs,
-    log::test_logger,
-    root::{CacheDir, Root},
-};
+use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
 use std::panic::Location;
 use std::path::PathBuf;

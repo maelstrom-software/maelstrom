@@ -14,6 +14,7 @@ use anyhow::{anyhow, Result};
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
+pub struct CacheDir;
 pub struct ProjectDir;
 
 pub const MANIFEST_DIR: &str = "manifests";

@@ -9,7 +9,7 @@ mod layer_fs;
 pub mod local_worker;
 
 use anyhow::{Context as _, Result};
-use cache::{Cache, StdFs};
+use cache::{Cache, CacheDir, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
@@ -50,6 +50,8 @@ use tokio::{
     task::{self, JoinHandle, JoinSet},
     time,
 };
+
+pub struct WorkerCacheDir;
 
 async fn read_manifest(path: &Path) -> Result<HashSet<Sha256Digest>> {
     let fs = async_fs::Fs::new();
@@ -386,7 +388,7 @@ async fn dispatcher_main(
 ) {
     let mount_dir = config.cache_root.join("mount").transmute::<MountDir>();
     let tmpfs_dir = config.cache_root.join("upper").transmute::<TmpfsDir>();
-    let cache_root = config.cache_root.join("artifacts");
+    let cache_root = config.cache_root.join("artifacts").transmute::<CacheDir>();
     let blob_dir = cache_root.join("blob/sha256").transmute::<BlobDir>();
 
     let broker_sender = BrokerSender::new(broker_socket_sender);
