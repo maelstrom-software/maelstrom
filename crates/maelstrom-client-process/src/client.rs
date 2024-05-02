@@ -20,7 +20,7 @@ use maelstrom_client_base::{
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheRoot, CacheSize, InlineLimit, LogLevel, Slots},
+    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     ext::BoolExt,
     log::LoggerFactory,
     net,
@@ -296,7 +296,7 @@ impl Client {
                 // uses.
                 let local_worker_cache = local_worker::Cache::new(
                     local_worker::StdFs,
-                    CacheRoot::from(cache_root.into_inner()),
+                    cache_root,
                     cache_size,
                     log.clone(),
                 );

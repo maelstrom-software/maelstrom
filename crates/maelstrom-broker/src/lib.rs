@@ -10,7 +10,10 @@ mod scheduler_task;
 use anyhow::{Context as _, Result};
 use config::Config;
 use maelstrom_base::stats::BROKER_STATISTICS_INTERVAL;
-use maelstrom_util::config::common::{CacheRoot, CacheSize};
+use maelstrom_util::{
+    config::common::CacheSize,
+    root::{CacheDir, RootBuf},
+};
 use scheduler_task::{SchedulerMessage, SchedulerSender, SchedulerTask};
 use slog::{error, info, Logger};
 use std::{
@@ -61,7 +64,7 @@ async fn stats_heartbeat(sender: SchedulerSender) {
 async fn main_inner_inner(
     listener: TcpListener,
     http_listener: TcpListener,
-    cache_root: CacheRoot,
+    cache_root: RootBuf<CacheDir>,
     cache_size: CacheSize,
     log: Logger,
 ) {

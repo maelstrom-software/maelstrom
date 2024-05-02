@@ -8,9 +8,10 @@ use anyhow::{anyhow, bail, Result};
 use bytesize::ByteSize;
 use maelstrom_base::{ClientId, JobId, Sha256Digest};
 use maelstrom_util::{
-    config::common::{CacheRoot, CacheSize},
+    config::common::CacheSize,
     heap::{Heap, HeapDeps, HeapIndex},
     manifest::ManifestReader,
+    root::{CacheDir, RootBuf},
 };
 use slog::debug;
 use std::{
@@ -238,7 +239,7 @@ impl<FsT: CacheFs> Cache<FsT> {
     /// cannot. If there are existing entries in the cache, this function will scan them and
     /// incorporate them into the new cache. If there are garbage files in the directories, likely
     /// from incomplete downloads in the previous instance, this function will remove them.
-    pub fn new(mut fs: FsT, root: CacheRoot, size: CacheSize, log: slog::Logger) -> Self {
+    pub fn new(mut fs: FsT, root: RootBuf<CacheDir>, size: CacheSize, log: slog::Logger) -> Self {
         let root = root.into_inner();
         let mut path = root.clone();
 
@@ -581,7 +582,7 @@ mod tests {
             let fs = Rc::new(RefCell::new(fs));
             let cache = Cache::new(
                 fs.clone(),
-                Path::new("/z").to_owned().into(),
+                "/z".parse().unwrap(),
                 ByteSize::b(bytes_used_target).into(),
                 slog::Logger::root(slog::Discard, slog::o!()),
             );

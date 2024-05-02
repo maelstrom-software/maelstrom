@@ -1,7 +1,10 @@
 use anyhow::Result;
 use derive_more::From;
 use maelstrom_macro::Config;
-use maelstrom_util::config::common::{CacheRoot, CacheSize, LogLevel};
+use maelstrom_util::{
+    config::common::{CacheSize, LogLevel},
+    root::{CacheDir, RootBuf},
+};
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
@@ -80,7 +83,7 @@ pub struct Config {
         value_name = "PATH",
         default = "|bd: &BaseDirectories| bd.get_cache_home().into_os_string().into_string().unwrap()"
     )]
-    pub cache_root: CacheRoot,
+    pub cache_root: RootBuf<CacheDir>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.

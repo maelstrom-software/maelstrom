@@ -1,6 +1,5 @@
 use bytesize::ByteSize;
 use clap::ValueEnum;
-use derive_more::From;
 use serde::{
     de::{self, Deserializer, Visitor},
     Deserialize, Serialize,
@@ -12,7 +11,6 @@ use std::{
     io,
     net::{SocketAddr, ToSocketAddrs},
     num::ParseIntError,
-    path::{Path, PathBuf},
     result,
     str::FromStr,
 };
@@ -90,41 +88,6 @@ impl<'de> Deserialize<'de> for BrokerAddr {
         } else {
             SocketAddr::deserialize(deserializer).map(BrokerAddr::new)
         }
-    }
-}
-
-#[derive(Deserialize, From)]
-#[serde(from = "PathBuf")]
-pub struct CacheRoot(PathBuf);
-
-impl CacheRoot {
-    pub fn inner(&self) -> &Path {
-        &self.0
-    }
-
-    pub fn into_inner(self) -> PathBuf {
-        self.0
-    }
-}
-
-impl Debug for CacheRoot {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl FromStr for CacheRoot {
-    type Err = <PathBuf as FromStr>::Err;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(Self(PathBuf::from_str(value)?))
-    }
-}
-
-impl TryFrom<String> for CacheRoot {
-    type Error = <CacheRoot as FromStr>::Err;
-    fn try_from(from: String) -> Result<Self, Self::Error> {
-        CacheRoot::from_str(from.as_str())
     }
 }
 

@@ -25,11 +25,11 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     async_fs,
-    config::common::{BrokerAddr, CacheRoot, InlineLimit},
+    config::common::{BrokerAddr, InlineLimit},
     fs::Fs,
     manifest::AsyncManifestReader,
     net,
-    root::{CacheDir, Root, RootBuf},
+    root::RootBuf,
     sync::{self, EventReceiver, EventSender},
     time::SystemMonotonicClock,
 };
@@ -384,19 +384,13 @@ async fn dispatcher_main(
     broker_socket_sender: BrokerSocketSender,
     log: Logger,
 ) {
-    let cache_root = Root::<CacheDir>::new(config.cache_root.inner());
-    let mount_dir = cache_root.join("mount").transmute::<MountDir>();
-    let tmpfs_dir = cache_root.join("upper").transmute::<TmpfsDir>();
-    let cache_root = cache_root.join("artifacts");
+    let mount_dir = config.cache_root.join("mount").transmute::<MountDir>();
+    let tmpfs_dir = config.cache_root.join("upper").transmute::<TmpfsDir>();
+    let cache_root = config.cache_root.join("artifacts");
     let blob_dir = cache_root.join("blob/sha256").transmute::<BlobDir>();
 
     let broker_sender = BrokerSender::new(broker_socket_sender);
-    let cache = Cache::new(
-        StdFs,
-        CacheRoot::from(cache_root.into_inner()),
-        config.cache_size,
-        log.clone(),
-    );
+    let cache = Cache::new(StdFs, cache_root, config.cache_size, log.clone());
     let artifact_fetcher =
         ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
     match DispatcherAdapter::new(

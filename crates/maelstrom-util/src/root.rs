@@ -1,8 +1,11 @@
+use serde::{de::Deserializer, Deserialize};
 use std::{
     borrow::{Borrow, ToOwned},
+    fmt::{self, Debug, Formatter},
     marker::PhantomData,
     ops::Deref,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 pub struct CacheDir;
@@ -61,6 +64,12 @@ impl<T> ToOwned for Root<T> {
     // Provided method
     fn clone_into(&self, target: &mut Self::Owned) {
         self.as_path().clone_into(&mut target.inner)
+    }
+}
+
+impl<T> Debug for Root<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.as_path().fmt(f)
     }
 }
 
@@ -123,5 +132,34 @@ impl<T> Borrow<Root<T>> for RootBuf<T> {
 impl<T> Clone for RootBuf<T> {
     fn clone(&self) -> Self {
         Self::new(self.inner.clone())
+    }
+}
+
+impl<T> Debug for RootBuf<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        self.inner.fmt(f)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for RootBuf<T> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(Self::new(PathBuf::deserialize(deserializer)?))
+    }
+}
+
+impl<T> FromStr for RootBuf<T> {
+    type Err = <PathBuf as FromStr>::Err;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self::new(PathBuf::from_str(value)?))
+    }
+}
+
+impl<T> TryFrom<String> for RootBuf<T> {
+    type Error = <RootBuf<T> as FromStr>::Err;
+    fn try_from(from: String) -> Result<Self, Self::Error> {
+        Self::from_str(from.as_str())
     }
 }

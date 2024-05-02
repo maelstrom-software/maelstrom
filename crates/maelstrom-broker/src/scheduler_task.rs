@@ -4,7 +4,8 @@ mod scheduler;
 use cache::{Cache, GetArtifactForWorkerError, StdCacheFs};
 use maelstrom_base::proto::{BrokerToClient, BrokerToWorker};
 use maelstrom_util::{
-    config::common::{CacheRoot, CacheSize},
+    config::common::CacheSize,
+    root::{CacheDir, RootBuf},
     sync,
 };
 use scheduler::{Message, Scheduler, SchedulerDeps};
@@ -59,7 +60,7 @@ pub struct SchedulerTask {
 }
 
 impl SchedulerTask {
-    pub fn new(cache_root: CacheRoot, cache_size: CacheSize, log: Logger) -> Self {
+    pub fn new(cache_root: RootBuf<CacheDir>, cache_size: CacheSize, log: Logger) -> Self {
         let (sender, receiver) = tokio_mpsc::unbounded_channel();
         let cache = Cache::new(StdCacheFs::new(), cache_root, cache_size, log);
         let cache_tmp_path = cache.tmp_path();
