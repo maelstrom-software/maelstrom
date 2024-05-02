@@ -275,6 +275,9 @@ impl AllMetadata {
                     layer.replace_template_vars(vars)?;
                 }
             }
+            for added_layer in &mut directive.added_layers {
+                added_layer.replace_template_vars(vars)?;
+            }
         }
         Ok(())
     }
