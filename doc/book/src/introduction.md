@@ -30,6 +30,8 @@ to implement containers.
 
 ## Structure of This Book
 
+I think even before you get to "common concepts" you should have a "run your first Maelstrom test" section (something like [this part](https://docs.pytest.org/en/7.1.x/getting-started.html#create-your-first-test) of the Pytest documentation. Show me how easy it is to improve my sad, poorly performing test suite by using `cargo-maelstrom` to parallelize my tests locally. Then, perhaps, step back a bit and fill me in about what's going on under the covers with the "common concepts" section followed by a more in-depth treatment of `cargo-maelstrom`. Then blow me away by telling me how I can share this awesomeness with my whole team by deploying a cluster.
+
 This book will start out covering how to [install](installation.md) Maelstrom.
 Next, it will cover [common concepts](common.md) that are applicable to all
 Maelstrom components. After that, there are in-depth sections for each of the
