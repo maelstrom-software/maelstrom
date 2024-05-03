@@ -25,7 +25,8 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
+    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir,
+    StateDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -55,6 +56,7 @@ use test_listing::{
     load_test_listing, test_listing_file, write_test_listing, TestListing, TestListingFile,
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
+use xdg::BaseDirectories;
 
 #[derive(Debug)]
 pub enum ListAction {
@@ -621,10 +623,11 @@ impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
+        broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
+        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
-        broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
@@ -632,13 +635,15 @@ impl DefaultMainAppDeps {
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref();
         let state_dir = state_dir.as_ref();
+        let container_image_depot_dir = container_image_depot_dir.as_ref();
         let cache_dir = cache_dir.as_ref();
         slog::debug!(
             log, "creating app dependencies";
+            "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir,
             "state_dir" => ?state_dir,
+            "container_image_depot_dir" => ?container_image_depot_dir,
             "cache_dir" => ?cache_dir,
-            "broker_addr" => ?broker_addr,
             "cache_size" => ?cache_size,
             "inline_limit" => ?inline_limit,
             "slots" => ?slots,
@@ -648,6 +653,7 @@ impl DefaultMainAppDeps {
             broker_addr,
             project_dir,
             state_dir,
+            container_image_depot_dir,
             cache_dir,
             cache_size,
             inline_limit,
@@ -1149,6 +1155,14 @@ fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
     Ok(cargo_metadata)
 }
 
+fn container_image_depot_dir() -> Result<RootBuf<ContainerImageDepotDir>> {
+    Ok(RootBuf::new(
+        BaseDirectories::with_prefix("maelstrom/container")
+            .context("failed to find container image depot dir")?
+            .get_cache_file(""),
+    ))
+}
+
 pub fn main<TermT>(
     config: config::Config,
     extra_options: cli::ExtraCommandLineOptions,
@@ -1187,16 +1201,18 @@ where
     let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
     let state_dir = maelstrom_target_dir.join::<StateDir>("state");
     let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
+    let container_image_depot_dir = container_image_depot_dir()?;
 
     fs.create_dir_all(&state_dir)?;
     fs.create_dir_all(&cache_dir)?;
 
     let deps = DefaultMainAppDeps::new(
         bg_proc,
+        config.broker,
         workspace_dir.transmute::<ProjectDir>(),
         &state_dir,
-        &cache_dir,
-        config.broker,
+        container_image_depot_dir,
+        cache_dir,
         config.cache_size,
         config.inline_limit,
         config.slots,

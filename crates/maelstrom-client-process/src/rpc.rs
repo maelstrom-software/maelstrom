@@ -53,7 +53,7 @@ impl ClientProcess for Handler {
                     RootBuf::<StateDir>::try_from_proto_buf(request.state_dir)?,
                     RootBuf::<CacheDir>::try_from_proto_buf(request.cache_dir)?,
                     RootBuf::<ContainerImageDepotDir>::try_from_proto_buf(
-                        request.container_image_depot_cache_dir,
+                        request.container_image_depot_dir,
                     )?,
                     CacheSize::try_from_proto_buf(request.cache_size)?,
                     InlineLimit::try_from_proto_buf(request.inline_limit)?,

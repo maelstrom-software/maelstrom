@@ -3,7 +3,7 @@ use maelstrom_base::{
     ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec,
     JobStatus, Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
 };
-use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_client::{CacheDir, Client, ClientBgProcess, ProjectDir, StateDir, ContainerImageDepotDir};
 use maelstrom_client_base::spec::{Layer, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
@@ -44,6 +44,8 @@ impl ClientFixture {
         fs.create_dir_all(&cache_dir).unwrap();
         let state_dir = temp_dir.path().join("state");
         fs.create_dir_all(&state_dir).unwrap();
+        let container_image_depot_dir = temp_dir.path().join("container_image_depot");
+        fs.create_dir_all(&container_image_depot_dir).unwrap();
 
         let bg_proc = spawn_bg_proc();
         let log = test_logger();
@@ -53,6 +55,7 @@ impl ClientFixture {
             None, /* broker_addr */
             Root::<ProjectDir>::new(&project_dir),
             Root::<StateDir>::new(&state_dir),
+            Root::<ContainerImageDepotDir>::new(&container_image_depot_dir),
             Root::<CacheDir>::new(&cache_dir),
             "1mb".parse().unwrap(), /* cache_size */
             "1mb".parse().unwrap(), /* inline_limit */

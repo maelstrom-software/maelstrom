@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
-    CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
+    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -138,6 +138,14 @@ fn state_dir() -> RootBuf<StateDir> {
     )
 }
 
+fn container_image_depot_dir() -> RootBuf<ContainerImageDepotDir> {
+    RootBuf::new(
+        BaseDirectories::with_prefix("maelstrom/container")
+            .expect("failed to find container image depot dir")
+            .get_cache_file(""),
+    )
+}
+
 fn main() -> Result<ExitCode> {
     let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
 
@@ -150,11 +158,14 @@ fn main() -> Result<ExitCode> {
         fs.create_dir_all(&cache_dir)?;
         let state_dir = state_dir();
         fs.create_dir_all(&state_dir)?;
+        let container_image_depot_dir = container_image_depot_dir();
+        fs.create_dir_all(&container_image_depot_dir)?;
         let client = Client::new(
             bg_proc,
             config.broker,
             Root::<ProjectDir>::new(".".as_ref()),
             state_dir,
+            container_image_depot_dir,
             cache_dir,
             config.cache_size,
             config.inline_limit,

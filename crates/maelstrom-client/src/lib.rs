@@ -1,6 +1,7 @@
 pub use maelstrom_client_base::{
     spec, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, MANIFEST_DIR,
 };
+pub use maelstrom_container::ContainerImageDepotDir;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{
@@ -10,11 +11,11 @@ use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_container::{ContainerImage, ContainerImageDepotDir};
+use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
-    root::{Root, RootBuf},
+    root::Root,
 };
 use spec::Layer;
 use std::os::linux::net::SocketAddrExt as _;
@@ -28,7 +29,6 @@ use std::{
     process::{Command, Stdio},
     thread,
 };
-use xdg::BaseDirectories;
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 type RequestFn = Box<
@@ -182,6 +182,7 @@ impl Client {
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
         state_dir: impl AsRef<Root<StateDir>>,
+        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -200,17 +201,12 @@ impl Client {
         };
         slog::debug!(s.log, "finding maelstrom container dir");
 
-        let container_image_depot_cache_dir = RootBuf::<ContainerImageDepotDir>::new(
-            BaseDirectories::with_prefix("maelstrom/container")
-                .with_context(|| "finding container image depot cache dir")?
-                .get_cache_file(""),
-        );
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir.as_ref(),
             "state_dir" => ?state_dir.as_ref(),
             "cache_dir" => ?cache_dir.as_ref(),
-            "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
+            "container_image_depot_cache_dir" => ?container_image_depot_dir.as_ref(),
             "cache_size" => ?cache_size,
             "inline_limit" => ?inline_limit,
             "slots" => ?slots,
@@ -220,7 +216,7 @@ impl Client {
             project_dir: project_dir.as_ref().into_proto_buf(),
             state_dir: state_dir.as_ref().into_proto_buf(),
             cache_dir: cache_dir.as_ref().into_proto_buf(),
-            container_image_depot_cache_dir: container_image_depot_cache_dir.into_proto_buf(),
+            container_image_depot_dir: container_image_depot_dir.as_ref().into_proto_buf(),
             cache_size: cache_size.into_proto_buf(),
             inline_limit: inline_limit.into_proto_buf(),
             slots: slots.into_proto_buf(),
