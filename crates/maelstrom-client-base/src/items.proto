@@ -5,6 +5,7 @@ package maelstrom_client_base.items;
 message StartRequest {
     optional string broker_addr = 2;
     bytes project_dir = 3;
+    bytes state_dir = 9;
     bytes cache_dir = 4;
     uint64 cache_size = 5;
     uint64 inline_limit = 6;

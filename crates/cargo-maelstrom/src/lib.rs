@@ -25,7 +25,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ProjectDir,
+    ArtifactUploadProgress, CacheDir, StateDir, Client, ClientBgProcess, ProjectDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -605,14 +605,20 @@ pub struct DefaultMainAppDeps {
     client: Client,
 }
 
+/// The workspace directory is the top-level Cargo workspace directory. If workspaces aren't
+/// explicilty being used, it's the top-level directory for the package.
 pub struct WorkspaceDir;
+
+/// The Maelstrom target directory is <workspace-dir>/<target-dir>/maelstrom. Usually <target-dir>
+/// is just "target", though this can be configured differently.
+pub struct MaelstromTargetDir;
 
 impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
-        cache_dir: impl AsRef<Root<CacheDir>>,
-        workspace_root: impl AsRef<Root<WorkspaceDir>>,
+        maelstrom_target_dir: impl AsRef<Root<MaelstromTargetDir>>,
+        workspace_dir: impl AsRef<Root<WorkspaceDir>>,
         broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -629,8 +635,9 @@ impl DefaultMainAppDeps {
         let client = Client::new(
             bg_proc,
             broker_addr,
-            Root::<ProjectDir>::new(workspace_root.as_ref()),
-            cache_dir,
+            workspace_dir.as_ref().transmute::<ProjectDir>(),
+            maelstrom_target_dir.as_ref().transmute::<StateDir>(),
+            maelstrom_target_dir.as_ref().transmute::<CacheDir>(),
             cache_size,
             inline_limit,
             slots,
@@ -1166,12 +1173,12 @@ where
 
     let fs = Fs::new();
     let target_dir = &cargo_metadata.target_directory;
-    let cache_dir = target_dir.join("maelstrom");
-    fs.create_dir_all(&cache_dir)?;
+    let maelstrom_target_dir = target_dir.join("maelstrom");
+    fs.create_dir_all(&maelstrom_target_dir)?;
 
     let deps = DefaultMainAppDeps::new(
         bg_proc,
-        Root::<CacheDir>::new(cache_dir.as_std_path()),
+        Root::<MaelstromTargetDir>::new(maelstrom_target_dir.as_std_path()),
         Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_path().as_std_path()),
         config.broker,
         config.cache_size,
@@ -1188,7 +1195,7 @@ where
         stderr_is_tty,
         &cargo_metadata.workspace_root,
         &cargo_metadata.workspace_packages(),
-        &cache_dir,
+        &maelstrom_target_dir,
         target_dir,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,

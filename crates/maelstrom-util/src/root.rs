@@ -23,6 +23,10 @@ impl<T: ?Sized> Root<T> {
     pub fn join(&self, path: impl AsRef<Path>) -> RootBuf<T> {
         RootBuf::new(self.inner.join(path.as_ref()))
     }
+
+    pub fn transmute<U>(&self) -> &Root<U> {
+        Root::<U>::new(&self.inner)
+    }
 }
 
 impl<T> Deref for Root<T> {

@@ -5,7 +5,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{std_env_lookup, ImageConfig},
-    CacheDir, Client, ClientBgProcess, ProjectDir,
+    CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -130,6 +130,14 @@ fn cache_dir() -> RootBuf<CacheDir> {
     )
 }
 
+fn state_dir() -> RootBuf<StateDir> {
+    RootBuf::new(
+        BaseDirectories::with_prefix("maelstrom/run")
+            .expect("failed to find state dir")
+            .get_state_file(""),
+    )
+}
+
 fn main() -> Result<ExitCode> {
     let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
 
@@ -140,10 +148,13 @@ fn main() -> Result<ExitCode> {
         let accum = Arc::new(ExitCodeAccumulator::default());
         let cache_dir = cache_dir();
         fs.create_dir_all(&cache_dir)?;
+        let state_dir = state_dir();
+        fs.create_dir_all(&state_dir)?;
         let client = Client::new(
             bg_proc,
             config.broker,
             Root::<ProjectDir>::new(".".as_ref()),
+            state_dir,
             cache_dir,
             config.cache_size,
             config.inline_limit,

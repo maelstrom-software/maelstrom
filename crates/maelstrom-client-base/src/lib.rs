@@ -14,8 +14,27 @@ use anyhow::{anyhow, Result};
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
-pub struct CacheDir;
+/// The project directory is used for two things. First, any relative paths in layer specifications
+/// are resolved based on this path. Second, it's where the client process looks for the
+/// `maelstrom-container-tags.lock` file.
 pub struct ProjectDir;
+
+/// According to the XDG base directories spec:
+///
+///   The state directory contains state data that should persist between (application) restarts,
+///   but that is not important or portable enough to the user that it should be stored in
+///   $XDG_DATA_HOME. It may contain:
+///     - actions history (logs, history, recently used files, ...)
+///     - current state of the application that can be reused on a restart (view, layout, open
+///       files, undo history, ...)
+///
+/// For the client process, that currently just means the log files.
+pub struct StateDir;
+
+/// The cache directory is where we put a variety of different caches. The local worker's cache
+/// directory lives inside of this client cache directory. Another cache in this directory is the
+/// manifest cache.
+pub struct CacheDir;
 
 pub const MANIFEST_DIR: &str = "manifests";
 pub const STUB_MANIFEST_DIR: &str = "manifests/stubs";

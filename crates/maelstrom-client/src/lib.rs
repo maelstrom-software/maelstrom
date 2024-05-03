@@ -1,4 +1,4 @@
-pub use maelstrom_client_base::{spec, ArtifactUploadProgress, CacheDir, ProjectDir, MANIFEST_DIR};
+pub use maelstrom_client_base::{spec, ArtifactUploadProgress, CacheDir, ProjectDir, MANIFEST_DIR, StateDir};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{
@@ -179,6 +179,7 @@ impl Client {
         mut process_handle: ClientBgProcess,
         broker_addr: Option<BrokerAddr>,
         project_dir: impl AsRef<Root<ProjectDir>>,
+        state_dir: impl AsRef<Root<StateDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
@@ -203,6 +204,7 @@ impl Client {
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir.as_ref(),
+            "state_dir" => ?state_dir.as_ref(),
             "cache_dir" => ?cache_dir.as_ref(),
             "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
             "cache_size" => ?cache_size,
@@ -212,6 +214,7 @@ impl Client {
         let msg = proto::StartRequest {
             broker_addr: broker_addr.into_proto_buf(),
             project_dir: project_dir.as_ref().into_proto_buf(),
+            state_dir: state_dir.as_ref().into_proto_buf(),
             cache_dir: cache_dir.as_ref().into_proto_buf(),
             container_image_depot_cache_dir: container_image_depot_cache_dir.into_proto_buf(),
             cache_size: cache_size.into_proto_buf(),
