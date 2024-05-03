@@ -2,7 +2,11 @@ use crate::client::Client;
 use anyhow::Result;
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
-    IntoProtoBuf, IntoResult, TryFromProtoBuf,
+    CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir, TryFromProtoBuf,
+};
+use maelstrom_util::{
+    config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
+    root::RootBuf,
 };
 use std::{path::PathBuf, result, sync::Arc};
 use tonic::{Code, Request, Response, Status};
@@ -43,13 +47,14 @@ impl ClientProcess for Handler {
             let request = request.into_inner();
             self.client
                 .start(
-                    TryFromProtoBuf::try_from_proto_buf(request.broker_addr)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.project_dir)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.cache_dir)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.container_image_depot_cache_dir)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.cache_size)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.inline_limit)?,
-                    TryFromProtoBuf::try_from_proto_buf(request.slots)?,
+                    Option::<BrokerAddr>::try_from_proto_buf(request.broker_addr)?,
+                    RootBuf::<ProjectDir>::try_from_proto_buf(request.project_dir)?,
+                    RootBuf::<StateDir>::try_from_proto_buf(request.state_dir)?,
+                    RootBuf::<CacheDir>::try_from_proto_buf(request.cache_dir)?,
+                    PathBuf::try_from_proto_buf(request.container_image_depot_cache_dir)?,
+                    CacheSize::try_from_proto_buf(request.cache_size)?,
+                    InlineLimit::try_from_proto_buf(request.inline_limit)?,
+                    Slots::try_from_proto_buf(request.slots)?,
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)

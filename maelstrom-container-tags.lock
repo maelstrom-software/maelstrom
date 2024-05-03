@@ -1,4 +1,7 @@
 version = 0
 
+[alpine]
+latest = "sha256:6457d53fb065d6f250e1504b9bc42d5b6c65941d57532c072d929dd0628977d0"
+
 [rust]
 latest = "sha256:de6e081a4e9c10e70731071cec6f629892da1bbaa24b478a96bdc59060674117"

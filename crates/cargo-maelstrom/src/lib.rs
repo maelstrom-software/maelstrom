@@ -25,7 +25,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, CacheDir, StateDir, Client, ClientBgProcess, ProjectDir,
+    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ProjectDir, StateDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},

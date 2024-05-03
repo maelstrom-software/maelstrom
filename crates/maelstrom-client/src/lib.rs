@@ -1,4 +1,6 @@
-pub use maelstrom_client_base::{spec, ArtifactUploadProgress, CacheDir, ProjectDir, MANIFEST_DIR, StateDir};
+pub use maelstrom_client_base::{
+    spec, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, MANIFEST_DIR,
+};
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{

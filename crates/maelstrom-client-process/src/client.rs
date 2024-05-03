@@ -15,7 +15,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::Layer, ArtifactUploadProgress, CacheDir, ProjectDir, STUB_MANIFEST_DIR,
+    spec::Layer, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, STUB_MANIFEST_DIR,
     SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
@@ -25,7 +25,7 @@ use maelstrom_util::{
     ext::BoolExt,
     log::LoggerFactory,
     net,
-    root::RootBuf,
+    root::{Root, RootBuf},
     sync,
 };
 use maelstrom_worker::local_worker;
@@ -127,6 +127,7 @@ impl Client {
         &self,
         broker_addr: Option<BrokerAddr>,
         project_dir: RootBuf<ProjectDir>,
+        state_dir: RootBuf<StateDir>,
         cache_dir: RootBuf<CacheDir>,
         container_image_depot_cache_dir: PathBuf,
         cache_size: CacheSize,
@@ -136,10 +137,11 @@ impl Client {
         async fn file_logger(
             log_level: LogLevel,
             fs: &async_fs::Fs,
-            cache_dir: &Path,
+            state_dir: &Root<StateDir>,
         ) -> Result<Logger> {
+            struct LogFile;
             let log_file = fs
-                .open_or_create_file(cache_dir.join("client-process.log"))
+                .open_or_create_file(state_dir.join::<LogFile>("client-process.log"))
                 .await?;
             Ok(maelstrom_util::log::file_logger(
                 log_level,
@@ -151,6 +153,7 @@ impl Client {
             log: LoggerFactory,
             broker_addr: Option<BrokerAddr>,
             project_dir: RootBuf<ProjectDir>,
+            state_dir: RootBuf<StateDir>,
             cache_dir: RootBuf<CacheDir>,
             container_image_depot_cache_dir: PathBuf,
             cache_size: CacheSize,
@@ -159,21 +162,20 @@ impl Client {
         ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
 
-            // Make sure the cache dir exists before we try to put a log file in.
-            fs.create_dir_all(&cache_dir).await?;
+            // Make sure the state dir exists before we try to put a log file in.
+            fs.create_dir_all(&state_dir).await?;
 
             // Ensure we have a logger. If this program was started by a user on the shell, then a
             // logger will have been provided. Otherwise, open a log file in the cache directory
             // and log there.
             let log = match log {
                 LoggerFactory::FromLogger(log) => log,
-                LoggerFactory::FromLevel(level) => {
-                    file_logger(level, &fs, cache_dir.as_ref()).await?
-                }
+                LoggerFactory::FromLevel(level) => file_logger(level, &fs, &state_dir).await?,
             };
             debug!(log, "client starting";
                 "broker_addr" => ?broker_addr,
                 "project_dir" => ?project_dir,
+                "state_dir" => ?state_dir,
                 "cache_dir" => ?cache_dir,
                 "container_image_depot_cache_dir" => ?container_image_depot_cache_dir,
                 "cache_size" => ?cache_size,
@@ -366,6 +368,7 @@ impl Client {
             log,
             broker_addr,
             project_dir,
+            state_dir,
             cache_dir,
             container_image_depot_cache_dir,
             cache_size,

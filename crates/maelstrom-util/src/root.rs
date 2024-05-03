@@ -20,7 +20,7 @@ impl<T: ?Sized> Root<T> {
         unsafe { &*ptr }
     }
 
-    pub fn join(&self, path: impl AsRef<Path>) -> RootBuf<T> {
+    pub fn join<U>(&self, path: impl AsRef<Path>) -> RootBuf<U> {
         RootBuf::new(self.inner.join(path.as_ref()))
     }
 
