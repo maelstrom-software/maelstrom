@@ -80,16 +80,19 @@ pub struct Config {
 
     /// The directory to use for the cache.
     #[config(
-        short = 'r',
         value_name = "PATH",
-        default = "|bd: &BaseDirectories| bd.get_cache_home().into_os_string().into_string().unwrap()"
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_cache_home()
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#
     )]
     pub cache_root: RootBuf<CacheDir>,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative.
     #[config(
-        short = 's',
         value_name = "BYTES",
         default = "bytesize::ByteSize::gb(1)"
     )]

@@ -50,7 +50,6 @@ pub struct Config {
 
     /// Directory in which to put cached container images.
     #[config(
-        short = 'C',
         value_name = "PATH",
         default = r#"|bd: &BaseDirectories| {
             bd.get_cache_home()
@@ -77,7 +76,6 @@ pub struct Config {
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
     #[config(
-        short = 's',
         value_name = "BYTES",
         default = "CacheSize::default()",
         next_help_heading = "Local Worker Options"
@@ -85,11 +83,11 @@ pub struct Config {
     pub cache_size: CacheSize,
 
     /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(short = 'I', value_name = "BYTES", default = "InlineLimit::default()")]
+    #[config(value_name = "BYTES", default = "InlineLimit::default()")]
     pub inline_limit: InlineLimit,
 
     /// The number of job slots available.
-    #[config(short = 'S', value_name = "N", default = "Slots::default()")]
+    #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
 
     #[config(flatten, next_help_heading = "Feature Selection Config Options")]

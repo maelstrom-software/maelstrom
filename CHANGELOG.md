@@ -16,8 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   there are `target/maelstrom/cache` and `target/maelstrom/state`, which are
   the equivalents to the "cache" and "state" directories in the XDG Base
   Directories Specification.
+- Remove the following short command-line option aliases:
+  \[[277](https://github.com/maelstrom-software/maelstrom/issues/277)\]
+  - `-s` (`--cache-size`)
+  - `-I` (`--inline-limit`)
+  - `-S` (`--slots`)
 
-### `cargo-run`
+### `maelstrom-run`
 - Added a new `container-image-depot-root` configuration value. The default is
   `$XDG_CACHE_HOME/maelstrom/container`, which is what was hard-coded before.
   \[[248](https://github.com/maelstrom-software/maelstrom/issues/248)\]
@@ -30,6 +35,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Moved the `client-process.log` file into the `state-root` directory. It used
   to live in the cache directory, which was incorrect according to the XDG Base
   Directory Specification.
+- Remove the following short command-line option aliases:
+  \[[277](https://github.com/maelstrom-software/maelstrom/issues/277)\]
+  - `-s` (`--cache-size`)
+  - `-i` (`--inline-limit`)
+  - `-S` (`--slots`)
+
+### `maelstrom-worker`
+- Remove the following short command-line option aliases:
+  \[[277](https://github.com/maelstrom-software/maelstrom/issues/277)\]
+  - `-r` (`--cache-root`)
+  - `-s` (`--cache-size`)
+  - `-i` (`--inline-limit`)
+  - `-S` (`--slots`)
+
+### `maelstrom-broker`
+- Remove the following short command-line option aliases:
+  \[[277](https://github.com/maelstrom-software/maelstrom/issues/277)\]
+  - `-r` (`--cache-root`)
+  - `-s` (`--cache-size`)
 
 ## [0.8.0] - 2024-05-01
 
