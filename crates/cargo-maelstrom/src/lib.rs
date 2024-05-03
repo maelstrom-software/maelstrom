@@ -369,6 +369,7 @@ where
             self.queuing_state.expected_job_count,
             count + 1,
         ));
+        self.queuing_state.tracker.add_outstanding();
 
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
@@ -584,8 +585,6 @@ pub trait MainAppDeps: Sync {
         handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
     ) -> Result<()>;
 
-    fn wait_for_outstanding_jobs(&self) -> Result<()>;
-
     type CargoWaitHandle: Wait;
     type CargoTestArtifactStream: Iterator<Item = Result<CargoArtifact>>;
 
@@ -666,10 +665,6 @@ impl MainAppDeps for DefaultMainAppDeps {
         handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
     ) -> Result<()> {
         self.client.add_job(spec, handler)
-    }
-
-    fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        self.client.wait_for_outstanding_jobs()
     }
 
     type CargoWaitHandle = cargo::WaitHandle;
@@ -875,7 +870,7 @@ where
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
-        self.state.deps.wait_for_outstanding_jobs()?;
+        self.state.queuing_state.tracker.wait_for_outstanding();
         self.prog.finished()?;
 
         if self.state.queuing_state.list_action.is_none() {

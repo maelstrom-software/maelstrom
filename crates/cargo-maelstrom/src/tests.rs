@@ -295,10 +295,6 @@ impl MainAppDeps for TestMainAppDeps {
         Ok(())
     }
 
-    fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        Ok(())
-    }
-
     type CargoWaitHandle = WaitForNothing;
     type CargoTestArtifactStream = std::vec::IntoIter<Result<CargoArtifact>>;
 

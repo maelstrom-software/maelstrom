@@ -7,7 +7,7 @@ use maelstrom_base::{
     JobStatus,
 };
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
 
@@ -17,21 +17,44 @@ enum CaseResult {
 }
 
 #[derive(Default)]
+struct Statuses {
+    outstanding: u64,
+    completed: Vec<(String, CaseResult)>,
+}
+
+#[derive(Default)]
 pub struct JobStatusTracker {
-    statuses: Mutex<Vec<(String, CaseResult)>>,
+    statuses: Mutex<Statuses>,
+    condvar: Condvar,
     exit_code: ExitCodeAccumulator,
 }
 
 impl JobStatusTracker {
+    pub fn add_outstanding(&self) {
+        let mut statuses = self.statuses.lock().unwrap();
+        statuses.outstanding += 1;
+    }
+
     pub fn job_exited(&self, case: String, exit_code: ExitCode) {
         let mut statuses = self.statuses.lock().unwrap();
-        statuses.push((case, CaseResult::Ran(exit_code)));
+        statuses.outstanding -= 1;
+        statuses.completed.push((case, CaseResult::Ran(exit_code)));
         self.exit_code.add(exit_code);
+        self.condvar.notify_one();
     }
 
     pub fn job_ignored(&self, case: String) {
         let mut statuses = self.statuses.lock().unwrap();
-        statuses.push((case, CaseResult::Ignored));
+        statuses.outstanding -= 1;
+        statuses.completed.push((case, CaseResult::Ignored));
+        self.condvar.notify_one();
+    }
+
+    pub fn wait_for_outstanding(&self) {
+        let mut statuses = self.statuses.lock().unwrap();
+        while statuses.outstanding > 0 {
+            statuses = self.condvar.wait(statuses).unwrap();
+        }
     }
 
     pub fn print_summary(&self, width: usize, term: impl TermLike) -> Result<()> {
@@ -50,15 +73,18 @@ impl JobStatusTracker {
         let mut column1_width = std::cmp::max(success.width(), failure.width());
         let max_digits = 9;
         let statuses = self.statuses.lock().unwrap();
+        assert_eq!(statuses.outstanding, 0);
         let failed = statuses
+            .completed
             .iter()
             .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS));
         let ignored = statuses
+            .completed
             .iter()
             .filter(|(_, res)| matches!(res, CaseResult::Ignored));
         let num_failed = failed.clone().count();
         let num_ignored = ignored.clone().count();
-        let num_succeeded = statuses.len() - num_failed - num_ignored;
+        let num_succeeded = statuses.completed.len() - num_failed - num_ignored;
 
         if num_ignored > 0 {
             column1_width = std::cmp::max(column1_width, ignore.width());
