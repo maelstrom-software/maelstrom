@@ -31,7 +31,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
-    root::Root,
+    root::{Root, RootBuf},
     template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -51,7 +51,9 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{load_test_listing, write_test_listing, TestListing, LAST_TEST_LISTING_NAME};
+use test_listing::{
+    load_test_listing, test_listing_file, write_test_listing, TestListing, TestListingFile,
+};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -89,10 +91,10 @@ fn filter_case(
 fn do_template_replacement(
     test_metadata: &mut AllMetadata,
     compilation_options: &CompilationOptions,
-    target_dir: &Path,
+    target_dir: &Root<TargetDir>,
 ) -> Result<()> {
     let profile = compilation_options.profile.clone().unwrap_or("dev".into());
-    let mut target = target_dir.to_owned();
+    let mut target = (**target_dir).to_owned();
     match profile.as_str() {
         "dev" => target.push("debug"),
         other => target.push(other),
@@ -136,7 +138,7 @@ impl JobQueuingState {
         mut test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
-        target_directory: impl AsRef<Path>,
+        target_dir: impl AsRef<Root<TargetDir>>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
@@ -145,7 +147,7 @@ impl JobQueuingState {
         do_template_replacement(
             &mut test_metadata,
             &compilation_options,
-            target_directory.as_ref(),
+            target_dir.as_ref(),
         )?;
 
         Ok(Self {
@@ -609,24 +611,33 @@ pub struct DefaultMainAppDeps {
 /// explicilty being used, it's the top-level directory for the package.
 pub struct WorkspaceDir;
 
-/// The Maelstrom target directory is <workspace-dir>/<target-dir>/maelstrom. Usually <target-dir>
-/// is just "target", though this can be configured differently.
+/// The target directory is usually <workspace-dir>/target, but Cargo lets "target" be overridden.
+pub struct TargetDir;
+
+/// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
 
 impl DefaultMainAppDeps {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bg_proc: ClientBgProcess,
-        maelstrom_target_dir: impl AsRef<Root<MaelstromTargetDir>>,
-        workspace_dir: impl AsRef<Root<WorkspaceDir>>,
+        project_dir: impl AsRef<Root<ProjectDir>>,
+        state_dir: impl AsRef<Root<StateDir>>,
+        cache_dir: impl AsRef<Root<CacheDir>>,
         broker_addr: Option<BrokerAddr>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
         log: slog::Logger,
     ) -> Result<Self> {
+        let project_dir = project_dir.as_ref();
+        let state_dir = state_dir.as_ref();
+        let cache_dir = cache_dir.as_ref();
         slog::debug!(
             log, "creating app dependencies";
+            "project_dir" => ?project_dir,
+            "state_dir" => ?state_dir,
+            "cache_dir" => ?cache_dir,
             "broker_addr" => ?broker_addr,
             "cache_size" => ?cache_size,
             "inline_limit" => ?inline_limit,
@@ -635,9 +646,9 @@ impl DefaultMainAppDeps {
         let client = Client::new(
             bg_proc,
             broker_addr,
-            workspace_dir.as_ref().transmute::<ProjectDir>(),
-            maelstrom_target_dir.as_ref().transmute::<StateDir>(),
-            maelstrom_target_dir.as_ref().transmute::<CacheDir>(),
+            project_dir,
+            state_dir,
+            cache_dir,
             cache_size,
             inline_limit,
             slots,
@@ -707,7 +718,7 @@ impl MainAppDeps for DefaultMainAppDeps {
 pub struct MainAppState<MainAppDepsT> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState,
-    cache_dir: PathBuf,
+    test_listing_file: RootBuf<TestListingFile>,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
@@ -732,10 +743,10 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
         stderr_color: bool,
-        workspace_root: &impl AsRef<Path>,
+        workspace_root: impl AsRef<Root<WorkspaceDir>>,
         workspace_packages: &[&CargoPackage],
-        cache_directory: &impl AsRef<Path>,
-        target_directory: &impl AsRef<Path>,
+        test_listing_file: RootBuf<TestListingFile>,
+        target_directory: impl AsRef<Root<TargetDir>>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
         manifest_options: ManifestOptions,
@@ -751,8 +762,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
 
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let mut test_listing =
-            load_test_listing(&cache_directory.as_ref().join(LAST_TEST_LISTING_NAME))?
-                .unwrap_or_default();
+            load_test_listing(&Fs::new(), test_listing_file.as_ref())?.unwrap_or_default();
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
@@ -781,7 +791,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 compilation_options,
                 manifest_options,
             )?,
-            cache_dir: cache_directory.as_ref().to_owned(),
+            test_listing_file,
             logging_output,
             log,
         })
@@ -892,7 +902,8 @@ where
         }
 
         write_test_listing(
-            &self.state.cache_dir.join(LAST_TEST_LISTING_NAME),
+            &Fs::new(),
+            &self.state.test_listing_file,
             &self.state.queuing_state.test_listing.lock().unwrap(),
         )?;
 
@@ -1150,6 +1161,14 @@ pub fn main<TermT>(
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
+    let cargo_metadata = read_cargo_metadata(&config)?;
+    let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
+    let fs = Fs::new();
+    if extra_options.test_metadata.init {
+        metadata::maybe_write_default_test_metadata(&fs, workspace_dir)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
@@ -1164,22 +1183,19 @@ where
         (_, _, _) => None,
     };
 
-    let cargo_metadata = read_cargo_metadata(&config)?;
+    let target_dir = Root::<TargetDir>::new(cargo_metadata.target_directory.as_std_path());
+    let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
+    let state_dir = maelstrom_target_dir.join::<StateDir>("state");
+    let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
 
-    if extra_options.test_metadata.init {
-        metadata::maybe_write_default_test_metadata(&cargo_metadata.workspace_root)?;
-        return Ok(ExitCode::SUCCESS);
-    }
-
-    let fs = Fs::new();
-    let target_dir = &cargo_metadata.target_directory;
-    let maelstrom_target_dir = target_dir.join("maelstrom");
-    fs.create_dir_all(&maelstrom_target_dir)?;
+    fs.create_dir_all(&state_dir)?;
+    fs.create_dir_all(&cache_dir)?;
 
     let deps = DefaultMainAppDeps::new(
         bg_proc,
-        Root::<MaelstromTargetDir>::new(maelstrom_target_dir.as_std_path()),
-        Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_path().as_std_path()),
+        workspace_dir.transmute::<ProjectDir>(),
+        &state_dir,
+        &cache_dir,
         config.broker,
         config.cache_size,
         config.inline_limit,
@@ -1193,9 +1209,9 @@ where
         extra_options.exclude,
         list_action,
         stderr_is_tty,
-        &cargo_metadata.workspace_root,
+        workspace_dir,
         &cargo_metadata.workspace_packages(),
-        &maelstrom_target_dir,
+        test_listing_file(&state_dir),
         target_dir,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,

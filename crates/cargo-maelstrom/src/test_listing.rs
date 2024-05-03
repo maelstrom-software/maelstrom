@@ -1,12 +1,15 @@
 use crate::pattern;
 use anyhow::{anyhow, Result};
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Target as CargoTarget};
-use maelstrom_util::fs::Fs;
+use maelstrom_client::StateDir;
+use maelstrom_util::{
+    fs::Fs,
+    root::{Root, RootBuf},
+};
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, FromInto};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
 
 pub use crate::pattern::ArtifactKind;
 
@@ -148,10 +151,13 @@ impl TestListing {
     }
 }
 
-pub const LAST_TEST_LISTING_NAME: &str = "test-listing.toml";
+pub struct TestListingFile;
 
-pub fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
-    let fs = Fs::new();
+pub fn test_listing_file(state_dir: impl AsRef<Root<StateDir>>) -> RootBuf<TestListingFile> {
+    state_dir.as_ref().join("test-listing.toml")
+}
+
+pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<Option<TestListing>> {
     if let Some(contents) = fs.read_to_string_if_exists(path)? {
         let mut table: toml::Table = toml::from_str(&contents)?;
         let version: TestListingVersion = table
@@ -168,8 +174,11 @@ pub fn load_test_listing(path: &Path) -> Result<Option<TestListing>> {
     }
 }
 
-pub fn write_test_listing(path: &Path, job_listing: &TestListing) -> Result<()> {
-    let fs = Fs::new();
+pub fn write_test_listing(
+    fs: &Fs,
+    path: &Root<TestListingFile>,
+    job_listing: &TestListing,
+) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)?;
     }

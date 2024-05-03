@@ -1,6 +1,6 @@
 mod directive;
 
-use crate::pattern;
+use crate::{pattern, WorkspaceDir};
 use anyhow::{Context as _, Error, Result};
 use directive::TestDirective;
 use enumset::enum_set;
@@ -8,9 +8,9 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{self, substitute, ImageConfig, ImageOption, Layer, PossiblyImage};
-use maelstrom_util::{fs::Fs, template::TemplateVars};
+use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
 use serde::Deserialize;
-use std::{collections::BTreeMap, path::Path, str};
+use std::{collections::BTreeMap, str};
 
 /// This file is what we write out for the user when `--init` is provided. It should contain the
 /// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
@@ -20,9 +20,14 @@ const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
 
 /// Write out a default config file to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing exists
 /// there already.
-pub fn maybe_write_default_test_metadata(workspace_root: &impl AsRef<Path>) -> Result<()> {
-    let path = workspace_root.as_ref().join(MAELSTROM_TEST_TOML);
-    let fs = Fs::new();
+pub fn maybe_write_default_test_metadata(
+    fs: &Fs,
+    workspace_dir: impl AsRef<Root<WorkspaceDir>>,
+) -> Result<()> {
+    struct MaelstromTestTomlFile;
+    let path = workspace_dir
+        .as_ref()
+        .join::<MaelstromTestTomlFile>(MAELSTROM_TEST_TOML);
     if !fs.exists(&path) {
         fs.write(&path, DEFAULT_TEST_METADATA)?;
         println!("Wrote default config to {}.", path.display());
@@ -314,8 +319,11 @@ impl AllMetadata {
         Ok(toml::from_str(contents)?)
     }
 
-    pub fn load(log: slog::Logger, workspace_root: &impl AsRef<Path>) -> Result<Self> {
-        let path = workspace_root.as_ref().join(MAELSTROM_TEST_TOML);
+    pub fn load(log: slog::Logger, workspace_root: impl AsRef<Root<WorkspaceDir>>) -> Result<Self> {
+        struct MaelstromTestTomlFile;
+        let path = workspace_root
+            .as_ref()
+            .join::<MaelstromTestTomlFile>(MAELSTROM_TEST_TOML);
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             Ok(Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
         } else {

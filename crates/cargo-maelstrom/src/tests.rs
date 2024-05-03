@@ -4,10 +4,11 @@ use crate::{
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{
-        load_test_listing, ArtifactCases, ArtifactKey, ArtifactKind, Package, TestListing,
-        LAST_TEST_LISTING_NAME,
+        load_test_listing, test_listing_file, ArtifactCases, ArtifactKey, ArtifactKind, Package,
+        TestListing,
     },
-    EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, Wait,
+    EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
+    WorkspaceDir,
 };
 use anyhow::Result;
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
@@ -19,18 +20,22 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress,
+    ArtifactUploadProgress, StateDir,
 };
 use maelstrom_test::digest;
-use maelstrom_util::{fs::Fs, log::test_logger};
+use maelstrom_util::{
+    fs::Fs,
+    log::test_logger,
+    root::{Root, RootBuf},
+};
 use std::collections::HashSet;
 use std::{
     cell::RefCell,
-    path::{Path, PathBuf},
+    path::Path,
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
 };
-use tempfile::{tempdir, TempDir};
+use tempfile::tempdir;
 
 #[derive(Clone)]
 struct FakeTestCase {
@@ -248,15 +253,18 @@ impl Wait for WaitForNothing {
     }
 }
 
+struct BinDir;
+struct TmpDir;
+
 struct TestMainAppDeps {
     tests: FakeTests,
-    bin_path: PathBuf,
-    target_dir: PathBuf,
+    bin_path: RootBuf<BinDir>,
+    target_dir: RootBuf<TargetDir>,
     next_job_id: AtomicU32,
 }
 
 impl TestMainAppDeps {
-    fn new(tests: FakeTests, bin_path: PathBuf, target_dir: PathBuf) -> Self {
+    fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<TargetDir>) -> Self {
         Self {
             tests,
             bin_path,
@@ -308,7 +316,7 @@ impl MainAppDeps for TestMainAppDeps {
     ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)> {
         let fs = Fs::new();
         fs.create_dir_all(&self.target_dir).unwrap();
-        fs.write(self.target_dir.join("cargo_test_run"), "")
+        fs.write((**self.target_dir).join("cargo_test_run"), "")
             .unwrap();
 
         Ok((
@@ -336,10 +344,10 @@ fn counts_from_states(states: &[JobState]) -> JobStateCounts {
 
 #[allow(clippy::too_many_arguments)]
 fn run_app(
-    temp_dir: &TempDir,
+    bin_dir: &Root<BinDir>,
     term: InMemoryTerm,
     fake_tests: FakeTests,
-    workspace_root: &Path,
+    workspace_root: &Root<WorkspaceDir>,
     stdout_tty: bool,
     quiet: Quiet,
     include_filter: Vec<String>,
@@ -358,12 +366,15 @@ fn run_app(
     );
     let packages = fake_tests.packages();
 
-    let bin_path = temp_dir.path().join("bin");
-    fs.create_dir_all(&bin_path).unwrap();
-    fake_tests.create_binaries(&fs, &bin_path);
+    fs.create_dir_all(bin_dir).unwrap();
+    fake_tests.create_binaries(&fs, bin_dir);
 
-    let target_directory = workspace_root.join("target");
-    let deps = TestMainAppDeps::new(fake_tests.clone(), bin_path, target_directory.clone());
+    let target_directory = workspace_root.join::<TargetDir>("target");
+    let deps = TestMainAppDeps::new(
+        fake_tests.clone(),
+        bin_dir.to_owned(),
+        target_directory.clone(),
+    );
 
     let state = MainAppState::new(
         deps,
@@ -371,9 +382,9 @@ fn run_app(
         exclude_filter,
         list,
         false, // stderr_color
-        &workspace_root,
+        workspace_root,
         &Vec::from_iter(packages.iter()),
-        &target_directory.join("maelstrom"),
+        test_listing_file(target_directory.join::<StateDir>("maelstrom/state")),
         &target_directory,
         FeatureSelectionOptions::default(),
         CompilationOptions::default(),
@@ -419,21 +430,22 @@ fn run_app(
 }
 
 fn run_or_list_all_tests_sync(
-    tmp_dir: &TempDir,
+    tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
     list: Option<ListAction>,
 ) -> String {
-    let workspace = tmp_dir.path().join("workspace");
+    let bin_dir = tmp_dir.join::<BinDir>("bin");
+    let workspace_dir = tmp_dir.join::<WorkspaceDir>("workspace");
 
     let term = InMemoryTerm::new(50, 50);
     run_app(
-        tmp_dir,
+        &bin_dir,
         term.clone(),
         fake_tests,
-        &workspace,
+        &workspace_dir,
         false, // stdout_tty
         quiet,
         include_filter,
@@ -444,7 +456,7 @@ fn run_or_list_all_tests_sync(
 }
 
 fn run_all_tests_sync(
-    tmp_dir: &TempDir,
+    tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
     quiet: Quiet,
     include_filter: Vec<String>,
@@ -462,7 +474,7 @@ fn run_all_tests_sync(
 
 #[allow(clippy::too_many_arguments)]
 fn list_all_tests_sync(
-    tmp_dir: &TempDir,
+    tmp_dir: &Root<TmpDir>,
     fake_tests: FakeTests,
     quiet: Quiet,
     include_filter: Vec<String>,
@@ -513,7 +525,7 @@ fn no_tests_all_tests_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec!["all".into()],
@@ -538,7 +550,7 @@ fn no_tests_all_tests_sync_listing() {
         }],
     };
     list_all_tests_sync(
-        &tmp_dir,
+        Root::new(tmp_dir.path()),
         fake_tests,
         false.into(),
         vec!["all".into()],
@@ -572,7 +584,7 @@ fn two_tests_all_tests_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec!["all".into()],
@@ -611,7 +623,7 @@ fn two_tests_all_tests_sync_listing() {
         ],
     };
     list_all_tests_sync(
-        &tmp_dir,
+        Root::new(tmp_dir.path()),
         fake_tests,
         false.into(),
         vec!["all".into()],
@@ -668,7 +680,7 @@ fn four_tests_filtered_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec![
@@ -724,7 +736,7 @@ fn four_tests_filtered_sync_listing() {
         ],
     };
     list_all_tests_sync(
-        &tmp_dir,
+        Root::new(tmp_dir.path()),
         fake_tests,
         false.into(),
         vec![
@@ -779,7 +791,7 @@ fn three_tests_single_package_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec!["package.equals(foo)".into()],
@@ -831,7 +843,7 @@ fn three_tests_single_package_filtered_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec!["package.equals(foo) && name.equals(test_it)".into()],
@@ -878,7 +890,7 @@ fn ignored_test_sync() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
             vec!["all".into()],
@@ -921,7 +933,7 @@ fn two_tests_all_tests_sync_quiet() {
     };
     assert_eq!(
         run_all_tests_sync(
-            &tmp_dir,
+            Root::new(tmp_dir.path()),
             fake_tests,
             true.into(),
             vec!["all".into()],
@@ -938,13 +950,14 @@ fn two_tests_all_tests_sync_quiet() {
 
 fn run_failed_tests(fake_tests: FakeTests) -> String {
     let tmp_dir = tempdir().unwrap();
+    let workspace_dir = RootBuf::<WorkspaceDir>::new(tmp_dir.path().join("workspace"));
 
     let term = InMemoryTerm::new(50, 50);
     run_app(
-        &tmp_dir,
+        Root::new(tmp_dir.path()),
         term.clone(),
         fake_tests,
-        &tmp_dir.path().join("workspace"),
+        &workspace_dir,
         false, // stdout_tty
         Quiet::from(false),
         vec!["all".into()],
@@ -1005,14 +1018,15 @@ fn failed_tests() {
 
 fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
+    let workspace_dir = RootBuf::<WorkspaceDir>::new(tmp_dir.path().join("workspace"));
 
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
     let contents = run_app(
-        &tmp_dir,
+        Root::new(tmp_dir.path()),
         term_clone,
         fake_tests,
-        &tmp_dir.path().join("workspace"),
+        &workspace_dir,
         true, // stdout_tty
         quiet,
         vec!["all".into()],
@@ -1191,7 +1205,9 @@ fn complete_quiet() {
 
 #[test]
 fn expected_count_updates_packages() {
+    let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
+    let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
         test_binaries: vec![
             FakeTestBinary {
@@ -1211,18 +1227,16 @@ fn expected_count_updates_packages() {
         ],
     };
     run_all_tests_sync(
-        &tmp_dir,
+        tmp_dir,
         fake_tests.clone(),
         false.into(),
         vec!["all".into()],
         vec![],
     );
 
-    let path = tmp_dir
-        .path()
-        .join("workspace/target/maelstrom")
-        .join(LAST_TEST_LISTING_NAME);
-    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
+    let test_listing_file = test_listing_file(&state_dir);
+    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove bar
@@ -1237,7 +1251,7 @@ fn expected_count_updates_packages() {
     };
 
     run_all_tests_sync(
-        &tmp_dir,
+        tmp_dir,
         fake_tests.clone(),
         false.into(),
         vec!["all".into()],
@@ -1245,13 +1259,15 @@ fn expected_count_updates_packages() {
     );
 
     // new listing should match
-    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 
 #[test]
 fn expected_count_updates_cases() {
+    let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
+    let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
@@ -1269,11 +1285,9 @@ fn expected_count_updates_cases() {
         vec![],
     );
 
-    let path = tmp_dir
-        .path()
-        .join("workspace/target/maelstrom")
-        .join(LAST_TEST_LISTING_NAME);
-    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
+    let test_listing_file = test_listing_file(&state_dir);
+    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove the test
@@ -1293,13 +1307,14 @@ fn expected_count_updates_cases() {
     );
 
     // new listing should match
-    let listing: TestListing = load_test_listing(&path).unwrap().unwrap();
+    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 
 #[test]
 fn filtering_none_does_not_build() {
     let tmp_dir = tempdir().unwrap();
+    let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
@@ -1318,12 +1333,18 @@ fn filtering_none_does_not_build() {
     );
 
     let fs = Fs::new();
-    let cache_dir = tmp_dir.path().join("workspace/target/maelstrom");
+    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
+    let test_listing_file_name = test_listing_file(&state_dir)
+        .file_name()
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_owned();
     let mut entries: Vec<_> = fs
-        .read_dir(cache_dir)
+        .read_dir(state_dir)
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
     entries.sort();
-    assert_eq!(entries, vec![LAST_TEST_LISTING_NAME.to_owned(),]);
+    assert_eq!(entries, vec![test_listing_file_name]);
 }

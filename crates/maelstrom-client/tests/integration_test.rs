@@ -52,7 +52,7 @@ impl ClientFixture {
             bg_proc,
             None, /* broker_addr */
             Root::<ProjectDir>::new(&project_dir),
-            Root::<StateDir>::new(&cache_dir),
+            Root::<StateDir>::new(&state_dir),
             Root::<CacheDir>::new(&cache_dir),
             "1mb".parse().unwrap(), /* cache_size */
             "1mb".parse().unwrap(), /* inline_limit */
