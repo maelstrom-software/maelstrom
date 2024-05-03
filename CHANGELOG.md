@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `cargo-maelstrom`
+- Added a new `container-image-depot-root` configuration value. The default is
+  `$XDG_CACHE_HOME/maelstrom/container`, which is what was hard-coded before.
+  \[[248](https://github.com/maelstrom-software/maelstrom/issues/248)\]
+- Cleaned up where various thing go in the Cargo target directory. Before, we
+  had a number of files and directories directly in the target directory. Now,
+  there are `target/maelstrom/cache` and `target/maelstrom/state`, which are
+  the equivalents to the "cache" and "state" directories in the XDG Base
+  Directories Specification.
+
+### `cargo-run`
+- Added a new `container-image-depot-root` configuration value. The default is
+  `$XDG_CACHE_HOME/maelstrom/container`, which is what was hard-coded before.
+  \[[248](https://github.com/maelstrom-software/maelstrom/issues/248)\]
+- Added a new `cache-root` configuration value. The default is
+  `$XDG_CACHE_HOME/maelstrom/run`, which is what was hard-coded before.
+  \[[191](https://github.com/maelstrom-software/maelstrom/issues/191)\]
+- Added a new `state-root` configuration value. The default is
+  `$XDG_STATE_HOME/maelstrom/run`.
+  \[[191](https://github.com/maelstrom-software/maelstrom/issues/191)\]
+- Moved the `client-process.log` file into the `state-root` directory. It used
+  to live in the cache directory, which was incorrect according to the XDG Base
+  Directory Specification.
+
 ## [0.8.0] - 2024-05-01
 
 ### `cargo-maelstrom`
