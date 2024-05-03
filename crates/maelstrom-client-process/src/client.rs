@@ -18,7 +18,10 @@ use maelstrom_client_base::{
     spec::Layer, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, STUB_MANIFEST_DIR,
     SYMLINK_MANIFEST_DIR,
 };
-use maelstrom_container::{ContainerImage, ContainerImageDepot, NullProgressTracker};
+use maelstrom_container::{
+    self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
+    NullProgressTracker,
+};
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -129,7 +132,7 @@ impl Client {
         project_dir: RootBuf<ProjectDir>,
         state_dir: RootBuf<StateDir>,
         cache_dir: RootBuf<CacheDir>,
-        container_image_depot_cache_dir: PathBuf,
+        container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
@@ -155,7 +158,7 @@ impl Client {
             project_dir: RootBuf<ProjectDir>,
             state_dir: RootBuf<StateDir>,
             cache_dir: RootBuf<CacheDir>,
-            container_image_depot_cache_dir: PathBuf,
+            container_image_depot_cache_dir: RootBuf<ContainerImageDepotDir>,
             cache_size: CacheSize,
             inline_limit: InlineLimit,
             slots: Slots,
@@ -191,8 +194,10 @@ impl Client {
             }
 
             // Create standalone sub-components.
-            let container_image_depot =
-                ContainerImageDepot::new(&project_dir, container_image_depot_cache_dir)?;
+            let container_image_depot = ContainerImageDepot::new(
+                project_dir.transmute::<container::ProjectDir>(),
+                container_image_depot_cache_dir,
+            )?;
             let digest_repo = DigestRepository::new(&cache_dir);
             let upload_tracker = ArtifactUploadTracker::default();
 

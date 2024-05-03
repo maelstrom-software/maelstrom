@@ -4,6 +4,7 @@ use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
     CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir, TryFromProtoBuf,
 };
+use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     root::RootBuf,
@@ -51,7 +52,9 @@ impl ClientProcess for Handler {
                     RootBuf::<ProjectDir>::try_from_proto_buf(request.project_dir)?,
                     RootBuf::<StateDir>::try_from_proto_buf(request.state_dir)?,
                     RootBuf::<CacheDir>::try_from_proto_buf(request.cache_dir)?,
-                    PathBuf::try_from_proto_buf(request.container_image_depot_cache_dir)?,
+                    RootBuf::<ContainerImageDepotDir>::try_from_proto_buf(
+                        request.container_image_depot_cache_dir,
+                    )?,
                     CacheSize::try_from_proto_buf(request.cache_size)?,
                     InlineLimit::try_from_proto_buf(request.inline_limit)?,
                     Slots::try_from_proto_buf(request.slots)?,

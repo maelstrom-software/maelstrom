@@ -10,11 +10,11 @@ use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_container::ContainerImage;
+use maelstrom_container::{ContainerImage, ContainerImageDepotDir};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
-    root::Root,
+    root::{Root, RootBuf},
 };
 use spec::Layer;
 use std::os::linux::net::SocketAddrExt as _;
@@ -200,9 +200,11 @@ impl Client {
         };
         slog::debug!(s.log, "finding maelstrom container dir");
 
-        let container_image_depot_cache_dir = BaseDirectories::with_prefix("maelstrom/container")
-            .with_context(|| "finding container image depot cache dir")?
-            .get_cache_file("");
+        let container_image_depot_cache_dir = RootBuf::<ContainerImageDepotDir>::new(
+            BaseDirectories::with_prefix("maelstrom/container")
+                .with_context(|| "finding container image depot cache dir")?
+                .get_cache_file(""),
+        );
         slog::debug!(s.log, "client sending start";
             "broker_addr" => ?broker_addr,
             "project_dir" => ?project_dir.as_ref(),
