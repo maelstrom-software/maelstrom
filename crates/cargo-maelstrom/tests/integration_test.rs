@@ -9,6 +9,7 @@ use maelstrom_client::ClientBgProcess;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
+    root::RootBuf,
 };
 use std::path::Path;
 use std::path::PathBuf;
@@ -48,6 +49,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         broker: None,
         log_level: LogLevel::Debug,
         quiet: false.into(),
+        container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
         timeout: None,
         cache_size: CacheSize::default(),
         inline_limit: InlineLimit::default(),

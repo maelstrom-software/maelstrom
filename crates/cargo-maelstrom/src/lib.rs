@@ -56,7 +56,6 @@ use test_listing::{
     load_test_listing, test_listing_file, write_test_listing, TestListing, TestListingFile,
 };
 use visitor::{JobStatusTracker, JobStatusVisitor};
-use xdg::BaseDirectories;
 
 #[derive(Debug)]
 pub enum ListAction {
@@ -1155,14 +1154,6 @@ fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
     Ok(cargo_metadata)
 }
 
-fn container_image_depot_dir() -> Result<RootBuf<ContainerImageDepotDir>> {
-    Ok(RootBuf::new(
-        BaseDirectories::with_prefix("maelstrom/container")
-            .context("failed to find container image depot dir")?
-            .get_cache_file(""),
-    ))
-}
-
 pub fn main<TermT>(
     config: config::Config,
     extra_options: cli::ExtraCommandLineOptions,
@@ -1201,7 +1192,6 @@ where
     let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
     let state_dir = maelstrom_target_dir.join::<StateDir>("state");
     let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
-    let container_image_depot_dir = container_image_depot_dir()?;
 
     fs.create_dir_all(&state_dir)?;
     fs.create_dir_all(&cache_dir)?;
@@ -1211,7 +1201,7 @@ where
         config.broker,
         workspace_dir.transmute::<ProjectDir>(),
         &state_dir,
-        container_image_depot_dir,
+        config.container_image_depot_root,
         cache_dir,
         config.cache_size,
         config.inline_limit,

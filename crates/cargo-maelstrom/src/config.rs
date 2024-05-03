@@ -1,12 +1,17 @@
 use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use derive_more::From;
+use maelstrom_client::ContainerImageDepotDir;
 use maelstrom_macro::Config;
-use maelstrom_util::config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots};
+use maelstrom_util::{
+    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
+    root::RootBuf,
+};
 use serde::Deserialize;
 use std::{
     fmt::{self, Debug, Formatter},
     result,
 };
+use xdg::BaseDirectories;
 
 #[derive(Clone, Deserialize, From)]
 #[serde(transparent)]
@@ -42,6 +47,22 @@ pub struct Config {
     /// Don't output information about the tests being run.
     #[config(flag, short = 'q')]
     pub quiet: Quiet,
+
+    /// Directory in which to put cached container images.
+    #[config(
+        short = 'C',
+        value_name = "PATH",
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_cache_home()
+                .parent()
+                .unwrap()
+                .join("container/")
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#
+    )]
+    pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
     #[config(

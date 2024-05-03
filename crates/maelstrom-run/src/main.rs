@@ -36,6 +36,46 @@ pub struct Config {
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
+    /// Directory in which to put cached container images.
+    #[config(
+        short = 'C',
+        value_name = "PATH",
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_cache_home()
+                .parent()
+                .unwrap()
+                .join("container/")
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#
+    )]
+    pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
+
+    /// Directory for state that persists between runs, including the client's log file.
+    #[config(
+        value_name = "PATH",
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_state_home()
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#
+    )]
+    pub state_root: RootBuf<StateDir>,
+
+    /// Directory to use for the cache. The local worker's cache will be contained within it.
+    #[config(
+        value_name = "PATH",
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_cache_home()
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#
+    )]
+    pub cache_root: RootBuf<CacheDir>,
+
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
     #[config(
@@ -122,30 +162,6 @@ fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccum
     }
 }
 
-fn cache_dir() -> RootBuf<CacheDir> {
-    RootBuf::new(
-        BaseDirectories::with_prefix("maelstrom/run")
-            .expect("failed to find cache dir")
-            .get_cache_file(""),
-    )
-}
-
-fn state_dir() -> RootBuf<StateDir> {
-    RootBuf::new(
-        BaseDirectories::with_prefix("maelstrom/run")
-            .expect("failed to find state dir")
-            .get_state_file(""),
-    )
-}
-
-fn container_image_depot_dir() -> RootBuf<ContainerImageDepotDir> {
-    RootBuf::new(
-        BaseDirectories::with_prefix("maelstrom/container")
-            .expect("failed to find container image depot dir")
-            .get_cache_file(""),
-    )
-}
-
 fn main() -> Result<ExitCode> {
     let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
 
@@ -154,19 +170,16 @@ fn main() -> Result<ExitCode> {
     maelstrom_util::log::run_with_logger(config.log_level, |log| {
         let fs = Fs::new();
         let accum = Arc::new(ExitCodeAccumulator::default());
-        let cache_dir = cache_dir();
-        fs.create_dir_all(&cache_dir)?;
-        let state_dir = state_dir();
-        fs.create_dir_all(&state_dir)?;
-        let container_image_depot_dir = container_image_depot_dir();
-        fs.create_dir_all(&container_image_depot_dir)?;
+        fs.create_dir_all(&config.cache_root)?;
+        fs.create_dir_all(&config.state_root)?;
+        fs.create_dir_all(&config.container_image_depot_root)?;
         let client = Client::new(
             bg_proc,
             config.broker,
             Root::<ProjectDir>::new(".".as_ref()),
-            state_dir,
-            container_image_depot_dir,
-            cache_dir,
+            config.state_root,
+            config.container_image_depot_root,
+            config.cache_root,
             config.cache_size,
             config.inline_limit,
             config.slots,
