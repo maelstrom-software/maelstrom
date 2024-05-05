@@ -1427,6 +1427,7 @@ mod tests {
     ) {
         let mut fix = Fixture::new().await;
         let input = vec![
+            BuildEntry::dir_args(".", 0o770, false),
             BuildEntry::reg("Foo", b"hello world"),
             BuildEntry::dir("Qux"),
             BuildEntry::reg_empty("Bar/Baz"),
@@ -1459,6 +1460,8 @@ mod tests {
         ] {
             expectations.push(Expect::Attrs(e, Mode(0o555).into()));
         }
+
+        expectations.push(Expect::Attrs("", Mode(0o770).into()));
 
         assert_expectations(&fix.fs, &mount_path, expectations).await;
 

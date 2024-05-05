@@ -285,12 +285,17 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
-        if let Some(existing) = self.look_up(parent_id, name).await? {
-            self.set_attr(existing, attrs).await?;
-            Ok(existing)
+        if let Some(name) = path.file_name() {
+            if let Some(existing) = self.look_up(parent_id, name).await? {
+                self.set_attr(existing, attrs).await?;
+                Ok(existing)
+            } else {
+                self.add_dir(parent_id, name, attrs).await
+            }
         } else {
-            self.add_dir(parent_id, name, attrs).await
+            let file_id = FileId::root(LayerId::BOTTOM);
+            self.set_attr(file_id, attrs).await?;
+            Ok(file_id)
         }
     }
 
