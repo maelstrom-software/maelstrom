@@ -127,7 +127,15 @@ struct AuthResponse {
 }
 
 #[anyhow_trace]
-async fn decode_and_check_for_error<T: DeserializeOwned>(response: reqwest::Response) -> Result<T> {
+async fn decode_and_check_for_error<T: DeserializeOwned>(
+    name: &str,
+    response: reqwest::Response,
+) -> Result<T> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        bail!("container resource {name:?} not found");
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("could not access {name:?}, are you sure it exists?")
+    }
     let json: serde_json::Value = response.json().await?;
     if let Some(error) = json.get("errors") {
         bail!("docker API error: {error:?}");
@@ -154,6 +162,7 @@ async fn get_image_index(
     tag_or_digest: &str,
 ) -> Result<ImageIndex> {
     decode_and_check_for_error(
+        &format!("{pkg}:{tag_or_digest}"),
         client
             .get(&format!(
                 "https://registry-1.docker.io/v2/library/{pkg}/manifests/{tag_or_digest}"
@@ -190,6 +199,7 @@ async fn get_image_manifest(
     manifest_digest: &str,
 ) -> Result<ImageManifest> {
     decode_and_check_for_error(
+        pkg,
         client
             .get(&format!(
                 "https://registry-1.docker.io/v2/library/{pkg}/manifests/{manifest_digest}"
@@ -213,6 +223,7 @@ async fn get_image_config(
     config_digest: &str,
 ) -> Result<ImageConfiguration> {
     let config: oci_spec::image::ImageConfiguration = decode_and_check_for_error(
+        pkg,
         client
             .get(&format!(
                 "https://registry-1.docker.io/v2/library/{pkg}/blobs/{config_digest}"
