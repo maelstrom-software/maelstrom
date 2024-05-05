@@ -15,6 +15,7 @@ use maelstrom_util::{
     process::{ExitCode, ExitCodeAccumulator},
     root::{Root, RootBuf},
 };
+use std::sync::{Condvar, Mutex};
 use std::{
     io::{self, Read, Write as _},
     sync::Arc,
@@ -125,37 +126,66 @@ fn print_effects(
     Ok(())
 }
 
-fn visitor(cjid: ClientJobId, result: JobOutcomeResult, accum: Arc<ExitCodeAccumulator>) {
-    match result {
+fn visitor(cjid: ClientJobId, result: JobOutcomeResult, tracker: Arc<JobTracker>) {
+    let exit_code = match result {
         Ok(JobOutcome::Completed(JobCompleted { status, effects })) => {
             print_effects(cjid, effects).ok();
             match status {
-                JobStatus::Exited(0) => {}
+                JobStatus::Exited(0) => ExitCode::SUCCESS,
                 JobStatus::Exited(code) => {
                     io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: exited with code {code}");
-                    accum.add(ExitCode::from(code));
+                    ExitCode::from(code)
                 }
                 JobStatus::Signaled(signum) => {
                     io::stdout().lock().flush().ok();
                     eprintln!("job {cjid}: killed by signal {signum}");
-                    accum.add(ExitCode::FAILURE);
+                    ExitCode::FAILURE
                 }
-            };
+            }
         }
         Ok(JobOutcome::TimedOut(effects)) => {
             print_effects(cjid, effects).ok();
             io::stdout().lock().flush().ok();
             eprintln!("job {cjid}: timed out");
-            accum.add(ExitCode::FAILURE);
+            ExitCode::FAILURE
         }
         Err(JobError::Execution(err)) => {
             eprintln!("job {cjid}: execution error: {err}");
-            accum.add(ExitCode::FAILURE);
+            ExitCode::FAILURE
         }
         Err(JobError::System(err)) => {
             eprintln!("job {cjid}: system error: {err}");
-            accum.add(ExitCode::FAILURE);
+            ExitCode::FAILURE
+        }
+    };
+    tracker.job_completed(exit_code);
+}
+
+#[derive(Default)]
+struct JobTracker {
+    condvar: Condvar,
+    outstanding: Mutex<usize>,
+    accum: ExitCodeAccumulator,
+}
+
+impl JobTracker {
+    fn add_outstanding(&self) {
+        let mut locked = self.outstanding.lock().unwrap();
+        *locked += 1;
+    }
+
+    fn job_completed(&self, exit_code: ExitCode) {
+        let mut locked = self.outstanding.lock().unwrap();
+        *locked -= 1;
+        self.accum.add(exit_code);
+        self.condvar.notify_one();
+    }
+
+    fn wait_for_outstanding(&self) {
+        let mut locked = self.outstanding.lock().unwrap();
+        while *locked > 0 {
+            locked = self.condvar.wait(locked).unwrap();
         }
     }
 }
@@ -167,7 +197,7 @@ fn main() -> Result<ExitCode> {
 
     maelstrom_util::log::run_with_logger(config.log_level, |log| {
         let fs = Fs::new();
-        let accum = Arc::new(ExitCodeAccumulator::default());
+        let tracker = Arc::new(JobTracker::default());
         fs.create_dir_all(&config.cache_root)?;
         fs.create_dir_all(&config.state_root)?;
         fs.create_dir_all(&config.container_image_depot_root)?;
@@ -200,12 +230,13 @@ fn main() -> Result<ExitCode> {
             image_lookup,
         );
         for job_spec in job_specs {
-            let accum_clone = accum.clone();
+            let tracker = tracker.clone();
+            tracker.add_outstanding();
             client.add_job(job_spec?, move |cjid, result| {
-                visitor(cjid, result, accum_clone)
+                visitor(cjid, result, tracker)
             })?;
         }
-        client.wait_for_outstanding_jobs()?;
-        Ok(accum.get())
+        tracker.wait_for_outstanding();
+        Ok(tracker.accum.get())
     })
 }
