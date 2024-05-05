@@ -294,11 +294,11 @@ impl MainAppDeps for TestMainAppDeps {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()> {
         let cjid = ClientJobId::from_u32(self.next_job_id.fetch_add(1, Ordering::AcqRel));
         if let Some(outcome) = self.tests.find_outcome(spec) {
-            handler(cjid, Ok(outcome));
+            handler(Ok((cjid, Ok(outcome))));
         }
         Ok(())
     }

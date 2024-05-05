@@ -406,7 +406,7 @@ where
                 group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
             },
-            move |cjid, result| visitor.job_finished(cjid, result),
+            move |res| visitor.job_finished(res),
         )?;
 
         Ok(EnqueueResult::Enqueued {
@@ -586,7 +586,7 @@ pub trait MainAppDeps: Sync {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()>;
 
     type CargoWaitHandle: Wait;
@@ -688,7 +688,7 @@ impl MainAppDeps for DefaultMainAppDeps {
     fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()> {
         self.client.add_job(spec, handler)
     }

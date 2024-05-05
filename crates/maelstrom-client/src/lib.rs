@@ -307,7 +307,7 @@ impl Client {
     pub fn add_job(
         &self,
         spec: JobSpec,
-        handler: impl FnOnce(ClientJobId, JobOutcomeResult) + Send + Sync + 'static,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()> {
         let msg = proto::AddJobRequest {
             spec: Some(spec.clone().into_proto_buf()),
@@ -317,7 +317,7 @@ impl Client {
             .unwrap()
             .send(Box::new(move |mut client| {
                 Box::pin(async move {
-                    let inner = async move {
+                    let res = async move {
                         let res = client.add_job(msg).await?.into_inner();
                         let result: proto::JobOutcomeResult = res
                             .result
@@ -327,10 +327,9 @@ impl Client {
                             TryFromProtoBuf::try_from_proto_buf(res.client_job_id)?,
                             TryFromProtoBuf::try_from_proto_buf(result)?,
                         ))
-                    };
-                    if let Ok((cjid, result)) = inner.await {
-                        tokio::task::spawn_blocking(move || handler(cjid, result));
                     }
+                    .await;
+                    tokio::task::spawn_blocking(move || handler(res));
                 })
             }))?;
         Ok(())

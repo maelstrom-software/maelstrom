@@ -197,23 +197,26 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         }
     }
 
-    pub fn job_finished(&self, cjid: ClientJobId, result: JobOutcomeResult) {
+    pub fn job_finished(&self, res: Result<(ClientJobId, JobOutcomeResult)>) {
         let result_str: ColoredString;
         let mut result_details: Option<String> = None;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
         let mut duration_str = String::new();
-        match result {
-            Ok(JobOutcome::Completed(JobCompleted {
-                status,
-                effects:
-                    JobEffects {
-                        stdout,
-                        stderr,
-                        duration,
-                        ..
-                    },
-            })) => {
+        match res {
+            Ok((
+                cjid,
+                Ok(JobOutcome::Completed(JobCompleted {
+                    status,
+                    effects:
+                        JobEffects {
+                            stdout,
+                            stderr,
+                            duration,
+                            ..
+                        },
+                })),
+            )) => {
                 duration_str = format!("{:.3}s", duration.as_secs_f64());
                 let mut job_failed = true;
                 match status {
@@ -239,7 +242,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
                 }
             }
-            Ok(JobOutcome::TimedOut(JobEffects { stdout, stderr, .. })) => {
+            Ok((cjid, Ok(JobOutcome::TimedOut(JobEffects { stdout, stderr, .. })))) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
                 self.tracker
@@ -247,15 +250,21 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                 test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
                 test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
             }
-            Err(JobError::Execution(err)) => {
+            Ok((_, Err(JobError::Execution(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
                 self.tracker
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
             }
-            Err(JobError::System(err)) => {
+            Ok((_, Err(JobError::System(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("system error: {err}"));
+                self.tracker
+                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+            }
+            Err(err) => {
+                result_str = "ERR".yellow();
+                result_details = Some(format!("remote error: {err}"));
                 self.tracker
                     .job_exited(self.case.clone(), ExitCode::FAILURE);
             }

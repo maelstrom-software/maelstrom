@@ -126,9 +126,9 @@ fn print_effects(
     Ok(())
 }
 
-fn visitor(cjid: ClientJobId, result: JobOutcomeResult, tracker: Arc<JobTracker>) {
-    let exit_code = match result {
-        Ok(JobOutcome::Completed(JobCompleted { status, effects })) => {
+fn visitor(res: Result<(ClientJobId, JobOutcomeResult)>, tracker: Arc<JobTracker>) {
+    let exit_code = match res {
+        Ok((cjid, Ok(JobOutcome::Completed(JobCompleted { status, effects })))) => {
             print_effects(cjid, effects).ok();
             match status {
                 JobStatus::Exited(0) => ExitCode::SUCCESS,
@@ -144,18 +144,22 @@ fn visitor(cjid: ClientJobId, result: JobOutcomeResult, tracker: Arc<JobTracker>
                 }
             }
         }
-        Ok(JobOutcome::TimedOut(effects)) => {
+        Ok((cjid, Ok(JobOutcome::TimedOut(effects)))) => {
             print_effects(cjid, effects).ok();
             io::stdout().lock().flush().ok();
             eprintln!("job {cjid}: timed out");
             ExitCode::FAILURE
         }
-        Err(JobError::Execution(err)) => {
+        Ok((cjid, Err(JobError::Execution(err)))) => {
             eprintln!("job {cjid}: execution error: {err}");
             ExitCode::FAILURE
         }
-        Err(JobError::System(err)) => {
+        Ok((cjid, Err(JobError::System(err)))) => {
             eprintln!("job {cjid}: system error: {err}");
+            ExitCode::FAILURE
+        }
+        Err(err) => {
+            eprintln!("remote error: {err}");
             ExitCode::FAILURE
         }
     };
@@ -232,9 +236,7 @@ fn main() -> Result<ExitCode> {
         for job_spec in job_specs {
             let tracker = tracker.clone();
             tracker.add_outstanding();
-            client.add_job(job_spec?, move |cjid, result| {
-                visitor(cjid, result, tracker)
-            })?;
+            client.add_job(job_spec?, move |res| visitor(res, tracker))?;
         }
         tracker.wait_for_outstanding();
         Ok(tracker.accum.get())
