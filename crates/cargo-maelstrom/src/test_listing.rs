@@ -112,10 +112,6 @@ impl TestListing {
         );
     }
 
-    pub fn remove_package(&mut self, package: &str) {
-        self.packages.remove(package);
-    }
-
     pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
         self.packages
             .iter()
