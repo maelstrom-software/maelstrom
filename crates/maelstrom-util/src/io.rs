@@ -389,7 +389,6 @@ enum BufferedStreamState {
 #[derive(Debug)]
 struct BufferedStreamChunk {
     data: Vec<u8>,
-    #[allow(dead_code)]
     dirty_start: usize,
 }
 
