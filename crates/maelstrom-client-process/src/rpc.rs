@@ -138,17 +138,6 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
-    async fn wait_for_outstanding_jobs(
-        &self,
-        _request: Request<proto::Void>,
-    ) -> TonicResponse<proto::Void> {
-        self.client
-            .wait_for_outstanding_jobs()
-            .await
-            .map(IntoProtoBuf::into_proto_buf)
-            .map_to_tonic()
-    }
-
     async fn get_job_state_counts(
         &self,
         _request: Request<proto::Void>,

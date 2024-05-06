@@ -335,14 +335,6 @@ impl Client {
         Ok(())
     }
 
-    pub fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        self.send_sync(move |mut client| async move {
-            client.wait_for_outstanding_jobs(proto::Void {}).await
-        })
-        .with_context(|| "waiting for outstanding jobs")?;
-        Ok(())
-    }
-
     pub fn get_job_state_counts(&self) -> Result<JobStateCounts> {
         self.send_sync(move |mut client| async move {
             let res = client.get_job_state_counts(proto::Void {}).await?;

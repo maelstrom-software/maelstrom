@@ -33,7 +33,6 @@ struct ClientFixture {
     test_line: u32,
     temp_dir: tempfile::TempDir,
     fs: Fs,
-    log: slog::Logger,
 }
 
 impl ClientFixture {
@@ -102,7 +101,6 @@ impl ClientFixture {
             self_path,
             test_line: 0,
             temp_dir,
-            log,
         }
     }
 
@@ -144,13 +142,6 @@ impl ClientFixture {
             Regex::new("(?s)^\nrunning 1 test\n(.*)test .* \\.\\.\\. ok\n\n.*$").unwrap();
         let captured = output_re.captures(output).unwrap().get(1).unwrap();
         captured.as_str().to_owned()
-    }
-}
-
-impl Drop for ClientFixture {
-    fn drop(&mut self) {
-        slog::debug!(self.log, "dropping ClientFixture");
-        self.client.wait_for_outstanding_jobs().unwrap();
     }
 }
 

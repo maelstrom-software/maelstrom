@@ -43,7 +43,6 @@ pub enum Message<DepsT: Deps> {
     AddArtifact(PathBuf, Sha256Digest),
     RunJob(JobSpec, DepsT::JobHandle),
     GetJobStateCounts(DepsT::JobStateCountsHandle),
-    NotifyWhenAllJobsComplete(DepsT::AllJobsCompleteHandle),
 
     // Only in non-standalone mode.
     Broker(BrokerToClient),
@@ -130,14 +129,6 @@ impl<DepsT: Deps> Router<DepsT> {
                     self.job_state_counts_handles.push_back(handle);
                     self.deps
                         .send_message_to_broker(ClientToBroker::JobStateCountsRequest);
-                }
-            }
-            Message::NotifyWhenAllJobsComplete(handle) => {
-                if self.job_handles.is_empty() {
-                    assert!(self.all_jobs_complete_handles.is_empty());
-                    self.deps.all_jobs_complete(handle);
-                } else {
-                    self.all_jobs_complete_handles.push(handle);
                 }
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {

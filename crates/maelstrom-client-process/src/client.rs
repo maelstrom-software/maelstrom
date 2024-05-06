@@ -434,16 +434,6 @@ impl Client {
         watcher.wait(receiver).await
     }
 
-    pub async fn wait_for_outstanding_jobs(&self) -> Result<()> {
-        let (state, watcher) = self.state_machine.active_with_watcher()?;
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        debug!(state.log, "wait_for_outstanding_jobs");
-        state
-            .local_broker_sender
-            .send(router::Message::NotifyWhenAllJobsComplete(sender))?;
-        watcher.wait(receiver).await
-    }
-
     pub async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
