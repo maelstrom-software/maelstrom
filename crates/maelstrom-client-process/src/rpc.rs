@@ -119,17 +119,17 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
-    async fn add_job(
+    async fn run_job(
         &self,
-        request: Request<proto::AddJobRequest>,
-    ) -> TonicResponse<proto::AddJobResponse> {
+        request: Request<proto::RunJobRequest>,
+    ) -> TonicResponse<proto::RunJobResponse> {
         async {
             let spec = request.into_inner().into_result()?;
             let spec = TryFromProtoBuf::try_from_proto_buf(spec)?;
             self.client
                 .run_job(spec)
                 .await
-                .map(|(cjid, res)| proto::AddJobResponse {
+                .map(|(cjid, res)| proto::RunJobResponse {
                     client_job_id: cjid.into_proto_buf(),
                     result: Some(res.into_proto_buf()),
                 })

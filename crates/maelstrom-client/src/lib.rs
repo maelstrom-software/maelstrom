@@ -309,7 +309,7 @@ impl Client {
         spec: JobSpec,
         handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()> {
-        let msg = proto::AddJobRequest {
+        let msg = proto::RunJobRequest {
             spec: Some(spec.clone().into_proto_buf()),
         };
         self.requester
@@ -318,10 +318,10 @@ impl Client {
             .send(Box::new(move |mut client| {
                 Box::pin(async move {
                     let res = async move {
-                        let res = client.add_job(msg).await?.into_inner();
+                        let res = client.run_job(msg).await?.into_inner();
                         let result: proto::JobOutcomeResult = res
                             .result
-                            .ok_or(anyhow!("malformed AddJobResponse"))
+                            .ok_or(anyhow!("malformed RunJobResponse"))
                             .with_context(|| format!("adding job {spec:#?}"))?;
                         Result::<_, anyhow::Error>::Ok((
                             TryFromProtoBuf::try_from_proto_buf(res.client_job_id)?,

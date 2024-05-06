@@ -4,7 +4,7 @@ use std::str::from_utf8;
 
 const INTO_RESULT: [&str; 7] = [
     "AddArtifactResponse",
-    "AddJobRequest",
+    "RunJobRequest",
     "AddLayerRequest",
     "AddLayerResponse",
     "GetArtifactUploadProgressResponse",

@@ -107,7 +107,7 @@ message JobSpec {
     optional uint32 timeout = 12;
 }
 
-message AddJobRequest {
+message RunJobRequest {
     JobSpec spec = 1;
 }
 
@@ -222,7 +222,7 @@ message JobOutcomeResult {
     }
 }
 
-message AddJobResponse {
+message RunJobResponse {
     uint32 client_job_id = 1;
     JobOutcomeResult result = 2;
 }
@@ -255,7 +255,7 @@ service ClientProcess {
     rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
     rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
-    rpc AddJob(AddJobRequest) returns (AddJobResponse);
+    rpc RunJob(RunJobRequest) returns (RunJobResponse);
     rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);
     rpc GetArtifactUploadProgress(Void) returns (GetArtifactUploadProgressResponse);
 }
