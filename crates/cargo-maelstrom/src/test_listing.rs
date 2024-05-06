@@ -133,21 +133,19 @@ impl TestListing {
             .iter()
             .map(|p| (&p.name, *p))
             .collect();
-        let mut new_packages = BTreeMap::new();
-        for (name, mut pkg) in std::mem::take(&mut self.packages).into_iter() {
+        self.packages.retain(|name, pkg| {
             let Some(existing_package) = existing_packages.get(&name) else {
-                continue;
+                return false;
             };
-            let artifact_keys: HashSet<_> = existing_package
+            let existing_artifacts: HashSet<_> = existing_package
                 .targets
                 .iter()
                 .map(ArtifactKey::from_target)
                 .collect();
-            pkg.artifacts.retain(|key, _| artifact_keys.contains(key));
-            new_packages.insert(name, pkg);
-        }
-
-        self.packages = new_packages;
+            pkg.artifacts
+                .retain(|key, _| existing_artifacts.contains(key));
+            true
+        });
     }
 }
 
