@@ -122,11 +122,10 @@ impl TestListing {
  *  FIGLET: on disk
  */
 
-#[derive(Default, Eq, PartialEq, Serialize_repr, Deserialize_repr)]
+#[derive(Eq, PartialEq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum OnDiskTestListingVersion {
     V0 = 0,
-    #[default]
     V1 = 1,
 }
 
@@ -180,7 +179,7 @@ struct OnDiskTestListing {
 impl From<TestListing> for OnDiskTestListing {
     fn from(in_memory: TestListing) -> Self {
         Self {
-            version: OnDiskTestListingVersion::default(),
+            version: OnDiskTestListingVersion::V1,
             packages: in_memory
                 .packages
                 .into_iter()
@@ -252,7 +251,7 @@ pub fn load_test_listing(fs: &Fs, state_dir: impl AsRef<Root<StateDir>>) -> Resu
             .remove("version")
             .ok_or(anyhow!("missing version"))?
             .try_into()?;
-        if version != OnDiskTestListingVersion::default() {
+        if version != OnDiskTestListingVersion::V1 {
             Ok(Default::default())
         } else {
             Ok(toml::from_str::<OnDiskTestListing>(&contents)?.into())
