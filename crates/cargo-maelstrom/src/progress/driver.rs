@@ -44,23 +44,23 @@ impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
 }
 
 #[derive(Default)]
-struct UploadProgressBarTracker {
-    uploads: HashMap<String, ProgressBar>,
+struct RemoteProgressBarTracker {
+    bars: HashMap<String, ProgressBar>,
 }
 
-impl UploadProgressBarTracker {
+impl RemoteProgressBarTracker {
     fn update(&mut self, ind: &impl ProgressIndicator, states: Vec<RemoteProgress>) {
         let mut existing = HashSet::new();
         for state in states {
             existing.insert(state.name.clone());
 
-            let prog = match self.uploads.get(&state.name) {
+            let prog = match self.bars.get(&state.name) {
                 Some(prog) => prog.clone(),
                 None => {
                     let Some(prog) = ind.new_side_progress(&state.name) else {
                         continue;
                     };
-                    self.uploads.insert(state.name, prog.clone());
+                    self.bars.insert(state.name, prog.clone());
                     prog
                 }
             };
@@ -68,7 +68,7 @@ impl UploadProgressBarTracker {
             prog.set_position(state.progress);
         }
 
-        self.uploads.retain(|name, bar| {
+        self.bars.retain(|name, bar| {
             if !existing.contains(name) {
                 bar.finish_and_clear();
                 false
@@ -79,9 +79,9 @@ impl UploadProgressBarTracker {
     }
 }
 
-impl Drop for UploadProgressBarTracker {
+impl Drop for RemoteProgressBarTracker {
     fn drop(&mut self) {
-        for bar in self.uploads.values() {
+        for bar in self.bars.values() {
             bar.finish_and_clear();
         }
     }
@@ -100,10 +100,12 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                         thread::sleep(Duration::from_millis(500))
                     }
                 });
-                let mut upload_bar_tracker = UploadProgressBarTracker::default();
+                let mut remote_bar_tracker = RemoteProgressBarTracker::default();
                 while !canceled.load(Ordering::Acquire) {
                     let introspect_resp = deps.introspect()?;
-                    upload_bar_tracker.update(&ind, introspect_resp.artifact_uploads);
+                    let mut states = introspect_resp.artifact_uploads;
+                    states.extend(introspect_resp.image_downloads);
+                    remote_bar_tracker.update(&ind, states);
 
                     if !ind.update_job_states(introspect_resp.job_state_counts)? {
                         break;
