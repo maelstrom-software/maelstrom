@@ -1327,19 +1327,10 @@ fn filtering_none_does_not_build() {
         vec![],
     );
 
-    let fs = Fs::new();
-    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
-    let test_listing_file_name = test_listing_file(&state_dir)
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .to_owned();
-    let mut entries: Vec<_> = fs
-        .read_dir(state_dir)
+    let entries: Vec<_> = Fs::new()
+        .read_dir((**tmp_dir).join("workspace/target"))
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();
-    entries.sort();
-    assert_eq!(entries, vec![test_listing_file_name]);
+    assert_eq!(entries, vec!["maelstrom"]);
 }
