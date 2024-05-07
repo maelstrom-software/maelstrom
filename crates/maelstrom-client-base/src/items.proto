@@ -13,10 +13,6 @@ message StartRequest {
     bytes container_image_depot_dir = 8;
 }
 
-message AddArtifactRequest {
-    bytes path = 1;
-}
-
 message TarLayer {
     string path = 1;
 }
@@ -118,10 +114,6 @@ message GetContainerImageRequest {
 
 message Error {
     string message_ = 1;
-}
-
-message AddArtifactResponse {
-    bytes digest = 1;
 }
 
 message AddLayerResponse {
@@ -250,7 +242,6 @@ message IntrospectResponse {
 
 service ClientProcess {
     rpc Start(StartRequest) returns (Void);
-    rpc AddArtifact(AddArtifactRequest) returns (AddArtifactResponse);
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
     rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);

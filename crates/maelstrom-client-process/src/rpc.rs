@@ -9,7 +9,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     root::RootBuf,
 };
-use std::{path::PathBuf, result, sync::Arc};
+use std::{result, sync::Arc};
 use tonic::{Code, Request, Response, Status};
 
 type TonicResult<T> = result::Result<T, Status>;
@@ -61,24 +61,6 @@ impl ClientProcess for Handler {
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)
-        }
-        .await
-        .map_to_tonic()
-    }
-
-    async fn add_artifact(
-        &self,
-        request: Request<proto::AddArtifactRequest>,
-    ) -> TonicResponse<proto::AddArtifactResponse> {
-        async {
-            let request = request.into_inner();
-            let path = PathBuf::try_from_proto_buf(request.path)?;
-            self.client
-                .add_artifact(&path)
-                .await
-                .map(|digest| proto::AddArtifactResponse {
-                    digest: digest.into_proto_buf(),
-                })
         }
         .await
         .map_to_tonic()

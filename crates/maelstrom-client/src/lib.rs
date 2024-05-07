@@ -264,18 +264,6 @@ impl Client {
             .with_context(|| "receiving RPC response from client process")?
     }
 
-    pub fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
-        slog::debug!(self.log, "client.add_artifact"; "path" => ?path);
-        let msg = proto::AddArtifactRequest {
-            path: path.into_proto_buf(),
-        };
-        let digest = self
-            .send_sync(move |mut client| async move { client.add_artifact(msg).await })
-            .with_context(|| format!("adding artifact {}", path.to_string_lossy()))?;
-        slog::debug!(self.log, "client.add_artifact complete");
-        Ok(digest.try_into()?)
-    }
-
     pub fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         slog::debug!(self.log, "client.add_layer"; "layer" => ?layer);
         let msg = proto::AddLayerRequest {

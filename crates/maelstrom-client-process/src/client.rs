@@ -404,10 +404,6 @@ impl Client {
         }
     }
 
-    pub async fn add_artifact(&self, path: &Path) -> Result<Sha256Digest> {
-        self.state_machine.active()?.add_artifact(path).await
-    }
-
     pub async fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         self.state_machine.active()?.add_layer(layer).await
     }

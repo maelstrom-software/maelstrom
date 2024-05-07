@@ -2,14 +2,11 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::str::from_utf8;
 
-const INTO_RESULT: [&str; 7] = [
-    "AddArtifactResponse",
+const INTO_RESULT: [&str; 4] = [
     "RunJobRequest",
     "AddLayerRequest",
     "AddLayerResponse",
-    "GetArtifactUploadProgressResponse",
     "GetContainerImageResponse",
-    "GetJobStateCountsResponse",
 ];
 
 const ENUM_PROTO: [(&str, &str); 4] = [
