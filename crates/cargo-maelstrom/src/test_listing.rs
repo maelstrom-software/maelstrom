@@ -63,6 +63,14 @@ pub struct Package {
     pub artifacts: HashMap<ArtifactKey, Artifact>,
 }
 
+impl<K: Into<ArtifactKey>, V: Into<Artifact>> FromIterator<(K, V)> for Package {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        Self {
+            artifacts: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TestListing {
     pub packages: HashMap<String, Package>,
@@ -231,15 +239,11 @@ impl From<OnDiskTestListing> for TestListing {
                 .map(|(package_name, package)| {
                     (
                         package_name,
-                        Package {
-                            artifacts: package
-                                .artifacts
-                                .into_iter()
-                                .map(|(artifact_key, artifact)| {
-                                    (artifact_key, Artifact::from_iter(artifact.cases))
-                                })
-                                .collect(),
-                        },
+                        Package::from_iter(package.artifacts.into_iter().map(
+                            |(artifact_key, artifact)| {
+                                (artifact_key, Artifact::from_iter(artifact.cases))
+                            },
+                        )),
                     )
                 })
                 .collect(),
@@ -477,12 +481,10 @@ mod tests {
         let expected = TestListing {
             packages: HashMap::from_iter([(
                 "package1".into(),
-                Package {
-                    artifacts: HashMap::from_iter([(
-                        ArtifactKey::new("package1", ArtifactKind::Library),
-                        Artifact::from_iter(["case1", "case2"]),
-                    )]),
-                },
+                Package::from_iter([(
+                    ArtifactKey::new("package1", ArtifactKind::Library),
+                    Artifact::from_iter(["case1", "case2"]),
+                )]),
             )]),
         };
         assert_eq!(store.load().unwrap(), expected);
@@ -602,12 +604,10 @@ mod tests {
         let listing = TestListing {
             packages: HashMap::from_iter([(
                 "package1".into(),
-                Package {
-                    artifacts: HashMap::from_iter([(
-                        ArtifactKey::new("package1", ArtifactKind::Library),
-                        Artifact::from_iter(["case1", "case2"]),
-                    )]),
-                },
+                Package::from_iter([(
+                    ArtifactKey::new("package1", ArtifactKind::Library),
+                    Artifact::from_iter(["case1", "case2"]),
+                )]),
             )]),
         };
         store.save(listing).unwrap();
