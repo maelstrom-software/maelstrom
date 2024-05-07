@@ -1,6 +1,7 @@
 mod artifact_pusher;
 mod client;
 mod digest_repo;
+mod progress;
 mod router;
 mod rpc;
 mod stream_wrapper;

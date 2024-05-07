@@ -1,95 +1,17 @@
+use crate::progress::{ProgressTracker, UploadProgressReader};
 use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
     Sha256Digest,
 };
-use maelstrom_client_base::RemoteProgress;
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
-use std::pin::{pin, Pin};
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
-use std::{
-    collections::HashMap,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 use tokio::{
-    io::{self, AsyncRead, AsyncReadExt as _},
+    io::{self, AsyncReadExt as _},
     net::TcpStream,
-    sync::{
-        mpsc::{self, UnboundedReceiver, UnboundedSender},
-        Mutex,
-    },
+    sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::JoinSet,
 };
-
-struct UploadProgress {
-    size: u64,
-    progress: AtomicU64,
-}
-
-#[derive(Clone, Default)]
-pub struct ArtifactUploadTracker {
-    uploads: Arc<Mutex<HashMap<String, Arc<UploadProgress>>>>,
-}
-
-impl ArtifactUploadTracker {
-    async fn new_upload(&self, name: impl Into<String>, size: u64) -> Arc<UploadProgress> {
-        let mut uploads = self.uploads.lock().await;
-        let prog = Arc::new(UploadProgress {
-            size,
-            progress: AtomicU64::new(0),
-        });
-        uploads.insert(name.into(), prog.clone());
-        prog
-    }
-
-    async fn remove_upload(&self, name: &str) {
-        let mut uploads = self.uploads.lock().await;
-        uploads.remove(name);
-    }
-
-    pub async fn get_artifact_upload_progress(&self) -> Vec<RemoteProgress> {
-        let uploads = self.uploads.lock().await;
-        uploads
-            .iter()
-            .map(|(name, p)| RemoteProgress {
-                name: name.clone(),
-                size: p.size,
-                progress: p.progress.load(Ordering::Acquire),
-            })
-            .collect()
-    }
-}
-
-struct UploadProgressReader<ReadT> {
-    prog: Arc<UploadProgress>,
-    read: ReadT,
-}
-
-impl<ReadT> UploadProgressReader<ReadT> {
-    fn new(prog: Arc<UploadProgress>, read: ReadT) -> Self {
-        Self { prog, read }
-    }
-}
-
-impl<ReadT: AsyncRead + Unpin> AsyncRead for UploadProgressReader<ReadT> {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-        dst: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<io::Result<()>> {
-        let start_len = dst.filled().len();
-        let me = self.get_mut();
-        let result = AsyncRead::poll_read(pin!(&mut me.read), cx, dst);
-        let amount_read = dst.filled().len() - start_len;
-        me.prog
-            .progress
-            .fetch_add(amount_read as u64, Ordering::AcqRel);
-        result
-    }
-}
 
 fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
     let digest_string = digest.to_string();
@@ -99,7 +21,7 @@ fn construct_upload_name(digest: &Sha256Digest, path: &Path) -> String {
 }
 
 async fn push_one_artifact(
-    upload_tracker: ArtifactUploadTracker,
+    upload_tracker: ProgressTracker,
     broker_addr: BrokerAddr,
     path: PathBuf,
     digest: Sha256Digest,
@@ -112,7 +34,7 @@ async fn push_one_artifact(
     let size = file.metadata().await?.len();
 
     let upload_name = construct_upload_name(&digest, &path);
-    let prog = upload_tracker.new_upload(&upload_name, size).await;
+    let prog = upload_tracker.new_task(&upload_name, size).await;
 
     let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
 
@@ -122,7 +44,7 @@ async fn push_one_artifact(
 
     let BrokerToArtifactPusher(resp) = net::read_message_from_async_socket(&mut stream).await?;
 
-    upload_tracker.remove_upload(&upload_name).await;
+    upload_tracker.remove_task(&upload_name).await;
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
@@ -142,7 +64,7 @@ pub fn start_task(
     join_set: &mut JoinSet<Result<()>>,
     mut receiver: Receiver,
     broker_addr: BrokerAddr,
-    upload_tracker: ArtifactUploadTracker,
+    upload_tracker: ProgressTracker,
 ) {
     join_set.spawn(async move {
         // When this join_set gets destroyed, all outstanding artifact pusher tasks will be

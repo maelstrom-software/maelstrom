@@ -240,7 +240,7 @@ async fn get_image_config(
     Ok(config.into())
 }
 
-pub trait ProgressTracker: Clone + Unpin + Send + 'static {
+pub trait ProgressTracker: Unpin + Send + 'static {
     fn set_length(&self, length: u64);
     fn inc(&self, v: u64);
 }
@@ -251,6 +251,16 @@ pub struct NullProgressTracker;
 impl ProgressTracker for NullProgressTracker {
     fn set_length(&self, _length: u64) {}
     fn inc(&self, _v: u64) {}
+}
+
+impl<T: ProgressTracker + Sync> ProgressTracker for std::sync::Arc<T> {
+    fn set_length(&self, length: u64) {
+        <T as ProgressTracker>::set_length(self, length)
+    }
+
+    fn inc(&self, v: u64) {
+        <T as ProgressTracker>::inc(self, v)
+    }
 }
 
 impl ProgressTracker for indicatif::ProgressBar {
@@ -396,7 +406,7 @@ pub async fn download_image(
     name: &str,
     tag_or_digest: &str,
     layer_dir: impl AsRef<Path>,
-    prog: impl ProgressTracker,
+    prog: impl ProgressTracker + Clone,
 ) -> Result<ContainerImage> {
     let token = get_token(client, name).await?;
 
@@ -481,7 +491,7 @@ pub trait ContainerImageDepotOps {
         name: &str,
         digest: &str,
         layer_dir: &Path,
-        prog: impl ProgressTracker,
+        prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage>;
 }
 
@@ -507,7 +517,7 @@ impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
         name: &str,
         digest: &str,
         layer_dir: &Path,
-        prog: impl ProgressTracker,
+        prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         download_image(&self.client, name, digest, layer_dir, prog).await
     }
@@ -599,7 +609,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         &self,
         name: &str,
         digest: &str,
-        prog: impl ProgressTracker,
+        prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         let output_dir = self.cache_dir.join::<DigestDir>(digest);
         if output_dir.exists() {
@@ -658,7 +668,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         &self,
         name: &str,
         tag: &str,
-        prog: impl ProgressTracker,
+        prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         self.fs.create_dir_all(&self.cache_dir).await?;
 
@@ -702,7 +712,7 @@ impl ContainerImageDepotOps for PanicContainerImageDepotOps {
         _name: &str,
         _digest: &str,
         _layer_dir: &Path,
-        _prog: impl ProgressTracker,
+        _prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         panic!()
     }

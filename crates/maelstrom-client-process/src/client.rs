@@ -1,11 +1,7 @@
 mod layer_builder;
 mod state_machine;
 
-use crate::{
-    artifact_pusher::{self, ArtifactUploadTracker},
-    digest_repo::DigestRepository,
-    router,
-};
+use crate::{artifact_pusher, digest_repo::DigestRepository, progress::ProgressTracker, router};
 use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
@@ -19,7 +15,6 @@ use maelstrom_client_base::{
 };
 use maelstrom_container::{
     self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
-    NullProgressTracker,
 };
 use maelstrom_util::{
     async_fs,
@@ -51,7 +46,8 @@ pub struct Client {
 struct ClientState {
     local_broker_sender: router::Sender,
     layer_builder: LayerBuilder,
-    upload_tracker: ArtifactUploadTracker,
+    artifact_upload_tracker: ProgressTracker,
+    image_download_tracker: ProgressTracker,
     container_image_depot: ContainerImageDepot,
     log: Logger,
     locked: Mutex<ClientStateLocked>,
@@ -198,7 +194,8 @@ impl Client {
                 container_image_depot_cache_dir,
             )?;
             let digest_repo = DigestRepository::new(&cache_dir);
-            let upload_tracker = ArtifactUploadTracker::default();
+            let artifact_upload_tracker = ProgressTracker::default();
+            let image_download_tracker = ProgressTracker::default();
 
             // Create the JoinSet we're going to put tasks in. If we bail early from this function,
             // we'll cancel all tasks we have started thus far.
@@ -262,7 +259,7 @@ impl Client {
                     &mut join_set,
                     artifact_pusher_receiver,
                     broker_addr,
-                    upload_tracker.clone(),
+                    artifact_upload_tracker.clone(),
                 );
             } else {
                 // We don't have a broker_addr, which means we're in standalone mode.
@@ -353,7 +350,8 @@ impl Client {
                 ClientState {
                     local_broker_sender,
                     layer_builder: LayerBuilder::new(cache_dir, project_dir),
-                    upload_tracker,
+                    artifact_upload_tracker,
+                    image_download_tracker,
                     container_image_depot,
                     log,
                     locked: Mutex::new(ClientStateLocked {
@@ -417,10 +415,14 @@ impl Client {
     pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         let state = self.state_machine.active()?;
         debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
-        state
+        let dl_name = format!("{name}:{tag}");
+        let tracker = state.image_download_tracker.new_task(&dl_name, 1).await;
+        let res = state
             .container_image_depot
-            .get_container_image(name, tag, NullProgressTracker)
-            .await
+            .get_container_image(name, tag, tracker)
+            .await;
+        state.image_download_tracker.remove_task(&dl_name).await;
+        res
     }
 
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
@@ -440,11 +442,12 @@ impl Client {
             .local_broker_sender
             .send(router::Message::GetJobStateCounts(sender))?;
         let job_state_counts = watcher.wait(receiver).await?;
-        let artifact_uploads = state.upload_tracker.get_artifact_upload_progress().await;
+        let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses().await;
+        let image_downloads = state.image_download_tracker.get_remote_progresses().await;
         Ok(IntrospectResponse {
             job_state_counts,
             artifact_uploads,
-            image_downloads: vec![],
+            image_downloads,
         })
     }
 }
