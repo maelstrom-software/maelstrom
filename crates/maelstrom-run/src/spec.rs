@@ -4,8 +4,8 @@ use maelstrom_base::{
     Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, JobSpec, Layer,
-    PossiblyImage,
+    incompatible, substitute, EnvironmentSpec, Image, ImageConfig, ImageOption, ImageUse, JobSpec,
+    Layer, PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read};
@@ -131,7 +131,6 @@ impl Job {
             })
             .collect::<Result<BTreeMap<_, _>>>()?;
         environment.extend(added_environment);
-        let environment = Vec::from_iter(environment.into_iter().map(|(k, v)| k + "=" + &v));
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers,
             PossiblyImage::Image => NonEmpty::from_vec(image.layers()?.collect())
@@ -147,8 +146,15 @@ impl Job {
         Ok(JobSpec {
             program: self.program,
             arguments: self.arguments.unwrap_or_default(),
-            environment,
-            layers,
+            image: None,
+            environment: (!environment.is_empty())
+                .then_some(EnvironmentSpec {
+                    vars: environment,
+                    extend: false,
+                })
+                .into_iter()
+                .collect(),
+            layers: layers.into(),
             devices: self
                 .devices
                 .unwrap_or(EnumSet::EMPTY)
@@ -158,7 +164,7 @@ impl Job {
             mounts: self.mounts.unwrap_or_default(),
             enable_loopback: self.enable_loopback.unwrap_or_default(),
             enable_writable_file_system: self.enable_writable_file_system.unwrap_or_default(),
-            working_directory,
+            working_directory: Some(working_directory),
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
             timeout: self.timeout.and_then(Timeout::new),
@@ -441,7 +447,7 @@ mod test {
             .unwrap(),
             JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)])
                 .arguments(["arg1", "arg2"])
-                .environment(["BAR=bar", "FOO=foo"])
+                .environment([[("BAR", "bar"), ("FOO", "foo")].into()])
                 .devices(enum_set! {JobDevice::Null})
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -764,7 +770,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["BAR=bar", "FOO=foo"]),
+            .environment([[("BAR", "bar"), ("FOO", "foo")].into()]),
         )
     }
 
@@ -785,7 +791,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["BAR=bar", "FOO=pre-foo-env-post"]),
+            .environment([[("BAR", "bar"), ("FOO", "pre-foo-env-post")].into()]),
         )
     }
 
@@ -806,7 +812,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["BAR=bar", "FOO=pre-no-prev-post"]),
+            .environment([[("BAR", "bar"), ("FOO", "pre-no-prev-post")].into()]),
         )
     }
 
@@ -827,7 +833,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["BAZ=image-baz", "FOO=image-foo"]),
+            .environment([[("BAZ", "image-baz"), ("FOO", "image-foo")].into()]),
         )
     }
 
@@ -848,7 +854,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["PATH=$env{PATH}"]),
+            .environment([[("PATH", "$env{PATH}")].into()]),
         )
     }
 
@@ -902,7 +908,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment(["BAR=bar", "BAZ=image-baz", "FOO=foo"]),
+            .environment([[("BAR", "bar"), ("BAZ", "image-baz"), ("FOO", "foo")].into()]),
         )
     }
 
@@ -928,11 +934,12 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([
-                "BAR=no-env-bar:no-prev-bar",
-                "BAZ=no-env-baz:image-baz",
-                "FOO=foo-env:image-foo"
-            ]),
+            .environment([[
+                ("BAR", "no-env-bar:no-prev-bar"),
+                ("BAZ", "no-env-baz:image-baz"),
+                ("FOO", "foo-env:image-foo"),
+            ]
+            .into()]),
         )
     }
 

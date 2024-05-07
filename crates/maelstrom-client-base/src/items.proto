@@ -88,19 +88,33 @@ message JobMount {
     string mount_point = 2;
 }
 
+message EnvironmentSpec {
+    map<string, string> vars = 1;
+    bool extend = 2;
+}
+
+message ImageSpec {
+    string name = 1;
+    string tag = 2;
+    bool use_layers = 3;
+    bool use_environment = 4;
+    bool use_working_directory = 5;
+}
+
 message JobSpec {
     string program = 1;
     repeated string arguments = 2;
-    repeated string environment = 3;
-    repeated LayerSpec layers = 4;
-    repeated JobDevice devices = 5;
-    repeated JobMount mounts = 6;
-    bool enable_loopback = 7;
-    bool enable_writable_file_system = 8;
-    string working_directory = 9;
-    uint32 user = 10;
-    uint32 group = 11;
-    optional uint32 timeout = 12;
+    optional ImageSpec image = 3;
+    repeated EnvironmentSpec environment = 4;
+    repeated LayerSpec layers = 6;
+    repeated JobDevice devices = 8;
+    repeated JobMount mounts = 9;
+    bool enable_loopback = 10;
+    bool enable_writable_file_system = 11;
+    optional string working_directory = 12;
+    uint32 user = 13;
+    uint32 group = 14;
+    optional uint32 timeout = 15;
 }
 
 message RunJobRequest {

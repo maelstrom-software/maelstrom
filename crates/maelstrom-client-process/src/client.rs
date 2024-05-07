@@ -2,7 +2,7 @@ mod layer_builder;
 mod state_machine;
 
 use crate::{artifact_pusher, digest_repo::DigestRepository, progress::ProgressTracker, router};
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
 use maelstrom_base::{
@@ -428,13 +428,26 @@ impl Client {
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: spec.environment,
-            layers: spec.layers,
+            environment: spec
+                .environment
+                .into_iter()
+                .flat_map(|s| {
+                    s.vars
+                        .into_iter()
+                        .map(|(key, value)| format!("{key}={value}"))
+                })
+                .collect(),
+            layers: spec
+                .layers
+                .try_into()
+                .map_err(|_| anyhow!("missing layers"))?,
             devices: spec.devices,
             mounts: spec.mounts,
             enable_loopback: spec.enable_loopback,
             enable_writable_file_system: spec.enable_writable_file_system,
-            working_directory: spec.working_directory,
+            working_directory: spec
+                .working_directory
+                .ok_or(anyhow!("missing working directory"))?,
             user: spec.user,
             group: spec.group,
             timeout: spec.timeout,

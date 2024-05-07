@@ -127,7 +127,7 @@ pub struct TestMetadata {
     pub group: GroupId,
     pub timeout: Option<Timeout>,
     pub layers: Vec<Layer>,
-    environment: BTreeMap<String, String>,
+    pub environment: BTreeMap<String, String>,
     pub mounts: Vec<JobMount>,
     pub devices: EnumSet<JobDevice>,
 }
@@ -161,13 +161,6 @@ impl TestMetadata {
             Some(val) => val,
             None => self.layers.is_empty(),
         }
-    }
-
-    pub fn environment(&self) -> Vec<String> {
-        self.environment
-            .iter()
-            .map(|(k, v)| format!("{k}={v}"))
-            .collect()
     }
 
     fn try_fold(
@@ -340,6 +333,7 @@ mod test {
     use super::*;
     use maelstrom_base::{enum_set, JobMountFsType};
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
+    use maplit::btreemap;
     use toml::de::Error as TomlError;
 
     fn test_ctx(package: &str, test: &str) -> pattern::Context {
@@ -818,20 +812,31 @@ mod test {
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test1"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["BAR=env-bar", "BAZ=no-prev-baz", "FOO=image-foo",],
+                .environment,
+            btreemap! {
+                "BAR".into() => "env-bar".into(),
+                "BAZ".into() => "no-prev-baz".into(),
+                "FOO".into() => "image-foo".into(),
+            },
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["FOO=image-foo", "FROB=image-frob"],
+                .environment,
+            btreemap! {
+                "FOO".into() => "image-foo".into(),
+                "FROB".into() => "image-frob".into(),
+            },
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["BAR=bar", "BAZ=no-prev-foo", "FOO=env-foo",],
+                .environment,
+            btreemap! {
+                "BAR".into() => "bar".into(),
+                "BAZ".into() => "no-prev-foo".into(),
+                "FOO".into() => "env-foo".into(),
+            },
         );
     }
 
@@ -877,31 +882,42 @@ mod test {
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test1"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec![
-                "BAR=bar",
-                "BAZ=no-prev-baz",
-                "FOO=prev-image-foo",
-                "FROB=image-frob",
-            ],
+                .environment,
+            btreemap! {
+                "BAR".into() => "bar".into(),
+                "BAZ".into() => "no-prev-baz".into(),
+                "FOO".into() => "prev-image-foo".into(),
+                "FROB".into() => "image-frob".into(),
+            },
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["BAR=env-bar", "FOO=prev-prev-image-foo",],
+                .environment,
+            btreemap! {
+                "BAR".into() => "env-bar".into(),
+                "FOO".into() => "prev-prev-image-foo".into(),
+            },
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test3"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["BAZ=no-prev-baz", "FOO=image-foo", "FROB=image-frob",],
+                .environment,
+            btreemap! {
+                "BAZ".into() => "no-prev-baz".into(),
+                "FOO".into() => "image-foo".into(),
+                "FROB".into() => "image-frob".into(),
+            },
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"), env, images)
                 .unwrap()
-                .environment(),
-            string_vec!["BAR=bar", "BAZ=no-prev-baz", "FOO=prev-foo",],
+                .environment,
+            btreemap! {
+                "BAR".into() => "bar".into(),
+                "BAZ".into() => "no-prev-baz".into(),
+                "FOO".into() => "prev-foo".into(),
+            },
         );
     }
 

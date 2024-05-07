@@ -10,8 +10,7 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobDevice, JobMount, NonEmpty, Sha256Digest, Timeout, UserId,
-    Utf8PathBuf,
+    ArtifactType, GroupId, JobDevice, JobMount, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -47,17 +46,49 @@ where
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[proto(other_type = "proto::ImageSpec")]
+pub struct ImageSpec {
+    pub name: String,
+    pub tag: String,
+    pub use_layers: bool,
+    pub use_environment: bool,
+    pub use_working_directory: bool,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[proto(other_type = "proto::EnvironmentSpec")]
+pub struct EnvironmentSpec {
+    pub vars: BTreeMap<String, String>,
+    pub extend: bool,
+}
+
+impl<KeyT, ValueT, IterT> From<IterT> for EnvironmentSpec
+where
+    IterT: IntoIterator<Item = (KeyT, ValueT)>,
+    KeyT: Into<String>,
+    ValueT: Into<String>,
+{
+    fn from(i: IterT) -> Self {
+        Self {
+            vars: i.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+            extend: false,
+        }
+    }
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[proto(other_type = "proto::JobSpec")]
 pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
-    pub environment: Vec<String>,
-    pub layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+    pub image: Option<ImageSpec>,
+    pub environment: Vec<EnvironmentSpec>,
+    pub layers: Vec<(Sha256Digest, ArtifactType)>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
-    pub working_directory: Utf8PathBuf,
+    pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
     pub group: GroupId,
     pub timeout: Option<Timeout>,
@@ -66,18 +97,19 @@ pub struct JobSpec {
 impl JobSpec {
     pub fn new(
         program: impl Into<String>,
-        layers: impl Into<NonEmpty<(Sha256Digest, ArtifactType)>>,
+        layers: impl Into<Vec<(Sha256Digest, ArtifactType)>>,
     ) -> Self {
         JobSpec {
             program: program.into().into(),
             layers: layers.into(),
+            image: None,
             arguments: Default::default(),
             environment: Default::default(),
             devices: Default::default(),
             mounts: Default::default(),
             enable_loopback: false,
             enable_writable_file_system: Default::default(),
-            working_directory: Utf8PathBuf::from("/"),
+            working_directory: Some(Utf8PathBuf::from("/")),
             user: UserId::from(0),
             group: GroupId::from(0),
             timeout: None,
@@ -93,12 +125,11 @@ impl JobSpec {
         self
     }
 
-    pub fn environment<I, T>(mut self, environment: I) -> Self
+    pub fn environment<IterT>(mut self, environment: IterT) -> Self
     where
-        I: IntoIterator<Item = T>,
-        T: Into<String>,
+        IterT: IntoIterator<Item = EnvironmentSpec>,
     {
-        self.environment = environment.into_iter().map(Into::into).collect();
+        self.environment = environment.into_iter().collect();
         self
     }
 
@@ -123,7 +154,7 @@ impl JobSpec {
     }
 
     pub fn working_directory(mut self, working_directory: impl Into<Utf8PathBuf>) -> Self {
-        self.working_directory = working_directory.into();
+        self.working_directory = Some(working_directory.into());
         self
     }
 

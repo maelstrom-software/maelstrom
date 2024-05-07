@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use enum_map::{enum_map, EnumMap};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::Utf8PathBuf;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsString;
 use std::hash::Hash;
 use std::os::unix::ffi::OsStringExt as _;
@@ -180,6 +180,34 @@ where
 }
 
 impl<K: TryFromProtoBuf + Eq + Hash, V: TryFromProtoBuf> TryFromProtoBuf for HashMap<K, V> {
+    type ProtoBufType = HashMap<K::ProtoBufType, V::ProtoBufType>;
+
+    fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {
+        v.into_iter()
+            .map(|(k, v)| {
+                Ok((
+                    TryFromProtoBuf::try_from_proto_buf(k)?,
+                    TryFromProtoBuf::try_from_proto_buf(v)?,
+                ))
+            })
+            .collect()
+    }
+}
+
+impl<K: IntoProtoBuf + Eq + Hash + Ord, V: IntoProtoBuf> IntoProtoBuf for BTreeMap<K, V>
+where
+    K::ProtoBufType: Eq + Hash,
+{
+    type ProtoBufType = HashMap<K::ProtoBufType, V::ProtoBufType>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        self.into_iter()
+            .map(|(k, v)| (k.into_proto_buf(), v.into_proto_buf()))
+            .collect()
+    }
+}
+
+impl<K: TryFromProtoBuf + Eq + Ord, V: TryFromProtoBuf> TryFromProtoBuf for BTreeMap<K, V> {
     type ProtoBufType = HashMap<K::ProtoBufType, V::ProtoBufType>;
 
     fn try_from_proto_buf(v: Self::ProtoBufType) -> Result<Self> {

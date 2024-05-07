@@ -19,11 +19,9 @@ use cargo_metadata::{
 };
 use config::Quiet;
 use indicatif::TermLike;
-use maelstrom_base::{
-    ArtifactType, ClientJobId, JobOutcomeResult, NonEmpty, Sha256Digest, Timeout,
-};
+use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
 use maelstrom_client::{
-    spec::{ImageConfig, JobSpec, Layer},
+    spec::{EnvironmentSpec, ImageConfig, JobSpec, Layer},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };
@@ -295,7 +293,7 @@ where
     fn calculate_job_layers(
         &mut self,
         test_metadata: &TestMetadata,
-    ) -> Result<NonEmpty<(Sha256Digest, ArtifactType)>> {
+    ) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
         let mut layers = test_metadata
             .layers
             .iter()
@@ -310,7 +308,7 @@ where
         }
         layers.push((artifacts.binary.clone(), ArtifactType::Manifest));
 
-        Ok(NonEmpty::try_from(layers).unwrap())
+        Ok(layers)
     }
 
     fn format_case_str(&self, case: &str) -> String {
@@ -399,13 +397,17 @@ where
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
-                environment: test_metadata.environment(),
+                image: None,
+                environment: vec![EnvironmentSpec {
+                    vars: test_metadata.environment,
+                    extend: true,
+                }],
                 layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
                 enable_writable_file_system: test_metadata.enable_writable_file_system,
-                working_directory: test_metadata.working_directory,
+                working_directory: Some(test_metadata.working_directory),
                 user: test_metadata.user,
                 group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
