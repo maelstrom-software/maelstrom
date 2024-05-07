@@ -4,7 +4,7 @@ use crate::{
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{
-        load_test_listing, test_listing_file, ArtifactCases, ArtifactKey, ArtifactKind, Package,
+        load_test_listing, test_listing_file, Artifact, ArtifactKey, ArtifactKind, Package,
         TestListing,
     },
     EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
@@ -86,7 +86,6 @@ impl FakeTests {
 
     fn listing(&self) -> TestListing {
         TestListing {
-            version: Default::default(),
             packages: self
                 .test_binaries
                 .iter()
@@ -99,7 +98,7 @@ impl FakeTests {
                                     name: b.name.clone(),
                                     kind: ArtifactKind::Library,
                                 },
-                                ArtifactCases {
+                                Artifact {
                                     cases: b.tests.iter().map(|t| t.name.clone()).collect(),
                                 },
                             )]
