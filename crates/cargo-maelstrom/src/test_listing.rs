@@ -125,7 +125,6 @@ impl TestListing {
 #[derive(Eq, PartialEq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 enum OnDiskTestListingVersion {
-    V0 = 0,
     V1 = 1,
 }
 
