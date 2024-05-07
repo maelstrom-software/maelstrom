@@ -13,10 +13,10 @@ use indicatif::InMemoryTerm;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ArtifactType, ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult,
-    JobOutputResult, JobSpec, JobStatus, Sha256Digest,
+    JobOutputResult, JobStatus, Sha256Digest,
 };
 use maelstrom_client::{
-    spec::{ImageConfig, Layer},
+    spec::{ImageConfig, JobSpec, Layer},
     IntrospectResponse, StateDir,
 };
 use maelstrom_test::digest;

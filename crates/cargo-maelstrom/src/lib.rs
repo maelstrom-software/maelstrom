@@ -20,10 +20,10 @@ use cargo_metadata::{
 use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{
-    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, NonEmpty, Sha256Digest, Timeout,
+    ArtifactType, ClientJobId, JobOutcomeResult, NonEmpty, Sha256Digest, Timeout,
 };
 use maelstrom_client::{
-    spec::{ImageConfig, Layer},
+    spec::{ImageConfig, JobSpec, Layer},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };

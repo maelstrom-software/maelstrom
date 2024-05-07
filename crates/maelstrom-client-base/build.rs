@@ -16,9 +16,8 @@ const ENUM_PROTO: [(&str, &str); 4] = [
     ("JobCompleted.status", "maelstrom_base::JobStatus"),
 ];
 
-const MSG_PROTO: [(&str, &str, &str); 7] = [
+const MSG_PROTO: [(&str, &str, &str); 6] = [
     ("JobMount", "maelstrom_base::JobMount", ""),
-    ("JobSpec", "maelstrom_base::JobSpec", ""),
     ("ContainerImage", "maelstrom_container::ContainerImage", ""),
     (
         "OciImageConfiguration",

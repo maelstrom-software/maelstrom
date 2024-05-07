@@ -9,7 +9,10 @@ pub mod substitute;
 use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
-use maelstrom_base::Utf8PathBuf;
+use maelstrom_base::{
+    ArtifactType, GroupId, JobDevice, JobMount, NonEmpty, Sha256Digest, Timeout, UserId,
+    Utf8PathBuf,
+};
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
 use std::{
@@ -40,6 +43,103 @@ where
         Err(E::custom(format_args!("{}", msg)))
     } else {
         Ok(())
+    }
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[proto(other_type = "proto::JobSpec")]
+pub struct JobSpec {
+    pub program: Utf8PathBuf,
+    pub arguments: Vec<String>,
+    pub environment: Vec<String>,
+    pub layers: NonEmpty<(Sha256Digest, ArtifactType)>,
+    pub devices: EnumSet<JobDevice>,
+    pub mounts: Vec<JobMount>,
+    pub enable_loopback: bool,
+    pub enable_writable_file_system: bool,
+    pub working_directory: Utf8PathBuf,
+    pub user: UserId,
+    pub group: GroupId,
+    pub timeout: Option<Timeout>,
+}
+
+impl JobSpec {
+    pub fn new(
+        program: impl Into<String>,
+        layers: impl Into<NonEmpty<(Sha256Digest, ArtifactType)>>,
+    ) -> Self {
+        JobSpec {
+            program: program.into().into(),
+            layers: layers.into(),
+            arguments: Default::default(),
+            environment: Default::default(),
+            devices: Default::default(),
+            mounts: Default::default(),
+            enable_loopback: false,
+            enable_writable_file_system: Default::default(),
+            working_directory: Utf8PathBuf::from("/"),
+            user: UserId::from(0),
+            group: GroupId::from(0),
+            timeout: None,
+        }
+    }
+
+    pub fn arguments<I, T>(mut self, arguments: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.arguments = arguments.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn environment<I, T>(mut self, environment: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        self.environment = environment.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn devices(mut self, devices: impl IntoIterator<Item = JobDevice>) -> Self {
+        self.devices = devices.into_iter().collect();
+        self
+    }
+
+    pub fn mounts(mut self, mounts: impl IntoIterator<Item = JobMount>) -> Self {
+        self.mounts = mounts.into_iter().collect();
+        self
+    }
+
+    pub fn enable_loopback(mut self, enable_loopback: bool) -> Self {
+        self.enable_loopback = enable_loopback;
+        self
+    }
+
+    pub fn enable_writable_file_system(mut self, enable_writable_file_system: bool) -> Self {
+        self.enable_writable_file_system = enable_writable_file_system;
+        self
+    }
+
+    pub fn working_directory(mut self, working_directory: impl Into<Utf8PathBuf>) -> Self {
+        self.working_directory = working_directory.into();
+        self
+    }
+
+    pub fn user(mut self, user: impl Into<UserId>) -> Self {
+        self.user = user.into();
+        self
+    }
+
+    pub fn group(mut self, group: impl Into<GroupId>) -> Self {
+        self.group = group.into();
+        self
+    }
+
+    pub fn timeout(mut self, timeout: impl Into<Option<Timeout>>) -> Self {
+        self.timeout = timeout.into();
+        self
     }
 }
 

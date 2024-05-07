@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobSpec,
-    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, NonEmpty,
+    Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, Layer, PossiblyImage,
+    incompatible, substitute, Image, ImageConfig, ImageOption, ImageUse, JobSpec, Layer,
+    PossiblyImage,
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, io::Read};

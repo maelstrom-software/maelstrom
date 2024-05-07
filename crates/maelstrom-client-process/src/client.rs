@@ -7,11 +7,11 @@ use async_trait::async_trait;
 use layer_builder::LayerBuilder;
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
+    ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::Layer, CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR,
-    SYMLINK_MANIFEST_DIR,
+    spec::{JobSpec, Layer},
+    CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
     self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
@@ -425,6 +425,20 @@ impl Client {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
+        let spec = maelstrom_base::JobSpec {
+            program: spec.program,
+            arguments: spec.arguments,
+            environment: spec.environment,
+            layers: spec.layers,
+            devices: spec.devices,
+            mounts: spec.mounts,
+            enable_loopback: spec.enable_loopback,
+            enable_writable_file_system: spec.enable_writable_file_system,
+            working_directory: spec.working_directory,
+            user: spec.user,
+            group: spec.group,
+            timeout: spec.timeout,
+        };
         state
             .local_broker_sender
             .send(router::Message::RunJob(spec, sender))?;

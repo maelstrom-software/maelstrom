@@ -1,12 +1,12 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobSpec,
-    JobStatus, Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
+    ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus,
+    Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
-use maelstrom_client_base::spec::{Layer, PrefixOptions, SymlinkSpec};
+use maelstrom_client_base::spec::{JobSpec, Layer, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
 use regex::Regex;
 use std::panic::Location;
