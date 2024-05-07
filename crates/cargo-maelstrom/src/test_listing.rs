@@ -76,6 +76,14 @@ pub struct TestListing {
     pub packages: HashMap<String, Package>,
 }
 
+impl<K: Into<String>, V: Into<Package>> FromIterator<(K, V)> for TestListing {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
+        Self {
+            packages: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
+        }
+    }
+}
+
 impl TestListing {
     pub fn add_cases(&mut self, package_name: &str, artifact_key: ArtifactKey, cases: &[String]) {
         let package = self.packages.entry(package_name.into()).or_default();
@@ -232,22 +240,14 @@ impl From<TestListing> for OnDiskTestListing {
 
 impl From<OnDiskTestListing> for TestListing {
     fn from(on_disk: OnDiskTestListing) -> Self {
-        Self {
-            packages: on_disk
-                .packages
-                .into_iter()
-                .map(|(package_name, package)| {
-                    (
-                        package_name,
-                        Package::from_iter(package.artifacts.into_iter().map(
-                            |(artifact_key, artifact)| {
-                                (artifact_key, Artifact::from_iter(artifact.cases))
-                            },
-                        )),
-                    )
-                })
-                .collect(),
-        }
+        Self::from_iter(on_disk.packages.into_iter().map(|(package_name, package)| {
+            (
+                package_name,
+                Package::from_iter(package.artifacts.into_iter().map(
+                    |(artifact_key, artifact)| (artifact_key, Artifact::from_iter(artifact.cases)),
+                )),
+            )
+        }))
     }
 }
 
@@ -478,15 +478,13 @@ mod tests {
             }
         }
         let store = TestListingStore::new(Deps, RootBuf::new("".into()));
-        let expected = TestListing {
-            packages: HashMap::from_iter([(
-                "package1".into(),
-                Package::from_iter([(
-                    ArtifactKey::new("package1", ArtifactKind::Library),
-                    Artifact::from_iter(["case1", "case2"]),
-                )]),
+        let expected = TestListing::from_iter([(
+            "package1",
+            Package::from_iter([(
+                ArtifactKey::new("package1", ArtifactKind::Library),
+                Artifact::from_iter(["case1", "case2"]),
             )]),
-        };
+        )]);
         assert_eq!(store.load().unwrap(), expected);
     }
 
@@ -601,15 +599,13 @@ mod tests {
     fn save_of_simple_listing() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
         let store = TestListingStore::new(deps.clone(), RootBuf::new("maelstrom/state/".into()));
-        let listing = TestListing {
-            packages: HashMap::from_iter([(
-                "package1".into(),
-                Package::from_iter([(
-                    ArtifactKey::new("package1", ArtifactKind::Library),
-                    Artifact::from_iter(["case1", "case2"]),
-                )]),
+        let listing = TestListing::from_iter([(
+            "package1",
+            Package::from_iter([(
+                ArtifactKey::new("package1", ArtifactKind::Library),
+                Artifact::from_iter(["case1", "case2"]),
             )]),
-        };
+        )]);
         store.save(listing).unwrap();
         assert_eq!(
             deps.borrow().write,

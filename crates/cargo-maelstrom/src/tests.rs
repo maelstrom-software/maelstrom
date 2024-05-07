@@ -82,21 +82,15 @@ impl FakeTests {
     }
 
     fn listing(&self) -> TestListing {
-        TestListing {
-            packages: self
-                .test_binaries
-                .iter()
-                .map(|b| {
-                    (
-                        b.name.clone(),
-                        Package::from_iter([(
-                            ArtifactKey::new(&b.name, ArtifactKind::Library),
-                            Artifact::from_iter(b.tests.iter().map(|t| &t.name)),
-                        )]),
-                    )
-                })
-                .collect(),
-        }
+        TestListing::from_iter(self.test_binaries.iter().map(|b| {
+            (
+                &b.name,
+                Package::from_iter([(
+                    ArtifactKey::new(&b.name, ArtifactKind::Library),
+                    Artifact::from_iter(b.tests.iter().map(|t| &t.name)),
+                )]),
+            )
+        }))
     }
 
     fn packages(&self) -> Vec<CargoPackage> {
