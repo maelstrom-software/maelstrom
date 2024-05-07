@@ -1,7 +1,7 @@
 use crate::pattern;
 pub use crate::pattern::ArtifactKind;
 use anyhow::{anyhow, bail, Result};
-use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, Target as CargoTarget};
+use cargo_metadata::{Package as CargoPackage, Target as CargoTarget};
 use maelstrom_client::StateDir;
 use maelstrom_util::{
     fs::Fs,
@@ -33,11 +33,15 @@ pub struct ArtifactKey {
 }
 
 impl ArtifactKey {
-    fn from_target(target: &CargoTarget) -> Self {
+    pub fn new(name: impl Into<String>, kind: ArtifactKind) -> Self {
         Self {
-            name: target.name.clone(),
-            kind: ArtifactKind::from_target(target),
+            name: name.into(),
+            kind,
         }
+    }
+
+    pub fn from_target(target: &CargoTarget) -> Self {
+        Self::new(&target.name, ArtifactKind::from_target(target))
     }
 }
 
@@ -57,8 +61,7 @@ pub struct TestListing {
 }
 
 impl TestListing {
-    pub fn add_cases(&mut self, package_name: &str, artifact: &CargoArtifact, cases: &[String]) {
-        let artifact_key = ArtifactKey::from_target(&artifact.target);
+    pub fn add_cases(&mut self, package_name: &str, artifact_key: ArtifactKey, cases: &[String]) {
         let package = self.packages.entry(package_name.into()).or_default();
         package.artifacts.insert(
             artifact_key,
@@ -476,10 +479,7 @@ mod tests {
                 "package1".into(),
                 Package {
                     artifacts: HashMap::from_iter([(
-                        ArtifactKey {
-                            name: "package1".into(),
-                            kind: ArtifactKind::Library,
-                        },
+                        ArtifactKey::new("package1", ArtifactKind::Library),
                         Artifact {
                             cases: HashSet::from_iter(["case1".into(), "case2".into()]),
                         },
@@ -606,10 +606,7 @@ mod tests {
                 "package1".into(),
                 Package {
                     artifacts: HashMap::from_iter([(
-                        ArtifactKey {
-                            name: "package1".into(),
-                            kind: ArtifactKind::Library,
-                        },
+                        ArtifactKey::new("package1", ArtifactKind::Library),
                         Artifact {
                             cases: HashSet::from_iter(["case1".into(), "case2".into()]),
                         },
