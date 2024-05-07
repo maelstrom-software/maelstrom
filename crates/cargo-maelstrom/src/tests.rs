@@ -3,7 +3,7 @@ use crate::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
-    test_listing::{load_test_listing, Artifact, ArtifactKey, ArtifactKind, Package, TestListing},
+    test_listing::{Artifact, ArtifactKey, ArtifactKind, Package, TestListing, TestListingStore},
     EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
     WorkspaceDir,
 };
@@ -1197,7 +1197,6 @@ fn complete_quiet() {
 
 #[test]
 fn expected_count_updates_packages() {
-    let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
     let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
@@ -1226,8 +1225,11 @@ fn expected_count_updates_packages() {
         vec![],
     );
 
-    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
-    let listing = load_test_listing(&fs, &state_dir).unwrap();
+    let test_listing_store = TestListingStore::new(
+        Fs::new(),
+        &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+    );
+    let listing = test_listing_store.load().unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove bar
@@ -1250,13 +1252,12 @@ fn expected_count_updates_packages() {
     );
 
     // new listing should match
-    let listing = load_test_listing(&fs, &state_dir).unwrap();
+    let listing = test_listing_store.load().unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 
 #[test]
 fn expected_count_updates_cases() {
-    let fs = Fs::new();
     let tmp_dir = tempdir().unwrap();
     let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
@@ -1276,8 +1277,11 @@ fn expected_count_updates_cases() {
         vec![],
     );
 
-    let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
-    let listing = load_test_listing(&fs, &state_dir).unwrap();
+    let test_listing_store = TestListingStore::new(
+        Fs::new(),
+        &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+    );
+    let listing = test_listing_store.load().unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove the test
@@ -1297,7 +1301,7 @@ fn expected_count_updates_cases() {
     );
 
     // new listing should match
-    let listing = load_test_listing(&fs, &state_dir).unwrap();
+    let listing = test_listing_store.load().unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 

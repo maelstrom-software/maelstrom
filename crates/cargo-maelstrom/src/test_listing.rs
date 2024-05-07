@@ -9,7 +9,10 @@ use maelstrom_util::{
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, FromInto};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    path::Path,
+};
 
 pub use crate::pattern::ArtifactKind;
 
@@ -236,42 +239,76 @@ impl From<OnDiskTestListing> for TestListing {
     }
 }
 
+/*      _
+ *  ___| |_ ___  _ __ ___
+ * / __| __/ _ \| '__/ _ \
+ * \__ \ || (_) | | |  __/
+ * |___/\__\___/|_|  \___|
+ *  FIGLET: store
+ */
+
+pub trait TestListingStoreDeps {
+    fn read_to_string_if_exists(&self, path: impl AsRef<Path>) -> Result<Option<String>>;
+    fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<()>;
+    fn write(&self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()>;
+}
+
+impl TestListingStoreDeps for Fs {
+    fn read_to_string_if_exists(&self, path: impl AsRef<Path>) -> Result<Option<String>> {
+        Fs::read_to_string_if_exists(self, path)
+    }
+
+    fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<()> {
+        Fs::create_dir_all(self, path)
+    }
+
+    fn write(&self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
+        Fs::write(self, path, contents)
+    }
+}
+
 struct TestListingFile;
 
-fn test_listing_file(state_dir: impl AsRef<Root<StateDir>>) -> RootBuf<TestListingFile> {
-    state_dir.as_ref().join("test-listing.toml")
+pub struct TestListingStore<DepsT = Fs> {
+    deps: DepsT,
+    test_listing_file: RootBuf<TestListingFile>,
 }
 
-pub fn load_test_listing(fs: &Fs, state_dir: impl AsRef<Root<StateDir>>) -> Result<TestListing> {
-    let path = test_listing_file(state_dir);
-    if let Some(contents) = fs.read_to_string_if_exists(path)? {
-        let mut table: toml::Table = toml::from_str(&contents)?;
-        let version: OnDiskTestListingVersion = table
-            .remove("version")
-            .ok_or(anyhow!("missing version"))?
-            .try_into()?;
-        if version != OnDiskTestListingVersion::V1 {
-            Ok(Default::default())
-        } else {
-            Ok(toml::from_str::<OnDiskTestListing>(&contents)?.into())
+impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
+    pub fn new(deps: DepsT, state_dir: impl AsRef<Root<StateDir>>) -> Self {
+        Self {
+            deps,
+            test_listing_file: state_dir.as_ref().join("test-listing.toml"),
         }
-    } else {
-        Ok(Default::default())
     }
-}
 
-pub fn write_test_listing(
-    fs: &Fs,
-    state_dir: impl AsRef<Root<StateDir>>,
-    job_listing: TestListing,
-) -> Result<()> {
-    let path = test_listing_file(state_dir);
-    if let Some(parent) = path.parent() {
-        fs.create_dir_all(parent)?;
+    pub fn load(&self) -> Result<TestListing> {
+        if let Some(contents) = self
+            .deps
+            .read_to_string_if_exists(&self.test_listing_file)?
+        {
+            let mut table: toml::Table = toml::from_str(&contents)?;
+            let version: OnDiskTestListingVersion = table
+                .remove("version")
+                .ok_or(anyhow!("missing version"))?
+                .try_into()?;
+            if version != OnDiskTestListingVersion::V1 {
+                Ok(Default::default())
+            } else {
+                Ok(toml::from_str::<OnDiskTestListing>(&contents)?.into())
+            }
+        } else {
+            Ok(Default::default())
+        }
     }
-    fs.write(
-        path,
-        toml::to_string_pretty::<OnDiskTestListing>(&job_listing.into())?,
-    )?;
-    Ok(())
+
+    pub fn save(&self, job_listing: TestListing) -> Result<()> {
+        if let Some(parent) = self.test_listing_file.parent() {
+            self.deps.create_dir_all(parent)?;
+        }
+        self.deps.write(
+            &self.test_listing_file,
+            toml::to_string_pretty::<OnDiskTestListing>(&job_listing.into())?,
+        )
+    }
 }

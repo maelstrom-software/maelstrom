@@ -31,7 +31,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
     process::ExitCode,
-    root::{Root, RootBuf},
+    root::Root,
     template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};
@@ -51,7 +51,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{load_test_listing, write_test_listing, TestListing};
+use test_listing::{TestListing, TestListingStore};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -717,7 +717,7 @@ impl MainAppDeps for DefaultMainAppDeps {
 pub struct MainAppState<MainAppDepsT> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState,
-    state_dir: RootBuf<StateDir>,
+    test_listing_store: TestListingStore,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
@@ -744,7 +744,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         stderr_color: bool,
         workspace_root: impl AsRef<Root<WorkspaceDir>>,
         workspace_packages: &[&CargoPackage],
-        state_dir: RootBuf<StateDir>,
+        state_dir: impl AsRef<Root<StateDir>>,
         target_directory: impl AsRef<Root<TargetDir>>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
@@ -760,7 +760,8 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         );
 
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
-        let mut test_listing = load_test_listing(&Fs::new(), &state_dir)?;
+        let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
+        let mut test_listing = test_listing_store.load()?;
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
@@ -789,7 +790,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 compilation_options,
                 manifest_options,
             )?,
-            state_dir,
+            test_listing_store,
             logging_output,
             log,
         })
@@ -899,9 +900,7 @@ where
                 .print_summary(width, self.term.clone())?;
         }
 
-        write_test_listing(
-            &Fs::new(),
-            &self.state.state_dir,
+        self.state.test_listing_store.save(
             self.state
                 .queuing_state
                 .test_listing
@@ -1216,7 +1215,7 @@ where
         stderr_is_tty,
         workspace_dir,
         &cargo_metadata.workspace_packages(),
-        state_dir,
+        &state_dir,
         target_dir,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,
