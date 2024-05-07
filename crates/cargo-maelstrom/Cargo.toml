@@ -52,6 +52,7 @@ indoc.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
+pretty_assertions.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 

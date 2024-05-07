@@ -762,7 +762,9 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
         let mut test_listing = test_listing_store.load()?;
-        test_listing.retain_packages(workspace_packages);
+        test_listing.retain_packages_and_artifacts(
+            workspace_packages.iter().map(|p| (&*p.name, &p.targets)),
+        );
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
         let selected_packages: BTreeMap<_, _> = workspace_packages

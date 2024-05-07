@@ -1,7 +1,7 @@
 use crate::pattern;
 pub use crate::pattern::ArtifactKind;
 use anyhow::{anyhow, bail, Result};
-use cargo_metadata::{Package as CargoPackage, Target as CargoTarget};
+use cargo_metadata::Target as CargoTarget;
 use maelstrom_client::StateDir;
 use maelstrom_util::{
     fs::Fs,
@@ -99,6 +99,28 @@ impl TestListing {
             .insert(artifact_key.into(), Artifact::from_iter(cases));
     }
 
+    pub fn retain_packages_and_artifacts<'a, PI, PN, AI, AK>(&mut self, existing_packages: PI)
+    where
+        PI: IntoIterator<Item = (PN, AI)>,
+        PN: Into<&'a str>,
+        AI: IntoIterator<Item = AK>,
+        AK: Into<ArtifactKey>,
+    {
+        let existing_packages: HashMap<_, HashSet<_>> = existing_packages
+            .into_iter()
+            .map(|(pn, ai)| (pn.into(), ai.into_iter().map(Into::into).collect()))
+            .collect();
+        self.packages.retain(|package_name, package| {
+            let Some(existing_artifacts) = existing_packages.get(package_name.as_str()) else {
+                return false;
+            };
+            package
+                .artifacts
+                .retain(|key, _| existing_artifacts.contains(key));
+            true
+        });
+    }
+
     pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
         fn filter_case(
             package: &str,
@@ -126,26 +148,6 @@ impl TestListing {
             })
             .filter(|(p, a, c)| filter_case(p, a, c, filter))
             .count() as u64
-    }
-
-    pub fn retain_packages(&mut self, existing_packages_slice: &[&CargoPackage]) {
-        let existing_packages: HashMap<&String, &CargoPackage> = existing_packages_slice
-            .iter()
-            .map(|p| (&p.name, *p))
-            .collect();
-        self.packages.retain(|name, pkg| {
-            let Some(existing_package) = existing_packages.get(&name) else {
-                return false;
-            };
-            let existing_artifacts: HashSet<_> = existing_package
-                .targets
-                .iter()
-                .map(ArtifactKey::from)
-                .collect();
-            pkg.artifacts
-                .retain(|key, _| existing_artifacts.contains(key));
-            true
-        });
     }
 }
 
@@ -346,6 +348,7 @@ mod tests {
     use super::*;
     use indoc::indoc;
     use maelstrom_util::ext::OptionExt as _;
+    use pretty_assertions::assert_eq;
     use std::{cell::RefCell, rc::Rc, str};
 
     #[test]
@@ -446,6 +449,57 @@ mod tests {
                     ])
                 )
             ])
+        );
+    }
+
+    #[test]
+    fn retain_packages_and_artifacts() {
+        let mut listing = TestListing::from_iter([
+            (
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
+                        Artifact::from_iter(["case-1-1-1", "case-1-1-2"]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1-2", ArtifactKind::Binary),
+                        Artifact::from_iter(["case-1-2-1", "case-1-2-2"]),
+                    ),
+                ]),
+            ),
+            (
+                "package-2",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-2-1", ArtifactKind::Library),
+                    Artifact::from_iter(["case-2-1-1", "case-2-1-2"]),
+                )]),
+            ),
+        ]);
+
+        listing.retain_packages_and_artifacts([
+            (
+                "package-1",
+                vec![
+                    ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
+                    ArtifactKey::new("artifact-1-3", ArtifactKind::Binary),
+                ],
+            ),
+            (
+                "package-3",
+                vec![ArtifactKey::new("artifact-3-1", ArtifactKind::Library)],
+            ),
+        ]);
+
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
+                    Artifact::from_iter(["case-1-1-1", "case-1-1-2"]),
+                ),]),
+            ),])
         );
     }
 
