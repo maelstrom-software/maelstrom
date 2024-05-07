@@ -37,23 +37,6 @@ impl ArtifactKey {
     }
 }
 
-fn filter_case(
-    package: &str,
-    artifact: &ArtifactKey,
-    case: &str,
-    filter: &pattern::Pattern,
-) -> bool {
-    let c = pattern::Context {
-        package: package.into(),
-        artifact: Some(pattern::Artifact {
-            name: artifact.name.clone(),
-            kind: artifact.kind,
-        }),
-        case: Some(pattern::Case { name: case.into() }),
-    };
-    pattern::interpret_pattern(filter, &c).expect("case is provided")
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifact {
     pub cases: HashSet<String>,
@@ -82,6 +65,23 @@ impl TestListing {
     }
 
     pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
+        fn filter_case(
+            package: &str,
+            artifact: &ArtifactKey,
+            case: &str,
+            filter: &pattern::Pattern,
+        ) -> bool {
+            let c = pattern::Context {
+                package: package.into(),
+                artifact: Some(pattern::Artifact {
+                    name: artifact.name.clone(),
+                    kind: artifact.kind,
+                }),
+                case: Some(pattern::Case { name: case.into() }),
+            };
+            pattern::interpret_pattern(filter, &c).expect("case is provided")
+        }
+
         self.packages
             .iter()
             .flat_map(|(p, a)| {
