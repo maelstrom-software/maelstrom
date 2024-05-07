@@ -85,7 +85,15 @@ impl<K: Into<String>, V: Into<Package>> FromIterator<(K, V)> for TestListing {
 }
 
 impl TestListing {
-    pub fn add_cases(&mut self, package_name: &str, artifact_key: ArtifactKey, cases: &[String]) {
+    pub fn update_artifact_cases<T, A>(
+        &mut self,
+        package_name: &str,
+        artifact_key: ArtifactKey,
+        cases: T,
+    ) where
+        T: IntoIterator<Item = A>,
+        A: Into<String>,
+    {
         let package = self.packages.entry(package_name.into()).or_default();
         package
             .artifacts
@@ -340,6 +348,107 @@ mod tests {
     use indoc::indoc;
     use maelstrom_util::ext::OptionExt as _;
     use std::{cell::RefCell, rc::Rc, str};
+
+    #[test]
+    fn update_artifact_cases() {
+        let mut listing = TestListing::default();
+
+        // Add some initial cases.
+        listing.update_artifact_cases(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            ["case1", "case2", "case3"],
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter(["case3", "case2", "case1"]),
+                )])
+            )])
+        );
+
+        // Add some more cases with the same artifact name in the same package.
+        listing.update_artifact_cases(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+            ["case2", "case3", "case4"],
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter(["case4", "case3", "case2"]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter(["case3", "case2", "case1"]),
+                    )
+                ])
+            )])
+        );
+
+        // Add some more cases that partially overlap with previous ones. This should overwrite the
+        // old value we had for that artifact.
+        listing.update_artifact_cases(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+            ["case4", "case5", "case6"],
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter(["case6", "case5", "case4"]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter(["case3", "case2", "case1"]),
+                    )
+                ])
+            )])
+        );
+
+        // Add some more cases for a different package. They should be independent.
+        listing.update_artifact_cases(
+            "package-2",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            ["case100", "case101"],
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([
+                (
+                    "package-2",
+                    Package::from_iter([(
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter(["case101", "case100"]),
+                    )])
+                ),
+                (
+                    "package-1",
+                    Package::from_iter([
+                        (
+                            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                            Artifact::from_iter(["case6", "case5", "case4"]),
+                        ),
+                        (
+                            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                            Artifact::from_iter(["case3", "case2", "case1"]),
+                        )
+                    ])
+                )
+            ])
+        );
+    }
 
     #[test]
     fn load_passes_proper_path() {
