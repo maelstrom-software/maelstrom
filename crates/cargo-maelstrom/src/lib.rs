@@ -51,9 +51,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{
-    load_test_listing, test_listing_file, write_test_listing, TestListing, TestListingFile,
-};
+use test_listing::{load_test_listing, write_test_listing, TestListing};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -719,7 +717,7 @@ impl MainAppDeps for DefaultMainAppDeps {
 pub struct MainAppState<MainAppDepsT> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState,
-    test_listing_file: RootBuf<TestListingFile>,
+    state_dir: RootBuf<StateDir>,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
@@ -746,7 +744,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         stderr_color: bool,
         workspace_root: impl AsRef<Root<WorkspaceDir>>,
         workspace_packages: &[&CargoPackage],
-        test_listing_file: RootBuf<TestListingFile>,
+        state_dir: RootBuf<StateDir>,
         target_directory: impl AsRef<Root<TargetDir>>,
         feature_selection_options: FeatureSelectionOptions,
         compilation_options: CompilationOptions,
@@ -762,7 +760,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         );
 
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
-        let mut test_listing = load_test_listing(&Fs::new(), test_listing_file.as_ref())?;
+        let mut test_listing = load_test_listing(&Fs::new(), &state_dir)?;
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
@@ -791,7 +789,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 compilation_options,
                 manifest_options,
             )?,
-            test_listing_file,
+            state_dir,
             logging_output,
             log,
         })
@@ -903,7 +901,7 @@ where
 
         write_test_listing(
             &Fs::new(),
-            &self.state.test_listing_file,
+            &self.state.state_dir,
             self.state
                 .queuing_state
                 .test_listing
@@ -1218,7 +1216,7 @@ where
         stderr_is_tty,
         workspace_dir,
         &cargo_metadata.workspace_packages(),
-        test_listing_file(&state_dir),
+        state_dir,
         target_dir,
         config.cargo_feature_selection_options,
         config.cargo_compilation_options,

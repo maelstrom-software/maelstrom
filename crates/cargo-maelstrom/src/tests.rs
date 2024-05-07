@@ -3,10 +3,7 @@ use crate::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
-    test_listing::{
-        load_test_listing, test_listing_file, Artifact, ArtifactKey, ArtifactKind, Package,
-        TestListing,
-    },
+    test_listing::{load_test_listing, Artifact, ArtifactKey, ArtifactKind, Package, TestListing},
     EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
     WorkspaceDir,
 };
@@ -379,7 +376,7 @@ fn run_app(
         false, // stderr_color
         workspace_root,
         &Vec::from_iter(packages.iter()),
-        test_listing_file(target_directory.join::<StateDir>("maelstrom/state")),
+        target_directory.join::<StateDir>("maelstrom/state"),
         &target_directory,
         FeatureSelectionOptions::default(),
         CompilationOptions::default(),
@@ -1230,8 +1227,7 @@ fn expected_count_updates_packages() {
     );
 
     let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
-    let test_listing_file = test_listing_file(&state_dir);
-    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
+    let listing = load_test_listing(&fs, &state_dir).unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove bar
@@ -1254,7 +1250,7 @@ fn expected_count_updates_packages() {
     );
 
     // new listing should match
-    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
+    let listing = load_test_listing(&fs, &state_dir).unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 
@@ -1281,8 +1277,7 @@ fn expected_count_updates_cases() {
     );
 
     let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
-    let test_listing_file = test_listing_file(&state_dir);
-    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
+    let listing = load_test_listing(&fs, &state_dir).unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove the test
@@ -1302,7 +1297,7 @@ fn expected_count_updates_cases() {
     );
 
     // new listing should match
-    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
+    let listing = load_test_listing(&fs, &state_dir).unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 

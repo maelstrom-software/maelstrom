@@ -238,13 +238,14 @@ impl From<OnDiskTestListing> for TestListing {
     }
 }
 
-pub struct TestListingFile;
+struct TestListingFile;
 
-pub fn test_listing_file(state_dir: impl AsRef<Root<StateDir>>) -> RootBuf<TestListingFile> {
+fn test_listing_file(state_dir: impl AsRef<Root<StateDir>>) -> RootBuf<TestListingFile> {
     state_dir.as_ref().join("test-listing.toml")
 }
 
-pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<TestListing> {
+pub fn load_test_listing(fs: &Fs, state_dir: impl AsRef<Root<StateDir>>) -> Result<TestListing> {
+    let path = test_listing_file(state_dir);
     if let Some(contents) = fs.read_to_string_if_exists(path)? {
         let mut table: toml::Table = toml::from_str(&contents)?;
         let version: OnDiskTestListingVersion = table
@@ -263,9 +264,10 @@ pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<TestLi
 
 pub fn write_test_listing(
     fs: &Fs,
-    path: &Root<TestListingFile>,
+    state_dir: impl AsRef<Root<StateDir>>,
     job_listing: TestListing,
 ) -> Result<()> {
+    let path = test_listing_file(state_dir);
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)?;
     }
