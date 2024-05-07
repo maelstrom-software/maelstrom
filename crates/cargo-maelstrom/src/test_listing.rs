@@ -264,14 +264,14 @@ pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<TestLi
 pub fn write_test_listing(
     fs: &Fs,
     path: &Root<TestListingFile>,
-    job_listing: &TestListing,
+    job_listing: TestListing,
 ) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs.create_dir_all(parent)?;
     }
     fs.write(
         path,
-        toml::to_string_pretty::<OnDiskTestListing>(&job_listing.clone().into())?,
+        toml::to_string_pretty::<OnDiskTestListing>(&job_listing.into())?,
     )?;
     Ok(())
 }

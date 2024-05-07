@@ -40,10 +40,10 @@ use progress::{
     TestListingProgress, TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::{
     collections::{BTreeMap, HashSet},
     io,
+    panic::{RefUnwindSafe, UnwindSafe},
     path::{Path, PathBuf},
     str,
     sync::{
@@ -122,7 +122,7 @@ struct JobQueuingState {
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
     expected_job_count: u64,
-    test_listing: Mutex<TestListing>,
+    test_listing: Mutex<Option<TestListing>>,
     list_action: Option<ListAction>,
     feature_selection_options: FeatureSelectionOptions,
     compilation_options: CompilationOptions,
@@ -158,7 +158,7 @@ impl JobQueuingState {
             jobs_queued: AtomicU64::new(0),
             test_metadata,
             expected_job_count,
-            test_listing: Mutex::new(test_listing),
+            test_listing: Mutex::new(Some(test_listing)),
             list_action,
             feature_selection_options,
             compilation_options,
@@ -218,7 +218,10 @@ fn list_test_cases(
     let mut cases = deps.get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_state.test_listing.lock().unwrap();
-    listing.add_cases(package_name, artifact, &cases[..]);
+    listing
+        .as_mut()
+        .unwrap()
+        .add_cases(package_name, artifact, &cases[..]);
 
     cases.retain(|c| filter_case(package_name, artifact, c, &queuing_state.filter));
     Ok(TestListingResult {
@@ -901,7 +904,13 @@ where
         write_test_listing(
             &Fs::new(),
             &self.state.test_listing_file,
-            &self.state.queuing_state.test_listing.lock().unwrap(),
+            self.state
+                .queuing_state
+                .test_listing
+                .lock()
+                .unwrap()
+                .take()
+                .unwrap(),
         )?;
 
         Ok(self.state.queuing_state.tracker.exit_code())
