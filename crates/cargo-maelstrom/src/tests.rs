@@ -92,9 +92,7 @@ impl FakeTests {
                         Package {
                             artifacts: [(
                                 ArtifactKey::new(&b.name, ArtifactKind::Library),
-                                Artifact {
-                                    cases: b.tests.iter().map(|t| t.name.clone()).collect(),
-                                },
+                                Artifact::from_iter(b.tests.iter().map(|t| &t.name)),
                             )]
                             .into_iter()
                             .collect(),

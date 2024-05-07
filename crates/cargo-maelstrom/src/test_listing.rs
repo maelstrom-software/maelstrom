@@ -50,6 +50,14 @@ pub struct Artifact {
     pub cases: HashSet<String>,
 }
 
+impl<A: Into<String>> FromIterator<A> for Artifact {
+    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+        Self {
+            cases: HashSet::from_iter(iter.into_iter().map(Into::into)),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Package {
     pub artifacts: HashMap<ArtifactKey, Artifact>,
@@ -63,12 +71,9 @@ pub struct TestListing {
 impl TestListing {
     pub fn add_cases(&mut self, package_name: &str, artifact_key: ArtifactKey, cases: &[String]) {
         let package = self.packages.entry(package_name.into()).or_default();
-        package.artifacts.insert(
-            artifact_key,
-            Artifact {
-                cases: cases.iter().cloned().collect(),
-            },
-        );
+        package
+            .artifacts
+            .insert(artifact_key, Artifact::from_iter(cases));
     }
 
     pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
@@ -231,12 +236,7 @@ impl From<OnDiskTestListing> for TestListing {
                                 .artifacts
                                 .into_iter()
                                 .map(|(artifact_key, artifact)| {
-                                    (
-                                        artifact_key,
-                                        Artifact {
-                                            cases: artifact.cases.into_iter().collect(),
-                                        },
-                                    )
+                                    (artifact_key, Artifact::from_iter(artifact.cases))
                                 })
                                 .collect(),
                         },
@@ -480,9 +480,7 @@ mod tests {
                 Package {
                     artifacts: HashMap::from_iter([(
                         ArtifactKey::new("package1", ArtifactKind::Library),
-                        Artifact {
-                            cases: HashSet::from_iter(["case1".into(), "case2".into()]),
-                        },
+                        Artifact::from_iter(["case1", "case2"]),
                     )]),
                 },
             )]),
@@ -607,9 +605,7 @@ mod tests {
                 Package {
                     artifacts: HashMap::from_iter([(
                         ArtifactKey::new("package1", ArtifactKind::Library),
-                        Artifact {
-                            cases: HashSet::from_iter(["case1".into(), "case2".into()]),
-                        },
+                        Artifact::from_iter(["case1", "case2"]),
                     )]),
                 },
             )]),
