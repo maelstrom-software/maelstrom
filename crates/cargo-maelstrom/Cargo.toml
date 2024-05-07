@@ -28,6 +28,8 @@ maelstrom-base.workspace = true
 maelstrom-client.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
+num-derive.workspace = true
+num-traits.workspace = true
 regex.workspace = true
 regex-macro.workspace = true
 serde.workspace = true
@@ -46,11 +48,12 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 enum-map.workspace = true
-serde.workspace = true
-tempfile.workspace = true
+indoc.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
+serde.workspace = true
+tempfile.workspace = true
 
 [[bin]]
 name = "client-bg-proc"
