@@ -3,12 +3,9 @@ use std::collections::HashMap;
 use std::pin::{pin, Pin};
 use std::sync::{
     atomic::{AtomicU64, Ordering},
-    Arc,
+    Arc, Mutex,
 };
-use tokio::{
-    io::{self, AsyncRead},
-    sync::Mutex,
-};
+use tokio::io::{self, AsyncRead};
 
 pub struct RunningProgress {
     size: AtomicU64,
@@ -31,8 +28,8 @@ pub struct ProgressTracker {
 }
 
 impl ProgressTracker {
-    pub async fn new_task(&self, name: impl Into<String>, size: u64) -> Arc<RunningProgress> {
-        let mut tasks = self.tasks.lock().await;
+    pub fn new_task(&self, name: impl Into<String>, size: u64) -> Arc<RunningProgress> {
+        let mut tasks = self.tasks.lock().unwrap();
         let prog = Arc::new(RunningProgress {
             size: AtomicU64::new(size),
             progress: AtomicU64::new(0),
@@ -41,13 +38,13 @@ impl ProgressTracker {
         prog
     }
 
-    pub async fn remove_task(&self, name: &str) {
-        let mut tasks = self.tasks.lock().await;
+    pub fn remove_task(&self, name: &str) {
+        let mut tasks = self.tasks.lock().unwrap();
         tasks.remove(name);
     }
 
-    pub async fn get_remote_progresses(&self) -> Vec<RemoteProgress> {
-        let tasks = self.tasks.lock().await;
+    pub fn get_remote_progresses(&self) -> Vec<RemoteProgress> {
+        let tasks = self.tasks.lock().unwrap();
         tasks
             .iter()
             .map(|(name, p)| RemoteProgress {

@@ -412,12 +412,12 @@ impl Client {
         let state = self.state_machine.active()?;
         debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
         let dl_name = format!("{name}:{tag}");
-        let tracker = state.image_download_tracker.new_task(&dl_name, 1).await;
+        let tracker = state.image_download_tracker.new_task(&dl_name, 1);
         let res = state
             .container_image_depot
             .get_container_image(name, tag, tracker)
             .await;
-        state.image_download_tracker.remove_task(&dl_name).await;
+        state.image_download_tracker.remove_task(&dl_name);
         res
     }
 
@@ -452,8 +452,8 @@ impl Client {
             .local_broker_sender
             .send(router::Message::GetJobStateCounts(sender))?;
         let job_state_counts = watcher.wait(receiver).await?;
-        let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses().await;
-        let image_downloads = state.image_download_tracker.get_remote_progresses().await;
+        let artifact_uploads = state.artifact_upload_tracker.get_remote_progresses();
+        let image_downloads = state.image_download_tracker.get_remote_progresses();
         Ok(IntrospectResponse {
             job_state_counts,
             artifact_uploads,

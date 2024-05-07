@@ -34,7 +34,7 @@ async fn push_one_artifact(
     let size = file.metadata().await?.len();
 
     let upload_name = construct_upload_name(&digest, &path);
-    let prog = upload_tracker.new_task(&upload_name, size).await;
+    let prog = upload_tracker.new_task(&upload_name, size);
 
     let mut file = UploadProgressReader::new(prog, file.chain(io::repeat(0)).take(size));
 
@@ -44,7 +44,7 @@ async fn push_one_artifact(
 
     let BrokerToArtifactPusher(resp) = net::read_message_from_async_socket(&mut stream).await?;
 
-    upload_tracker.remove_task(&upload_name).await;
+    upload_tracker.remove_task(&upload_name);
     resp.map_err(|e| anyhow!("Error from broker: {e}"))
 }
 
