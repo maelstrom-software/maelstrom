@@ -3,7 +3,7 @@ use maelstrom_base::{
     proto::{ArtifactPusherToBroker, BrokerToArtifactPusher, Hello},
     Sha256Digest,
 };
-use maelstrom_client_base::ArtifactUploadProgress;
+use maelstrom_client_base::RemoteProgress;
 use maelstrom_util::{async_fs::Fs, config::common::BrokerAddr, net};
 use std::pin::{pin, Pin};
 use std::sync::{
@@ -50,11 +50,11 @@ impl ArtifactUploadTracker {
         uploads.remove(name);
     }
 
-    pub async fn get_artifact_upload_progress(&self) -> Vec<ArtifactUploadProgress> {
+    pub async fn get_artifact_upload_progress(&self) -> Vec<RemoteProgress> {
         let uploads = self.uploads.lock().await;
         uploads
             .iter()
-            .map(|(name, p)| ArtifactUploadProgress {
+            .map(|(name, p)| RemoteProgress {
                 name: name.clone(),
                 size: p.size,
                 progress: p.progress.load(Ordering::Acquire),

@@ -138,29 +138,14 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
-    async fn get_job_state_counts(
+    async fn introspect(
         &self,
         _request: Request<proto::Void>,
-    ) -> TonicResponse<proto::GetJobStateCountsResponse> {
+    ) -> TonicResponse<proto::IntrospectResponse> {
         self.client
-            .get_job_state_counts()
+            .introspect()
             .await
-            .map(|counts| proto::GetJobStateCountsResponse {
-                counts: Some(counts.into_proto_buf()),
-            })
-            .map_to_tonic()
-    }
-
-    async fn get_artifact_upload_progress(
-        &self,
-        _request: Request<proto::Void>,
-    ) -> TonicResponse<proto::GetArtifactUploadProgressResponse> {
-        self.client
-            .get_artifact_upload_progress()
-            .await
-            .map(|progress| proto::GetArtifactUploadProgressResponse {
-                progress: progress.into_proto_buf(),
-            })
+            .map(|res| res.into_proto_buf())
             .map_to_tonic()
     }
 }

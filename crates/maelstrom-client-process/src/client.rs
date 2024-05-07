@@ -11,11 +11,10 @@ use async_trait::async_trait;
 use layer_builder::LayerBuilder;
 use maelstrom_base::{
     proto::{Hello, WorkerToBroker},
-    stats::JobStateCounts,
     ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::Layer, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, STUB_MANIFEST_DIR,
+    spec::Layer, CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR,
     SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
@@ -434,21 +433,18 @@ impl Client {
         watcher.wait(receiver).await
     }
 
-    pub async fn get_job_state_counts(&self) -> Result<JobStateCounts> {
+    pub async fn introspect(&self) -> Result<IntrospectResponse> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         state
             .local_broker_sender
             .send(router::Message::GetJobStateCounts(sender))?;
-        watcher.wait(receiver).await
-    }
-
-    pub async fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
-        Ok(self
-            .state_machine
-            .active()?
-            .upload_tracker
-            .get_artifact_upload_progress()
-            .await)
+        let job_state_counts = watcher.wait(receiver).await?;
+        let artifact_uploads = state.upload_tracker.get_artifact_upload_progress().await;
+        Ok(IntrospectResponse {
+            job_state_counts,
+            artifact_uploads,
+            image_downloads: vec![],
+        })
     }
 }

@@ -2,7 +2,7 @@ use super::ProgressIndicator;
 use crate::MainAppDeps;
 use anyhow::Result;
 use indicatif::ProgressBar;
-use maelstrom_client::ArtifactUploadProgress;
+use maelstrom_client::RemoteProgress;
 use std::collections::{HashMap, HashSet};
 use std::{
     sync::{
@@ -49,7 +49,7 @@ struct UploadProgressBarTracker {
 }
 
 impl UploadProgressBarTracker {
-    fn update(&mut self, ind: &impl ProgressIndicator, states: Vec<ArtifactUploadProgress>) {
+    fn update(&mut self, ind: &impl ProgressIndicator, states: Vec<RemoteProgress>) {
         let mut existing = HashSet::new();
         for state in states {
             existing.insert(state.name.clone());
@@ -102,11 +102,10 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                 });
                 let mut upload_bar_tracker = UploadProgressBarTracker::default();
                 while !canceled.load(Ordering::Acquire) {
-                    let upload_state = deps.get_artifact_upload_progress()?;
-                    upload_bar_tracker.update(&ind, upload_state);
+                    let introspect_resp = deps.introspect()?;
+                    upload_bar_tracker.update(&ind, introspect_resp.artifact_uploads);
 
-                    let counts = deps.get_job_state_counts()?;
-                    if !ind.update_job_states(counts)? {
+                    if !ind.update_job_states(introspect_resp.job_state_counts)? {
                         break;
                     }
 

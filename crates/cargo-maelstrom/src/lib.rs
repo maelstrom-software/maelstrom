@@ -20,12 +20,11 @@ use cargo_metadata::{
 use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{
-    stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, NonEmpty,
-    Sha256Digest, Timeout,
+    ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, NonEmpty, Sha256Digest, Timeout,
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir,
+    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };
 use maelstrom_util::{
@@ -577,9 +576,7 @@ impl Wait for cargo::WaitHandle {
 pub trait MainAppDeps: Sync {
     fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
 
-    fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>>;
-
-    fn get_job_state_counts(&self) -> Result<JobStateCounts>;
+    fn introspect(&self) -> Result<IntrospectResponse>;
 
     fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig>;
 
@@ -668,12 +665,8 @@ impl MainAppDeps for DefaultMainAppDeps {
         self.client.add_layer(layer)
     }
 
-    fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
-        self.client.get_artifact_upload_progress()
-    }
-
-    fn get_job_state_counts(&self) -> Result<JobStateCounts> {
-        self.client.get_job_state_counts()
+    fn introspect(&self) -> Result<IntrospectResponse> {
+        self.client.introspect()
     }
 
     fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig> {

@@ -1,12 +1,10 @@
 pub use maelstrom_client_base::{
-    spec, ArtifactUploadProgress, CacheDir, ProjectDir, StateDir, MANIFEST_DIR,
+    spec, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
 use anyhow::{anyhow, bail, Context as _, Result};
-use maelstrom_base::{
-    stats::JobStateCounts, ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest,
-};
+use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, JobSpec, Sha256Digest};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
@@ -335,17 +333,10 @@ impl Client {
         Ok(())
     }
 
-    pub fn get_job_state_counts(&self) -> Result<JobStateCounts> {
+    pub fn introspect(&self) -> Result<IntrospectResponse> {
         self.send_sync(move |mut client| async move {
-            let res = client.get_job_state_counts(proto::Void {}).await?;
-            Ok(res.map(|v| TryFromProtoBuf::try_from_proto_buf(v.into_result()?)))
-        })
-    }
-
-    pub fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
-        self.send_sync(move |mut client| async move {
-            let res = client.get_artifact_upload_progress(proto::Void {}).await?;
-            Ok(res.map(|v| TryFromProtoBuf::try_from_proto_buf(v.into_result()?)))
+            let res = client.introspect(proto::Void {}).await?;
+            Ok(res.map(TryFromProtoBuf::try_from_proto_buf))
         })
     }
 }

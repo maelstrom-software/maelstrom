@@ -20,7 +20,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{ImageConfig, Layer},
-    ArtifactUploadProgress, StateDir,
+    IntrospectResponse, StateDir,
 };
 use maelstrom_test::digest;
 use maelstrom_util::{
@@ -279,11 +279,7 @@ impl MainAppDeps for TestMainAppDeps {
         Ok((digest!(42), ArtifactType::Manifest))
     }
 
-    fn get_artifact_upload_progress(&self) -> Result<Vec<ArtifactUploadProgress>> {
-        todo!()
-    }
-
-    fn get_job_state_counts(&self) -> Result<JobStateCounts> {
+    fn introspect(&self) -> Result<IntrospectResponse> {
         todo!()
     }
 

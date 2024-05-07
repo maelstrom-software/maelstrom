@@ -11,6 +11,7 @@ pub mod proto {
 extern crate self as maelstrom_client;
 
 use anyhow::{anyhow, Result};
+use enum_map::EnumMap;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
@@ -87,9 +88,18 @@ impl<V> IntoResult for Vec<V> {
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf)]
-#[proto(other_type = "proto::ArtifactUploadProgress")]
-pub struct ArtifactUploadProgress {
+#[proto(other_type = "proto::RemoteProgress")]
+pub struct RemoteProgress {
     pub name: String,
     pub size: u64,
     pub progress: u64,
+}
+
+#[derive(IntoProtoBuf, TryFromProtoBuf)]
+#[proto(other_type = "proto::IntrospectResponse")]
+pub struct IntrospectResponse {
+    #[proto(option)]
+    pub job_state_counts: EnumMap<maelstrom_base::stats::JobState, u64>,
+    pub artifact_uploads: Vec<RemoteProgress>,
+    pub image_downloads: Vec<RemoteProgress>,
 }

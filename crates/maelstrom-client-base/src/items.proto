@@ -236,18 +236,16 @@ message JobStateCounts {
     uint64 complete = 4;
 }
 
-message GetJobStateCountsResponse {
-    JobStateCounts counts = 1;
-}
-
-message ArtifactUploadProgress {
+message RemoteProgress {
     string name = 1;
     uint64 size = 2;
     uint64 progress = 3;
 }
 
-message GetArtifactUploadProgressResponse {
-    repeated ArtifactUploadProgress progress = 1;
+message IntrospectResponse {
+    repeated RemoteProgress artifact_uploads = 1;
+    repeated RemoteProgress image_downloads = 2;
+    JobStateCounts job_state_counts = 3;
 }
 
 service ClientProcess {
@@ -256,6 +254,5 @@ service ClientProcess {
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
     rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);
-    rpc GetJobStateCounts(Void) returns (GetJobStateCountsResponse);
-    rpc GetArtifactUploadProgress(Void) returns (GetArtifactUploadProgressResponse);
+    rpc Introspect(Void) returns (IntrospectResponse);
 }
