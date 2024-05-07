@@ -1232,7 +1232,7 @@ fn expected_count_updates_packages() {
 
     let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
     let test_listing_file = test_listing_file(&state_dir);
-    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
+    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove bar
@@ -1255,7 +1255,7 @@ fn expected_count_updates_packages() {
     );
 
     // new listing should match
-    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
+    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 
@@ -1283,7 +1283,7 @@ fn expected_count_updates_cases() {
 
     let state_dir = tmp_dir.join::<StateDir>("workspace/target/maelstrom/state");
     let test_listing_file = test_listing_file(&state_dir);
-    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
+    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
     assert_eq!(listing, fake_tests.listing());
 
     // remove the test
@@ -1303,7 +1303,7 @@ fn expected_count_updates_cases() {
     );
 
     // new listing should match
-    let listing: TestListing = load_test_listing(&fs, &test_listing_file).unwrap().unwrap();
+    let listing = load_test_listing(&fs, &test_listing_file).unwrap();
     assert_eq!(listing, fake_tests.listing());
 }
 

@@ -151,7 +151,7 @@ pub fn test_listing_file(state_dir: impl AsRef<Root<StateDir>>) -> RootBuf<TestL
     state_dir.as_ref().join("test-listing.toml")
 }
 
-pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<Option<TestListing>> {
+pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<TestListing> {
     if let Some(contents) = fs.read_to_string_if_exists(path)? {
         let mut table: toml::Table = toml::from_str(&contents)?;
         let version: TestListingVersion = table
@@ -159,12 +159,12 @@ pub fn load_test_listing(fs: &Fs, path: &Root<TestListingFile>) -> Result<Option
             .ok_or(anyhow!("missing version"))?
             .try_into()?;
         if version != TestListingVersion::default() {
-            Ok(None)
+            Ok(Default::default())
         } else {
             Ok(toml::from_str(&contents)?)
         }
     } else {
-        Ok(None)
+        Ok(Default::default())
     }
 }
 

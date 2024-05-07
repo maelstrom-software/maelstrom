@@ -759,8 +759,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         );
 
         let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
-        let mut test_listing =
-            load_test_listing(&Fs::new(), test_listing_file.as_ref())?.unwrap_or_default();
+        let mut test_listing = load_test_listing(&Fs::new(), test_listing_file.as_ref())?;
         test_listing.retain_packages(workspace_packages);
 
         let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
