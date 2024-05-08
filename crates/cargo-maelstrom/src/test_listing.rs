@@ -182,6 +182,23 @@ impl TestListing {
             .filter(|(p, a, c)| filter_case(p, a, c, filter))
             .count() as u64
     }
+
+    pub fn add_timing(
+        &mut self,
+        package_name: &str,
+        artifact_key: ArtifactKey,
+        case_name: &str,
+        timing: Duration,
+    ) {
+        const MAX_TIMINGS_PER_CASE: usize = 3;
+        let package = self.packages.entry(package_name.to_owned()).or_default();
+        let artifact = package.artifacts.entry(artifact_key).or_default();
+        let case = artifact.cases.entry(case_name.to_owned()).or_default();
+        case.push(timing);
+        while case.len() > MAX_TIMINGS_PER_CASE {
+            case.remove(0);
+        }
+    }
 }
 
 /*                    _ _     _
@@ -663,6 +680,116 @@ mod tests {
             5
         );
         assert_eq!(listing.expected_job_count(&"library".parse().unwrap()), 4);
+    }
+
+    #[test]
+    fn add_timing() {
+        let mut listing = TestListing::default();
+
+        listing.add_timing(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            "case-1-1L-1",
+            millis!(10),
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-1-1L-1", [millis!(10)])]),
+                )]),
+            )]),
+        );
+
+        listing.add_timing(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            "case-1-1L-1",
+            millis!(11),
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-1-1L-1", [millis!(10), millis!(11)])]),
+                )]),
+            )]),
+        );
+
+        listing.add_timing(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            "case-1-1L-1",
+            millis!(12),
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-1-1L-1", [millis!(10), millis!(11), millis!(12)])]),
+                )]),
+            )]),
+        );
+
+        listing.add_timing(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            "case-1-1L-1",
+            millis!(13),
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-1-1L-1", [millis!(11), millis!(12), millis!(13)])]),
+                )]),
+            )]),
+        );
+    }
+
+    #[test]
+    fn add_timing_already_too_many() {
+        let mut listing = TestListing::from_iter([(
+            "package-1",
+            Package::from_iter([(
+                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                Artifact::from_iter([(
+                    "case-1-1L-1",
+                    [
+                        millis!(10),
+                        millis!(11),
+                        millis!(12),
+                        millis!(13),
+                        millis!(14),
+                    ],
+                )]),
+            )]),
+        )]);
+
+        listing.add_timing(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            "case-1-1L-1",
+            millis!(15),
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-1-1L-1", [millis!(13), millis!(14), millis!(15)])]),
+                )]),
+            )]),
+        );
     }
 
     #[test]
