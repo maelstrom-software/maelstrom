@@ -89,5 +89,7 @@ fn main() {
         b = b.field_attribute(name, &format!("#[proto({attrs})]"));
     }
 
+    b = b.btree_map(["EnvironmentSpec.vars"]);
+
     b.compile(&["src/items.proto"], &["src/"]).unwrap();
 }
