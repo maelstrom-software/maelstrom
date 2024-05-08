@@ -39,8 +39,10 @@ impl ArtifactKey {
             kind,
         }
     }
+}
 
-    pub fn from_target(target: &CargoTarget) -> Self {
+impl From<&CargoTarget> for ArtifactKey {
+    fn from(target: &CargoTarget) -> Self {
         Self::new(&target.name, ArtifactKind::from_target(target))
     }
 }
@@ -85,19 +87,16 @@ impl<K: Into<String>, V: Into<Package>> FromIterator<(K, V)> for TestListing {
 }
 
 impl TestListing {
-    pub fn update_artifact_cases<T, A>(
-        &mut self,
-        package_name: &str,
-        artifact_key: ArtifactKey,
-        cases: T,
-    ) where
-        T: IntoIterator<Item = A>,
-        A: Into<String>,
+    pub fn update_artifact_cases<K, I, T>(&mut self, package_name: &str, artifact_key: K, cases: I)
+    where
+        K: Into<ArtifactKey>,
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
     {
         let package = self.packages.entry(package_name.into()).or_default();
         package
             .artifacts
-            .insert(artifact_key, Artifact::from_iter(cases));
+            .insert(artifact_key.into(), Artifact::from_iter(cases));
     }
 
     pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
@@ -141,7 +140,7 @@ impl TestListing {
             let existing_artifacts: HashSet<_> = existing_package
                 .targets
                 .iter()
-                .map(ArtifactKey::from_target)
+                .map(ArtifactKey::from)
                 .collect();
             pkg.artifacts
                 .retain(|key, _| existing_artifacts.contains(key));

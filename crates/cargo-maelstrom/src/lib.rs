@@ -51,7 +51,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{ArtifactKey, TestListing, TestListingStore};
+use test_listing::{TestListing, TestListingStore};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -216,11 +216,10 @@ fn list_test_cases(
     let mut cases = deps.get_cases_from_binary(&binary, &None)?;
 
     let mut listing = queuing_state.test_listing.lock().unwrap();
-    listing.as_mut().unwrap().update_artifact_cases(
-        package_name,
-        ArtifactKey::from_target(&artifact.target),
-        &cases,
-    );
+    listing
+        .as_mut()
+        .unwrap()
+        .update_artifact_cases(package_name, &artifact.target, &cases);
 
     cases.retain(|c| filter_case(package_name, artifact, c, &queuing_state.filter));
     Ok(TestListingResult {
