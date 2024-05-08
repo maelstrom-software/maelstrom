@@ -115,6 +115,7 @@ message JobSpec {
     uint32 user = 13;
     uint32 group = 14;
     optional uint32 timeout = 15;
+    optional Duration estimated_duration = 16;
 }
 
 message RunJobRequest {

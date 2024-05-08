@@ -14,6 +14,7 @@ use maelstrom_base::{
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
+use std::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap},
     env::{self, VarError},
@@ -182,6 +183,7 @@ pub struct JobSpec {
     pub user: UserId,
     pub group: GroupId,
     pub timeout: Option<Timeout>,
+    pub estimated_duration: Option<Duration>,
 }
 
 impl JobSpec {
@@ -203,6 +205,7 @@ impl JobSpec {
             user: UserId::from(0),
             group: GroupId::from(0),
             timeout: None,
+            estimated_duration: None,
         }
     }
 

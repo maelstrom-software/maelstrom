@@ -137,6 +137,7 @@ impl Job {
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
             timeout: self.timeout.and_then(Timeout::new),
+            estimated_duration: None,
         })
     }
 }

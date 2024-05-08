@@ -408,6 +408,7 @@ where
                 user: test_metadata.user,
                 group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
+                estimated_duration: None,
             },
             move |res| visitor.job_finished(res),
         )?;
