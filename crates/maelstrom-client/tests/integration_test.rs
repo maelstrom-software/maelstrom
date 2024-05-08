@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use maelstrom_base::{
-    ArtifactType, GroupId, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus,
-    Sha256Digest, UserId, Utf8Path, Utf8PathBuf,
+    ArtifactType, JobCompleted, JobEffects, JobOutcome, JobOutputResult, JobStatus, Sha256Digest,
+    Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
@@ -107,25 +107,12 @@ impl ClientFixture {
     fn run_job(&self, added_layers: Vec<(Sha256Digest, ArtifactType)>) -> String {
         let mut layers = self.layers.clone();
         layers.extend(added_layers);
-        let spec = JobSpec {
-            program: self.self_path.clone(),
-            arguments: vec!["--exact".into(), "single_test".into(), "--nocapture".into()],
-            image: None,
-            environment: vec![[
+        let spec = JobSpec::new(self.self_path.clone(), layers)
+            .arguments(["--exact", "single_test", "--nocapture"])
+            .environment([
                 ("INSIDE_JOB", "yes"),
                 ("TEST_LINE", &self.test_line.to_string()),
-            ]
-            .into()],
-            layers: layers.try_into().unwrap(),
-            devices: Default::default(),
-            mounts: vec![],
-            enable_loopback: false,
-            enable_writable_file_system: false,
-            working_directory: Some("/".into()),
-            user: UserId::new(0),
-            group: GroupId::new(0),
-            timeout: None,
-        };
+            ]);
         let (send, recv) = std::sync::mpsc::channel();
         self.client
             .add_job(spec, move |res| send.send(res).unwrap())

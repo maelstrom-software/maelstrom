@@ -447,7 +447,7 @@ mod test {
             .unwrap(),
             JobSpec::new("program", nonempty![(digest!(1), ArtifactType::Tar)])
                 .arguments(["arg1", "arg2"])
-                .environment([[("BAR", "bar"), ("FOO", "foo")].into()])
+                .environment([("BAR", "bar"), ("FOO", "foo")])
                 .devices(enum_set! {JobDevice::Null})
                 .mounts([JobMount {
                     fs_type: JobMountFsType::Tmp,
@@ -770,7 +770,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("BAR", "bar"), ("FOO", "foo")].into()]),
+            .environment([("BAR", "bar"), ("FOO", "foo")]),
         )
     }
 
@@ -791,7 +791,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("BAR", "bar"), ("FOO", "pre-foo-env-post")].into()]),
+            .environment([("BAR", "bar"), ("FOO", "pre-foo-env-post")]),
         )
     }
 
@@ -812,7 +812,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("BAR", "bar"), ("FOO", "pre-no-prev-post")].into()]),
+            .environment([("BAR", "bar"), ("FOO", "pre-no-prev-post")]),
         )
     }
 
@@ -833,7 +833,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("BAZ", "image-baz"), ("FOO", "image-foo")].into()]),
+            .environment([("BAZ", "image-baz"), ("FOO", "image-foo")]),
         )
     }
 
@@ -854,7 +854,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("PATH", "$env{PATH}")].into()]),
+            .environment([("PATH", "$env{PATH}")]),
         )
     }
 
@@ -908,7 +908,7 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[("BAR", "bar"), ("BAZ", "image-baz"), ("FOO", "foo")].into()]),
+            .environment([("BAR", "bar"), ("BAZ", "image-baz"), ("FOO", "foo")]),
         )
     }
 
@@ -934,12 +934,11 @@ mod test {
                 string!("/bin/sh"),
                 nonempty![(digest!(1), ArtifactType::Tar)]
             )
-            .environment([[
+            .environment([
                 ("BAR", "no-env-bar:no-prev-bar"),
                 ("BAZ", "no-env-baz:image-baz"),
                 ("FOO", "foo-env:image-foo"),
-            ]
-            .into()]),
+            ]),
         )
     }
 

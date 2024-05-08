@@ -15,7 +15,7 @@ use maelstrom_base::{
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     env::{self, VarError},
     path::PathBuf,
     result,
@@ -62,19 +62,61 @@ pub struct EnvironmentSpec {
     pub extend: bool,
 }
 
-impl<KeyT, ValueT, IterT> From<IterT> for EnvironmentSpec
+pub trait IntoEnvironment {
+    fn into_environment(self) -> Vec<EnvironmentSpec>;
+}
+
+impl IntoEnvironment for Vec<EnvironmentSpec> {
+    fn into_environment(self) -> Self {
+        self
+    }
+}
+
+impl IntoEnvironment for EnvironmentSpec {
+    fn into_environment(self) -> Vec<Self> {
+        vec![self]
+    }
+}
+
+impl<KeyT, ValueT, const N: usize> IntoEnvironment for [(KeyT, ValueT); N]
 where
-    IterT: IntoIterator<Item = (KeyT, ValueT)>,
     KeyT: Into<String>,
     ValueT: Into<String>,
 {
-    fn from(i: IterT) -> Self {
-        Self {
-            vars: i.into_iter().map(|(k, v)| (k.into(), v.into())).collect(),
+    fn into_environment(self) -> Vec<EnvironmentSpec> {
+        vec![EnvironmentSpec {
+            vars: self
+                .into_iter()
+                .map(|(k, v)| (k.into(), v.into()))
+                .collect(),
             extend: false,
-        }
+        }]
     }
 }
+
+macro_rules! into_env_container {
+    ($container:ty) => {
+        impl<KeyT, ValueT> IntoEnvironment for $container
+        where
+            KeyT: Into<String>,
+            ValueT: Into<String>,
+        {
+            fn into_environment(self) -> Vec<EnvironmentSpec> {
+                vec![EnvironmentSpec {
+                    vars: self
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect(),
+                    extend: false,
+                }]
+            }
+        }
+    };
+}
+
+into_env_container!(Vec<(KeyT, ValueT)>);
+into_env_container!(BTreeMap<KeyT, ValueT>);
+into_env_container!(HashMap<KeyT, ValueT>);
 
 pub fn environment_eval(
     env: Vec<EnvironmentSpec>,
@@ -162,11 +204,8 @@ impl JobSpec {
         self
     }
 
-    pub fn environment<IterT>(mut self, environment: IterT) -> Self
-    where
-        IterT: IntoIterator<Item = EnvironmentSpec>,
-    {
-        self.environment = environment.into_iter().collect();
+    pub fn environment(mut self, environment: impl IntoEnvironment) -> Self {
+        self.environment = environment.into_environment();
         self
     }
 
