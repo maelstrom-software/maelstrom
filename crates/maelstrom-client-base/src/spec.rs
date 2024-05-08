@@ -76,6 +76,43 @@ where
     }
 }
 
+pub fn environment_eval(
+    env: Vec<EnvironmentSpec>,
+    env_lookup: impl Fn(&str) -> Result<Option<String>>,
+) -> Result<Vec<String>> {
+    fn substitute_environment(
+        env_lookup: impl Fn(&str) -> Result<Option<String>>,
+        prev: &BTreeMap<String, String>,
+        new: &BTreeMap<String, String>,
+    ) -> Result<Vec<(String, String)>> {
+        new.iter()
+            .map(|(k, v)| {
+                substitute::substitute(v, &env_lookup, |var| prev.get(var).map(String::as_str))
+                    .map(|v| (k.clone(), String::from(v)))
+                    .map_err(Error::new)
+            })
+            .collect()
+    }
+    let mut running_env = BTreeMap::new();
+    for entry in env {
+        if entry.extend {
+            running_env.extend(substitute_environment(
+                &env_lookup,
+                &running_env,
+                &entry.vars,
+            )?);
+        } else {
+            running_env = substitute_environment(&env_lookup, &running_env, &entry.vars)?
+                .into_iter()
+                .collect();
+        }
+    }
+    Ok(running_env
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect())
+}
+
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[proto(other_type = "proto::JobSpec")]
 pub struct JobSpec {
@@ -411,6 +448,7 @@ impl<'a> ImageOption<'a> {
 mod test {
     use super::*;
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer};
+    use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
 
     #[test]
@@ -521,5 +559,75 @@ mod test {
             err,
             r#"image invalid-layer-path has a non-UTF-8 layer path "\xFF""#,
         );
+    }
+
+    fn env_test(
+        input: Vec<(BTreeMap<&'static str, &'static str>, bool)>,
+        expected: Vec<&'static str>,
+    ) {
+        let test_env: BTreeMap<String, String> = btreemap! {
+            "FOO".into() => "bar".into(),
+        };
+        let res = environment_eval(
+            input
+                .into_iter()
+                .map(|(vars, extend)| EnvironmentSpec {
+                    vars: vars
+                        .into_iter()
+                        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                        .collect(),
+                    extend,
+                })
+                .collect(),
+            |k| Ok(test_env.get(k).cloned()),
+        )
+        .unwrap();
+        assert_eq!(
+            res,
+            Vec::from_iter(expected.into_iter().map(ToOwned::to_owned))
+        );
+    }
+
+    #[test]
+    fn environment_eval_env() {
+        env_test(
+            vec![(btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false)],
+            vec!["BAR=baz", "FOO=bar"],
+        )
+    }
+
+    #[test]
+    fn environment_eval_prev() {
+        env_test(
+            vec![
+                (btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false),
+                (btreemap! { "BAZ" => "$prev{FOO}" }, true),
+            ],
+            vec!["BAR=baz", "BAZ=bar", "FOO=bar"],
+        )
+    }
+
+    #[test]
+    fn environment_eval_env_extend_false() {
+        env_test(
+            vec![
+                (btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false),
+                (btreemap! { "BAZ" => "$prev{FOO}" }, false),
+            ],
+            vec!["BAZ=bar"],
+        )
+    }
+
+    #[test]
+    fn environment_eval_env_extend_false_mixed() {
+        env_test(
+            vec![
+                (btreemap! { "A" => "1" }, true),
+                (btreemap! { "B" => "$prev{A}" }, false),
+                (btreemap! { "C" => "$prev{B}" }, true),
+                (btreemap! { "D" => "$prev{C}" }, false),
+            ],
+            vec!["D=1"],
+        )
     }
 }

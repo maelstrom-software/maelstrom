@@ -26,6 +26,7 @@ tonic.workspace = true
 tuple.workspace = true
 
 [dev-dependencies]
+maplit.workspace = true
 maelstrom-test.workspace = true
 
 [build-dependencies]

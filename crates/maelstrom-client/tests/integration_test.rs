@@ -111,10 +111,11 @@ impl ClientFixture {
             program: self.self_path.clone(),
             arguments: vec!["--exact".into(), "single_test".into(), "--nocapture".into()],
             image: None,
-            environment: vec![
-                [("INSIDE_JOB", "yes")].into(),
-                [("TEST_LINE".to_owned(), self.test_line.to_string())].into(),
-            ],
+            environment: vec![[
+                ("INSIDE_JOB", "yes"),
+                ("TEST_LINE", &self.test_line.to_string()),
+            ]
+            .into()],
             layers: layers.try_into().unwrap(),
             devices: Default::default(),
             mounts: vec![],

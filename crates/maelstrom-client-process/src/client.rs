@@ -10,7 +10,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{JobSpec, Layer},
+    spec::{environment_eval, std_env_lookup, JobSpec, Layer},
     CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
@@ -428,15 +428,7 @@ impl Client {
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: spec
-                .environment
-                .into_iter()
-                .flat_map(|s| {
-                    s.vars
-                        .into_iter()
-                        .map(|(key, value)| format!("{key}={value}"))
-                })
-                .collect(),
+            environment: environment_eval(spec.environment, std_env_lookup)?,
             layers: spec
                 .layers
                 .try_into()
