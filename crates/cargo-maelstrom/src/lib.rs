@@ -21,7 +21,7 @@ use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
 use maelstrom_client::{
-    spec::{EnvironmentSpec, ImageConfig, JobSpec, Layer},
+    spec::{ImageConfig, JobSpec, Layer},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };
@@ -398,10 +398,7 @@ where
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
                 image: None,
-                environment: vec![EnvironmentSpec {
-                    vars: test_metadata.environment,
-                    extend: true,
-                }],
+                environment: test_metadata.environment,
                 layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
