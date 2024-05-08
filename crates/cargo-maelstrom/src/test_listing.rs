@@ -15,6 +15,7 @@ use serde_with::{serde_as, FromInto};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::Path,
+    time::Duration,
 };
 
 /*  _
@@ -162,12 +163,18 @@ impl TestListing {
 #[derive(Deserialize_repr, Eq, FromPrimitive, PartialEq, Serialize_repr)]
 #[repr(u32)]
 enum OnDiskTestListingVersion {
-    V1 = 1,
+    V2 = 2,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct OnDiskArtifactCase {
+    name: String,
+    timings: Vec<Duration>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 struct OnDiskArtifactCases {
-    cases: Vec<String>,
+    cases: Vec<OnDiskArtifactCase>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -215,7 +222,7 @@ struct OnDiskTestListing {
 impl From<TestListing> for OnDiskTestListing {
     fn from(in_memory: TestListing) -> Self {
         Self {
-            version: OnDiskTestListingVersion::V1,
+            version: OnDiskTestListingVersion::V2,
             packages: in_memory
                 .packages
                 .into_iter()
@@ -231,9 +238,16 @@ impl From<TestListing> for OnDiskTestListing {
                                         artifact_key,
                                         OnDiskArtifactCases {
                                             cases: {
-                                                let mut cases = Vec::from_iter(artifact.cases);
+                                                let mut cases =
+                                                    Vec::<String>::from_iter(artifact.cases);
                                                 cases.sort();
                                                 cases
+                                                    .into_iter()
+                                                    .map(|name| OnDiskArtifactCase {
+                                                        name,
+                                                        timings: vec![],
+                                                    })
+                                                    .collect()
                                             },
                                         },
                                     )
@@ -253,7 +267,12 @@ impl From<OnDiskTestListing> for TestListing {
             (
                 package_name,
                 Package::from_iter(package.artifacts.into_iter().map(
-                    |(artifact_key, artifact)| (artifact_key, Artifact::from_iter(artifact.cases)),
+                    |(artifact_key, artifact)| {
+                        (
+                            artifact_key,
+                            Artifact::from_iter(artifact.cases.into_iter().map(|case| case.name)),
+                        )
+                    },
                 )),
             )
         }))
@@ -327,7 +346,7 @@ impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
         };
         match OnDiskTestListingVersion::from_i64(version) {
             None => Ok(Default::default()),
-            Some(OnDiskTestListingVersion::V1) => {
+            Some(OnDiskTestListingVersion::V2) => {
                 Ok(toml::from_str::<OnDiskTestListing>(&contents)?.into())
             }
         }
@@ -659,15 +678,19 @@ mod tests {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some(
                     indoc! {r#"
-                        version = 1
+                        version = 2
 
                         [[package1.artifacts]]
                         name = "package1"
                         kind = "Library"
-                        cases = [
-                            "case1",
-                            "case2",
-                        ]
+
+                        [[package1.artifacts.cases]]
+                        name = "case1"
+                        timings = []
+
+                        [[package1.artifacts.cases]]
+                        name = "case2"
+                        timings = []
                     "#}
                     .into(),
                 ))
@@ -691,7 +714,7 @@ mod tests {
             fn read_to_string_if_exists(&self, _: impl AsRef<Path>) -> Result<Option<String>> {
                 Ok(Some(
                     indoc! {r#"
-                        version = 1
+                        version = 2
 
                         [[frob.blah]]
                         foo = "package1"
@@ -786,7 +809,7 @@ mod tests {
             deps.borrow().write,
             Some((
                 format!("maelstrom/state/{TEST_LISTING_FILE}"),
-                "version = 1\n".into()
+                "version = 2\n".into()
             ))
         );
     }
@@ -808,15 +831,19 @@ mod tests {
             Some((
                 format!("maelstrom/state/{TEST_LISTING_FILE}"),
                 indoc! {r#"
-                    version = 1
+                    version = 2
 
                     [[package1.artifacts]]
                     name = "package1"
                     kind = "Library"
-                    cases = [
-                        "case1",
-                        "case2",
-                    ]
+
+                    [[package1.artifacts.cases]]
+                    name = "case1"
+                    timings = []
+
+                    [[package1.artifacts.cases]]
+                    name = "case2"
+                    timings = []
                 "#}
                 .into()
             ))
