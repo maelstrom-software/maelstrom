@@ -1,24 +1,32 @@
 use crate::pattern::parser::*;
 use cargo_metadata::Target as CargoTarget;
 use serde::{Deserialize, Serialize};
-use std::fmt;
+use strum::{Display, EnumString};
 
 #[cfg(test)]
 use crate::parse_str;
 
-#[derive(Copy, Clone, Hash, PartialOrd, Ord, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Hash,
+    PartialOrd,
+    Ord,
+    PartialEq,
+    Eq,
+    Debug,
+    Serialize,
+    Deserialize,
+    EnumString,
+    Display,
+)]
+#[strum(serialize_all = "snake_case")]
 pub enum ArtifactKind {
     Library,
     Binary,
     Test,
     Benchmark,
     Example,
-}
-
-impl fmt::Display for ArtifactKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        format!("{:?}", self).to_lowercase().fmt(f)
-    }
 }
 
 impl ArtifactKind {

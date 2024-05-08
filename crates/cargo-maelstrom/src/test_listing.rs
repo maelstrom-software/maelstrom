@@ -11,10 +11,13 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive as _;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use serde_with::{serde_as, FromInto};
+use serde_with::{serde_as, DisplayFromStr, DurationSecondsWithFrac};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    fmt::{self, Display, Formatter},
     path::Path,
+    result,
+    str::FromStr,
     time::Duration,
 };
 
@@ -26,6 +29,9 @@ use std::{
  *                                                |___/
  *  FIGLET: in memory
  */
+
+const MISSING_RIGHT_PAREN: &str = "last character was not ')'";
+const MISSING_LEFT_PAREN: &str = "could not find opening '('";
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct ArtifactKey {
@@ -47,6 +53,28 @@ impl From<&CargoTarget> for ArtifactKey {
         Self::new(&target.name, ArtifactKind::from_target(target))
     }
 }
+
+impl Display for ArtifactKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        format!("{}({})", self.name, self.kind).fmt(f)
+    }
+}
+
+impl FromStr for ArtifactKey {
+    type Err = String;
+    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
+        let Some(s) = s.strip_suffix(')') else {
+            return Err(MISSING_RIGHT_PAREN.to_string());
+        };
+        let Some((name, kind)) = s.rsplit_once('(') else {
+            return Err(MISSING_LEFT_PAREN.to_string());
+        };
+        let kind = ArtifactKind::from_str(kind).map_err(|e| format!("{e}"))?;
+        let name = name.to_owned();
+        Ok(Self { name, kind })
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifact {
     pub cases: HashMap<String, Vec<Duration>>,
@@ -170,50 +198,33 @@ enum OnDiskTestListingVersion {
     V2 = 2,
 }
 
+#[serde_as]
 #[derive(Clone, Serialize, Deserialize)]
-struct OnDiskArtifactCase {
-    name: String,
+#[serde(transparent)]
+struct OnDiskArtifactTimings {
+    #[serde_as(as = "Vec<DurationSecondsWithFrac>")]
     timings: Vec<Duration>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct OnDiskArtifactCases {
-    cases: Vec<OnDiskArtifactCase>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct OnDiskArtifact {
-    #[serde(flatten)]
-    key: ArtifactKey,
-    #[serde(flatten)]
-    value: OnDiskArtifactCases,
-}
-
-#[derive(Serialize, Deserialize)]
 #[serde(transparent)]
-struct OnDiskArtifactVec(Vec<OnDiskArtifact>);
-
-impl From<OnDiskArtifactVec> for BTreeMap<ArtifactKey, OnDiskArtifactCases> {
-    fn from(v: OnDiskArtifactVec) -> Self {
-        v.0.into_iter().map(|a| (a.key, a.value)).collect()
-    }
+struct OnDiskArtifact {
+    cases: BTreeMap<String, OnDiskArtifactTimings>,
 }
 
-impl From<BTreeMap<ArtifactKey, OnDiskArtifactCases>> for OnDiskArtifactVec {
-    fn from(m: BTreeMap<ArtifactKey, OnDiskArtifactCases>) -> Self {
-        Self(
-            m.into_iter()
-                .map(|(key, value)| OnDiskArtifact { key, value })
-                .collect(),
-        )
-    }
+#[serde_as]
+#[derive(Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+struct OnDiskArtifactKey {
+    #[serde_as(as = "DisplayFromStr")]
+    key: ArtifactKey,
 }
 
 #[serde_as]
 #[derive(Serialize, Deserialize)]
+#[serde(transparent)]
 struct OnDiskPackage {
-    #[serde_as(as = "FromInto<OnDiskArtifactVec>")]
-    artifacts: BTreeMap<ArtifactKey, OnDiskArtifactCases>,
+    artifacts: BTreeMap<OnDiskArtifactKey, OnDiskArtifact>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -237,22 +248,24 @@ impl From<TestListing> for OnDiskTestListing {
                             artifacts: package
                                 .artifacts
                                 .into_iter()
-                                .map(|(artifact_key, artifact)| {
+                                .map(|(key, artifact)| {
                                     (
-                                        artifact_key,
-                                        OnDiskArtifactCases {
+                                        OnDiskArtifactKey { key },
+                                        OnDiskArtifact {
                                             cases: {
-                                                let mut cases = Vec::from_iter(artifact.cases);
+                                                let mut cases =
+                                                    Vec::from_iter(artifact.cases.into_iter().map(
+                                                        |(case, timings)| {
+                                                            (
+                                                                case,
+                                                                OnDiskArtifactTimings { timings },
+                                                            )
+                                                        },
+                                                    ));
                                                 cases.sort_by(|(name1, _), (name2, _)| {
                                                     name1.cmp(name2)
                                                 });
-                                                cases
-                                                    .into_iter()
-                                                    .map(|(name, timings)| OnDiskArtifactCase {
-                                                        name,
-                                                        timings,
-                                                    })
-                                                    .collect()
+                                                cases.into_iter().collect()
                                             },
                                         },
                                     )
@@ -271,19 +284,17 @@ impl From<OnDiskTestListing> for TestListing {
         Self::from_iter(on_disk.packages.into_iter().map(|(package_name, package)| {
             (
                 package_name,
-                Package::from_iter(package.artifacts.into_iter().map(
-                    |(artifact_key, artifact)| {
-                        (
-                            artifact_key,
-                            Artifact::from_iter(
-                                artifact
-                                    .cases
-                                    .into_iter()
-                                    .map(|case| (case.name, case.timings)),
-                            ),
-                        )
-                    },
-                )),
+                Package::from_iter(package.artifacts.into_iter().map(|(key, artifact)| {
+                    (
+                        key.key,
+                        Artifact::from_iter(
+                            artifact
+                                .cases
+                                .into_iter()
+                                .map(|(case, timings)| (case, timings.timings)),
+                        ),
+                    )
+                })),
             )
         }))
     }
@@ -367,7 +378,7 @@ impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
             .create_dir_all(self.test_listing_file.parent().unwrap())?;
         self.deps.write(
             &self.test_listing_file,
-            toml::to_string_pretty::<OnDiskTestListing>(&job_listing.into())?,
+            toml::to_string::<OnDiskTestListing>(&job_listing.into())?,
         )
     }
 }
@@ -384,6 +395,42 @@ mod tests {
         ($millis:expr) => {
             Duration::from_millis($millis)
         };
+    }
+
+    #[test]
+    fn artifact_key_display() {
+        let key = ArtifactKey::new("foo", ArtifactKind::Library);
+        assert_eq!(format!("{key}"), "foo(library)");
+    }
+
+    #[test]
+    fn artifact_key_from_str_empty_string() {
+        let err = ArtifactKey::from_str("").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
+    }
+
+    #[test]
+    fn artifact_key_from_str_no_right_paren() {
+        let err = ArtifactKey::from_str("foo bar").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
+    }
+
+    #[test]
+    fn artifact_key_from_str_no_left_paren() {
+        let err = ArtifactKey::from_str("bar)").unwrap_err();
+        assert_eq!(err.to_string(), MISSING_LEFT_PAREN);
+    }
+
+    #[test]
+    fn artifact_key_from_str_bad_kind() {
+        let err = ArtifactKey::from_str("foo(not-a-valid-kind)").unwrap_err();
+        assert_eq!(err.to_string(), "Matching variant not found");
+    }
+
+    #[test]
+    fn artifact_key_from_str_good() {
+        let key = ArtifactKey::from_str("foo(library)").unwrap();
+        assert_eq!(key, ArtifactKey::new("foo", ArtifactKind::Library));
     }
 
     #[test]
@@ -742,31 +789,10 @@ mod tests {
                     indoc! {r#"
                         version = 2
 
-                        [[package-1.artifacts]]
-                        name = "artifact-1"
-                        kind = "Library"
-
-                        [[package-1.artifacts.cases]]
-                        name = "case-1-1L-1"
-
-                        [[package-1.artifacts.cases.timings]]
-                        secs = 0
-                        nanos = 10000000
-
-                        [[package-1.artifacts.cases.timings]]
-                        secs = 0
-                        nanos = 11000000
-
-                        [[package-1.artifacts.cases]]
-                        name = "case-1-1L-2"
-
-                        [[package-1.artifacts.cases.timings]]
-                        secs = 0
-                        nanos = 20000000
-
-                        [[package-1.artifacts.cases]]
-                        name = "case-1-1L-3"
-                        timings = []
+                        [package-1."artifact-1(library)"]
+                        case-1-1L-1 = [0.01, 0.011]
+                        case-1-1L-2 = [0.02]
+                        case-1-1L-3 = []
                     "#}
                     .into(),
                 ))
@@ -935,65 +961,17 @@ mod tests {
             indoc! {r#"
                 version = 2
 
-                [[package-1.artifacts]]
-                name = "artifact-1"
-                kind = "Library"
+                [package-1."artifact-1(library)"]
+                case-1-1L-1 = [0.01, 0.011]
+                case-1-1L-2 = [0.02]
+                case-1-1L-3 = []
 
-                [[package-1.artifacts.cases]]
-                name = "case-1-1L-1"
+                [package-1."artifact-1(binary)"]
+                case-1-1B-1 = [0.015, 0.016]
+                case-1-1B-2 = []
 
-                [[package-1.artifacts.cases.timings]]
-                secs = 0
-                nanos = 10000000
-
-                [[package-1.artifacts.cases.timings]]
-                secs = 0
-                nanos = 11000000
-
-                [[package-1.artifacts.cases]]
-                name = "case-1-1L-2"
-
-                [[package-1.artifacts.cases.timings]]
-                secs = 0
-                nanos = 20000000
-
-                [[package-1.artifacts.cases]]
-                name = "case-1-1L-3"
-                timings = []
-
-                [[package-1.artifacts]]
-                name = "artifact-1"
-                kind = "Binary"
-
-                [[package-1.artifacts.cases]]
-                name = "case-1-1B-1"
-
-                [[package-1.artifacts.cases.timings]]
-                secs = 0
-                nanos = 15000000
-
-                [[package-1.artifacts.cases.timings]]
-                secs = 0
-                nanos = 16000000
-
-                [[package-1.artifacts.cases]]
-                name = "case-1-1B-2"
-                timings = []
-
-                [[package-2.artifacts]]
-                name = "artifact-1"
-                kind = "Library"
-
-                [[package-2.artifacts.cases]]
-                name = "case-2-1L-1"
-
-                [[package-2.artifacts.cases.timings]]
-                secs = 0
-                nanos = 10000000
-
-                [[package-2.artifacts.cases.timings]]
-                secs = 0
-                nanos = 12000000
+                [package-2."artifact-1(library)"]
+                case-2-1L-1 = [0.01, 0.012]
             "#},
         );
     }
