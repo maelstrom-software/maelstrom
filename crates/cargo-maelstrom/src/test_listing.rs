@@ -504,6 +504,40 @@ mod tests {
     }
 
     #[test]
+    fn expected_job_count() {
+        let listing = TestListing::from_iter([
+            (
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
+                        Artifact::from_iter(["case-1-1-1", "case-1-1-2", "case-1-1-3"]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1-2", ArtifactKind::Binary),
+                        Artifact::from_iter(["case-1-2-1", "case-1-2-2"]),
+                    ),
+                ]),
+            ),
+            (
+                "package-2",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-2-1", ArtifactKind::Library),
+                    Artifact::from_iter(["case-2-1-1"]),
+                )]),
+            ),
+        ]);
+
+        assert_eq!(listing.expected_job_count(&"all".parse().unwrap()), 6);
+        assert_eq!(listing.expected_job_count(&"none".parse().unwrap()), 0);
+        assert_eq!(
+            listing.expected_job_count(&"package.eq(package-1)".parse().unwrap()),
+            5
+        );
+        assert_eq!(listing.expected_job_count(&"library".parse().unwrap()), 4);
+    }
+
+    #[test]
     fn load_passes_proper_path() {
         struct Deps;
         impl TestListingStoreDeps for Deps {
