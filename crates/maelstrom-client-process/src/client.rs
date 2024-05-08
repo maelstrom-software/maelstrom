@@ -474,6 +474,7 @@ impl Client {
             user: spec.user,
             group: spec.group,
             timeout: spec.timeout,
+            estimated_duration: spec.estimated_duration,
         };
         state
             .local_broker_sender

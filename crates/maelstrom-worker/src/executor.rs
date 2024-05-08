@@ -82,6 +82,7 @@ impl JobSpec {
             user,
             group,
             timeout,
+            estimated_duration: _,
         } = spec;
         JobSpec {
             program,
