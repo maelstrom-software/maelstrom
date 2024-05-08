@@ -51,7 +51,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{TestListing, TestListingStore};
+use test_listing::{ArtifactKey, TestListing, TestListingStore};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -120,7 +120,7 @@ struct JobQueuingState {
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata,
     expected_job_count: u64,
-    test_listing: Mutex<Option<TestListing>>,
+    test_listing: Arc<Mutex<Option<TestListing>>>,
     list_action: Option<ListAction>,
     feature_selection_options: FeatureSelectionOptions,
     compilation_options: CompilationOptions,
@@ -156,7 +156,7 @@ impl JobQueuingState {
             jobs_queued: AtomicU64::new(0),
             test_metadata,
             expected_job_count,
-            test_listing: Mutex::new(Some(test_listing)),
+            test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
             feature_selection_options,
             compilation_options,
@@ -377,6 +377,10 @@ where
 
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
+            self.queuing_state.test_listing.clone(),
+            self.package_name.clone(),
+            ArtifactKey::from(&self.artifact.target),
+            case.to_owned(),
             case_str.clone(),
             self.width,
             self.ind.clone(),

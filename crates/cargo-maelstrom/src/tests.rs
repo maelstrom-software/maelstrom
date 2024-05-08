@@ -3,7 +3,7 @@ use crate::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
-    test_listing::{Artifact, ArtifactKey, ArtifactKind, Package, TestListing, TestListingStore},
+    test_listing::{ArtifactKey, ArtifactKind, TestListing, TestListingStore},
     EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
     WorkspaceDir,
 };
@@ -25,12 +25,14 @@ use maelstrom_util::{
     log::test_logger,
     root::{Root, RootBuf},
 };
-use std::collections::HashSet;
+use pretty_assertions::assert_eq;
 use std::{
     cell::RefCell,
+    collections::HashSet,
     path::Path,
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
+    time::Duration,
 };
 use tempfile::tempdir;
 
@@ -40,6 +42,17 @@ struct FakeTestCase {
     ignored: bool,
     desired_state: JobState,
     outcome: JobOutcome,
+}
+
+impl FakeTestCase {
+    fn timing(&self) -> Duration {
+        let (JobOutcome::TimedOut(JobEffects { duration, .. })
+        | JobOutcome::Completed(JobCompleted {
+            effects: JobEffects { duration, .. },
+            ..
+        })) = self.outcome;
+        duration.clone()
+    }
 }
 
 impl Default for FakeTestCase {
@@ -66,6 +79,12 @@ struct FakeTestBinary {
     tests: Vec<FakeTestCase>,
 }
 
+impl FakeTestBinary {
+    fn artifact_key(&self) -> ArtifactKey {
+        ArtifactKey::new(&self.name, ArtifactKind::Library)
+    }
+}
+
 #[derive(Clone)]
 struct FakeTests {
     test_binaries: Vec<FakeTestBinary>,
@@ -81,16 +100,33 @@ impl FakeTests {
         }
     }
 
+    fn update_listing(&self, listing: &mut TestListing) {
+        listing.retain_packages_and_artifacts(
+            self.test_binaries
+                .iter()
+                .map(|binary| (binary.name.as_str(), [binary.artifact_key()])),
+        );
+        for binary in &self.test_binaries {
+            listing.update_artifact_cases(
+                &binary.name,
+                binary.artifact_key(),
+                binary.tests.iter().map(|case| &case.name),
+            );
+            for case in &binary.tests {
+                listing.add_timing(
+                    &binary.name,
+                    binary.artifact_key(),
+                    &case.name,
+                    case.timing(),
+                );
+            }
+        }
+    }
+
     fn listing(&self) -> TestListing {
-        TestListing::from_iter(self.test_binaries.iter().map(|b| {
-            (
-                &b.name,
-                Package::from_iter([(
-                    ArtifactKey::new(&b.name, ArtifactKind::Library),
-                    Artifact::from_iter(b.tests.iter().map(|t| (&t.name, []))),
-                )]),
-            )
-        }))
+        let mut listing = TestListing::default();
+        self.update_listing(&mut listing);
+        listing
     }
 
     fn packages(&self) -> Vec<CargoPackage> {
@@ -1197,6 +1233,11 @@ fn expected_count_updates_packages() {
                 name: "bar".into(),
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
+                    outcome: JobOutcome::TimedOut(JobEffects {
+                        stdout: JobOutputResult::None,
+                        stderr: JobOutputResult::None,
+                        duration: std::time::Duration::from_secs(1),
+                    }),
                     ..Default::default()
                 }],
             },
@@ -1215,7 +1256,8 @@ fn expected_count_updates_packages() {
         &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
-    assert_eq!(listing, fake_tests.listing());
+    let mut expected_listing = fake_tests.listing();
+    assert_eq!(listing, expected_listing);
 
     // remove bar
     let fake_tests = FakeTests {
@@ -1238,7 +1280,8 @@ fn expected_count_updates_packages() {
 
     // new listing should match
     let listing = test_listing_store.load().unwrap();
-    assert_eq!(listing, fake_tests.listing());
+    fake_tests.update_listing(&mut expected_listing);
+    assert_eq!(listing, expected_listing);
 }
 
 #[test]
@@ -1267,7 +1310,8 @@ fn expected_count_updates_cases() {
         &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
-    assert_eq!(listing, fake_tests.listing());
+    let mut expected_listing = fake_tests.listing();
+    assert_eq!(listing, expected_listing);
 
     // remove the test
     let fake_tests = FakeTests {
@@ -1287,7 +1331,8 @@ fn expected_count_updates_cases() {
 
     // new listing should match
     let listing = test_listing_store.load().unwrap();
-    assert_eq!(listing, fake_tests.listing());
+    fake_tests.update_listing(&mut expected_listing);
+    assert_eq!(listing, expected_listing);
 }
 
 #[test]

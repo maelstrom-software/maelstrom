@@ -1,3 +1,4 @@
+use crate::test_listing::{ArtifactKey, TestListing};
 use crate::ProgressIndicator;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
@@ -128,21 +129,34 @@ impl JobStatusTracker {
 
 pub struct JobStatusVisitor<ProgressIndicatorT> {
     tracker: Arc<JobStatusTracker>,
+    test_listing: Arc<Mutex<Option<TestListing>>>,
+    package: String,
+    artifact: ArtifactKey,
     case: String,
+    case_str: String,
     width: usize,
     ind: ProgressIndicatorT,
 }
 
 impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
+        test_listing: Arc<Mutex<Option<TestListing>>>,
+        package: String,
+        artifact: ArtifactKey,
         case: String,
+        case_str: String,
         width: usize,
         ind: ProgressIndicatorT,
     ) -> Self {
         Self {
             tracker,
+            test_listing,
+            package,
+            artifact,
             case,
+            case_str,
             width,
             ind,
         }
@@ -169,12 +183,12 @@ fn format_test_output(res: &JobOutputResult, name: &str, cjid: ClientJobId) -> V
 impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
     fn print_job_result(&self, result_str: ColoredString, duration_str: String) {
         if self.width > 10 {
-            let case_width = self.case.width();
+            let case_width = self.case_str.width();
             let trailer_str = format!("{result_str} {duration_str:>8}");
             let trailer_width = result_str.width() + 1 + std::cmp::max(duration_str.width(), 8);
             if case_width + trailer_width < self.width {
                 let dots_width = self.width - trailer_width - case_width;
-                let case = self.case.bold();
+                let case = self.case_str.bold();
 
                 self.ind.println(format!(
                     "{case}{empty:.<dots_width$}{trailer_str}",
@@ -182,7 +196,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                 ));
             } else {
                 let (case, case_width) = self
-                    .case
+                    .case_str
                     .unicode_truncate_start(self.width - 2 - trailer_width);
                 let case = case.bold();
                 let dots_width = self.width - trailer_width - case_width - 1;
@@ -193,7 +207,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
             }
         } else {
             self.ind
-                .println(format!("{case} {result_str}", case = self.case));
+                .println(format!("{case} {result_str}", case = self.case_str));
         }
     }
 
@@ -213,7 +227,6 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                             stdout,
                             stderr,
                             duration,
-                            ..
                         },
                 })),
             )) => {
@@ -228,45 +241,74 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                             "FAIL".red()
                         };
                         self.tracker
-                            .job_exited(self.case.clone(), ExitCode::from(code));
+                            .job_exited(self.case_str.clone(), ExitCode::from(code));
                     }
                     JobStatus::Signaled(signo) => {
                         result_str = "FAIL".red();
                         result_details = Some(format!("killed by signal {signo}"));
                         self.tracker
-                            .job_exited(self.case.clone(), ExitCode::FAILURE);
+                            .job_exited(self.case_str.clone(), ExitCode::FAILURE);
                     }
                 };
                 if job_failed {
                     test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
                     test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
                 }
+                self.test_listing
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .add_timing(
+                        self.package.as_str(),
+                        self.artifact.clone(),
+                        self.case.as_str(),
+                        duration,
+                    );
             }
-            Ok((cjid, Ok(JobOutcome::TimedOut(JobEffects { stdout, stderr, .. })))) => {
+            Ok((
+                cjid,
+                Ok(JobOutcome::TimedOut(JobEffects {
+                    stdout,
+                    stderr,
+                    duration,
+                })),
+            )) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
                 self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
                 test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
                 test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
+                self.test_listing
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .add_timing(
+                        self.package.as_str(),
+                        self.artifact.clone(),
+                        self.case.as_str(),
+                        duration,
+                    );
             }
             Ok((_, Err(JobError::Execution(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
                 self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
             }
             Ok((_, Err(JobError::System(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("system error: {err}"));
                 self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
             }
             Err(err) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("remote error: {err}"));
                 self.tracker
-                    .job_exited(self.case.clone(), ExitCode::FAILURE);
+                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
             }
         }
         self.print_job_result(result_str, duration_str);
@@ -285,7 +327,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
 
     pub fn job_ignored(&self) {
         self.print_job_result("IGNORED".yellow(), "".into());
-        self.tracker.job_ignored(self.case.clone());
+        self.tracker.job_ignored(self.case_str.clone());
         self.ind.job_finished();
     }
 }
