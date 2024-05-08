@@ -199,6 +199,26 @@ impl TestListing {
             case.remove(0);
         }
     }
+
+    pub fn get_timing(
+        &self,
+        package_name: &str,
+        artifact_key: &ArtifactKey,
+        case_name: &str,
+    ) -> Option<Duration> {
+        let package = self.packages.get(package_name)?;
+        let artifact = package.artifacts.get(artifact_key)?;
+        let case = artifact.cases.get(case_name)?;
+        if case.is_empty() {
+            return None;
+        }
+        let mut avg = Duration::ZERO;
+        let len: u32 = case.len().try_into().unwrap();
+        for timing in case {
+            avg += *timing / len;
+        }
+        Some(avg)
+    }
 }
 
 /*                    _ _     _
@@ -790,6 +810,47 @@ mod tests {
                 )]),
             )]),
         );
+    }
+
+    #[test]
+    fn get_timing() {
+        let artifact_1 = ArtifactKey::new("artifact-1", ArtifactKind::Library);
+        let listing = TestListing::from_iter([(
+            "package-1",
+            Package::from_iter([(
+                artifact_1.clone(),
+                Artifact::from_iter([
+                    ("case-1", vec![]),
+                    ("case-2", vec![millis!(10)]),
+                    ("case-3", vec![millis!(10), millis!(12)]),
+                    (
+                        "case-4",
+                        vec![millis!(10), millis!(12), millis!(14), millis!(16)],
+                    ),
+                ]),
+            )]),
+        )]);
+
+        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-1"), None);
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1, "case-2"),
+            Some(millis!(10))
+        );
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1, "case-3"),
+            Some(millis!(11))
+        );
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1, "case-4"),
+            Some(millis!(13))
+        );
+        assert_eq!(listing.get_timing("package-1", &artifact_1, "case-5"), None);
+        let artifact_1_bin = ArtifactKey::new("artifact-1", ArtifactKind::Binary);
+        assert_eq!(
+            listing.get_timing("package-1", &artifact_1_bin, "case-1"),
+            None
+        );
+        assert_eq!(listing.get_timing("package-2", &artifact_1, "case-1"), None);
     }
 
     #[test]
