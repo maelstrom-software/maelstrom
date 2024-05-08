@@ -87,7 +87,7 @@ impl FakeTests {
                 &b.name,
                 Package::from_iter([(
                     ArtifactKey::new(&b.name, ArtifactKind::Library),
-                    Artifact::from_iter(b.tests.iter().map(|t| &t.name)),
+                    Artifact::from_iter(b.tests.iter().map(|t| (&t.name, []))),
                 )]),
             )
         }))

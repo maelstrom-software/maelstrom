@@ -47,16 +47,15 @@ impl From<&CargoTarget> for ArtifactKey {
         Self::new(&target.name, ArtifactKind::from_target(target))
     }
 }
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifact {
-    pub cases: HashSet<String>,
+    pub cases: HashMap<String, Vec<Duration>>,
 }
 
-impl<A: Into<String>> FromIterator<A> for Artifact {
-    fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+impl<K: Into<String>, V: IntoIterator<Item = Duration>> FromIterator<(K, V)> for Artifact {
+    fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self {
-            cases: HashSet::from_iter(iter.into_iter().map(Into::into)),
+            cases: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), Vec::from_iter(v)))),
         }
     }
 }
@@ -95,9 +94,14 @@ impl TestListing {
         T: Into<String>,
     {
         let package = self.packages.entry(package_name.into()).or_default();
-        package
-            .artifacts
-            .insert(artifact_key.into(), Artifact::from_iter(cases));
+        let artifact = package.artifacts.entry(artifact_key.into()).or_default();
+        let mut cases: HashSet<String> = cases.into_iter().map(Into::into).collect();
+        artifact
+            .cases
+            .retain(|case_name, _| cases.remove(case_name));
+        artifact
+            .cases
+            .extend(cases.into_iter().map(|case_name| (case_name, vec![])));
     }
 
     pub fn retain_packages_and_artifacts<'a, PI, PN, AI, AK>(&mut self, existing_packages: PI)
@@ -145,7 +149,7 @@ impl TestListing {
             .flat_map(|(p, a)| {
                 a.artifacts
                     .iter()
-                    .flat_map(move |(a, c)| c.cases.iter().map(move |c| (p, a, c)))
+                    .flat_map(move |(a, c)| c.cases.keys().map(move |c| (p, a, c)))
             })
             .filter(|(p, a, c)| filter_case(p, a, c, filter))
             .count() as u64
@@ -238,14 +242,15 @@ impl From<TestListing> for OnDiskTestListing {
                                         artifact_key,
                                         OnDiskArtifactCases {
                                             cases: {
-                                                let mut cases =
-                                                    Vec::<String>::from_iter(artifact.cases);
-                                                cases.sort();
+                                                let mut cases = Vec::from_iter(artifact.cases);
+                                                cases.sort_by(|(name1, _), (name2, _)| {
+                                                    name1.cmp(name2)
+                                                });
                                                 cases
                                                     .into_iter()
-                                                    .map(|name| OnDiskArtifactCase {
+                                                    .map(|(name, timings)| OnDiskArtifactCase {
                                                         name,
-                                                        timings: vec![],
+                                                        timings,
                                                     })
                                                     .collect()
                                             },
@@ -270,7 +275,12 @@ impl From<OnDiskTestListing> for TestListing {
                     |(artifact_key, artifact)| {
                         (
                             artifact_key,
-                            Artifact::from_iter(artifact.cases.into_iter().map(|case| case.name)),
+                            Artifact::from_iter(
+                                artifact
+                                    .cases
+                                    .into_iter()
+                                    .map(|case| (case.name, case.timings)),
+                            ),
                         )
                     },
                 )),
@@ -370,32 +380,69 @@ mod tests {
     use pretty_assertions::assert_eq;
     use std::{cell::RefCell, rc::Rc, str};
 
+    macro_rules! millis {
+        ($millis:expr) => {
+            Duration::from_millis($millis)
+        };
+    }
+
     #[test]
     fn update_artifact_cases() {
-        let mut listing = TestListing::default();
+        let mut listing = TestListing::from_iter([(
+            "package-1",
+            Package::from_iter([(
+                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                Artifact::from_iter([
+                    ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
+                    ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                    ("case-1-1L-3", vec![millis!(30)]),
+                ]),
+            )]),
+        )]);
 
-        // Add some initial cases.
+        // Add some more cases with the same artifact name, but a different kind, in the same
+        // package.
+        listing.update_artifact_cases(
+            "package-1",
+            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+            ["case-1-1B-1", "case-1-1B-2", "case-1-1B-3"],
+        );
+        assert_eq!(
+            listing,
+            TestListing::from_iter([(
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
+                            ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                            ("case-1-1L-3", vec![millis!(30)]),
+                        ]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter([
+                            ("case-1-1B-1", []),
+                            ("case-1-1B-2", []),
+                            ("case-1-1B-3", []),
+                        ]),
+                    ),
+                ]),
+            )]),
+        );
+
+        // Add some more cases that partially overlap with previous ones. This should retain the
+        // timings, but remove cases that no longer exist.
         listing.update_artifact_cases(
             "package-1",
             ArtifactKey::new("artifact-1", ArtifactKind::Library),
-            ["case1", "case2", "case3"],
+            ["case-1-1L-2", "case-1-1L-3", "case-1-1L-4"],
         );
-        assert_eq!(
-            listing,
-            TestListing::from_iter([(
-                "package-1",
-                Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                    Artifact::from_iter(["case3", "case2", "case1"]),
-                )])
-            )])
-        );
-
-        // Add some more cases with the same artifact name in the same package.
         listing.update_artifact_cases(
             "package-1",
             ArtifactKey::new("artifact-1", ArtifactKind::Binary),
-            ["case2", "case3", "case4"],
+            ["case-1-1B-2", "case-1-1B-3", "case-1-1B-4"],
         );
         assert_eq!(
             listing,
@@ -403,71 +450,67 @@ mod tests {
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
-                        Artifact::from_iter(["case4", "case3", "case2"]),
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                            ("case-1-1L-3", vec![millis!(30)]),
+                            ("case-1-1L-4", vec![]),
+                        ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                        Artifact::from_iter(["case3", "case2", "case1"]),
-                    )
-                ])
-            )])
-        );
-
-        // Add some more cases that partially overlap with previous ones. This should overwrite the
-        // old value we had for that artifact.
-        listing.update_artifact_cases(
-            "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
-            ["case4", "case5", "case6"],
-        );
-        assert_eq!(
-            listing,
-            TestListing::from_iter([(
-                "package-1",
-                Package::from_iter([
-                    (
                         ArtifactKey::new("artifact-1", ArtifactKind::Binary),
-                        Artifact::from_iter(["case6", "case5", "case4"]),
+                        Artifact::from_iter([
+                            ("case-1-1B-2", []),
+                            ("case-1-1B-3", []),
+                            ("case-1-1B-4", []),
+                        ]),
                     ),
-                    (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                        Artifact::from_iter(["case3", "case2", "case1"]),
-                    )
-                ])
-            )])
+                ]),
+            )]),
         );
 
         // Add some more cases for a different package. They should be independent.
         listing.update_artifact_cases(
             "package-2",
             ArtifactKey::new("artifact-1", ArtifactKind::Library),
-            ["case100", "case101"],
+            ["case-2-1L-1", "case-2-1L-2", "case-2-1L-3"],
         );
         assert_eq!(
             listing,
             TestListing::from_iter([
                 (
-                    "package-2",
-                    Package::from_iter([(
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                        Artifact::from_iter(["case101", "case100"]),
-                    )])
-                ),
-                (
                     "package-1",
                     Package::from_iter([
                         (
-                            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
-                            Artifact::from_iter(["case6", "case5", "case4"]),
+                            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                            Artifact::from_iter([
+                                ("case-1-1L-2", vec![millis!(20), millis!(21)]),
+                                ("case-1-1L-3", vec![millis!(30)]),
+                                ("case-1-1L-4", vec![]),
+                            ]),
                         ),
                         (
-                            ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                            Artifact::from_iter(["case3", "case2", "case1"]),
-                        )
+                            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                            Artifact::from_iter([
+                                ("case-1-1B-2", []),
+                                ("case-1-1B-3", []),
+                                ("case-1-1B-4", []),
+                            ]),
+                        ),
                     ])
-                )
-            ])
+                ),
+                (
+                    "package-2",
+                    Package::from_iter([(
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-2-1L-1", []),
+                            ("case-2-1L-2", []),
+                            ("case-2-1L-3", []),
+                        ]),
+                    )]),
+                ),
+            ]),
         );
     }
 
@@ -478,20 +521,29 @@ mod tests {
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
-                        Artifact::from_iter(["case-1-1-1", "case-1-1-2"]),
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-1-1L-1", [millis!(10), millis!(11)]),
+                            ("case-1-1L-2", [millis!(20), millis!(21)]),
+                        ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1-2", ArtifactKind::Binary),
-                        Artifact::from_iter(["case-1-2-1", "case-1-2-2"]),
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter([
+                            ("case-1-1B-1", [millis!(15), millis!(16)]),
+                            ("case-1-1B-2", [millis!(25), millis!(26)]),
+                        ]),
                     ),
                 ]),
             ),
             (
                 "package-2",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-2-1", ArtifactKind::Library),
-                    Artifact::from_iter(["case-2-1-1", "case-2-1-2"]),
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([
+                        ("case-2-1L-1", [millis!(10), millis!(12)]),
+                        ("case-2-1L-2", [millis!(20), millis!(22)]),
+                    ]),
                 )]),
             ),
         ]);
@@ -500,13 +552,13 @@ mod tests {
             (
                 "package-1",
                 vec![
-                    ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
-                    ArtifactKey::new("artifact-1-3", ArtifactKind::Binary),
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    ArtifactKey::new("artifact-2", ArtifactKind::Binary),
                 ],
             ),
             (
                 "package-3",
-                vec![ArtifactKey::new("artifact-3-1", ArtifactKind::Library)],
+                vec![ArtifactKey::new("artifact-1", ArtifactKind::Library)],
             ),
         ]);
 
@@ -515,10 +567,13 @@ mod tests {
             TestListing::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
-                    Artifact::from_iter(["case-1-1-1", "case-1-1-2"]),
-                ),]),
-            ),])
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([
+                        ("case-1-1L-1", [millis!(10), millis!(11)]),
+                        ("case-1-1L-2", [millis!(20), millis!(21)]),
+                    ]),
+                )]),
+            )]),
         );
     }
 
@@ -529,20 +584,27 @@ mod tests {
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1-1", ArtifactKind::Library),
-                        Artifact::from_iter(["case-1-1-1", "case-1-1-2", "case-1-1-3"]),
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-1-1L-1", vec![millis!(10), millis!(11)]),
+                            ("case-1-1L-2", vec![millis!(20)]),
+                            ("case-1-1L-3", vec![]),
+                        ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1-2", ArtifactKind::Binary),
-                        Artifact::from_iter(["case-1-2-1", "case-1-2-2"]),
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter([
+                            ("case-1-1B-1", vec![millis!(15), millis!(16)]),
+                            ("case-1-1B-2", vec![]),
+                        ]),
                     ),
                 ]),
             ),
             (
                 "package-2",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-2-1", ArtifactKind::Library),
-                    Artifact::from_iter(["case-2-1-1"]),
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-2-1L-1", [millis!(10), millis!(12)])]),
                 )]),
             ),
         ]);
@@ -680,16 +742,30 @@ mod tests {
                     indoc! {r#"
                         version = 2
 
-                        [[package1.artifacts]]
-                        name = "package1"
+                        [[package-1.artifacts]]
+                        name = "artifact-1"
                         kind = "Library"
 
-                        [[package1.artifacts.cases]]
-                        name = "case1"
-                        timings = []
+                        [[package-1.artifacts.cases]]
+                        name = "case-1-1L-1"
 
-                        [[package1.artifacts.cases]]
-                        name = "case2"
+                        [[package-1.artifacts.cases.timings]]
+                        secs = 0
+                        nanos = 10000000
+
+                        [[package-1.artifacts.cases.timings]]
+                        secs = 0
+                        nanos = 11000000
+
+                        [[package-1.artifacts.cases]]
+                        name = "case-1-1L-2"
+
+                        [[package-1.artifacts.cases.timings]]
+                        secs = 0
+                        nanos = 20000000
+
+                        [[package-1.artifacts.cases]]
+                        name = "case-1-1L-3"
                         timings = []
                     "#}
                     .into(),
@@ -698,10 +774,14 @@ mod tests {
         }
         let store = TestListingStore::new(Deps, RootBuf::new("".into()));
         let expected = TestListing::from_iter([(
-            "package1",
+            "package-1",
             Package::from_iter([(
-                ArtifactKey::new("package1", ArtifactKind::Library),
-                Artifact::from_iter(["case1", "case2"]),
+                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                Artifact::from_iter([
+                    ("case-1-1L-1", vec![millis!(10), millis!(11)]),
+                    ("case-1-1L-2", vec![millis!(20)]),
+                    ("case-1-1L-3", vec![]),
+                ]),
             )]),
         )]);
         assert_eq!(store.load().unwrap(), expected);
@@ -815,38 +895,106 @@ mod tests {
     }
 
     #[test]
-    fn save_of_simple_listing() {
+    fn save_of_listing() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
         let store = TestListingStore::new(deps.clone(), RootBuf::new("maelstrom/state/".into()));
-        let listing = TestListing::from_iter([(
-            "package1",
-            Package::from_iter([(
-                ArtifactKey::new("package1", ArtifactKind::Library),
-                Artifact::from_iter(["case1", "case2"]),
-            )]),
-        )]);
+        let listing = TestListing::from_iter([
+            (
+                "package-2",
+                Package::from_iter([(
+                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    Artifact::from_iter([("case-2-1L-1", [millis!(10), millis!(12)])]),
+                )]),
+            ),
+            (
+                "package-1",
+                Package::from_iter([
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        Artifact::from_iter([
+                            ("case-1-1B-1", vec![millis!(15), millis!(16)]),
+                            ("case-1-1B-2", vec![]),
+                        ]),
+                    ),
+                    (
+                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        Artifact::from_iter([
+                            ("case-1-1L-1", vec![millis!(10), millis!(11)]),
+                            ("case-1-1L-2", vec![millis!(20)]),
+                            ("case-1-1L-3", vec![]),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]);
         store.save(listing).unwrap();
+        let (actual_path, actual_contents) = deps.borrow_mut().write.take().unwrap();
+        assert_eq!(actual_path, format!("maelstrom/state/{TEST_LISTING_FILE}"));
         assert_eq!(
-            deps.borrow().write,
-            Some((
-                format!("maelstrom/state/{TEST_LISTING_FILE}"),
-                indoc! {r#"
-                    version = 2
+            actual_contents,
+            indoc! {r#"
+                version = 2
 
-                    [[package1.artifacts]]
-                    name = "package1"
-                    kind = "Library"
+                [[package-1.artifacts]]
+                name = "artifact-1"
+                kind = "Library"
 
-                    [[package1.artifacts.cases]]
-                    name = "case1"
-                    timings = []
+                [[package-1.artifacts.cases]]
+                name = "case-1-1L-1"
 
-                    [[package1.artifacts.cases]]
-                    name = "case2"
-                    timings = []
-                "#}
-                .into()
-            ))
+                [[package-1.artifacts.cases.timings]]
+                secs = 0
+                nanos = 10000000
+
+                [[package-1.artifacts.cases.timings]]
+                secs = 0
+                nanos = 11000000
+
+                [[package-1.artifacts.cases]]
+                name = "case-1-1L-2"
+
+                [[package-1.artifacts.cases.timings]]
+                secs = 0
+                nanos = 20000000
+
+                [[package-1.artifacts.cases]]
+                name = "case-1-1L-3"
+                timings = []
+
+                [[package-1.artifacts]]
+                name = "artifact-1"
+                kind = "Binary"
+
+                [[package-1.artifacts.cases]]
+                name = "case-1-1B-1"
+
+                [[package-1.artifacts.cases.timings]]
+                secs = 0
+                nanos = 15000000
+
+                [[package-1.artifacts.cases.timings]]
+                secs = 0
+                nanos = 16000000
+
+                [[package-1.artifacts.cases]]
+                name = "case-1-1B-2"
+                timings = []
+
+                [[package-2.artifacts]]
+                name = "artifact-1"
+                kind = "Library"
+
+                [[package-2.artifacts.cases]]
+                name = "case-2-1L-1"
+
+                [[package-2.artifacts.cases.timings]]
+                secs = 0
+                nanos = 10000000
+
+                [[package-2.artifacts.cases.timings]]
+                secs = 0
+                nanos = 12000000
+            "#},
         );
     }
 }
