@@ -4,8 +4,8 @@ use maelstrom_base::{
     JobStatus,
 };
 use maelstrom_client::{
-    spec::{std_env_lookup, ImageConfig},
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    spec::ImageConfig, CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir,
+    StateDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -227,12 +227,8 @@ fn main() -> Result<ExitCode> {
                 working_directory: image.working_dir().map(From::from),
             })
         };
-        let job_specs = job_spec_iter_from_reader(
-            reader,
-            |layer| client.add_layer(layer),
-            std_env_lookup,
-            image_lookup,
-        );
+        let job_specs =
+            job_spec_iter_from_reader(reader, |layer| client.add_layer(layer), image_lookup);
         for job_spec in job_specs {
             let tracker = tracker.clone();
             tracker.add_outstanding();

@@ -3101,6 +3101,7 @@ dependencies = [
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
+ "maplit",
  "serde",
  "serde_json",
  "serde_with",

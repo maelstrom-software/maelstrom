@@ -55,7 +55,18 @@ pub struct ImageSpec {
     pub use_working_directory: bool,
 }
 
-#[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    IntoProtoBuf,
+    TryFromProtoBuf,
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+)]
 #[proto(other_type = "proto::EnvironmentSpec")]
 pub struct EnvironmentSpec {
     pub vars: BTreeMap<String, String>,
