@@ -428,7 +428,7 @@ impl Client {
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: environment_eval(spec.environment, std_env_lookup)?,
+            environment: environment_eval(Default::default(), spec.environment, std_env_lookup)?,
             layers: spec
                 .layers
                 .try_into()

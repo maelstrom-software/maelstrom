@@ -131,6 +131,7 @@ into_env_container!(BTreeMap<KeyT, ValueT>);
 into_env_container!(HashMap<KeyT, ValueT>);
 
 pub fn environment_eval(
+    inital_env: BTreeMap<String, String>,
     env: Vec<EnvironmentSpec>,
     env_lookup: impl Fn(&str) -> Result<Option<String>>,
 ) -> Result<Vec<String>> {
@@ -147,7 +148,7 @@ pub fn environment_eval(
             })
             .collect()
     }
-    let mut running_env = BTreeMap::new();
+    let mut running_env = inital_env;
     for entry in env {
         if entry.extend {
             running_env.extend(substitute_environment(
@@ -615,6 +616,7 @@ mod test {
     }
 
     fn env_test(
+        inital_env: BTreeMap<&'static str, &'static str>,
         input: Vec<(BTreeMap<&'static str, &'static str>, bool)>,
         expected: Vec<&'static str>,
     ) {
@@ -622,6 +624,10 @@ mod test {
             "FOO".into() => "bar".into(),
         };
         let res = environment_eval(
+            inital_env
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                .collect(),
             input
                 .into_iter()
                 .map(|(vars, extend)| EnvironmentSpec {
@@ -642,8 +648,36 @@ mod test {
     }
 
     #[test]
+    fn environment_eval_inital_env_extend() {
+        env_test(
+            btreemap! {"BIN" => "bin" },
+            vec![(btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, true)],
+            vec!["BAR=baz", "BIN=bin", "FOO=bar"],
+        )
+    }
+
+    #[test]
+    fn environment_eval_inital_env_no_extend() {
+        env_test(
+            btreemap! {"BIN" => "bin" },
+            vec![(btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false)],
+            vec!["BAR=baz", "FOO=bar"],
+        )
+    }
+
+    #[test]
+    fn environment_eval_inital_not_substituted() {
+        env_test(
+            btreemap! {"BIN" => "$env{FOO}" },
+            vec![(btreemap! { "BAR" => "baz" }, true)],
+            vec!["BAR=baz", "BIN=$env{FOO}"],
+        )
+    }
+
+    #[test]
     fn environment_eval_env() {
         env_test(
+            btreemap! {},
             vec![(btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false)],
             vec!["BAR=baz", "FOO=bar"],
         )
@@ -652,6 +686,7 @@ mod test {
     #[test]
     fn environment_eval_prev() {
         env_test(
+            btreemap! {},
             vec![
                 (btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false),
                 (btreemap! { "BAZ" => "$prev{FOO}" }, true),
@@ -663,6 +698,7 @@ mod test {
     #[test]
     fn environment_eval_env_extend_false() {
         env_test(
+            btreemap! {},
             vec![
                 (btreemap! { "FOO" => "$env{FOO}", "BAR" => "baz" }, false),
                 (btreemap! { "BAZ" => "$prev{FOO}" }, false),
@@ -674,6 +710,7 @@ mod test {
     #[test]
     fn environment_eval_env_extend_false_mixed() {
         env_test(
+            btreemap! {},
             vec![
                 (btreemap! { "A" => "1" }, true),
                 (btreemap! { "B" => "$prev{A}" }, false),
