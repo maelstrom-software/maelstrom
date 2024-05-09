@@ -11,6 +11,7 @@ use maelstrom_util::{
     fs::Fs,
     root::RootBuf,
 };
+use regex::Regex;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -129,6 +130,41 @@ fn few_tests() {
             Failed Tests    :         0\
         "
         ),
+        "{contents}"
+    );
+}
+
+#[test]
+fn failed_test() {
+    let contents = do_cargo_maelstrom_test(
+        "
+        #[test]
+        fn foo() {
+            println!(\"test output\");
+            assert_eq!(1, 2);
+        }
+        ",
+    );
+    assert!(
+        Regex::new(
+            "(?ms)^\
+            project foo..........................FAIL   [\\d\\.]+s\n\
+            test output\n\
+            stderr: thread 'foo' panicked at src/lib.rs:\\d+:\\d+:\n\
+            stderr: assertion `left == right` failed\n\
+            stderr:   left: 1\n\
+            stderr:  right: 2\n\
+            stderr: note: run with `RUST_BACKTRACE=1` environm\n\
+            ent variable to display a backtrace\n\
+            \n\
+            ================== Test Summary ==================\n\
+                Successful Tests:         0\n\
+                Failed Tests    :         1\n\
+                \\s\\s\\s\\sproject foo: failure\
+            $"
+        )
+        .unwrap()
+        .is_match(&contents),
         "{contents}"
     );
 }
