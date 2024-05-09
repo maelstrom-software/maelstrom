@@ -109,6 +109,7 @@ impl ClientFixture {
         layers.extend(added_layers);
         let spec = JobSpec::new(self.self_path.clone(), layers)
             .arguments(["--exact", "single_test", "--nocapture"])
+            .working_directory("/")
             .environment([
                 ("INSIDE_JOB", "yes"),
                 ("TEST_LINE", &self.test_line.to_string()),

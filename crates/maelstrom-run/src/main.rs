@@ -4,8 +4,7 @@ use maelstrom_base::{
     JobStatus,
 };
 use maelstrom_client::{
-    spec::ImageConfig, CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir,
-    StateDir,
+    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
@@ -218,17 +217,7 @@ fn main() -> Result<ExitCode> {
             log,
         )?;
         let reader: Box<dyn Read> = Box::new(io::stdin().lock());
-        let image_lookup = |image: &str| {
-            let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
-            let image = client.get_container_image(image, version)?;
-            Ok(ImageConfig {
-                layers: image.layers.clone(),
-                environment: image.env().cloned(),
-                working_directory: image.working_dir().map(From::from),
-            })
-        };
-        let job_specs =
-            job_spec_iter_from_reader(reader, |layer| client.add_layer(layer), image_lookup);
+        let job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
         for job_spec in job_specs {
             let tracker = tracker.clone();
             tracker.add_outstanding();

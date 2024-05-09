@@ -202,12 +202,17 @@ impl JobSpec {
             mounts: Default::default(),
             enable_loopback: false,
             enable_writable_file_system: Default::default(),
-            working_directory: Some(Utf8PathBuf::from("/")),
+            working_directory: None,
             user: UserId::from(0),
             group: GroupId::from(0),
             timeout: None,
             estimated_duration: None,
         }
+    }
+
+    pub fn image(mut self, image: ImageSpec) -> Self {
+        self.image = Some(image);
+        self
     }
 
     pub fn arguments<I, T>(mut self, arguments: I) -> Self
