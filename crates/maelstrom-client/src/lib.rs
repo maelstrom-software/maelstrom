@@ -10,7 +10,6 @@ use maelstrom_client_base::{
     spec::JobSpec,
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_container::ContainerImage;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
@@ -278,17 +277,6 @@ impl Client {
             TryFromProtoBuf::try_from_proto_buf(spec.digest)?,
             TryFromProtoBuf::try_from_proto_buf(spec.r#type)?,
         ))
-    }
-
-    pub fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        let msg = proto::GetContainerImageRequest {
-            name: name.into(),
-            tag: tag.into(),
-        };
-        let img = self
-            .send_sync(move |mut client| async move { client.get_container_image(msg).await })
-            .with_context(|| format!("getting container image {name}:{tag}"))?;
-        TryFromProtoBuf::try_from_proto_buf(img)
     }
 
     pub fn add_job(

@@ -84,23 +84,6 @@ impl ClientProcess for Handler {
         .map_to_tonic()
     }
 
-    async fn get_container_image(
-        &self,
-        request: Request<proto::GetContainerImageRequest>,
-    ) -> TonicResponse<proto::GetContainerImageResponse> {
-        async {
-            let request = request.into_inner();
-            self.client
-                .get_container_image(&request.name, &request.tag)
-                .await
-                .map(|image| proto::GetContainerImageResponse {
-                    image: Some(image.into_proto_buf()),
-                })
-        }
-        .await
-        .map_to_tonic()
-    }
-
     async fn run_job(
         &self,
         request: Request<proto::RunJobRequest>,

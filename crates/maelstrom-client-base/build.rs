@@ -2,12 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::str::from_utf8;
 
-const INTO_RESULT: [&str; 4] = [
-    "RunJobRequest",
-    "AddLayerRequest",
-    "AddLayerResponse",
-    "GetContainerImageResponse",
-];
+const INTO_RESULT: [&str; 3] = ["RunJobRequest", "AddLayerRequest", "AddLayerResponse"];
 
 const ENUM_PROTO: [(&str, &str); 4] = [
     ("JobDevice", "maelstrom_base::JobDevice"),
@@ -16,24 +11,9 @@ const ENUM_PROTO: [(&str, &str); 4] = [
     ("JobCompleted.status", "maelstrom_base::JobStatus"),
 ];
 
-const MSG_PROTO: [(&str, &str, &str); 6] = [
+const MSG_PROTO: [(&str, &str, &str); 2] = [
     ("JobMount", "maelstrom_base::JobMount", ""),
-    ("ContainerImage", "maelstrom_container::ContainerImage", ""),
-    (
-        "OciImageConfiguration",
-        "maelstrom_container::ImageConfiguration",
-        "",
-    ),
-    ("OciConfig", "maelstrom_container::Config", ""),
-    ("OciRootFs", "maelstrom_container::RootFs", ""),
     ("JobEffects", "maelstrom_base::JobEffects", "option_all"),
-];
-
-const FIELD_ATTR: [(&str, &str); 4] = [
-    ("ContainerImage.config", "option"),
-    ("OciImageConfiguration.architecture", "option"),
-    ("OciImageConfiguration.os", "option"),
-    ("OciImageConfiguration.rootfs", "option"),
 ];
 
 fn test_for_protoc() -> Option<PathBuf> {
@@ -83,10 +63,6 @@ fn main() {
                  #[proto(other_type = {other_type}, remote, {extra})]"
             ),
         );
-    }
-
-    for (name, attrs) in FIELD_ATTR {
-        b = b.field_attribute(name, &format!("#[proto({attrs})]"));
     }
 
     b = b.btree_map(["EnvironmentSpec.vars"]);

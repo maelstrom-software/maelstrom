@@ -122,58 +122,12 @@ message RunJobRequest {
     JobSpec spec = 1;
 }
 
-message GetContainerImageRequest {
-    string name = 1;
-    string tag = 2;
-}
-
 message Error {
     string message_ = 1;
 }
 
 message AddLayerResponse {
     LayerSpec spec = 1;
-}
-
-message OciConfig {
-    optional string user = 1;
-    repeated string exposed_ports = 2;
-    repeated string env = 3;
-    repeated string entrypoint = 4;
-    repeated string cmd = 5;
-    repeated string volumes = 6;
-    optional string working_dir = 7;
-    map<string, string> labels = 8;
-    optional string stop_signal = 9;
-}
-
-message OciRootFs {
-    string type = 1;
-    repeated string diff_ids = 2;
-}
-
-message OciImageConfiguration {
-    optional string created = 1;
-    optional string author = 2;
-    optional string architecture = 3;
-    optional string os = 4;
-    optional string os_version = 5;
-    repeated string os_features = 6;
-    optional string variant = 7;
-    optional OciConfig config = 8;
-    OciRootFs rootfs = 9;
-}
-
-message ContainerImage {
-    uint32 version = 1;
-    string name = 2;
-    string digest = 3;
-    OciImageConfiguration config = 4;
-    repeated bytes layers = 5;
-}
-
-message GetContainerImageResponse {
-    ContainerImage image = 1;
 }
 
 message JobError {
@@ -258,7 +212,6 @@ message IntrospectResponse {
 service ClientProcess {
     rpc Start(StartRequest) returns (Void);
     rpc AddLayer(AddLayerRequest) returns (AddLayerResponse);
-    rpc GetContainerImage(GetContainerImageRequest) returns (GetContainerImageResponse);
     rpc RunJob(RunJobRequest) returns (RunJobResponse);
     rpc Introspect(Void) returns (IntrospectResponse);
 }

@@ -420,12 +420,6 @@ impl Client {
         self.state_machine.active()?.add_layer(layer).await
     }
 
-    pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        let state = self.state_machine.active()?;
-        debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
-        state.get_container_image(name, tag).await
-    }
-
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
