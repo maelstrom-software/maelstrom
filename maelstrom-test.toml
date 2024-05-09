@@ -74,7 +74,7 @@ added_devices = ["null", "fuse"]
 
 [[directives]]
 filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
-image.name = "rust"
+image.name = "rust:alpine"
 image.use = ["layers", "environment"]
 added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
