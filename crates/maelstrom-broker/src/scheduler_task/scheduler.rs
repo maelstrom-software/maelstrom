@@ -13,15 +13,18 @@ use maelstrom_base::{
     ArtifactType, ClientId, ClientJobId, JobId, JobOutcomeResult, JobSpec, Sha256Digest, WorkerId,
 };
 use maelstrom_util::{
+    duration,
     ext::{BoolExt as _, OptionExt as _},
     heap::{Heap, HeapDeps, HeapIndex},
     manifest::ManifestReader,
 };
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    cmp::Ordering,
+    collections::{BinaryHeap, HashMap, HashSet},
     fmt::{self, Debug, Formatter},
     io,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 /*              _     _ _
@@ -200,9 +203,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     pub fn new(cache: CacheT) -> Self {
         Scheduler {
             cache,
-            clients: HashMap::default(),
+            clients: ClientMap(HashMap::default()),
             workers: WorkerMap(HashMap::default()),
-            queued_requests: VecDeque::default(),
+            queued_jobs: BinaryHeap::default(),
             worker_heap: Heap::default(),
             job_statistics: JobStatisticsTimeSeries::default(),
         }
@@ -305,6 +308,14 @@ impl<DepsT: SchedulerDeps> Client<DepsT> {
     }
 }
 
+struct ClientMap<DepsT: SchedulerDeps>(HashMap<ClientId, Client<DepsT>>);
+
+impl<DepsT: SchedulerDeps> ClientMap<DepsT> {
+    fn job_from_jid(&self, jid: JobId) -> &Job {
+        self.0.get(&jid.cid).unwrap().jobs.get(&jid.cjid).unwrap()
+    }
+}
+
 struct Worker<DepsT: SchedulerDeps> {
     slots: usize,
     pending: HashSet<JobId>,
@@ -333,7 +344,7 @@ impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
         let rhs_worker = self.0.get(rhs_id).unwrap();
         let lhs = (lhs_worker.pending.len() * rhs_worker.slots, *lhs_id);
         let rhs = (rhs_worker.pending.len() * lhs_worker.slots, *rhs_id);
-        lhs.cmp(&rhs) == std::cmp::Ordering::Less
+        lhs.cmp(&rhs) == Ordering::Less
     }
 
     fn update_index(&mut self, elem: &WorkerId, idx: HeapIndex) {
@@ -341,18 +352,52 @@ impl<DepsT: SchedulerDeps> HeapDeps for WorkerMap<DepsT> {
     }
 }
 
+struct QueuedJob {
+    jid: JobId,
+    estimated_duration: Option<Duration>,
+}
+
+impl QueuedJob {
+    fn new(jid: JobId, estimated_duration: Option<Duration>) -> Self {
+        Self {
+            jid,
+            estimated_duration,
+        }
+    }
+}
+
+impl PartialEq for QueuedJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.estimated_duration.eq(&other.estimated_duration)
+    }
+}
+
+impl PartialOrd for QueuedJob {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for QueuedJob {}
+
+impl Ord for QueuedJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        duration::cmp(&self.estimated_duration, &other.estimated_duration)
+    }
+}
+
 pub struct Scheduler<CacheT, DepsT: SchedulerDeps> {
     cache: CacheT,
-    clients: HashMap<ClientId, Client<DepsT>>,
+    clients: ClientMap<DepsT>,
     workers: WorkerMap<DepsT>,
-    queued_requests: VecDeque<JobId>,
+    queued_jobs: BinaryHeap<QueuedJob>,
     worker_heap: Heap<WorkerMap<DepsT>>,
     job_statistics: JobStatisticsTimeSeries,
 }
 
 impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn possibly_start_jobs(&mut self, deps: &mut DepsT) {
-        while !self.queued_requests.is_empty() && !self.workers.0.is_empty() {
+        while !self.queued_jobs.is_empty() && !self.workers.0.is_empty() {
             let wid = self.worker_heap.peek().unwrap();
             let worker = self.workers.0.get_mut(wid).unwrap();
 
@@ -360,18 +405,11 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 break;
             }
 
-            let jid = self.queued_requests.pop_front().unwrap();
-            let spec = &self
-                .clients
-                .get(&jid.cid)
-                .unwrap()
-                .jobs
-                .get(&jid.cjid)
-                .unwrap()
-                .spec;
+            let jid = self.queued_jobs.pop().unwrap().jid;
+            let job = self.clients.job_from_jid(jid);
             deps.send_message_to_worker(
                 &mut worker.sender,
-                BrokerToWorker::EnqueueJob(jid, spec.clone()),
+                BrokerToWorker::EnqueueJob(jid, job.spec.clone()),
             );
 
             worker.pending.insert(jid).assert_is_true();
@@ -382,6 +420,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
 
     fn receive_client_connected(&mut self, id: ClientId, sender: DepsT::ClientSender) {
         self.clients
+            .0
             .insert(id, Client::new(sender))
             .assert_is_none();
     }
@@ -389,14 +428,14 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     fn receive_client_disconnected(&mut self, deps: &mut DepsT, id: ClientId) {
         self.cache.client_disconnected(id);
 
-        let client = self.clients.remove(&id).unwrap();
+        let client = self.clients.0.remove(&id).unwrap();
         for job in client.jobs.into_values() {
             for artifact in job.acquired_artifacts {
                 self.cache.decrement_refcount(artifact);
             }
         }
 
-        self.queued_requests.retain(|JobId { cid, .. }| *cid != id);
+        self.queued_jobs.retain(|qj| qj.jid.cid != id);
         for worker in self.workers.0.values_mut() {
             worker.pending.retain(|jid| {
                 jid.cid != id || {
@@ -419,7 +458,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         jid: JobId,
         is_manifest: IsManifest,
     ) {
-        let client = self.clients.get_mut(&jid.cid).unwrap();
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
         let job = client.jobs.get_mut(&jid.cjid).unwrap();
         if job.acquired_artifacts.contains(&digest) || job.missing_artifacts.contains_key(&digest) {
             return;
@@ -459,8 +498,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         spec: JobSpec,
     ) {
         let jid = JobId { cid, cjid };
-        let client = self.clients.get_mut(&cid).unwrap();
+        let client = self.clients.0.get_mut(&cid).unwrap();
         let layers = spec.layers.clone();
+        let estimated_duration = spec.estimated_duration;
         client.jobs.insert(cjid, Job::new(spec)).assert_is_none();
 
         for (digest, type_) in layers {
@@ -468,11 +508,12 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             self.ensure_artifact_for_job(deps, digest, jid, is_manifest);
         }
 
-        let client = self.clients.get_mut(&cid).unwrap();
+        let client = self.clients.0.get_mut(&cid).unwrap();
         let job = client.jobs.get(&jid.cjid).unwrap();
         let have_all_artifacts = job.missing_artifacts.is_empty();
         if have_all_artifacts {
-            self.queued_requests.push_back(jid);
+            self.queued_jobs
+                .push(QueuedJob::new(jid, estimated_duration));
             self.possibly_start_jobs(deps);
         }
     }
@@ -485,13 +526,13 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                 .collect(),
             job_statistics: self.job_statistics.clone(),
         });
-        deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
+        deps.send_message_to_client(&mut self.clients.0.get_mut(&cid).unwrap().sender, resp);
     }
 
     fn receive_client_job_state_counts(&mut self, deps: &mut DepsT, cid: ClientId) {
         let resp =
             BrokerToClient::JobStateCountsResponse(self.sample_job_statistics_for_client(cid));
-        deps.send_message_to_client(&mut self.clients.get_mut(&cid).unwrap().sender, resp);
+        deps.send_message_to_client(&mut self.clients.0.get_mut(&cid).unwrap().sender, resp);
     }
 
     fn receive_worker_connected(
@@ -515,10 +556,14 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             .remove(&mut self.workers, worker.heap_index);
 
         // We sort the requests to keep our tests deterministic.
-        let mut vec: Vec<_> = worker.pending.drain().collect();
-        vec.sort();
-        for jid in vec.into_iter().rev() {
-            self.queued_requests.push_front(jid);
+        for jid in worker.pending.drain() {
+            self.queued_jobs.push(QueuedJob::new(
+                jid,
+                self.clients
+                    .job_from_jid(jid)
+                    .spec
+                    .estimated_duration,
+            ));
         }
 
         self.possibly_start_jobs(deps);
@@ -540,7 +585,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             return;
         }
 
-        let client = self.clients.get_mut(&jid.cid).unwrap();
+        let client = self.clients.0.get_mut(&jid.cid).unwrap();
         deps.send_message_to_client(
             &mut client.sender,
             BrokerToClient::JobResponse(jid.cjid, result),
@@ -551,21 +596,14 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         }
         client.num_completed_jobs += 1;
 
-        if let Some(jid) = self.queued_requests.pop_front() {
-            let spec = &self
-                .clients
-                .get(&jid.cid)
-                .unwrap()
-                .jobs
-                .get(&jid.cjid)
-                .unwrap()
-                .spec;
+        if let Some(QueuedJob { jid, .. }) = self.queued_jobs.pop() {
             // If there are any queued_requests, we can just pop one off of the front of
             // the queue and not have to update the worker's used slot count or position in the
             // workers list.
+            let job = self.clients.job_from_jid(jid);
             deps.send_message_to_worker(
                 &mut worker.sender,
-                BrokerToWorker::EnqueueJob(jid, spec.clone()),
+                BrokerToWorker::EnqueueJob(jid, job.spec.clone()),
             );
             worker.pending.insert(jid);
         } else {
@@ -599,7 +637,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         path: PathBuf,
     ) {
         for jid in self.cache.got_artifact(digest.clone(), size, &path) {
-            let client = self.clients.get_mut(&jid.cid).unwrap();
+            let client = self.clients.0.get_mut(&jid.cid).unwrap();
             let job = client.jobs.get_mut(&jid.cjid).unwrap();
             job.acquired_artifacts
                 .insert(digest.clone())
@@ -611,10 +649,10 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
                     .unwrap();
             }
 
-            let client = self.clients.get_mut(&jid.cid).unwrap();
-            let job = client.jobs.get_mut(&jid.cjid).unwrap();
+            let job = self.clients.job_from_jid(jid);
             if job.missing_artifacts.is_empty() {
-                self.queued_requests.push_back(jid);
+                self.queued_jobs
+                    .push(QueuedJob::new(jid, job.spec.estimated_duration));
             }
         }
         self.possibly_start_jobs(deps);
@@ -637,7 +675,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     }
 
     fn sample_job_statistics_for_client(&self, cid: ClientId) -> JobStateCounts {
-        let client = self.clients.get(&cid).unwrap();
+        let client = self.clients.0.get(&cid).unwrap();
         let jobs = &client.jobs;
 
         let mut counts = JobStateCounts::default();
@@ -647,9 +685,9 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
             .count() as u64;
 
         counts[JobState::Pending] = self
-            .queued_requests
+            .queued_jobs
             .iter()
-            .filter(|jid| jid.cid == cid)
+            .filter(|QueuedJob { jid, .. }| jid.cid == cid)
             .count() as u64;
 
         counts[JobState::Running] = self
@@ -669,6 +707,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         let sample = JobStatisticsSample {
             client_to_stats: self
                 .clients
+                .0
                 .keys()
                 .map(|&cid| (cid, self.sample_job_statistics_for_client(cid)))
                 .collect(),
@@ -1182,32 +1221,32 @@ mod tests {
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar])) => {
             CacheGetArtifact(jid![1, 1], digest!(1)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![2, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![2, Tar].estimated_duration(millis!(6)))) => {
             CacheGetArtifact(jid![1, 2], digest!(2)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar].estimated_duration(millis!(5)))) => {
             CacheGetArtifact(jid![1, 3], digest!(3)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar].estimated_duration(millis!(4)))) => {
             CacheGetArtifact(jid![1, 4], digest!(4)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec![5, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec![5, Tar].estimated_duration(millis!(3)))) => {
             CacheGetArtifact(jid![1, 5], digest!(5)),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], spec![6, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![6], spec![6, Tar].estimated_duration(millis!(2)))) => {
             CacheGetArtifact(jid![1, 6], digest!(6)),
         };
 
         WorkerConnected(wid![1], 2, worker_sender![1]) => {
             ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar])),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar])),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar])),
-            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec![4, Tar])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar].estimated_duration(millis!(6)))),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(millis!(5)))),
+            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(millis!(4)))),
         };
 
         WorkerConnected(wid![2], 2, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 5], spec![5, Tar])),
-            ToWorker(wid![2], EnqueueJob(jid![1, 6], spec![6, Tar])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 5], spec![5, Tar].estimated_duration(millis!(3)))),
+            ToWorker(wid![2], EnqueueJob(jid![1, 6], spec![6, Tar].estimated_duration(millis!(2)))),
         };
     }
 
@@ -1242,9 +1281,9 @@ mod tests {
             ToWorker(wid![3], EnqueueJob(jid![1, 3], spec![3, Tar])),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar].estimated_duration(millis!(40)))) => {
             CacheGetArtifact(jid![1, 4], digest![4]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec![4, Tar])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(millis!(40)))),
         };
 
         FromClient(cid![1], ClientToBroker::JobRequest(cjid![5], spec![5, Tar])) => {
@@ -1259,7 +1298,7 @@ mod tests {
         FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(millis!(40)))),
         };
     }
 
@@ -1286,21 +1325,21 @@ mod tests {
             ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar])),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar].estimated_duration(millis!(300)))) => {
             CacheGetArtifact(jid![1, 3], digest![3]),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar].estimated_duration(millis!(40)))) => {
             CacheGetArtifact(jid![1, 4], digest![4]),
         };
 
         FromWorker(wid![1], WorkerToBroker(jid![1, 1], Ok(outcome![1]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![1], Ok(outcome![1]))),
             CacheDecrementRefcount(digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(millis!(300)))),
         };
 
         WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(millis!(40)))),
         };
 
         WorkerDisconnected(wid![1]) => {
@@ -1310,12 +1349,12 @@ mod tests {
         FromWorker(wid![2], WorkerToBroker(jid![1, 2], Ok(outcome![2]))) => {
             ToClient(cid![1], BrokerToClient::JobResponse(cjid![2], Ok(outcome![2]))),
             CacheDecrementRefcount(digest![2]),
-            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec![3, Tar])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(millis!(300)))),
         };
     }
 
     script_test! {
-        requests_outstanding_on_disconnected_worker_go_to_head_of_queue_for_other_workers,
+        requests_outstanding_on_disconnected_worker_get_reenqueued_for_other_workers,
         {
             Fixture::new([
                 ((jid![1, 1], digest![1]), vec![GetArtifact::Success]),
@@ -1327,28 +1366,28 @@ mod tests {
         WorkerConnected(wid![1], 1, worker_sender![1]) => {};
         ClientConnected(cid![1], client_sender![1]) => {};
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![1], spec![1, Tar].estimated_duration(millis!(1)))) => {
             CacheGetArtifact(jid![1, 1], digest![1]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 1], spec![1, Tar].estimated_duration(millis!(1)))),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![2, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![2], spec![2, Tar].estimated_duration(millis!(2)))) => {
             CacheGetArtifact(jid![1, 2], digest![2]),
-            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar])),
+            ToWorker(wid![1], EnqueueJob(jid![1, 2], spec![2, Tar].estimated_duration(millis!(2)))),
         };
 
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![3], spec![3, Tar].estimated_duration(millis!(3)))) => {
             CacheGetArtifact(jid![1, 3], digest![3]),
         };
-        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar])) => {
+        FromClient(cid![1], ClientToBroker::JobRequest(cjid![4], spec![4, Tar].estimated_duration(millis!(4)))) => {
             CacheGetArtifact(jid![1, 4], digest![4]),
         };
 
         WorkerDisconnected(wid![1]) => {};
 
         WorkerConnected(wid![2], 1, worker_sender![2]) => {
-            ToWorker(wid![2], EnqueueJob(jid![1, 1], spec![1, Tar])),
-            ToWorker(wid![2], EnqueueJob(jid![1, 2], spec![2, Tar])),
+            ToWorker(wid![2], EnqueueJob(jid![1, 3], spec![3, Tar].estimated_duration(millis!(3)))),
+            ToWorker(wid![2], EnqueueJob(jid![1, 4], spec![4, Tar].estimated_duration(millis!(4)))),
         };
     }
 

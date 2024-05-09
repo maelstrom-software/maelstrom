@@ -1069,21 +1069,23 @@ mod tests {
 
     impl TestListingStoreDeps for Rc<RefCell<LoggingDeps>> {
         fn create_dir_all(&self, path: impl AsRef<Path>) -> Result<()> {
-            Ok(self
-                .borrow_mut()
-                .create_dir_all
-                .replace(path.as_ref().to_str().unwrap().to_string())
-                .assert_is_none())
+            self
+            .borrow_mut()
+            .create_dir_all
+            .replace(path.as_ref().to_str().unwrap().to_string())
+            .assert_is_none();
+            Ok(())
         }
         fn write(&self, path: impl AsRef<Path>, contents: impl AsRef<[u8]>) -> Result<()> {
-            Ok(self
-                .borrow_mut()
-                .write
-                .replace((
-                    path.as_ref().to_str().unwrap().to_string(),
-                    str::from_utf8(contents.as_ref()).unwrap().to_string(),
-                ))
-                .assert_is_none())
+            self
+            .borrow_mut()
+            .write
+            .replace((
+                path.as_ref().to_str().unwrap().to_string(),
+                str::from_utf8(contents.as_ref()).unwrap().to_string(),
+            ))
+            .assert_is_none();
+            Ok(())
         }
     }
 

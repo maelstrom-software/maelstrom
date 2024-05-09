@@ -728,9 +728,9 @@ mod tests {
                 Self::link(split.next().unwrap(), split.next().unwrap())
             } else if s.starts_with("opq:") {
                 let path = &s[4..];
-                assert!(path.ends_with("/"), "{path:?}");
+                assert!(path.ends_with('/'), "{path:?}");
                 Self::opaque_dir(path)
-            } else if s.ends_with("/") {
+            } else if s.ends_with('/') {
                 Self::dir(s)
             } else {
                 Self::reg_empty(s)
@@ -752,7 +752,7 @@ mod tests {
         entries.sort();
         assert_eq!(
             entries,
-            Vec::from_iter(expected.into_iter().map(|e| std::ffi::OsString::from(e)))
+            Vec::from_iter(expected.into_iter().map(std::ffi::OsString::from))
         );
     }
 
@@ -865,7 +865,7 @@ mod tests {
         async fn new_data_dir(&mut self) -> PathBuf {
             let index = self.data_dir_index;
             self.data_dir_index += 1;
-            let data_dir = self.temp.path().join(&format!("data{index}"));
+            let data_dir = self.temp.path().join(format!("data{index}"));
             self.fs.create_dir(&data_dir).await.unwrap();
             self.data_dirs.insert(index, data_dir.clone());
             data_dir
@@ -875,7 +875,7 @@ mod tests {
             BottomLayerBuilder::new(
                 self.log.clone(),
                 &self.fs,
-                &data_dir,
+                data_dir,
                 &self.blob_dir,
                 ARBITRARY_TIME,
             )
@@ -1211,7 +1211,7 @@ mod tests {
 
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             vec![
                 Expect::Entries("", vec!["Bar", "Baz", "Foo"]),
                 Expect::Exists("Bar"),
@@ -1242,7 +1242,7 @@ mod tests {
 
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             vec![
                 Expect::Entries("", vec!["Foo/"]),
                 Expect::Entries("Foo", vec!["Bar/", "Bin"]),
@@ -1277,7 +1277,7 @@ mod tests {
         };
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             ["Foo", "Bar", "Baz"]
                 .into_iter()
                 .map(|d| Expect::Attrs(d, expected_attrs.clone()))
@@ -1313,7 +1313,7 @@ mod tests {
         };
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             ["Foo", "Bar", "Baz"]
                 .into_iter()
                 .map(|d| Expect::Attrs(d, expected_attrs.clone()))
@@ -1341,7 +1341,7 @@ mod tests {
 
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             vec![
                 Expect::Contents("Foo", "hello world"),
                 Expect::Contents("Bar", ""),
@@ -1371,7 +1371,7 @@ mod tests {
 
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             vec![
                 Expect::IsSymlink("Bar"),
                 Expect::Contents("Bar", "hello world"),
@@ -1400,7 +1400,7 @@ mod tests {
 
         assert_expectations(
             &fix.fs,
-            &mount_path,
+            mount_path,
             vec![
                 Expect::Contents("Foo", "hello"),
                 Expect::Contents("Bar", "world"),
@@ -1463,7 +1463,7 @@ mod tests {
 
         expectations.push(Expect::Attrs("", Mode(0o770).into()));
 
-        assert_expectations(&fix.fs, &mount_path, expectations).await;
+        assert_expectations(&fix.fs, mount_path, expectations).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1517,7 +1517,7 @@ mod tests {
             Expect::Entries("Bar", vec!["Qux"]),
         ];
 
-        assert_expectations(&fix.fs, &mount_path, expectations).await;
+        assert_expectations(&fix.fs, mount_path, expectations).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1554,7 +1554,7 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        assert_expectations(&fix.fs, &mount_path, expected).await;
+        assert_expectations(&fix.fs, mount_path, expected).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }
@@ -1586,7 +1586,7 @@ mod tests {
         let mount_handle = fix.mount(layer_fs).await;
         let mount_path = mount_handle.mount_path();
 
-        assert_expectations(&fix.fs, &mount_path, expected).await;
+        assert_expectations(&fix.fs, mount_path, expected).await;
 
         mount_handle.umount_and_join().await.unwrap();
     }

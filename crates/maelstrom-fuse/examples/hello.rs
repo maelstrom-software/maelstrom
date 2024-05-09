@@ -60,7 +60,7 @@ impl FuseFileSystem for HelloFs {
         if parent == 1 && name.to_str() == Some("hello.txt") {
             Ok(EntryResponse {
                 ttl: TTL,
-                attr: HELLO_TXT_ATTR.clone(),
+                attr: HELLO_TXT_ATTR,
                 generation: 0,
             })
         } else {

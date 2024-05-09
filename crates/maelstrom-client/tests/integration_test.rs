@@ -143,7 +143,7 @@ impl Fixture {
     fn new() -> Self {
         Self {
             client_fixture: (std::env::var("INSIDE_JOB").unwrap_or_default() != "yes")
-                .then(|| ClientFixture::new()),
+                .then(ClientFixture::new),
         }
     }
 
@@ -224,9 +224,9 @@ fn paths_test_job() {
             continue;
         }
         let mut str_e = path.to_owned();
-        let meta = fs.symlink_metadata(&path).unwrap();
+        let meta = fs.symlink_metadata(path).unwrap();
         if meta.is_symlink() {
-            let data = fs.read_link(&path).unwrap();
+            let data = fs.read_link(path).unwrap();
             str_e += &format!(" => {}", data.to_str().unwrap());
         } else if meta.is_dir() {
             str_e += "/";
@@ -325,11 +325,11 @@ fn symlinks_test(fix: &ClientFixture) {
 fn single_test() {
     let mut fix = Fixture::new();
 
-    fix.run_test(|fix| tar_test(fix), || tar_test_job());
-    fix.run_test(|fix| paths_test_strip_prefix(fix), || paths_test_job());
-    fix.run_test(|fix| paths_test_prepend_prefix(fix), || paths_test_job());
-    fix.run_test(|fix| paths_test_absolute(fix), || paths_test_job());
-    fix.run_test(|fix| glob_test(fix), || paths_test_job());
-    fix.run_test(|fix| stubs_test(fix), || paths_test_job());
-    fix.run_test(|fix| symlinks_test(fix), || paths_test_job());
+    fix.run_test(tar_test, tar_test_job);
+    fix.run_test(paths_test_strip_prefix, paths_test_job);
+    fix.run_test(paths_test_prepend_prefix, paths_test_job);
+    fix.run_test(paths_test_absolute, paths_test_job);
+    fix.run_test(glob_test, paths_test_job);
+    fix.run_test(stubs_test, paths_test_job);
+    fix.run_test(symlinks_test, paths_test_job);
 }

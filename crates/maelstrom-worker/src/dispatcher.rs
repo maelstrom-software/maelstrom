@@ -9,7 +9,7 @@ use maelstrom_base::{
     proto::{BrokerToWorker, WorkerToBroker},
     ArtifactType, JobCompleted, JobError, JobId, JobOutcome, JobResult, JobSpec, Sha256Digest,
 };
-use maelstrom_util::{config::common::Slots, ext::OptionExt as _};
+use maelstrom_util::{config::common::Slots, duration, ext::OptionExt as _};
 use std::{
     cmp::Ordering,
     collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
@@ -266,14 +266,10 @@ impl Eq for AvailableJob {}
 
 impl Ord for AvailableJob {
     fn cmp(&self, other: &Self) -> Ordering {
-        let lhs = &self.spec.estimated_duration;
-        let rhs = &other.spec.estimated_duration;
-        match (lhs, rhs) {
-            (None, None) => Ordering::Equal,
-            (Some(_), None) => Ordering::Less,
-            (None, Some(_)) => Ordering::Greater,
-            (Some(lhs), Some(rhs)) => lhs.cmp(rhs),
-        }
+        duration::cmp(
+            &self.spec.estimated_duration,
+            &other.spec.estimated_duration,
+        )
     }
 }
 
@@ -717,65 +713,6 @@ mod tests {
     use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
 
-    #[test]
-    fn available_job_ord() {
-        let job1 = AvailableJob {
-            jid: jid!(1),
-            spec: spec!(1, Tar).estimated_duration(millis!(10)),
-            path: path_buf!("foo"),
-            cache_keys: Default::default(),
-        };
-        let job2 = AvailableJob {
-            jid: jid!(2),
-            spec: spec!(2, Tar).estimated_duration(millis!(10)),
-            path: path_buf!("bar"),
-            cache_keys: Default::default(),
-        };
-
-        // A job is equal to itself.
-        assert_eq!(job1, job1);
-        assert_eq!(job1.cmp(&job1), Ordering::Equal);
-
-        // job1 and job2 are equal because they have the same estimated duration.
-        assert_eq!(job1, job2);
-        assert_eq!(job2, job1);
-        assert_eq!(job1.cmp(&job2), Ordering::Equal);
-        assert_eq!(job2.cmp(&job1), Ordering::Equal);
-
-        let job3 = AvailableJob {
-            jid: jid!(3),
-            spec: spec!(3, Tar),
-            path: path_buf!("baz"),
-            cache_keys: Default::default(),
-        };
-        let job4 = AvailableJob {
-            jid: jid!(4),
-            spec: spec!(4, Tar),
-            path: path_buf!("frob"),
-            cache_keys: Default::default(),
-        };
-
-        // job3 and job4 are equal because they have the same estimated duration (None).
-        assert_eq!(job3, job4);
-        assert_eq!(job4, job3);
-        assert_eq!(job4.cmp(&job3), Ordering::Equal);
-        assert_eq!(job3.cmp(&job4), Ordering::Equal);
-
-        let job5 = AvailableJob {
-            jid: jid!(5),
-            spec: spec!(5, Tar).estimated_duration(millis!(100)),
-            path: path_buf!("scoob"),
-            cache_keys: Default::default(),
-        };
-
-        assert_eq!(job1.cmp(&job3), Ordering::Less);
-        assert_eq!(job1.cmp(&job5), Ordering::Less);
-        assert_eq!(job3.cmp(&job1), Ordering::Greater);
-        assert_eq!(job3.cmp(&job5), Ordering::Greater);
-        assert_eq!(job5.cmp(&job1), Ordering::Greater);
-        assert_eq!(job5.cmp(&job3), Ordering::Less);
-    }
-
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMessage {
         StartJob(JobId, JobSpec, PathBuf),
@@ -892,7 +829,7 @@ mod tests {
             self.borrow_mut()
                 .get_artifact_returns
                 .remove(&cache::Key::new(kind, digest.clone()))
-                .expect(&format!("unexpected get_artifact of {kind:?} {digest}"))
+                .unwrap_or_else(|| panic!("unexpected get_artifact of {kind:?} {digest}"))
         }
 
         fn got_artifact_failure(

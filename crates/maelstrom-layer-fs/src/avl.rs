@@ -437,7 +437,7 @@ where
                 (cmp::max(left_height, right_height) + 1) as u32
             );
             assert!(
-                balance_factor >= -1 && balance_factor <= 1,
+                (-1..=1).contains(&balance_factor),
                 "balance factor wrong: -1 <= {balance_factor} <= 1"
             );
             next.extend([node.left, node.right].into_iter().flatten());

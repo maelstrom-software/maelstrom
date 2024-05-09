@@ -6,6 +6,7 @@ pub mod r#async;
 pub mod async_fs;
 pub mod clap;
 pub mod config;
+pub mod duration;
 pub mod elf;
 pub mod ext;
 pub mod fs;

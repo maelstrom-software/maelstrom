@@ -52,7 +52,7 @@ impl FakeTestCase {
             effects: JobEffects { duration, .. },
             ..
         })) = self.outcome;
-        duration.clone()
+        duration
     }
 }
 
@@ -164,7 +164,7 @@ impl FakeTests {
     fn artifacts(&self, bin_path: &Path, packages: &[String]) -> Vec<Result<CargoArtifact>> {
         let packages: HashSet<_> = packages
             .iter()
-            .map(|p| p.split("@").next().unwrap())
+            .map(|p| p.split('@').next().unwrap())
             .collect();
         self.test_binaries
             .iter()
@@ -200,23 +200,23 @@ impl FakeTests {
 
     fn cases(&self, binary: &Path) -> Vec<String> {
         let binary_name = binary.file_name().unwrap().to_str().unwrap();
-        let binary = self.find_binary(&binary_name);
+        let binary = self.find_binary(binary_name);
         binary.tests.iter().map(|t| t.name.to_owned()).collect()
     }
 
     fn ignored_cases(&self, binary: &Path) -> Vec<String> {
         let binary_name = binary.file_name().unwrap().to_str().unwrap();
-        let binary = self.find_binary(&binary_name);
+        let binary = self.find_binary(binary_name);
         binary
             .tests
             .iter()
-            .filter_map(|t| t.ignored.then(|| t.name.to_owned()))
+            .filter(|&t| t.ignored).map(|t| t.name.to_owned())
             .collect()
     }
 
     fn find_outcome(&self, spec: JobSpec) -> Option<JobOutcome> {
         let binary_name = spec.program.file_name().unwrap();
-        let binary = self.find_binary(&binary_name);
+        let binary = self.find_binary(binary_name);
         let case_name = spec
             .arguments
             .iter()
@@ -231,7 +231,7 @@ impl FakeTests {
         self.test_binaries
             .iter()
             .find(|b| b.name == binary_name)
-            .expect(&format!("binary {binary_name} not found"))
+            .unwrap_or_else(|| panic!("binary {binary_name} not found"))
     }
 
     fn find_case(&self, binary_name: &str, case: &str) -> &FakeTestCase {
@@ -1272,7 +1272,7 @@ fn expected_count_updates_packages() {
 
     let test_listing_store = TestListingStore::new(
         Fs::new(),
-        &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+        tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
     let mut expected_listing = fake_tests.listing();
@@ -1318,7 +1318,7 @@ fn expected_count_updates_cases() {
         }],
     };
     run_all_tests_sync(
-        &tmp_dir,
+        tmp_dir,
         fake_tests.clone(),
         false.into(),
         vec!["all".into()],
@@ -1327,7 +1327,7 @@ fn expected_count_updates_cases() {
 
     let test_listing_store = TestListingStore::new(
         Fs::new(),
-        &tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+        tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
     let mut expected_listing = fake_tests.listing();
@@ -1342,7 +1342,7 @@ fn expected_count_updates_cases() {
     };
 
     run_all_tests_sync(
-        &tmp_dir,
+        tmp_dir,
         fake_tests.clone(),
         false.into(),
         vec!["all".into()],
@@ -1369,7 +1369,7 @@ fn filtering_none_does_not_build() {
         }],
     };
     run_all_tests_sync(
-        &tmp_dir,
+        tmp_dir,
         fake_tests.clone(),
         false.into(),
         vec!["none".into()],

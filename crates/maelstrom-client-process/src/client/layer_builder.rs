@@ -340,7 +340,7 @@ mod tests {
         for ExpectedManifestEntry { path, mode, data } in expected {
             let actual_data = actual_map
                 .get(path.as_path())
-                .expect(&format!("{path:?} not found in {actual_map:?}"));
+                .unwrap_or_else(|| panic!("{path:?} not found in {actual_map:?}"));
             assert_eq!(mode, actual_data.metadata.mode);
             assert_eq!(&data, &actual_data.data);
         }
@@ -631,7 +631,7 @@ mod tests {
                 "bar.bin" => "hello world",
             },
             |_| PrefixOptions::default(),
-            &Path::new("foo.txt"),
+            Path::new("foo.txt"),
         )
         .await;
     }
@@ -649,7 +649,7 @@ mod tests {
                 prepend_prefix: Some("foo/bar".into()),
                 ..Default::default()
             },
-            &Path::new("foo/bar/foo.txt"),
+            Path::new("foo/bar/foo.txt"),
         )
         .await;
     }
@@ -666,7 +666,7 @@ mod tests {
                 strip_prefix: Some(artifact_dir.to_owned().try_into().unwrap()),
                 ..Default::default()
             },
-            &Path::new("foo.txt"),
+            Path::new("foo.txt"),
         )
         .await;
     }
@@ -683,7 +683,7 @@ mod tests {
                 prepend_prefix: Some("foo/".into()),
                 ..Default::default()
             },
-            &Path::new("foo/foo.txt"),
+            Path::new("foo/foo.txt"),
         )
         .await;
     }
@@ -697,7 +697,7 @@ mod tests {
                 "bar.bin" => "hello world",
             },
             |_| PrefixOptions::default(),
-            &Path::new("foo/bar.txt"),
+            Path::new("foo/bar.txt"),
         )
         .await;
     }

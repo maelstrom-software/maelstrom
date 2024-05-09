@@ -223,7 +223,7 @@ mod tests {
     #[test]
     fn fail_while_latent() {
         let sm = StateMachine::<(), ()>::new(());
-        assert_eq!(sm.fail("foo".to_string()), false);
+        assert!(!sm.fail("foo".to_string()));
         assert_eq!(
             sm.active().unwrap_err().to_string(),
             "client not yet started"
@@ -263,7 +263,7 @@ mod tests {
         let sm = StateMachine::<(), String>::new(());
         let ah = sm.try_to_begin_activation().unwrap().1;
 
-        assert_eq!(sm.fail("foo".to_string()), false);
+        assert!(!sm.fail("foo".to_string()));
         assert_eq!(
             sm.active().unwrap_err().to_string(),
             "client not yet started"
@@ -320,7 +320,7 @@ mod tests {
         let ah = sm.try_to_begin_activation().unwrap().1;
         ah.activate(());
 
-        assert_eq!(sm.fail("failure!".to_string()), true);
+        assert!(sm.fail("failure!".to_string()));
 
         assert_eq!(
             sm.active().unwrap_err().to_string(),
@@ -333,7 +333,7 @@ mod tests {
         let sm = StateMachine::<(), ()>::new(());
         let ah = sm.try_to_begin_activation().unwrap().1;
         ah.activate(());
-        assert_eq!(sm.fail("failure!".to_string()), true);
+        assert!(sm.fail("failure!".to_string()));
 
         assert_eq!(
             sm.active().unwrap_err().to_string(),
@@ -366,7 +366,7 @@ mod tests {
         let sm = StateMachine::<(), ()>::new(());
         let ah = sm.try_to_begin_activation().unwrap().1;
         ah.activate(());
-        assert_eq!(sm.fail("failure!".to_string()), true);
+        assert!(sm.fail("failure!".to_string()));
 
         let Err(err) = sm.try_to_begin_activation() else {
             panic!("error expected");
@@ -401,9 +401,9 @@ mod tests {
         let sm = StateMachine::<(), ()>::new(());
         let ah = sm.try_to_begin_activation().unwrap().1;
         ah.activate(());
-        assert_eq!(sm.fail("failure!".to_string()), true);
+        assert!(sm.fail("failure!".to_string()));
 
-        assert_eq!(sm.fail("foo".to_string()), false);
+        assert!(!sm.fail("foo".to_string()));
 
         assert_eq!(
             sm.active().unwrap_err().to_string(),
@@ -417,7 +417,7 @@ mod tests {
         let ah = sm.try_to_begin_activation().unwrap().1;
         ah.fail("failure!".to_string());
 
-        assert_eq!(sm.fail("foo".to_string()), false);
+        assert!(!sm.fail("foo".to_string()));
 
         assert_eq!(
             sm.active().unwrap_err().to_string(),
