@@ -2,7 +2,7 @@ mod layer_builder;
 mod state_machine;
 
 use crate::{artifact_pusher, digest_repo::DigestRepository, progress::ProgressTracker, router};
-use anyhow::{anyhow, Context as _, Result};
+use anyhow::{anyhow, bail, Context as _, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
 use maelstrom_base::{
@@ -10,7 +10,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{environment_eval, std_env_lookup, JobSpec, Layer},
+    spec::{environment_eval, std_env_lookup, ImageConfig, ImageOption, JobSpec, Layer},
     CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
@@ -30,6 +30,7 @@ use slog::{debug, Logger};
 use state_machine::StateMachine;
 use std::{
     collections::{HashMap, HashSet},
+    mem,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -110,6 +111,17 @@ impl ClientState {
             .cached_layers
             .insert(layer, res.clone());
         Ok(res)
+    }
+
+    async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
+        let dl_name = format!("{name}:{tag}");
+        let tracker = self.image_download_tracker.new_task(&dl_name, 1);
+        let res = self
+            .container_image_depot
+            .get_container_image(name, tag, tracker)
+            .await;
+        self.image_download_tracker.remove_task(&dl_name);
+        res
     }
 }
 
@@ -411,35 +423,59 @@ impl Client {
     pub async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         let state = self.state_machine.active()?;
         debug!(state.log, "get_container_image"; "name" => name, "tag" => tag);
-        let dl_name = format!("{name}:{tag}");
-        let tracker = state.image_download_tracker.new_task(&dl_name, 1);
-        let res = state
-            .container_image_depot
-            .get_container_image(name, tag, tracker)
-            .await;
-        state.image_download_tracker.remove_task(&dl_name);
-        res
+        state.get_container_image(name, tag).await
     }
 
     pub async fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
         let (state, watcher) = self.state_machine.active_with_watcher()?;
         let (sender, receiver) = tokio::sync::oneshot::channel();
         debug!(state.log, "run_job"; "spec" => ?spec);
+
+        let mut layers = spec.layers;
+        let mut initial_env = Default::default();
+        let mut image_working_directory = None;
+        if let Some(image_spec) = spec.image {
+            let image = state
+                .get_container_image(&image_spec.name, &image_spec.tag)
+                .await?;
+            let image_config = ImageConfig {
+                layers: image.layers.clone(),
+                environment: image.env().cloned(),
+                working_directory: image.working_dir().map(From::from),
+            };
+            let image = ImageOption::from_config(image_config);
+            if image_spec.use_layers {
+                let end = mem::take(&mut layers);
+                for layer in image.layers()? {
+                    layers.push(state.add_layer(layer).await?);
+                }
+                layers.extend(end);
+            }
+            if image_spec.use_environment {
+                initial_env = image.environment()?;
+            }
+            if image_spec.use_working_directory {
+                image_working_directory = Some(image.working_directory()?);
+            }
+        }
+        if image_working_directory.is_some() && spec.working_directory.is_some() {
+            bail!("can't provide both `working_directory` and `image.use_working_directory`");
+        }
+
+        let working_directory = image_working_directory
+            .or(spec.working_directory)
+            .ok_or(anyhow!("no working_directory provided"))?;
+
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
-            environment: environment_eval(Default::default(), spec.environment, std_env_lookup)?,
-            layers: spec
-                .layers
-                .try_into()
-                .map_err(|_| anyhow!("missing layers"))?,
+            environment: environment_eval(initial_env, spec.environment, std_env_lookup)?,
+            layers: layers.try_into().map_err(|_| anyhow!("missing layers"))?,
             devices: spec.devices,
             mounts: spec.mounts,
             enable_loopback: spec.enable_loopback,
             enable_writable_file_system: spec.enable_writable_file_system,
-            working_directory: spec
-                .working_directory
-                .ok_or(anyhow!("missing working directory"))?,
+            working_directory,
             user: spec.user,
             group: spec.group,
             timeout: spec.timeout,

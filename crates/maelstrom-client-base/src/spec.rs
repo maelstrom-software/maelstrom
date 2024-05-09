@@ -443,6 +443,15 @@ impl<'a> ImageOption<'a> {
         })
     }
 
+    pub fn from_config(config: ImageConfig) -> Self {
+        Self {
+            name: None,
+            layers: config.layers,
+            environment: config.environment,
+            working_directory: config.working_directory,
+        }
+    }
+
     /// Return the image name. A non-`None` image name must have been specified when this struct
     /// was created, or this function will panic.
     pub fn name(&self) -> &str {
