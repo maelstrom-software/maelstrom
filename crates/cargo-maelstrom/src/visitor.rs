@@ -318,7 +318,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
         let mut duration_str = String::new();
-        match res {
+        let exit_code = match res {
             Ok((
                 cjid,
                 Ok(JobOutcome::Completed(JobCompleted {
@@ -333,7 +333,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
             )) => {
                 duration_str = format!("{:.3}s", duration.as_secs_f64());
                 let mut job_failed = true;
-                match status {
+                let exit_code = match status {
                     JobStatus::Exited(code) => {
                         result_str = if code == 0 {
                             job_failed = false;
@@ -341,14 +341,12 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                         } else {
                             "FAIL".red()
                         };
-                        self.tracker
-                            .job_exited(self.case_str.clone(), ExitCode::from(code));
+                        ExitCode::from(code)
                     }
                     JobStatus::Signaled(signo) => {
                         result_str = "FAIL".red();
                         result_details = Some(format!("killed by signal {signo}"));
-                        self.tracker
-                            .job_exited(self.case_str.clone(), ExitCode::FAILURE);
+                        ExitCode::FAILURE
                     }
                 };
                 if job_failed {
@@ -376,6 +374,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                         self.case.as_str(),
                         duration,
                     );
+                exit_code
             }
             Ok((
                 cjid,
@@ -387,8 +386,6 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
             )) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
-                self.tracker
-                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
                 test_output_stdout.extend(format_test_output(
                     &stdout,
                     "stdout",
@@ -412,26 +409,24 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                         self.case.as_str(),
                         duration,
                     );
+                ExitCode::FAILURE
             }
             Ok((_, Err(JobError::Execution(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("execution error: {err}"));
-                self.tracker
-                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
+                ExitCode::FAILURE
             }
             Ok((_, Err(JobError::System(err)))) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("system error: {err}"));
-                self.tracker
-                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
+                ExitCode::FAILURE
             }
             Err(err) => {
                 result_str = "ERR".yellow();
                 result_details = Some(format!("remote error: {err}"));
-                self.tracker
-                    .job_exited(self.case_str.clone(), ExitCode::FAILURE);
+                ExitCode::FAILURE
             }
-        }
+        };
         let printer = self.ind.lock_printing();
         self.print_job_result(result_str, duration_str, &printer);
 
@@ -447,6 +442,9 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
         drop(printer);
 
         self.ind.job_finished();
+
+        // This call unblocks main thread, so it must go last
+        self.tracker.job_exited(self.case_str.clone(), exit_code);
     }
 
     pub fn job_ignored(&self) {
