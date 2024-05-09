@@ -385,3 +385,10 @@ macro_rules! timeout {
         maelstrom_base::Timeout::new($n)
     };
 }
+
+#[macro_export]
+macro_rules! millis {
+    ($millis:expr) => {
+        Duration::from_millis($millis)
+    };
+}

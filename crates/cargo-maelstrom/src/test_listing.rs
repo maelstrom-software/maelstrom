@@ -424,6 +424,7 @@ impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
 mod tests {
     use super::*;
     use indoc::indoc;
+    use maelstrom_test::millis;
     use maelstrom_util::ext::OptionExt as _;
     use pretty_assertions::assert_eq;
     use std::{cell::RefCell, rc::Rc, str};

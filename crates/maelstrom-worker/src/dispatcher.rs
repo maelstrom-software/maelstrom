@@ -11,7 +11,8 @@ use maelstrom_base::{
 };
 use maelstrom_util::{config::common::Slots, ext::OptionExt as _};
 use std::{
-    collections::{hash_map::Entry, HashMap, HashSet, VecDeque},
+    cmp::Ordering,
+    collections::{hash_map::Entry, BinaryHeap, HashMap, HashSet},
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -176,7 +177,7 @@ where
             cache,
             slots: slots.into_inner().into(),
             awaiting_layers: HashMap::default(),
-            available: VecDeque::default(),
+            available: BinaryHeap::default(),
             executing: HashMap::default(),
         }
     }
@@ -239,11 +240,41 @@ struct AwaitingLayersJob {
 /// This struct represents a job that is ready to be executed, but isn't yet executing. These jobs
 /// sit in a queue until there are slots available for them. At that point, they become
 /// `ExecutingJob`s.
+#[derive(Debug)]
 struct AvailableJob {
     jid: JobId,
     spec: JobSpec,
     path: PathBuf,
     cache_keys: HashSet<cache::Key>,
+}
+
+impl PartialEq for AvailableJob {
+    fn eq(&self, other: &Self) -> bool {
+        self.spec
+            .estimated_duration
+            .eq(&other.spec.estimated_duration)
+    }
+}
+
+impl PartialOrd for AvailableJob {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for AvailableJob {}
+
+impl Ord for AvailableJob {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let lhs = &self.spec.estimated_duration;
+        let rhs = &other.spec.estimated_duration;
+        match (lhs, rhs) {
+            (None, None) => Ordering::Equal,
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (Some(lhs), Some(rhs)) => lhs.cmp(rhs),
+        }
+    }
 }
 
 /// An executing job may have been canceled or timed out, or it may be executing normally.
@@ -288,7 +319,7 @@ pub struct Dispatcher<DepsT: Deps, ArtifactFetcherT, BrokerSenderT, CacheT> {
     cache: CacheT,
     slots: usize,
     awaiting_layers: HashMap<JobId, AwaitingLayersJob>,
-    available: VecDeque<AvailableJob>,
+    available: BinaryHeap<AvailableJob>,
     executing: HashMap<JobId, ExecutingJob<DepsT>>,
 }
 
@@ -394,7 +425,7 @@ where
             spec,
             path,
             cache_keys,
-        }) = self.available.pop_front()
+        }) = self.available.pop()
         else {
             return;
         };
@@ -415,7 +446,7 @@ where
     /// Put a job on the available jobs queue. At this point, it must have all of its artifacts.
     fn make_job_available(&mut self, jid: JobId, spec: JobSpec, tracker: LayerTracker) {
         let (path, cache_keys) = tracker.into_path_and_cache_keys();
-        self.available.push_back(AvailableJob {
+        self.available.push(AvailableJob {
             jid,
             spec,
             path,
@@ -455,16 +486,19 @@ where
             *state = ExecutingJobState::Canceled;
         } else {
             // It may be the queue.
-            self.available.retain_mut(|entry| {
+            let mut keys_to_drop: Vec<cache::Key> = vec![];
+            let keys_to_drop_ref = &mut keys_to_drop;
+            self.available.retain(|entry| {
                 if entry.jid != jid {
                     true
                 } else {
-                    for cache::Key { kind, digest } in &entry.cache_keys {
-                        self.cache.decrement_ref_count(*kind, digest);
-                    }
+                    keys_to_drop_ref.extend(entry.cache_keys.iter().map(Clone::clone));
                     false
                 }
             });
+            for cache::Key { kind, digest } in keys_to_drop {
+                self.cache.decrement_ref_count(kind, &digest);
+            }
         }
     }
 
@@ -682,6 +716,65 @@ mod tests {
     use maelstrom_test::*;
     use std::{cell::RefCell, rc::Rc, time::Duration};
     use BrokerToWorker::*;
+
+    #[test]
+    fn available_job_ord() {
+        let job1 = AvailableJob {
+            jid: jid!(1),
+            spec: spec!(1, Tar).estimated_duration(millis!(10)),
+            path: path_buf!("foo"),
+            cache_keys: Default::default(),
+        };
+        let job2 = AvailableJob {
+            jid: jid!(2),
+            spec: spec!(2, Tar).estimated_duration(millis!(10)),
+            path: path_buf!("bar"),
+            cache_keys: Default::default(),
+        };
+
+        // A job is equal to itself.
+        assert_eq!(job1, job1);
+        assert_eq!(job1.cmp(&job1), Ordering::Equal);
+
+        // job1 and job2 are equal because they have the same estimated duration.
+        assert_eq!(job1, job2);
+        assert_eq!(job2, job1);
+        assert_eq!(job1.cmp(&job2), Ordering::Equal);
+        assert_eq!(job2.cmp(&job1), Ordering::Equal);
+
+        let job3 = AvailableJob {
+            jid: jid!(3),
+            spec: spec!(3, Tar),
+            path: path_buf!("baz"),
+            cache_keys: Default::default(),
+        };
+        let job4 = AvailableJob {
+            jid: jid!(4),
+            spec: spec!(4, Tar),
+            path: path_buf!("frob"),
+            cache_keys: Default::default(),
+        };
+
+        // job3 and job4 are equal because they have the same estimated duration (None).
+        assert_eq!(job3, job4);
+        assert_eq!(job4, job3);
+        assert_eq!(job4.cmp(&job3), Ordering::Equal);
+        assert_eq!(job3.cmp(&job4), Ordering::Equal);
+
+        let job5 = AvailableJob {
+            jid: jid!(5),
+            spec: spec!(5, Tar).estimated_duration(millis!(100)),
+            path: path_buf!("scoob"),
+            cache_keys: Default::default(),
+        };
+
+        assert_eq!(job1.cmp(&job3), Ordering::Less);
+        assert_eq!(job1.cmp(&job5), Ordering::Less);
+        assert_eq!(job3.cmp(&job1), Ordering::Greater);
+        assert_eq!(job3.cmp(&job5), Ordering::Greater);
+        assert_eq!(job5.cmp(&job1), Ordering::Greater);
+        assert_eq!(job5.cmp(&job3), Ordering::Less);
+    }
 
     #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
     enum TestMessage {
@@ -972,7 +1065,7 @@ mod tests {
     }
 
     script_test! {
-        jobs_are_executed_in_fifo_order,
+        jobs_are_executed_in_lpt_order,
         Fixture::new(2, [
             (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/a"))),
             (cache_key!(Blob, 2), GetArtifact::Success(path_buf!("/b"))),
@@ -995,11 +1088,11 @@ mod tests {
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
         };
-        Broker(EnqueueJob(jid!(3), spec!(3, Tar))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)))) => {
             CacheGetArtifact(Blob, digest!(3), jid!(3)),
             CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
         };
-        Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
+        Broker(EnqueueJob(jid!(4), spec!(4, Tar).estimated_duration(millis!(100)))) => {
             CacheGetArtifact(Blob, digest!(4), jid!(4)),
             CacheGetArtifact(BottomFsLayer, digest!(4), jid!(4)),
         };
@@ -1021,7 +1114,7 @@ mod tests {
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            StartJob(jid!(3), spec!(3, Tar), path_buf!("/c")),
+            StartJob(jid!(5), spec!(5, Tar), path_buf!("/e")),
         };
 
         Broker(CancelJob(jid!(2))) => {
@@ -1037,13 +1130,13 @@ mod tests {
         })) => {
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
-            StartJob(jid!(4), spec!(4, Tar), path_buf!("/d")),
+            StartJob(jid!(4), spec!(4, Tar).estimated_duration(millis!(100)), path_buf!("/d")),
         };
 
-        Broker(CancelJob(jid!(3))) => {
-            JobHandleDropped(jid!(3)),
+        Broker(CancelJob(jid!(5))) => {
+            JobHandleDropped(jid!(5)),
         };
-        Message::JobCompleted(jid!(3), Ok(base::JobCompleted {
+        Message::JobCompleted(jid!(5), Ok(base::JobCompleted {
             status: JobStatus::Exited(0),
             effects: JobEffects {
                 stdout: JobOutputResult::None,
@@ -1051,9 +1144,9 @@ mod tests {
                 duration: std::time::Duration::from_secs(1),
             }
         })) => {
-            CacheDecrementRefCount(Blob, digest!(3)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(3)),
-            StartJob(jid!(5), spec!(5, Tar), path_buf!("/e")),
+            CacheDecrementRefCount(Blob, digest!(5)),
+            CacheDecrementRefCount(BottomFsLayer, digest!(5)),
+            StartJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)), path_buf!("/c")),
         };
     }
 

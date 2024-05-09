@@ -269,6 +269,11 @@ impl JobSpec {
         self.timeout = timeout.into();
         self
     }
+
+    pub fn estimated_duration(mut self, estimated_duration: impl Into<Option<Duration>>) -> Self {
+        self.estimated_duration = estimated_duration.into();
+        self
+    }
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
