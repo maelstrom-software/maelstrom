@@ -417,51 +417,27 @@ pub enum PossiblyImage<T> {
 
 /// A convenience struct for extracting parts of an OCI image for use in a
 /// [`maelstrom_base::JobSpec`].
-pub struct ImageOption<'a> {
-    name: Option<&'a str>,
+pub struct ConvertedImage {
+    name: String,
     layers: Vec<PathBuf>,
     environment: Option<Vec<String>>,
     working_directory: Option<Utf8PathBuf>,
 }
 
-impl<'a> ImageOption<'a> {
-    /// Create a new [`ImageOption`].
-    pub fn new(
-        image_name: &'a Option<String>,
-        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
-    ) -> Result<Self> {
-        let name = image_name.as_deref();
-        let (layers, environment, working_directory) =
-            image_name.as_deref().map(image_lookup).transpose()?.map_or(
-                (Default::default(), Default::default(), Default::default()),
-                |ImageConfig {
-                     layers,
-                     environment,
-                     working_directory,
-                 }| { (layers, environment, working_directory) },
-            );
-        Ok(ImageOption {
-            name,
-            layers,
-            environment,
-            working_directory,
-        })
-    }
-
-    pub fn from_config(config: ImageConfig) -> Self {
+impl ConvertedImage {
+    /// Create a new [`ConvertedImage`].
+    pub fn new(name: &str, config: ImageConfig) -> Self {
         Self {
-            name: None,
+            name: name.into(),
             layers: config.layers,
             environment: config.environment,
             working_directory: config.working_directory,
         }
     }
 
-    /// Return the image name. A non-`None` image name must have been specified when this struct
-    /// was created, or this function will panic.
+    /// Return the image name.
     pub fn name(&self) -> &str {
-        self.name
-            .expect("name() called on an ImageOption that has no image name")
+        &self.name
     }
 
     /// Return an iterator of layers for the image. If there is no image, the iterator will be
@@ -545,23 +521,23 @@ mod test {
         );
     }
 
-    fn images(name: &str) -> Result<ImageConfig> {
+    fn images(name: &str) -> ImageConfig {
         match name {
-            "image1" => Ok(ImageConfig {
+            "image1" => ImageConfig {
                 layers: path_buf_vec!["42", "43"],
                 working_directory: Some("/foo".into()),
                 environment: Some(string_vec!["FOO=image-foo", "BAZ=image-baz",]),
-            }),
-            "empty" => Ok(Default::default()),
-            "invalid-env" => Ok(ImageConfig {
+            },
+            "empty" => Default::default(),
+            "invalid-env" => ImageConfig {
                 environment: Some(string_vec!["FOO"]),
                 ..Default::default()
-            }),
-            "invalid-layer-path" => Ok(ImageConfig {
+            },
+            "invalid-layer-path" => ImageConfig {
                 layers: vec![PathBuf::from(OsStr::from_bytes(b"\xff"))],
                 ..Default::default()
-            }),
-            _ => Err(anyhow!("no container named {name} found")),
+            },
+            _ => panic!("no container named {name} found"),
         }
     }
 
@@ -575,8 +551,7 @@ mod test {
 
     #[test]
     fn good_image_option() {
-        let image_name = Some(string!("image1"));
-        let io = ImageOption::new(&image_name, images).unwrap();
+        let io = ConvertedImage::new("image1", images("image1"));
         assert_eq!(io.name(), "image1");
         assert_eq!(
             Vec::from_iter(io.layers().unwrap()),
@@ -594,8 +569,7 @@ mod test {
 
     #[test]
     fn image_option_no_environment_and_no_working_directory() {
-        let image_name = Some(string!("empty"));
-        let io = ImageOption::new(&image_name, images).unwrap();
+        let io = ConvertedImage::new("empty", images("empty"));
         assert_error(
             io.environment().unwrap_err(),
             "image empty has no environment to use",
@@ -608,8 +582,7 @@ mod test {
 
     #[test]
     fn image_option_invalid_environment_variable() {
-        let image_name = Some(string!("invalid-env"));
-        let io = ImageOption::new(&image_name, images).unwrap();
+        let io = ConvertedImage::new("invalid-env", images("invalid-env"));
         assert_error(
             io.environment().unwrap_err(),
             "image invalid-env has an invalid environment variable FOO",
@@ -618,8 +591,7 @@ mod test {
 
     #[test]
     fn image_option_invalid_layer_path() {
-        let image_name = Some(string!("invalid-layer-path"));
-        let io = ImageOption::new(&image_name, images).unwrap();
+        let io = ConvertedImage::new("invalid-layer-path", images("invalid-layer-path"));
         let Err(err) = io.layers() else {
             panic!("");
         };

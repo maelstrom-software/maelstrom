@@ -10,7 +10,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{environment_eval, std_env_lookup, ImageConfig, ImageOption, JobSpec, Layer},
+    spec::{environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobSpec, Layer},
     CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
@@ -437,7 +437,8 @@ impl Client {
                 environment: image.env().cloned(),
                 working_directory: image.working_dir().map(From::from),
             };
-            let image = ImageOption::from_config(image_config);
+            let image_name = format!("{}:{}", &image_spec.name, &image_spec.tag);
+            let image = ConvertedImage::new(&image_name, image_config);
             if image_spec.use_layers {
                 let end = mem::take(&mut layers);
                 for layer in image.layers()? {
