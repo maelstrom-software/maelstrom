@@ -4,6 +4,7 @@ use maelstrom_base::{manifest::UnixTimestamp, ArtifactType, Sha256Digest};
 use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, UpperLayerBuilder};
 use maelstrom_util::{async_fs::Fs, root::Root};
 use std::path::{Path, PathBuf};
+use tokio::io::BufReader;
 
 async fn dir_size(fs: &Fs, path: &Path) -> Result<u64> {
     let mut total = 0;
@@ -27,7 +28,7 @@ pub async fn build_bottom_layer(
     fs.create_dir_all(&layer_path).await?;
     let mut builder =
         BottomLayerBuilder::new(log, &fs, &layer_path, blob_dir, UnixTimestamp::EPOCH).await?;
-    let artifact_file = fs.open_file(artifact_path).await?;
+    let artifact_file = BufReader::new(fs.open_file(artifact_path).await?);
     match artifact_type {
         ArtifactType::Tar => builder.add_from_tar(artifact_digest, artifact_file).await?,
         ArtifactType::Manifest => builder.add_from_manifest(artifact_file).await?,
