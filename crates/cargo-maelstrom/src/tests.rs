@@ -41,6 +41,7 @@ struct FakeTestCase {
     name: String,
     ignored: bool,
     desired_state: JobState,
+    expected_estimated_duration: Option<Duration>,
     outcome: JobOutcome,
 }
 
@@ -61,12 +62,13 @@ impl Default for FakeTestCase {
             name: "".into(),
             ignored: false,
             desired_state: JobState::Complete,
+            expected_estimated_duration: None,
             outcome: JobOutcome::Completed(JobCompleted {
                 status: JobStatus::Exited(0),
                 effects: JobEffects {
                     stdout: JobOutputResult::None,
                     stderr: JobOutputResult::Inline(Box::new(*b"this output should be ignored")),
-                    duration: std::time::Duration::from_secs(1),
+                    duration: Duration::from_secs(1),
                 },
             }),
         }
@@ -221,6 +223,7 @@ impl FakeTests {
             .find(|a| !a.starts_with("--"))
             .unwrap();
         let case = binary.tests.iter().find(|c| &c.name == case_name).unwrap();
+        assert_eq!(&spec.estimated_duration, &case.expected_estimated_duration);
         (case.desired_state == JobState::Complete).then(|| case.outcome.clone())
     }
 
@@ -1001,7 +1004,7 @@ fn failed_tests() {
                 ",
             )),
             stderr: JobOutputResult::Inline(Box::new(*b"error output")),
-            duration: std::time::Duration::from_secs(1),
+            duration: Duration::from_secs(1),
         },
     });
     let fake_tests = FakeTests {
@@ -1252,7 +1255,7 @@ fn expected_count_updates_packages() {
                     outcome: JobOutcome::TimedOut(JobEffects {
                         stdout: JobOutputResult::None,
                         stderr: JobOutputResult::None,
-                        duration: std::time::Duration::from_secs(1),
+                        duration: Duration::from_secs(1),
                     }),
                     ..Default::default()
                 }],
@@ -1281,6 +1284,7 @@ fn expected_count_updates_packages() {
             name: "foo".into(),
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
+                expected_estimated_duration: Some(Duration::from_secs(1)),
                 ..Default::default()
             }],
         }],

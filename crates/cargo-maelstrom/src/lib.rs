@@ -377,6 +377,19 @@ where
             return Ok(EnqueueResult::Ignored);
         }
 
+        let estimated_duration = self
+            .queuing_state
+            .test_listing
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .get_timing(
+                &self.package_name,
+                &ArtifactKey::from(&self.artifact.target),
+                case,
+            );
+
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
@@ -396,7 +409,7 @@ where
                 user: test_metadata.user,
                 group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
-                estimated_duration: None,
+                estimated_duration,
             },
             move |res| visitor.job_finished(res),
         )?;
