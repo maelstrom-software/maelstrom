@@ -1104,14 +1104,7 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             StartJob(jid!(5), spec!(5, Tar), path_buf!("/e")),
@@ -1120,14 +1113,7 @@ mod tests {
         Broker(CancelJob(jid!(2))) => {
             JobHandleDropped(jid!(2)),
         };
-        Message::JobCompleted(jid!(2), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(2), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
             StartJob(jid!(4), spec!(4, Tar).estimated_duration(millis!(100)), path_buf!("/d")),
@@ -1136,14 +1122,7 @@ mod tests {
         Broker(CancelJob(jid!(5))) => {
             JobHandleDropped(jid!(5)),
         };
-        Message::JobCompleted(jid!(5), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(5), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(5)),
             CacheDecrementRefCount(BottomFsLayer, digest!(5)),
             StartJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)), path_buf!("/c")),
@@ -1194,14 +1173,7 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(BottomFsLayer, digest!(41)),
             CacheDecrementRefCount(BottomFsLayer, digest!(42)),
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(42, 41)),
@@ -1257,15 +1229,8 @@ mod tests {
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(42, 41)),
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(41, 42, 41)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             JobHandleDropped(jid!(1)),
@@ -1318,14 +1283,7 @@ mod tests {
             TimerHandleDropped(jid!(1)),
         };
         Broker(CancelJob(jid!(1))) => {};
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
@@ -1349,15 +1307,8 @@ mod tests {
             CacheGetArtifact(Blob, digest!(2), jid!(2)),
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             JobHandleDropped(jid!(1)),
@@ -1370,8 +1321,10 @@ mod tests {
         Fixture::new(1, [
             (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/a"))),
             (cache_key!(Blob, 2), GetArtifact::Success(path_buf!("/b"))),
+            (cache_key!(Blob, 3), GetArtifact::Success(path_buf!("/c"))),
             (cache_key!(BottomFsLayer, 1), GetArtifact::Success(path_buf!("/a"))),
             (cache_key!(BottomFsLayer, 2), GetArtifact::Success(path_buf!("/b"))),
+            (cache_key!(BottomFsLayer, 3), GetArtifact::Success(path_buf!("/c"))),
         ], [], []),
         Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
             CacheGetArtifact(Blob, digest!(1), jid!(1)),
@@ -1382,13 +1335,25 @@ mod tests {
             CacheGetArtifact(Blob, digest!(2), jid!(2)),
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
-        Message::JobCompleted(jid!(1), Err(JobError::System(string!("job error")))) => {
+        Broker(EnqueueJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)))) => {
+            CacheGetArtifact(Blob, digest!(3), jid!(3)),
+            CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
+        };
+        Message::JobCompleted(jid!(1), Err(JobError::System(string!("system error")))) => {
             SendMessageToBroker(WorkerToBroker(
-                jid!(1), Err(JobError::System(string!("job error"))))),
+                jid!(1), Err(JobError::System(string!("system error"))))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
+        };
+        Message::JobCompleted(jid!(2), Err(JobError::Execution(string!("execution error")))) => {
+            SendMessageToBroker(WorkerToBroker(
+                jid!(2), Err(JobError::Execution(string!("execution error"))))),
+            CacheDecrementRefCount(Blob, digest!(2)),
+            CacheDecrementRefCount(BottomFsLayer, digest!(2)),
+            JobHandleDropped(jid!(2)),
+            StartJob(jid!(3), spec!(3, Tar).estimated_duration(millis!(10)), path_buf!("/c")),
         };
     }
 
@@ -1412,14 +1377,7 @@ mod tests {
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Signaled(9),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(3))) => {
             CacheDecrementRefCount(Blob, digest!(41)),
             CacheDecrementRefCount(BottomFsLayer, digest!(41)),
             CacheDecrementRefCount(Blob, digest!(42)),
@@ -1432,17 +1390,9 @@ mod tests {
     #[should_panic(expected = "missing entry for JobId")]
     fn receive_job_completed_unknown() {
         let mut fixture = Fixture::new(1, [], [], []);
-        fixture.dispatcher.receive_message(Message::JobCompleted(
-            jid!(1),
-            Ok(base::JobCompleted {
-                status: JobStatus::Exited(0),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: std::time::Duration::from_secs(1),
-                },
-            }),
-        ));
+        fixture
+            .dispatcher
+            .receive_message(Message::JobCompleted(jid!(1), Ok(completed!(1))));
     }
 
     script_test! {
@@ -1457,22 +1407,8 @@ mod tests {
             StartJob(jid!(1), spec!(1, Tar).timeout(timeout!(33)), path_buf!("/a")),
             StartTimer(jid!(1), Duration::from_secs(33)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed(base::JobCompleted {
-                status: JobStatus::Exited(0),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: std::time::Duration::from_secs(1),
-                }
-            })))),
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             TimerHandleDropped(jid!(1)),
@@ -1557,25 +1493,11 @@ mod tests {
             CacheGetArtifact(Blob, digest!(2), jid!(2)),
             CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             TimerHandleDropped(jid!(1)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed(base::JobCompleted {
-                status: JobStatus::Exited(0),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: std::time::Duration::from_secs(1),
-                }
-            })))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
             JobHandleDropped(jid!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
         };
@@ -1605,14 +1527,7 @@ mod tests {
             TimerHandleDropped(jid!(1)),
         };
         JobTimer(jid!(1)) => {};
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
@@ -1701,25 +1616,11 @@ mod tests {
             CacheGetArtifact(UpperFsLayer, upper_digest!(1, 1), jid!(1)),
             StartJob(jid!(1), spec!(1, [(1, Tar), (1, Tar)]), path_buf!("/1")),
         };
-        Message::JobCompleted(jid!(1), Ok(base::JobCompleted {
-            status: JobStatus::Exited(0),
-            effects: JobEffects {
-                stdout: JobOutputResult::None,
-                stderr: JobOutputResult::None,
-                duration: std::time::Duration::from_secs(1),
-            }
-        })) => {
+        Message::JobCompleted(jid!(1), Ok(completed!(1))) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             CacheDecrementRefCount(UpperFsLayer, upper_digest!(1, 1)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(JobOutcome::Completed(base::JobCompleted {
-                status: JobStatus::Exited(0),
-                effects: JobEffects {
-                    stdout: JobOutputResult::None,
-                    stderr: JobOutputResult::None,
-                    duration: std::time::Duration::from_secs(1),
-                },
-            })))),
+            SendMessageToBroker(WorkerToBroker(jid!(1), Ok(outcome!(1)))),
             JobHandleDropped(jid!(1)),
         };
     }
