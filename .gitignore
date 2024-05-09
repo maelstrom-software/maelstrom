@@ -8,3 +8,5 @@ rusty-tags.vi
 result*
 **/.DS_Store
 /crates/maelstrom-web/target
+/py/__pycache__
+/py/maelstrom_client/__pycache__

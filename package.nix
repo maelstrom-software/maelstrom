@@ -9,6 +9,10 @@
   llvmPackages,
   openssl,
   libiconv,
+  python3,
+  python311Packages,
+  mypy,
+  black,
   version ? null
 }:
 
@@ -40,9 +44,16 @@ let
 
     nativeBuildInputs = [
       binaryen
+      black
       pkg-config
       llvmPackages.bintools
+      mypy
       protobuf
+      python3
+      python311Packages.grpcio-tools
+      python311Packages.pytest
+      python311Packages.types-protobuf
+      python311Packages.xdg-base-dirs
       mdbook
     ];
 
