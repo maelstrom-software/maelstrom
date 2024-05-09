@@ -9,7 +9,7 @@ pub struct QuietProgressBar {
 
 impl QuietProgressBar {
     pub fn new(term: impl TermLike + 'static) -> Self {
-        let bar = super::make_progress_bar("white", "jobs", 4, false);
+        let bar = super::make_main_progress_bar("white", "jobs", 4);
         bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
         Self { bar }
     }

@@ -33,12 +33,7 @@ impl MultipleProgressBars {
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {
-            let bar = multi_bar.add(super::make_progress_bar(
-                color,
-                state.to_string(),
-                21,
-                false,
-            ));
+            let bar = multi_bar.add(super::make_main_progress_bar(color, state.to_string(), 21));
             bars.insert(state, bar);
         }
         Self {
@@ -83,7 +78,7 @@ impl ProgressIndicator for MultipleProgressBars {
     fn new_side_progress(&self, msg: impl Into<String>) -> Option<ProgressBar> {
         Some(
             self.multi_bar
-                .insert(1, super::make_progress_bar("white", msg, 21, true)),
+                .insert(1, super::make_side_progress_bar("white", msg, 21)),
         )
     }
 

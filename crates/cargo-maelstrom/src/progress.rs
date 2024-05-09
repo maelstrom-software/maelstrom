@@ -110,20 +110,20 @@ where
 //                      waiting for artifacts, pending, running, complete
 const COLORS: [&str; 4] = ["red", "yellow", "blue", "green"];
 
-fn make_progress_bar(
-    color: &str,
-    message: impl Into<String>,
-    msg_len: usize,
-    bytes: bool,
-) -> ProgressBar {
-    let prog_line = if bytes {
-        "{bytes}/{total_bytes}"
-    } else {
-        "{pos}/{len}"
-    };
+fn make_main_progress_bar(color: &str, message: impl Into<String>, msg_len: usize) -> ProgressBar {
     ProgressBar::new(0).with_message(message.into()).with_style(
         ProgressStyle::with_template(&format!(
-            "{{wide_bar:.{color}}} {prog_line} {{msg:{msg_len}}}"
+            "{{wide_bar:.{color}}} {{pos}}/{{len}} {{msg:{msg_len}}}"
+        ))
+        .unwrap()
+        .progress_chars("##-"),
+    )
+}
+
+fn make_side_progress_bar(color: &str, message: impl Into<String>, msg_len: usize) -> ProgressBar {
+    ProgressBar::new(0).with_message(message.into()).with_style(
+        ProgressStyle::with_template(&format!(
+            "{{wide_bar:.{color}}} {{msg:{msg_len}}} {{bytes}}/{{total_bytes}}"
         ))
         .unwrap()
         .progress_chars("##-"),
