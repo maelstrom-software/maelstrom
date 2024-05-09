@@ -20,6 +20,7 @@ pub enum Hello {
 /// Message sent from the broker to a worker. The broker won't send a message until it has received
 /// a [`Hello`] and determined the type of its interlocutor.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum BrokerToWorker {
     EnqueueJob(JobId, JobSpec),
     CancelJob(JobId),
