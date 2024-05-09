@@ -929,22 +929,6 @@ mod tests {
     }
 
     script_test! {
-        enqueue_no_artifacts_no_error_slots_available,
-        Fixture::new(1, [
-            (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(BottomFsLayer, 1), GetArtifact::Success(path_buf!("/a"))),
-        ], [], []),
-        Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(Blob, digest!(1), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(1), jid!(1)),
-            StartJob(jid!(1), spec!(1, Tar), path_buf!("/a")),
-        };
-        Broker(CancelJob(jid!(1))) => {
-            JobHandleDropped(jid!(1)),
-        };
-    }
-
-    script_test! {
         enqueue_immediate_artifacts_no_error_slots_available,
         Fixture::new(1, [
             (cache_key!(Blob, 41), GetArtifact::Success(path_buf!("/a"))),
@@ -987,70 +971,9 @@ mod tests {
         };
     }
 
-    /*
     script_test! {
-        enqueue_immediate_artifacts_system_error_slots_available,
-        Fixture::new(1, [
-            Err(JobError::System(string!("se"))),
-        ], [
-            (cache_key!(Blob, 41), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(Blob, 42), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(BottomFsLayer, 41), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(BottomFsLayer, 42), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(UpperFsLayer, 42, 41), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(UpperFsLayer, 41, 42, 41), GetArtifact::Success(path_buf!("/a"))),
-        ], [], []),
-        Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]))) => {
-            CacheGetArtifact(Blob, digest!(41), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
-            CacheGetArtifact(Blob, digest!(42), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(42), jid!(1)),
-            CacheGetArtifact(UpperFsLayer, upper_digest!(42, 41), jid!(1)),
-            CacheGetArtifact(UpperFsLayer, upper_digest!(41, 42, 41), jid!(1)),
-            StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar), (41, Tar)]), path_buf!("/a")),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::System(string!("se"))))),
-            CacheDecrementRefCount(Blob, digest!(41)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(41)),
-            CacheDecrementRefCount(Blob, digest!(42)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(42)),
-            CacheDecrementRefCount(UpperFsLayer, upper_digest!(42, 41)),
-            CacheDecrementRefCount(UpperFsLayer, upper_digest!(41, 42, 41)),
-        };
-        Broker(CancelJob(jid!(1))) => {};
-    }
-
-    script_test! {
-        enqueue_immediate_artifacts_execution_error_slots_available,
-        Fixture::new(1, [
-            Err(JobError::Execution(string!("ee"))),
-        ], [
-            (cache_key!(Blob, 41), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(Blob, 42), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(BottomFsLayer, 41), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(BottomFsLayer, 42), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(UpperFsLayer, 42, 41), GetArtifact::Success(path_buf!("/a"))),
-        ], [], []),
-        Broker(EnqueueJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]))) => {
-            CacheGetArtifact(Blob, digest!(42), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(42), jid!(1)),
-            CacheGetArtifact(Blob, digest!(41), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(41), jid!(1)),
-            CacheGetArtifact(UpperFsLayer, upper_digest!(42, 41), jid!(1)),
-            StartJob(jid!(1), spec!(1, [(41, Tar), (42, Tar)]), path_buf!("/a")),
-            CacheDecrementRefCount(Blob, digest!(41)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(41)),
-            CacheDecrementRefCount(Blob, digest!(42)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(42)),
-            CacheDecrementRefCount(UpperFsLayer, upper_digest!(42, 41)),
-            SendMessageToBroker(WorkerToBroker(jid!(1), Err(JobError::Execution(string!("ee"))))),
-        };
-        Broker(CancelJob(jid!(1))) => {};
-    }
-    */
-
-    script_test! {
-        enqueue_fills_all_slots,
-        Fixture::new(4, [
+        jobs_are_executed_in_fifo_order,
+        Fixture::new(2, [
             (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/a"))),
             (cache_key!(Blob, 2), GetArtifact::Success(path_buf!("/b"))),
             (cache_key!(Blob, 3), GetArtifact::Success(path_buf!("/c"))),
@@ -1075,17 +998,16 @@ mod tests {
         Broker(EnqueueJob(jid!(3), spec!(3, Tar))) => {
             CacheGetArtifact(Blob, digest!(3), jid!(3)),
             CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
-            StartJob(jid!(3), spec!(3, Tar), path_buf!("/c")),
         };
         Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
             CacheGetArtifact(Blob, digest!(4), jid!(4)),
             CacheGetArtifact(BottomFsLayer, digest!(4), jid!(4)),
-            StartJob(jid!(4), spec!(4, Tar), path_buf!("/d")),
         };
         Broker(EnqueueJob(jid!(5), spec!(5, Tar))) => {
             CacheGetArtifact(Blob, digest!(5), jid!(5)),
             CacheGetArtifact(BottomFsLayer, digest!(5), jid!(5)),
         };
+
         Broker(CancelJob(jid!(1))) => {
             JobHandleDropped(jid!(1)),
         };
@@ -1099,63 +1021,41 @@ mod tests {
         })) => {
             CacheDecrementRefCount(Blob, digest!(1)),
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            StartJob(jid!(5), spec!(5, Tar), path_buf!("/e")),
-        }
-    }
+            StartJob(jid!(3), spec!(3, Tar), path_buf!("/c")),
+        };
 
-    /*
-    script_test! {
-        possibly_start_job_loops_until_slots_full,
-        Fixture::new(1, [
-            Ok(pid!(1)),
-            Err(JobError::Execution(string!("ee"))),
-            Err(JobError::System(string!("se"))),
-            Ok(pid!(4)),
-        ], [
-            (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(Blob, 2), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(Blob, 3), GetArtifact::Success(path_buf!("/c"))),
-            (cache_key!(Blob, 4), GetArtifact::Success(path_buf!("/d"))),
-            (cache_key!(BottomFsLayer, 1), GetArtifact::Success(path_buf!("/a"))),
-            (cache_key!(BottomFsLayer, 2), GetArtifact::Success(path_buf!("/b"))),
-            (cache_key!(BottomFsLayer, 3), GetArtifact::Success(path_buf!("/c"))),
-            (cache_key!(BottomFsLayer, 4), GetArtifact::Success(path_buf!("/d"))),
-        ], [], []),
-        Broker(EnqueueJob(jid!(1), spec!(1, Tar))) => {
-            CacheGetArtifact(Blob, digest!(1), jid!(1)),
-            CacheGetArtifact(BottomFsLayer, digest!(1), jid!(1)),
-            StartJob(jid!(1), spec!(1, Tar), path_buf!("/a")),
+        Broker(CancelJob(jid!(2))) => {
+            JobHandleDropped(jid!(2)),
         };
-        Broker(EnqueueJob(jid!(2), spec!(2, Tar))) => {
-            CacheGetArtifact(Blob, digest!(2), jid!(2)),
-            CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
-        };
-        Broker(EnqueueJob(jid!(3), spec!(3, Tar))) => {
-            CacheGetArtifact(Blob, digest!(3), jid!(3)),
-            CacheGetArtifact(BottomFsLayer, digest!(3), jid!(3)),
-        };
-        Broker(EnqueueJob(jid!(4), spec!(4, Tar))) => {
-            CacheGetArtifact(Blob, digest!(4), jid!(4)),
-            CacheGetArtifact(BottomFsLayer, digest!(4), jid!(4)),
-        };
-        PidStatus(pid!(1), JobStatus::Exited(0)) => {};
-        JobStdout(jid!(1), Ok(JobOutputResult::None)) => {};
-        JobStderr(jid!(1), Ok(JobOutputResult::None)) => {
-            SendMessageToBroker(WorkerToBroker(jid!(1), outcome!(1))),
-            CacheDecrementRefCount(Blob, digest!(1)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(1)),
-            StartJob(jid!(2), spec!(2, Tar), path_buf!("/b")),
-            SendMessageToBroker(WorkerToBroker(jid!(2), Err(JobError::Execution(string!("ee"))))),
+        Message::JobCompleted(jid!(2), Ok(base::JobCompleted {
+            status: JobStatus::Exited(0),
+            effects: JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
+            }
+        })) => {
             CacheDecrementRefCount(Blob, digest!(2)),
             CacheDecrementRefCount(BottomFsLayer, digest!(2)),
-            StartJob(jid!(3), spec!(3, Tar), path_buf!("/c")),
-            SendMessageToBroker(WorkerToBroker(jid!(3), Err(JobError::System(string!("se"))))),
-            CacheDecrementRefCount(Blob, digest!(3)),
-            CacheDecrementRefCount(BottomFsLayer, digest!(3)),
             StartJob(jid!(4), spec!(4, Tar), path_buf!("/d")),
         };
+
+        Broker(CancelJob(jid!(3))) => {
+            JobHandleDropped(jid!(3)),
+        };
+        Message::JobCompleted(jid!(3), Ok(base::JobCompleted {
+            status: JobStatus::Exited(0),
+            effects: JobEffects {
+                stdout: JobOutputResult::None,
+                stderr: JobOutputResult::None,
+                duration: std::time::Duration::from_secs(1),
+            }
+        })) => {
+            CacheDecrementRefCount(Blob, digest!(3)),
+            CacheDecrementRefCount(BottomFsLayer, digest!(3)),
+            StartJob(jid!(5), spec!(5, Tar), path_buf!("/e")),
+        };
     }
-    */
 
     script_test! {
         cancel_awaiting_layers,
