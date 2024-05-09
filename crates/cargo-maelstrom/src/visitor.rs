@@ -163,15 +163,112 @@ impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
     }
 }
 
-fn format_test_output(res: &JobOutputResult, name: &str, cjid: ClientJobId) -> Vec<String> {
+/// The Rust std test fixture prints out some output like "running 1 test" etc. This isn't very
+/// useful, so we want to strip it out.
+fn remove_fixture_output(case_str: &str, mut lines: Vec<String>) -> Vec<String> {
+    if let Some(pos) = lines.iter().position(|s| s.as_str() == "running 1 test") {
+        lines = lines[(pos + 1)..].to_vec();
+    }
+    if let Some(pos) = lines
+        .iter()
+        .rposition(|s| s.as_str().starts_with(&format!("test {case_str} ... ")))
+    {
+        lines = lines[..pos].to_vec();
+    }
+    lines
+}
+
+#[test]
+fn remove_fixture_output_basic_case() {
+    let example = "\n\
+    running 1 test\n\
+    this is some output from the test\n\
+    this is too\n\
+    test tests::i_be_failing ... FAILED\n\
+    \n\
+    failures:\n\
+    \n\
+    failures:\n\
+        tests::i_be_failing\n\
+        \n\
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
+    finished in 0.01s\n\
+    \n\
+    ";
+    let cleansed = remove_fixture_output(
+        "tests::i_be_failing",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        "\
+        this is some output from the test\n\
+        this is too\n\
+        "
+    );
+}
+
+#[test]
+fn remove_fixture_output_confusing_trailer() {
+    let example = "\n\
+    running 1 test\n\
+    this is some output from the test\n\
+    test tests::i_be_failing ... this is the test's own weird output\n\
+    this is too\n\
+    test tests::i_be_failing ... FAILED\n\
+    \n\
+    failures:\n\
+    \n\
+    failures:\n\
+        tests::i_be_failing\n\
+        \n\
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
+    finished in 0.01s\n\
+    \n\
+    ";
+    let cleansed = remove_fixture_output(
+        "tests::i_be_failing",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n") + "\n",
+        "\
+        this is some output from the test\n\
+        test tests::i_be_failing ... this is the test's own weird output\n\
+        this is too\n\
+        "
+    );
+}
+
+fn format_test_output(
+    res: &JobOutputResult,
+    name: &str,
+    cjid: ClientJobId,
+    case_str: &str,
+) -> Vec<String> {
+    let (_, case_str) = case_str.rsplit_once(' ').unwrap_or(("", case_str));
     let mut test_output_lines = vec![];
     match res {
         JobOutputResult::None => {}
         JobOutputResult::Inline(bytes) => {
-            test_output_lines.push(String::from_utf8_lossy(bytes).into());
+            test_output_lines.extend(
+                String::from_utf8_lossy(bytes)
+                    .split('\n')
+                    .map(ToOwned::to_owned),
+            );
+            if name == "stdout" {
+                test_output_lines = remove_fixture_output(case_str, test_output_lines);
+            }
         }
         JobOutputResult::Truncated { first, truncated } => {
-            test_output_lines.push(String::from_utf8_lossy(first).into());
+            test_output_lines.extend(
+                String::from_utf8_lossy(first)
+                    .split('\n')
+                    .map(ToOwned::to_owned),
+            );
+            if name == "stdout" {
+                test_output_lines = remove_fixture_output(case_str, test_output_lines);
+            }
             test_output_lines.push(format!(
                 "job {cjid}: {name} truncated, {truncated} bytes lost"
             ));
@@ -255,8 +352,18 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     }
                 };
                 if job_failed {
-                    test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
-                    test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
+                    test_output_stdout.extend(format_test_output(
+                        &stdout,
+                        "stdout",
+                        cjid,
+                        &self.case_str,
+                    ));
+                    test_output_stderr.extend(format_test_output(
+                        &stderr,
+                        "stderr",
+                        cjid,
+                        &self.case_str,
+                    ));
                 }
                 self.test_listing
                     .lock()
@@ -282,8 +389,18 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                 result_details = Some("timed out".into());
                 self.tracker
                     .job_exited(self.case_str.clone(), ExitCode::FAILURE);
-                test_output_stdout.extend(format_test_output(&stdout, "stdout", cjid));
-                test_output_stderr.extend(format_test_output(&stderr, "stderr", cjid));
+                test_output_stdout.extend(format_test_output(
+                    &stdout,
+                    "stdout",
+                    cjid,
+                    &self.case_str,
+                ));
+                test_output_stderr.extend(format_test_output(
+                    &stderr,
+                    "stderr",
+                    cjid,
+                    &self.case_str,
+                ));
                 self.test_listing
                     .lock()
                     .unwrap()

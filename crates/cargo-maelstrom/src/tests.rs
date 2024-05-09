@@ -983,7 +983,23 @@ fn failed_tests() {
     let failed_outcome = JobOutcome::Completed(JobCompleted {
         status: JobStatus::Exited(1),
         effects: JobEffects {
-            stdout: JobOutputResult::None,
+            stdout: JobOutputResult::Inline(Box::new(
+                *b"\n\
+                running 1 test\n\
+                this is some output from the test\n\
+                this is too\n\
+                test test_it ... FAILED\n\
+                \n\
+                failures:\n\
+                \n\
+                failures:\n\
+                    tests::i_be_failing\n\
+                    \n\
+                test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
+                finished in 0.01s\n\
+                \n\
+                ",
+            )),
             stderr: JobOutputResult::Inline(Box::new(*b"error output")),
             duration: std::time::Duration::from_secs(1),
         },
@@ -1012,8 +1028,12 @@ fn failed_tests() {
         run_failed_tests(fake_tests),
         "\
         bar test_it..........................FAIL   1.000s\n\
+        this is some output from the test\n\
+        this is too\n\
         stderr: error output\n\
         foo test_it..........................FAIL   1.000s\n\
+        this is some output from the test\n\
+        this is too\n\
         stderr: error output\n\
         \n\
         ================== Test Summary ==================\n\
