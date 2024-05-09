@@ -465,7 +465,7 @@ pub enum LockedContainerImageTagsVersion {
 struct LockedContainerImageTags {
     version: LockedContainerImageTagsVersion,
     #[serde(flatten)]
-    map: BTreeMap<String, HashMap<String, String>>,
+    map: BTreeMap<String, BTreeMap<String, String>>,
 }
 
 impl LockedContainerImageTags {
