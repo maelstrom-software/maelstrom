@@ -152,12 +152,13 @@ pub enum Message {
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
 }
 
-impl<
-        DepsT: Deps,
-        ArtifactFetcherT: ArtifactFetcher,
-        BrokerSenderT: BrokerSender,
-        CacheT: Cache,
-    > Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+    Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+where
+    DepsT: Deps,
+    ArtifactFetcherT: ArtifactFetcher,
+    BrokerSenderT: BrokerSender,
+    CacheT: Cache,
 {
     /// Create a new dispatcher with the provided slot count. The slot count must be a positive
     /// number.
@@ -374,12 +375,13 @@ where
     }
 }
 
-impl<
-        DepsT: Deps,
-        ArtifactFetcherT: ArtifactFetcher,
-        BrokerSenderT: BrokerSender,
-        CacheT: Cache,
-    > Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+    Dispatcher<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
+where
+    DepsT: Deps,
+    ArtifactFetcherT: ArtifactFetcher,
+    BrokerSenderT: BrokerSender,
+    CacheT: Cache,
 {
     /// Start at most one job, depending on whether there are any queued jobs and if there are any
     /// available slots.
