@@ -1,7 +1,12 @@
 mod layer_builder;
 mod state_machine;
 
-use crate::{artifact_pusher, digest_repo::DigestRepository, progress::ProgressTracker, router};
+use crate::{
+    artifact_pusher,
+    digest_repo::DigestRepository,
+    progress::{LazyProgress, ProgressTracker},
+    router,
+};
 use anyhow::{anyhow, bail, Context as _, Result};
 use async_trait::async_trait;
 use layer_builder::LayerBuilder;
@@ -115,10 +120,14 @@ impl ClientState {
 
     async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
         let dl_name = format!("{name}:{tag}");
-        let tracker = self.image_download_tracker.new_task(&dl_name, 1);
+
+        let tracker = self.image_download_tracker.clone();
+        let dl_name_clone = dl_name.clone();
+        let prog = LazyProgress::new(move |size| tracker.new_task(&dl_name_clone, size));
+
         let res = self
             .container_image_depot
-            .get_container_image(name, tag, tracker)
+            .get_container_image(name, tag, prog)
             .await;
         self.image_download_tracker.remove_task(&dl_name);
         res

@@ -1,25 +1,46 @@
 use maelstrom_client_base::RemoteProgress;
+use maelstrom_util::ext::OptionExt as _;
 use std::collections::HashMap;
 use std::pin::{pin, Pin};
+use std::sync::OnceLock;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc, Mutex,
 };
 use tokio::io::{self, AsyncRead};
 
-pub struct RunningProgress {
-    size: AtomicU64,
-    progress: AtomicU64,
+pub struct LazyProgress<FactoryT> {
+    factory: FactoryT,
+    tracker: OnceLock<Arc<RunningProgress>>,
 }
 
-impl maelstrom_container::ProgressTracker for RunningProgress {
+impl<FactoryT> LazyProgress<FactoryT> {
+    pub fn new(factory: FactoryT) -> Arc<Self> {
+        Arc::new(Self {
+            factory,
+            tracker: OnceLock::new(),
+        })
+    }
+}
+
+impl<FactoryT> maelstrom_container::ProgressTracker for LazyProgress<FactoryT>
+where
+    FactoryT: Fn(u64) -> Arc<RunningProgress> + Send + Sync + Unpin + 'static,
+{
     fn set_length(&self, length: u64) {
-        self.size.store(length, Ordering::Release);
+        self.tracker.set((self.factory)(length)).unwrap();
     }
 
     fn inc(&self, v: u64) {
-        self.progress.fetch_add(v, Ordering::AcqRel);
+        let prog = self.tracker.get().unwrap();
+        prog.progress.fetch_add(v, Ordering::AcqRel);
     }
+}
+
+#[derive(Debug)]
+pub struct RunningProgress {
+    size: u64,
+    progress: AtomicU64,
 }
 
 #[derive(Clone, Default)]
@@ -31,10 +52,10 @@ impl ProgressTracker {
     pub fn new_task(&self, name: impl Into<String>, size: u64) -> Arc<RunningProgress> {
         let mut tasks = self.tasks.lock().unwrap();
         let prog = Arc::new(RunningProgress {
-            size: AtomicU64::new(size),
+            size,
             progress: AtomicU64::new(0),
         });
-        tasks.insert(name.into(), prog.clone());
+        tasks.insert(name.into(), prog.clone()).assert_is_none();
         prog
     }
 
@@ -49,7 +70,7 @@ impl ProgressTracker {
             .iter()
             .map(|(name, p)| RemoteProgress {
                 name: name.clone(),
-                size: p.size.load(Ordering::Acquire),
+                size: p.size,
                 progress: p.progress.load(Ordering::Acquire),
             })
             .collect()
