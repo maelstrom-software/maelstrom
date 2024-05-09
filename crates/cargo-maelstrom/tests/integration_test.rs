@@ -122,11 +122,13 @@ fn few_tests() {
         "{contents}"
     );
     assert!(
-        contents.contains("Successful Tests:         2"),
-        "{contents}"
-    );
-    assert!(
-        contents.contains("Failed Tests    :         0"),
+        contents.ends_with(
+            "\
+            ================== Test Summary ==================\n\
+            Successful Tests:         2\n\
+            Failed Tests    :         0\
+        "
+        ),
         "{contents}"
     );
 }
