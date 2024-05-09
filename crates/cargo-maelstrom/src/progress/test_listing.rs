@@ -1,4 +1,4 @@
-use super::ProgressIndicator;
+use super::{ProgressBarPrinter, ProgressIndicator, TermPrinter};
 use anyhow::Result;
 use indicatif::{ProgressBar, TermLike};
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -13,6 +13,7 @@ struct State {
 pub struct TestListingProgress {
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
+    print_lock: Arc<Mutex<()>>,
 }
 
 impl TestListingProgress {
@@ -21,13 +22,19 @@ impl TestListingProgress {
         Self {
             enqueue_spinner,
             state: Default::default(),
+            print_lock: Default::default(),
         }
     }
 }
 
 impl ProgressIndicator for TestListingProgress {
-    fn println(&self, msg: String) {
-        self.enqueue_spinner.println(msg);
+    type Printer<'a> = ProgressBarPrinter<'a>;
+
+    fn lock_printing(&self) -> Self::Printer<'_> {
+        ProgressBarPrinter {
+            out: self.enqueue_spinner.clone(),
+            _guard: self.print_lock.lock().unwrap(),
+        }
     }
 
     fn update_enqueue_status(&self, msg: impl Into<String>) {
@@ -55,12 +62,14 @@ impl ProgressIndicator for TestListingProgress {
 
 #[derive(Clone)]
 pub struct TestListingProgressNoSpinner<TermT> {
-    term: TermT,
+    term: Arc<Mutex<TermT>>,
 }
 
 impl<TermT> TestListingProgressNoSpinner<TermT> {
     pub fn new(term: TermT) -> Self {
-        Self { term }
+        Self {
+            term: Arc::new(Mutex::new(term)),
+        }
     }
 }
 
@@ -68,12 +77,16 @@ impl<TermT> ProgressIndicator for TestListingProgressNoSpinner<TermT>
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
-    fn println(&self, msg: String) {
-        self.term.write_line(&msg).ok();
+    type Printer<'a> = TermPrinter<'a, TermT>;
+
+    fn lock_printing(&self) -> Self::Printer<'_> {
+        TermPrinter {
+            out: self.term.lock().unwrap(),
+        }
     }
 
     fn finished(&self) -> Result<()> {
-        self.term.flush()?;
+        self.term.lock().unwrap().flush()?;
         Ok(())
     }
 }

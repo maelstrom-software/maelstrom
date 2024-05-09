@@ -1,4 +1,4 @@
-use super::ProgressIndicator;
+use super::{NullPrinter, ProgressIndicator};
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressDrawTarget, TermLike};
 
@@ -16,8 +16,11 @@ impl QuietProgressBar {
 }
 
 impl ProgressIndicator for QuietProgressBar {
-    fn println(&self, _msg: String) {
+    type Printer<'a> = NullPrinter;
+
+    fn lock_printing(&self) -> Self::Printer<'_> {
         // quiet mode doesn't print anything
+        NullPrinter
     }
 
     fn job_finished(&self) {

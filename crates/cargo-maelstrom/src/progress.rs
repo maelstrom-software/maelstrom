@@ -8,7 +8,7 @@ mod test_listing;
 use anyhow::Result;
 use colored::Colorize as _;
 pub use driver::{DefaultProgressDriver, ProgressDriver};
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle, TermLike};
 use maelstrom_base::stats::JobStateCounts;
 pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
@@ -16,9 +16,10 @@ pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
 use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
+use std::sync::MutexGuard;
 pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
-pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {
+pub trait ProgressPrinter {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
 
@@ -29,6 +30,14 @@ pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 
             self.println(format!("{} {line}", "stderr:".red()))
         }
     }
+}
+
+pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {
+    type Printer<'a>: ProgressPrinter;
+
+    /// Begin outputting some messages to the terminal. While the given object exists, it holds a
+    /// lock on outputting messages like this.
+    fn lock_printing(&self) -> Self::Printer<'_>;
 
     /// Meant to be called with the job is complete, it updates the complete bar with this status
     fn job_finished(&self) {}
@@ -88,7 +97,7 @@ where
         if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
             let remaining = self.line.split_off(p);
             let line = std::mem::replace(&mut self.line, remaining[1..].into());
-            self.prog.println(line);
+            self.prog.lock_printing().println(line);
         }
         Ok(buf.len())
     }
@@ -119,4 +128,32 @@ fn make_progress_bar(
         .unwrap()
         .progress_chars("##-"),
     )
+}
+
+pub struct ProgressBarPrinter<'a> {
+    out: ProgressBar,
+    _guard: MutexGuard<'a, ()>,
+}
+
+impl<'a> ProgressPrinter for ProgressBarPrinter<'a> {
+    fn println(&self, msg: String) {
+        self.out.println(msg);
+    }
+}
+
+pub struct NullPrinter;
+
+impl ProgressPrinter for NullPrinter {
+    fn println(&self, _msg: String) {}
+}
+
+pub struct TermPrinter<'a, TermT> {
+    out: MutexGuard<'a, TermT>,
+}
+
+impl<'a, TermT: TermLike> ProgressPrinter for TermPrinter<'a, TermT> {
+    fn println(&self, msg: String) {
+        let _ = self.out.write_line(&msg);
+        let _ = self.out.flush();
+    }
 }

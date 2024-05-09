@@ -1,5 +1,5 @@
+use crate::progress::{ProgressIndicator, ProgressPrinter};
 use crate::test_listing::{ArtifactKey, TestListing};
-use crate::ProgressIndicator;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -181,7 +181,12 @@ fn format_test_output(res: &JobOutputResult, name: &str, cjid: ClientJobId) -> V
 }
 
 impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
-    fn print_job_result(&self, result_str: ColoredString, duration_str: String) {
+    fn print_job_result(
+        &self,
+        result_str: ColoredString,
+        duration_str: String,
+        printer: &impl ProgressPrinter,
+    ) {
         if self.width > 10 {
             let case_width = self.case_str.width();
             let trailer_str = format!("{result_str} {duration_str:>8}");
@@ -190,7 +195,7 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                 let dots_width = self.width - trailer_width - case_width;
                 let case = self.case_str.bold();
 
-                self.ind.println(format!(
+                printer.println(format!(
                     "{case}{empty:.<dots_width$}{trailer_str}",
                     empty = "",
                 ));
@@ -200,14 +205,13 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     .unicode_truncate_start(self.width - 2 - trailer_width);
                 let case = case.bold();
                 let dots_width = self.width - trailer_width - case_width - 1;
-                self.ind.println(format!(
+                printer.println(format!(
                     "<{case}{empty:.<dots_width$}{trailer_str}",
                     empty = ""
                 ));
             }
         } else {
-            self.ind
-                .println(format!("{case} {result_str}", case = self.case_str));
+            printer.println(format!("{case} {result_str}", case = self.case_str));
         }
     }
 
@@ -311,22 +315,25 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
                     .job_exited(self.case_str.clone(), ExitCode::FAILURE);
             }
         }
-        self.print_job_result(result_str, duration_str);
+        let printer = self.ind.lock_printing();
+        self.print_job_result(result_str, duration_str, &printer);
 
         if let Some(details_str) = result_details {
-            self.ind.println(details_str);
+            printer.println(details_str);
         }
         for line in test_output_stdout {
-            self.ind.println(line);
+            printer.println(line);
         }
         for line in test_output_stderr {
-            self.ind.eprintln(line);
+            printer.eprintln(line);
         }
+        drop(printer);
+
         self.ind.job_finished();
     }
 
     pub fn job_ignored(&self) {
-        self.print_job_result("IGNORED".yellow(), "".into());
+        self.print_job_result("IGNORED".yellow(), "".into(), &self.ind.lock_printing());
         self.tracker.job_ignored(self.case_str.clone());
         self.ind.job_finished();
     }

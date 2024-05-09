@@ -1,4 +1,4 @@
-use super::{ProgressIndicator, COLORS};
+use super::{ProgressBarPrinter, ProgressIndicator, COLORS};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, TermLike};
 use maelstrom_base::stats::{JobState, JobStateCounts};
@@ -21,6 +21,7 @@ pub struct MultipleProgressBars {
     bars: HashMap<JobState, ProgressBar>,
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
+    print_lock: Arc<Mutex<()>>,
 }
 
 impl MultipleProgressBars {
@@ -45,14 +46,19 @@ impl MultipleProgressBars {
             bars,
             enqueue_spinner,
             state: Default::default(),
+            print_lock: Default::default(),
         }
     }
 }
 
 impl ProgressIndicator for MultipleProgressBars {
-    fn println(&self, msg: String) {
-        let com = self.bars.get(&JobState::Complete).unwrap();
-        com.println(msg);
+    type Printer<'a> = ProgressBarPrinter<'a>;
+
+    fn lock_printing(&self) -> Self::Printer<'_> {
+        ProgressBarPrinter {
+            out: self.bars.get(&JobState::Complete).unwrap().clone(),
+            _guard: self.print_lock.lock().unwrap(),
+        }
     }
 
     fn job_finished(&self) {

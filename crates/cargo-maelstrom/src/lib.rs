@@ -34,8 +34,8 @@ use maelstrom_util::{
 };
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
-    MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, QuietNoBar, QuietProgressBar,
-    TestListingProgress, TestListingProgressNoSpinner,
+    MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, ProgressPrinter as _,
+    QuietNoBar, QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
 };
 use slog::Drain as _;
 use std::{
@@ -331,7 +331,7 @@ where
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
         if self.queuing_state.list_action.is_some() {
-            self.ind.println(case_str);
+            self.ind.lock_printing().println(case_str);
             return Ok(EnqueueResult::Listed);
         }
 
@@ -903,8 +903,9 @@ fn list_packages<ProgressIndicatorT>(
 ) where
     ProgressIndicatorT: ProgressIndicator,
 {
+    let printer = ind.lock_printing();
     for pkg in packages.values() {
-        ind.println(pkg.name.to_string());
+        printer.println(pkg.name.to_string());
     }
 }
 
@@ -914,6 +915,7 @@ fn list_binaries<ProgressIndicatorT>(
 ) where
     ProgressIndicatorT: ProgressIndicator,
 {
+    let printer = ind.lock_printing();
     for pkg in packages.values() {
         for tgt in &pkg.targets {
             if tgt.test {
@@ -923,7 +925,7 @@ fn list_binaries<ProgressIndicatorT>(
                     binary_name += " ";
                     binary_name += &tgt.name;
                 }
-                ind.println(format!("{}{} ({})", &pkg.name, binary_name, pkg_kind));
+                printer.println(format!("{}{} ({})", &pkg.name, binary_name, pkg_kind));
             }
         }
     }
