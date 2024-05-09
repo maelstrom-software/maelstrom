@@ -16,7 +16,7 @@ use maelstrom_base::{
     JobOutputResult, JobStatus, Sha256Digest,
 };
 use maelstrom_client::{
-    spec::{ImageConfig, JobSpec, Layer},
+    spec::{JobSpec, Layer},
     IntrospectResponse, StateDir,
 };
 use maelstrom_test::digest;
@@ -297,10 +297,6 @@ impl MainAppDeps for TestMainAppDeps {
     }
 
     fn introspect(&self) -> Result<IntrospectResponse> {
-        todo!()
-    }
-
-    fn get_container_image(&self, _name: &str, _tag: &str) -> Result<ImageConfig> {
         todo!()
     }
 

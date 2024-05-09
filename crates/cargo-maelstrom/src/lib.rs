@@ -21,7 +21,7 @@ use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
 use maelstrom_client::{
-    spec::{ImageConfig, JobSpec, Layer},
+    spec::{JobSpec, Layer},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };
@@ -335,18 +335,6 @@ where
             return Ok(EnqueueResult::Listed);
         }
 
-        let image_lookup = |image: &str| {
-            self.ind
-                .update_enqueue_status(format!("downloading image {image}"));
-            let (image, version) = image.split_once(':').unwrap_or((image, "latest"));
-            slog::debug!(
-                self.log, "getting container image";
-                "image" => &image,
-                "version" => &version,
-            );
-            self.deps.get_container_image(image, version)
-        };
-
         let filter_context = pattern::Context {
             package: self.package_name.clone(),
             artifact: Some(pattern::Artifact::from_target(&self.artifact.target)),
@@ -356,7 +344,7 @@ where
         let test_metadata = self
             .queuing_state
             .test_metadata
-            .get_metadata_for_test_with_env(&filter_context, image_lookup)?;
+            .get_metadata_for_test_with_env(&filter_context)?;
         self.ind
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
@@ -397,14 +385,14 @@ where
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
-                image: None,
+                image: test_metadata.image,
                 environment: test_metadata.environment,
                 layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 enable_loopback: test_metadata.enable_loopback,
                 enable_writable_file_system: test_metadata.enable_writable_file_system,
-                working_directory: Some(test_metadata.working_directory),
+                working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
                 group: test_metadata.group,
                 timeout: self.timeout_override.unwrap_or(test_metadata.timeout),
@@ -583,8 +571,6 @@ pub trait MainAppDeps: Sync {
 
     fn introspect(&self) -> Result<IntrospectResponse>;
 
-    fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig>;
-
     fn add_job(
         &self,
         spec: JobSpec,
@@ -672,15 +658,6 @@ impl MainAppDeps for DefaultMainAppDeps {
 
     fn introspect(&self) -> Result<IntrospectResponse> {
         self.client.introspect()
-    }
-
-    fn get_container_image(&self, name: &str, tag: &str) -> Result<ImageConfig> {
-        let image = self.client.get_container_image(name, tag)?;
-        Ok(ImageConfig {
-            layers: image.layers.clone(),
-            environment: image.env().cloned(),
-            working_directory: image.working_dir().map(From::from),
-        })
     }
 
     fn add_job(

@@ -1,13 +1,13 @@
 mod directive;
 
 use crate::{pattern, WorkspaceDir};
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, Timeout, UserId, Utf8PathBuf,
 };
-use maelstrom_client::spec::{EnvironmentSpec, ImageConfig, ImageOption, Layer, PossiblyImage};
+use maelstrom_client::spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage};
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
 use serde::Deserialize;
 use std::str;
@@ -120,9 +120,10 @@ fn all_metadata_default_matches_default_file() {
 #[derive(Debug, Eq, PartialEq)]
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
+    pub image: Option<ImageSpec>,
     pub enable_loopback: bool,
     pub enable_writable_file_system: bool,
-    pub working_directory: Utf8PathBuf,
+    pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
     pub group: GroupId,
     pub timeout: Option<Timeout>,
@@ -135,10 +136,11 @@ pub struct TestMetadata {
 impl Default for TestMetadata {
     fn default() -> Self {
         Self {
+            image: None,
             include_shared_libraries: Default::default(),
             enable_loopback: Default::default(),
             enable_writable_file_system: Default::default(),
-            working_directory: Utf8PathBuf::from("/"),
+            working_directory: Some(Utf8PathBuf::from("/")),
             user: UserId::from(0),
             group: GroupId::from(0),
             timeout: None,
@@ -184,9 +186,17 @@ impl TestMetadata {
             ref added_environment,
             ref working_directory,
         }: &TestDirective,
-        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<Self> {
-        let image = ImageOption::new(image, image_lookup)?;
+        let mut image = image.as_ref().map(|image| {
+            let (name, tag) = image.split_once(':').unwrap_or((&image, "latest"));
+            ImageSpec {
+                name: name.into(),
+                tag: tag.into(),
+                use_environment: false,
+                use_layers: false,
+                use_working_directory: false,
+            }
+        });
 
         self.include_shared_libraries = include_shared_libraries.or(self.include_shared_libraries);
         self.enable_loopback = enable_loopback.unwrap_or(self.enable_loopback);
@@ -201,7 +211,9 @@ impl TestMetadata {
                 self.layers = layers.to_vec();
             }
             Some(PossiblyImage::Image) => {
-                self.layers = image.layers()?.collect();
+                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                image.use_layers = true;
+                self.layers = vec![];
             }
             None => {}
         }
@@ -222,10 +234,8 @@ impl TestMetadata {
                 });
             }
             Some(PossiblyImage::Image) => {
-                self.environment.push(EnvironmentSpec {
-                    vars: image.environment()?,
-                    extend: false,
-                });
+                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                image.use_environment = true;
             }
             None => {}
         }
@@ -238,12 +248,18 @@ impl TestMetadata {
 
         match working_directory {
             Some(PossiblyImage::Explicit(working_directory)) => {
-                self.working_directory = working_directory.clone();
+                self.working_directory = Some(working_directory.clone());
             }
             Some(PossiblyImage::Image) => {
-                self.working_directory = image.working_directory()?;
+                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                image.use_working_directory = true;
+                self.working_directory = None;
             }
             None => {}
+        }
+
+        if image.is_some() {
+            self.image = image;
         }
 
         Ok(self)
@@ -269,11 +285,7 @@ impl AllMetadata {
         Ok(())
     }
 
-    fn get_metadata_for_test(
-        &self,
-        context: &pattern::Context,
-        mut image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
-    ) -> Result<TestMetadata> {
+    fn get_metadata_for_test(&self, context: &pattern::Context) -> Result<TestMetadata> {
         self.directives
             .iter()
             .filter(|directive| match directive {
@@ -283,17 +295,14 @@ impl AllMetadata {
                 } => pattern_match(filter, context),
                 TestDirective { filter: None, .. } => true,
             })
-            .try_fold(TestMetadata::default(), |m, d| {
-                m.try_fold(d, &mut image_lookup)
-            })
+            .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
     }
 
     pub fn get_metadata_for_test_with_env(
         &self,
         context: &pattern::Context,
-        image_lookup: impl FnMut(&str) -> Result<ImageConfig>,
     ) -> Result<TestMetadata> {
-        self.get_metadata_for_test(context, image_lookup)
+        self.get_metadata_for_test(context)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
@@ -321,7 +330,7 @@ mod test {
     use super::*;
     use anyhow::Error;
     use maelstrom_base::{enum_set, JobMountFsType};
-    use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer, utf8_path_buf};
+    use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
 
@@ -336,15 +345,11 @@ mod test {
         }
     }
 
-    fn no_containers(_: &str) -> Result<ImageConfig> {
-        panic!()
-    }
-
     #[test]
     fn default() {
         assert_eq!(
             AllMetadata { directives: vec![] }
-                .get_metadata_for_test(&test_ctx("mod", "foo"), no_containers)
+                .get_metadata_for_test(&test_ctx("mod", "foo"))
                 .unwrap(),
             TestMetadata::default(),
         );
@@ -365,15 +370,15 @@ mod test {
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            .get_metadata_for_test(&test_ctx("package1", "test1"))
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            .get_metadata_for_test(&test_ctx("package1", "test2"))
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            .get_metadata_for_test(&test_ctx("package2", "test1"))
             .unwrap()
             .include_shared_libraries());
     }
@@ -397,15 +402,15 @@ mod test {
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            .get_metadata_for_test(&test_ctx("package1", "test1"))
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            .get_metadata_for_test(&test_ctx("package1", "test2"))
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            .get_metadata_for_test(&test_ctx("package2", "test1"))
             .unwrap()
             .include_shared_libraries());
     }
@@ -425,17 +430,17 @@ mod test {
         )
         .unwrap();
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            !all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .enable_loopback
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .enable_loopback
         );
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            !all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .enable_loopback
         );
@@ -456,17 +461,17 @@ mod test {
         )
         .unwrap();
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            !all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            !all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .enable_writable_file_system
         );
@@ -474,14 +479,6 @@ mod test {
 
     #[test]
     fn working_directory() {
-        let image_lookup = |name: &_| match name {
-            "rust" => Ok(ImageConfig {
-                working_directory: Some(utf8_path_buf!("/foo")),
-                ..Default::default()
-            }),
-            "no-working-directory" => Ok(Default::default()),
-            _ => panic!(),
-        };
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
@@ -504,22 +501,34 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .working_directory,
-            utf8_path_buf!("/bar")
+            Some(utf8_path_buf!("/bar"))
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
-                .working_directory,
-            utf8_path_buf!("/foo")
+                .image,
+            Some(ImageSpec {
+                name: "rust".into(),
+                tag: "latest".into(),
+                use_environment: false,
+                use_layers: false,
+                use_working_directory: true,
+            })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .working_directory,
-            utf8_path_buf!("/")
+            None,
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+                .unwrap()
+                .working_directory,
+            Some(utf8_path_buf!("/"))
         );
     }
 
@@ -538,19 +547,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .user,
             UserId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .user,
             UserId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .user,
             UserId::from(0)
@@ -572,19 +581,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .group,
             GroupId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .group,
             GroupId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .group,
             GroupId::from(0)
@@ -606,19 +615,19 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .timeout,
             None,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .timeout,
             Timeout::new(100),
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .timeout,
             None,
@@ -627,18 +636,6 @@ mod test {
 
     #[test]
     fn layers() {
-        let image_lookup = |name: &_| match name {
-            "image1" => Ok(ImageConfig {
-                layers: path_buf_vec!["layer11", "layer12"],
-                ..Default::default()
-            }),
-            "image2" => Ok(ImageConfig {
-                layers: path_buf_vec!["layer21", "layer22"],
-                ..Default::default()
-            }),
-            "empty-layers" => Ok(Default::default()),
-            _ => panic!(),
-        };
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
@@ -660,40 +657,94 @@ mod test {
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test3)"
-            image.name = "empty-layers"
+            image.name = "image3"
             image.use = [ "layers" ]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), image_lookup)
-                .unwrap()
-                .layers,
-            vec![tar_layer!("layer11"), tar_layer!("layer12")],
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), image_lookup)
-                .unwrap()
-                .layers,
-            vec![tar_layer!("layer3"), tar_layer!("layer4")],
-        );
-        assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .layers,
             vec![]
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test4"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
-                .layers,
-            vec![tar_layer!("layer21"), tar_layer!("layer22")],
+                .image,
+            Some(ImageSpec {
+                name: "image1".into(),
+                tag: "latest".into(),
+                use_environment: false,
+                use_layers: true,
+                use_working_directory: false,
+            })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), image_lookup)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+                .unwrap()
+                .layers,
+            vec![tar_layer!("layer3"), tar_layer!("layer4")],
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+                .unwrap()
+                .image,
+            Some(ImageSpec {
+                name: "image2".into(),
+                tag: "latest".into(),
+                use_environment: false,
+                use_layers: true,
+                use_working_directory: false,
+            })
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+                .unwrap()
+                .layers,
+            vec![],
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+                .unwrap()
+                .image,
+            Some(ImageSpec {
+                name: "image3".into(),
+                tag: "latest".into(),
+                use_environment: false,
+                use_layers: true,
+                use_working_directory: false,
+            })
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test4"))
+                .unwrap()
+                .layers,
+            vec![],
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test4"))
+                .unwrap()
+                .image,
+            Some(ImageSpec {
+                name: "image2".into(),
+                tag: "latest".into(),
+                use_environment: false,
+                use_layers: true,
+                use_working_directory: false,
+            })
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .layers,
             vec![tar_layer!("layer1"), tar_layer!("layer2")],
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+                .unwrap()
+                .image,
+            None,
         );
     }
 
@@ -716,7 +767,7 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .layers,
             vec![
@@ -729,7 +780,7 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .layers,
             vec![
@@ -740,7 +791,7 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .layers,
             vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
@@ -749,30 +800,11 @@ mod test {
 
     #[test]
     fn environment() {
-        let images = |name: &_| match name {
-            "image1" => Ok(ImageConfig {
-                environment: Some(vec![string!("FOO=image-foo"), string!("FROB=image-frob")]),
-                ..Default::default()
-            }),
-            "no-environment" => Ok(Default::default()),
-            "bad-environment" => Ok(ImageConfig {
-                environment: Some(string_vec!["FOO"]),
-                ..Default::default()
-            }),
-            _ => panic!(),
-        };
         let dir1_env = EnvironmentSpec {
             vars: btreemap! {
                 "FOO".into() => "$env{FOO}".into(),
                 "BAR".into() => "bar".into(),
                 "BAZ".into() => "$prev{FOO:-no-prev-foo}".into(),
-            },
-            extend: false,
-        };
-        let dir2_env = EnvironmentSpec {
-            vars: btreemap! {
-                "FOO".into() => "image-foo".into(),
-                "FROB".into() => "image-frob".into(),
             },
             extend: false,
         };
@@ -811,19 +843,33 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), images)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .environment,
-            vec![dir1_env.clone(), dir2_env.clone(), dir3_env.clone()]
+            vec![dir1_env.clone(), dir3_env.clone()]
+        );
+        assert!(
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+                .unwrap()
+                .image
+                .unwrap()
+                .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), images)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .environment,
-            vec![dir1_env.clone(), dir2_env.clone()]
+            vec![dir1_env.clone()]
+        );
+        assert!(
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+                .unwrap()
+                .image
+                .unwrap()
+                .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), images)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone()]
@@ -832,13 +878,6 @@ mod test {
 
     #[test]
     fn added_environment() {
-        let images = |name: &_| match name {
-            "image1" => Ok(ImageConfig {
-                environment: Some(string_vec!["FOO=image-foo", "FROB=image-frob",]),
-                ..Default::default()
-            }),
-            _ => panic!(),
-        };
         let dir1_env = EnvironmentSpec {
             vars: btreemap! {
                 "BAR".into() => "bar".into(),
@@ -852,13 +891,6 @@ mod test {
                 "FOO".into() => "prev-$prev{FOO}".into(),
             },
             extend: true,
-        };
-        let dir2_env = EnvironmentSpec {
-            vars: btreemap! {
-                "FOO".into() => "image-foo".into(),
-                "FROB".into() => "image-frob".into(),
-            },
-            extend: false,
         };
         let dir2_added_env = EnvironmentSpec {
             vars: btreemap! {
@@ -911,43 +943,61 @@ mod test {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), images)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .environment,
             vec![
                 dir1_env.clone(),
                 dir1_added_env.clone(),
-                dir2_env.clone(),
                 dir2_added_env.clone(),
                 dir3_added_env.clone()
             ]
         );
+        assert!(
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+                .unwrap()
+                .image
+                .unwrap()
+                .use_environment,
+        );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), images)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .environment,
             vec![
                 dir1_env.clone(),
                 dir1_added_env.clone(),
-                dir2_env.clone(),
                 dir2_added_env.clone(),
                 dir4_env.clone(),
                 dir4_added_env.clone()
             ]
         );
+        assert!(
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+                .unwrap()
+                .image
+                .unwrap()
+                .use_environment,
+        );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"), images)
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
                 .unwrap()
                 .environment,
             vec![
                 dir1_env.clone(),
                 dir1_added_env.clone(),
-                dir2_env.clone(),
                 dir2_added_env.clone(),
             ]
         );
+        assert!(
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+                .unwrap()
+                .image
+                .unwrap()
+                .use_environment,
+        );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), images)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone(), dir1_added_env.clone(),]
@@ -973,7 +1023,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .mounts,
             vec![
@@ -988,7 +1038,7 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .mounts,
             vec![JobMount {
@@ -997,7 +1047,7 @@ mod test {
             },],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .mounts,
             vec![],
@@ -1044,7 +1094,7 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .mounts,
             vec![
@@ -1063,7 +1113,7 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .mounts,
             vec![
@@ -1086,7 +1136,7 @@ mod test {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
                 .unwrap()
                 .mounts,
             vec![JobMount {
@@ -1095,7 +1145,7 @@ mod test {
             },],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .mounts,
             vec![JobMount {
@@ -1121,19 +1171,19 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Tty},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Null},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .devices,
             EnumSet::EMPTY,
@@ -1169,25 +1219,25 @@ mod test {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Random},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Urandom},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"), no_containers)
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Tty},
