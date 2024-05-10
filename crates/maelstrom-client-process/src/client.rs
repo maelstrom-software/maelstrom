@@ -15,9 +15,7 @@ use maelstrom_base::{
     ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest,
 };
 use maelstrom_client_base::{
-    spec::{
-        environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobNetwork, JobSpec, Layer,
-    },
+    spec::{environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobSpec, Layer},
     CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
@@ -472,12 +470,6 @@ impl Client {
             .or(spec.working_directory)
             .ok_or(anyhow!("no working_directory provided"))?;
 
-        let enable_loopback = match spec.network {
-            JobNetwork::Disabled => false,
-            JobNetwork::Loopback => true,
-            JobNetwork::Local => panic!(),
-        };
-
         let spec = maelstrom_base::JobSpec {
             program: spec.program,
             arguments: spec.arguments,
@@ -485,7 +477,7 @@ impl Client {
             layers: layers.try_into().map_err(|_| anyhow!("missing layers"))?,
             devices: spec.devices,
             mounts: spec.mounts,
-            enable_loopback,
+            network: spec.network,
             enable_writable_file_system: spec.enable_writable_file_system,
             working_directory,
             user: spec.user,

@@ -10,7 +10,8 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobDevice, JobMount, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, GroupId, JobDevice, JobMount, JobNetwork, Sha256Digest, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -166,17 +167,6 @@ pub fn environment_eval(
         .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect())
-}
-
-#[derive(
-    Clone, Copy, Debug, Default, Eq, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
-)]
-#[proto(other_type = "proto::JobNetwork")]
-pub enum JobNetwork {
-    #[default]
-    Disabled,
-    Loopback,
-    Local,
 }
 
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

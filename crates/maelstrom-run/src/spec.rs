@@ -1,11 +1,11 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, NonEmpty,
-    Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobNetwork,
+    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobNetwork,
-    JobSpec, Layer, PossiblyImage,
+    incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
+    PossiblyImage,
 };
 use serde::de::Error as _;
 use serde::{de, Deserialize, Deserializer};

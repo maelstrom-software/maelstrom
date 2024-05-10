@@ -8,7 +8,7 @@ use bumpalo::{
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobMountFsType,
-    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    JobNetwork, JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -76,7 +76,7 @@ impl JobSpec {
             layers: _,
             devices,
             mounts,
-            enable_loopback,
+            network,
             enable_writable_file_system,
             working_directory,
             user,
@@ -90,7 +90,11 @@ impl JobSpec {
             environment,
             devices,
             mounts,
-            enable_loopback,
+            enable_loopback: match network {
+                JobNetwork::Disabled => false,
+                JobNetwork::Loopback => true,
+                JobNetwork::Local => panic!(),
+            },
             enable_writable_file_system,
             working_directory,
             user,
@@ -1194,7 +1198,7 @@ mod tests {
                     fs_type: JobMountFsType::Sys,
                     mount_point: utf8_path_buf!("/sys"),
                 }])
-                .enable_loopback(true),
+                .network(JobNetwork::Loopback),
         )
         .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))

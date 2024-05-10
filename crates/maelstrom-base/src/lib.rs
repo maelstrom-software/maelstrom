@@ -120,6 +120,14 @@ pub struct JobMount {
     pub mount_point: Utf8PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+pub enum JobNetwork {
+    #[default]
+    Disabled,
+    Loopback,
+    Local,
+}
+
 /// ID of a user. This should be compatible with uid_t.
 #[derive(
     Copy, Clone, Debug, Deserialize, Display, Eq, From, Hash, Ord, PartialEq, PartialOrd, Serialize,
@@ -181,7 +189,7 @@ pub struct JobSpec {
     pub layers: NonEmpty<(Sha256Digest, ArtifactType)>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
-    pub enable_loopback: bool,
+    pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
@@ -202,7 +210,7 @@ impl JobSpec {
             environment: Default::default(),
             devices: Default::default(),
             mounts: Default::default(),
-            enable_loopback: false,
+            network: Default::default(),
             enable_writable_file_system: Default::default(),
             working_directory: Utf8PathBuf::from("/"),
             user: UserId::from(0),
@@ -240,8 +248,8 @@ impl JobSpec {
         self
     }
 
-    pub fn enable_loopback(mut self, enable_loopback: bool) -> Self {
-        self.enable_loopback = enable_loopback;
+    pub fn network(mut self, network: JobNetwork) -> Self {
+        self.network = network;
         self
     }
 
