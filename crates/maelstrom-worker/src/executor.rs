@@ -59,7 +59,7 @@ pub struct JobSpec {
     pub environment: Vec<String>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
-    pub enable_loopback: bool,
+    pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
@@ -90,11 +90,7 @@ impl JobSpec {
             environment,
             devices,
             mounts,
-            enable_loopback: match network {
-                JobNetwork::Disabled => false,
-                JobNetwork::Loopback => true,
-                JobNetwork::Local => panic!(),
-            },
+            network,
             enable_writable_file_system,
             working_directory,
             user,
@@ -392,7 +388,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
 
-        if spec.enable_loopback {
+        if let JobNetwork::Loopback = spec.network {
             // In order to have a loopback network interface, we need to create a netlink socket and
             // configure things with the kernel. This creates the socket.
             builder.push(
