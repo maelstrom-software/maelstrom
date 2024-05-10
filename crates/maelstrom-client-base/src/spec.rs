@@ -168,6 +168,17 @@ pub fn environment_eval(
         .collect())
 }
 
+#[derive(
+    Clone, Copy, Debug, Default, Eq, IntoProtoBuf, Ord, PartialEq, PartialOrd, TryFromProtoBuf,
+)]
+#[proto(other_type = "proto::JobNetwork")]
+pub enum JobNetwork {
+    #[default]
+    Disabled,
+    Loopback,
+    Local,
+}
+
 #[derive(IntoProtoBuf, TryFromProtoBuf, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 #[proto(other_type = "proto::JobSpec")]
 pub struct JobSpec {
@@ -178,7 +189,7 @@ pub struct JobSpec {
     pub layers: Vec<(Sha256Digest, ArtifactType)>,
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
-    pub enable_loopback: bool,
+    pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
@@ -200,7 +211,7 @@ impl JobSpec {
             environment: Default::default(),
             devices: Default::default(),
             mounts: Default::default(),
-            enable_loopback: false,
+            network: Default::default(),
             enable_writable_file_system: Default::default(),
             working_directory: None,
             user: UserId::from(0),
@@ -239,8 +250,8 @@ impl JobSpec {
         self
     }
 
-    pub fn enable_loopback(mut self, enable_loopback: bool) -> Self {
-        self.enable_loopback = enable_loopback;
+    pub fn network(mut self, network: JobNetwork) -> Self {
+        self.network = network;
         self
     }
 

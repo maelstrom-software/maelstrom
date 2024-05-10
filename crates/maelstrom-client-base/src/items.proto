@@ -88,6 +88,12 @@ message JobMount {
     string mount_point = 2;
 }
 
+enum JobNetwork {
+    Disabled = 0;
+    Loopback = 1;
+    Local = 2;
+}
+
 message EnvironmentSpec {
     map<string, string> vars = 1;
     bool extend = 2;
@@ -109,7 +115,7 @@ message JobSpec {
     repeated LayerSpec layers = 6;
     repeated JobDevice devices = 8;
     repeated JobMount mounts = 9;
-    bool enable_loopback = 10;
+    JobNetwork network = 10;
     bool enable_writable_file_system = 11;
     optional string working_directory = 12;
     uint32 user = 13;

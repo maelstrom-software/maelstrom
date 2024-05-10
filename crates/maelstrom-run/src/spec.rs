@@ -4,8 +4,8 @@ use maelstrom_base::{
     Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
-    incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
-    PossiblyImage,
+    incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobNetwork,
+    JobSpec, Layer, PossiblyImage,
 };
 use serde::de::Error as _;
 use serde::{de, Deserialize, Deserializer};
@@ -139,7 +139,11 @@ impl Job {
                 .map(JobDevice::from)
                 .collect(),
             mounts: self.mounts.unwrap_or_default(),
-            enable_loopback: self.enable_loopback.unwrap_or_default(),
+            network: if self.enable_loopback.unwrap_or_default() {
+                JobNetwork::Loopback
+            } else {
+                JobNetwork::Disabled
+            },
             enable_writable_file_system: self.enable_writable_file_system.unwrap_or_default(),
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
@@ -411,7 +415,7 @@ mod test {
                 group: Some(GroupId::from(202)),
                 ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .arguments(["arg1", "arg2"])
@@ -428,17 +432,44 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback_into_job_spec() {
+    fn enable_loopback_none_into_job_spec() {
+        assert_eq!(
+            Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+                .into_job_spec(layer_mapper)
+                .unwrap(),
+            JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
+                .working_directory("/")
+                .network(JobNetwork::Disabled),
+        );
+    }
+
+    #[test]
+    fn enable_loopback_true_into_job_spec() {
         assert_eq!(
             Job {
                 enable_loopback: Some(true),
                 ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .enable_loopback(true),
+                .network(JobNetwork::Loopback),
+        );
+    }
+
+    #[test]
+    fn enable_loopback_false_into_job_spec() {
+        assert_eq!(
+            Job {
+                enable_loopback: Some(false),
+                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+            }
+            .into_job_spec(layer_mapper)
+            .unwrap(),
+            JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
+                .working_directory("/")
+                .network(JobNetwork::Disabled),
         );
     }
 
@@ -449,7 +480,7 @@ mod test {
                 enable_writable_file_system: Some(true),
                 ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -479,7 +510,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/"),
@@ -539,7 +570,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![])
                 .image(ImageSpec {
@@ -603,7 +634,7 @@ mod test {
                 }"#
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .image(ImageSpec {
@@ -687,7 +718,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -706,7 +737,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -725,7 +756,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -767,7 +798,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)],)
                 .working_directory("/")
@@ -819,7 +850,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)],)
                 .working_directory("/")
@@ -855,7 +886,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)],)
                 .working_directory("/")
@@ -896,7 +927,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -917,7 +948,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -939,11 +970,11 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .enable_loopback(true),
+                .network(JobNetwork::Loopback),
         )
     }
 
@@ -958,7 +989,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -977,7 +1008,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/foo/bar"),
@@ -998,7 +1029,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)]).image(
                 ImageSpec {
@@ -1064,7 +1095,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -1083,7 +1114,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -1102,7 +1133,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
@@ -1121,7 +1152,7 @@ mod test {
                 }"#,
             )
             .unwrap()
-            .into_job_spec(layer_mapper,)
+            .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")

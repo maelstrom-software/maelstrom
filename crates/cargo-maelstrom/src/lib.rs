@@ -21,7 +21,7 @@ use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
 use maelstrom_client::{
-    spec::{JobSpec, Layer},
+    spec::{JobNetwork, JobSpec, Layer},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
     StateDir,
 };
@@ -403,7 +403,11 @@ where
                 layers,
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
-                enable_loopback: test_metadata.enable_loopback,
+                network: if test_metadata.enable_loopback {
+                    JobNetwork::Loopback
+                } else {
+                    JobNetwork::Disabled
+                },
                 enable_writable_file_system: test_metadata.enable_writable_file_system,
                 working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
