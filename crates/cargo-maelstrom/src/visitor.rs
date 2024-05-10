@@ -449,7 +449,9 @@ impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT>
 
     pub fn job_ignored(&self) {
         self.print_job_result("IGNORED".yellow(), "".into(), &self.ind.lock_printing());
-        self.tracker.job_ignored(self.case_str.clone());
         self.ind.job_finished();
+
+        // This call unblocks main thread, so it must go last
+        self.tracker.job_ignored(self.case_str.clone());
     }
 }
