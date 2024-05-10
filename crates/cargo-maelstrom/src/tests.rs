@@ -210,7 +210,8 @@ impl FakeTests {
         binary
             .tests
             .iter()
-            .filter(|&t| t.ignored).map(|t| t.name.to_owned())
+            .filter(|&t| t.ignored)
+            .map(|t| t.name.to_owned())
             .collect()
     }
 

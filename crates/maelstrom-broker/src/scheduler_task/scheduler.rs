@@ -559,10 +559,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
         for jid in worker.pending.drain() {
             self.queued_jobs.push(QueuedJob::new(
                 jid,
-                self.clients
-                    .job_from_jid(jid)
-                    .spec
-                    .estimated_duration,
+                self.clients.job_from_jid(jid).spec.estimated_duration,
             ));
         }
 
