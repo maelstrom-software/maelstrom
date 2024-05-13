@@ -283,6 +283,10 @@ impl JobSpec {
         self.estimated_duration = estimated_duration.into();
         self
     }
+
+    pub fn must_be_run_locally(&self) -> bool {
+        self.network == JobNetwork::Local
+    }
 }
 
 /// How a job's process terminated. A process can either exit of its own accord or be killed by a
@@ -713,5 +717,18 @@ mod tests {
     ],
 )"
         );
+    }
+
+    #[test]
+    fn job_spec_must_be_run_locally() {
+        let spec = JobSpec::new(
+            "foo",
+            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
+        );
+        assert_eq!(spec.must_be_run_locally(), false);
+        let spec = spec.network(JobNetwork::Loopback);
+        assert_eq!(spec.must_be_run_locally(), false);
+        let spec = spec.network(JobNetwork::Local);
+        assert_eq!(spec.must_be_run_locally(), true);
     }
 }
