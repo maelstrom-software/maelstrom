@@ -29,7 +29,7 @@ pub trait Deps {
     // Only in remote broker mode.
     fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec);
     fn send_job_state_counts_request_to_broker(&self);
-    fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path);
+    fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf);
 
     // Only in standalone mode.
     fn send_message_to_local_worker(&mut self, message: local_worker::Message);
@@ -129,7 +129,8 @@ impl<DepsT: Deps> Router<DepsT> {
                 let path = self.artifacts.get(&digest).unwrap_or_else(|| {
                     panic!("got request for unknown artifact with digest {digest}")
                 });
-                self.deps.start_artifact_transfer_to_broker(digest, path);
+                self.deps
+                    .start_artifact_transfer_to_broker(digest, path.to_owned());
             }
             Message::Broker(BrokerToClient::StatisticsResponse(_)) => {
                 unimplemented!("this client doesn't send statistics requests");
@@ -213,11 +214,10 @@ impl Deps for Adapter {
             .send(ClientToBroker::JobStateCountsRequest);
     }
 
-    fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path) {
-        let _ = self.artifact_pusher_sender.send(artifact_pusher::Message {
-            digest,
-            path: path.to_owned(),
-        });
+    fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf) {
+        let _ = self
+            .artifact_pusher_sender
+            .send(artifact_pusher::Message { digest, path });
     }
 
     fn send_message_to_local_worker(&mut self, message: local_worker::Message) {
