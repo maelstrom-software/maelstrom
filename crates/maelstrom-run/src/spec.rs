@@ -54,7 +54,7 @@ struct Job {
     added_layers: Vec<Layer>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
     mounts: Option<Vec<JobMount>>,
-    enable_loopback: Option<bool>,
+    network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
     working_directory: Option<PossiblyImage<Utf8PathBuf>>,
     user: Option<UserId>,
@@ -75,7 +75,7 @@ impl Job {
             use_image_environment: false,
             devices: None,
             mounts: None,
-            enable_loopback: None,
+            network: None,
             enable_writable_file_system: None,
             working_directory: None,
             user: None,
@@ -139,11 +139,7 @@ impl Job {
                 .map(JobDevice::from)
                 .collect(),
             mounts: self.mounts.unwrap_or_default(),
-            network: if self.enable_loopback.unwrap_or_default() {
-                JobNetwork::Loopback
-            } else {
-                JobNetwork::Disabled
-            },
+            network: self.network.unwrap_or_default(),
             enable_writable_file_system: self.enable_writable_file_system.unwrap_or_default(),
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
@@ -164,7 +160,7 @@ enum JobField {
     AddedLayers,
     Devices,
     Mounts,
-    EnableLoopback,
+    Network,
     EnableWritableFileSystem,
     WorkingDirectory,
     User,
@@ -225,7 +221,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
         let mut added_layers = None;
         let mut devices = None;
         let mut mounts = None;
-        let mut enable_loopback = None;
+        let mut network = None;
         let mut enable_writable_file_system = None;
         let mut working_directory = None;
         let mut user = None;
@@ -279,8 +275,8 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                 JobField::Mounts => {
                     mounts = Some(map.next_value()?);
                 }
-                JobField::EnableLoopback => {
-                    enable_loopback = Some(map.next_value()?);
+                JobField::Network => {
+                    network = Some(map.next_value()?);
                 }
                 JobField::EnableWritableFileSystem => {
                     enable_writable_file_system = Some(map.next_value()?);
@@ -352,7 +348,7 @@ impl<'de> de::Visitor<'de> for JobVisitor {
             added_layers: added_layers.unwrap_or_default(),
             devices,
             mounts,
-            enable_loopback,
+            network,
             enable_writable_file_system,
             working_directory,
             user,
@@ -432,7 +428,7 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback_none_into_job_spec() {
+    fn network_none_into_job_spec() {
         assert_eq!(
             Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
                 .into_job_spec(layer_mapper)
@@ -444,10 +440,25 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback_true_into_job_spec() {
+    fn network_disabled_into_job_spec() {
         assert_eq!(
             Job {
-                enable_loopback: Some(true),
+                network: Some(JobNetwork::Disabled),
+                ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
+            }
+            .into_job_spec(layer_mapper)
+            .unwrap(),
+            JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
+                .working_directory("/")
+                .network(JobNetwork::Disabled),
+        );
+    }
+
+    #[test]
+    fn network_loopback_into_job_spec() {
+        assert_eq!(
+            Job {
+                network: Some(JobNetwork::Loopback),
                 ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
             .into_job_spec(layer_mapper)
@@ -459,17 +470,17 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback_false_into_job_spec() {
+    fn network_local_into_job_spec() {
         assert_eq!(
             Job {
-                enable_loopback: Some(false),
+                network: Some(JobNetwork::Local),
                 ..Job::new(utf8_path_buf!("program"), nonempty![tar_layer!("1")])
             }
             .into_job_spec(layer_mapper)
             .unwrap(),
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .network(JobNetwork::Disabled),
+                .network(JobNetwork::Local),
         );
     }
 
@@ -960,13 +971,13 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback() {
+    fn foo() {
         assert_eq!(
             parse_job(
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
-                    "enable_loopback": true
+                    "network": "loopback"
                 }"#,
             )
             .unwrap()
