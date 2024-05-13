@@ -27,7 +27,8 @@ pub trait Deps {
     fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts);
 
     // Only in remote broker mode.
-    fn send_message_to_broker(&mut self, message: ClientToBroker);
+    fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec);
+    fn send_job_state_counts_request_to_broker(&self);
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path);
 
     // Only in standalone mode.
@@ -107,8 +108,7 @@ impl<DepsT: Deps> Router<DepsT> {
                             ),
                         ));
                 } else {
-                    self.deps
-                        .send_message_to_broker(ClientToBroker::JobRequest(cjid, spec));
+                    self.deps.send_job_request_to_broker(cjid, spec);
                 }
             }
             Message::GetJobStateCounts(handle) => {
@@ -117,8 +117,7 @@ impl<DepsT: Deps> Router<DepsT> {
                     self.deps.job_state_counts(handle, self.counts);
                 } else {
                     self.job_state_counts_handles.push_back(handle);
-                    self.deps
-                        .send_message_to_broker(ClientToBroker::JobStateCountsRequest);
+                    self.deps.send_job_state_counts_request_to_broker();
                 }
             }
             Message::Broker(BrokerToClient::JobResponse(cjid, result)) => {
@@ -202,8 +201,16 @@ impl Deps for Adapter {
         handle.send(counts).ok();
     }
 
-    fn send_message_to_broker(&mut self, message: ClientToBroker) {
-        let _ = self.broker_sender.send(message);
+    fn send_job_request_to_broker(&self, cjid: ClientJobId, spec: JobSpec) {
+        let _ = self
+            .broker_sender
+            .send(ClientToBroker::JobRequest(cjid, spec));
+    }
+
+    fn send_job_state_counts_request_to_broker(&self) {
+        let _ = self
+            .broker_sender
+            .send(ClientToBroker::JobStateCountsRequest);
     }
 
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path) {
