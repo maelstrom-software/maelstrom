@@ -38,5 +38,7 @@ toml.workspace = true
 tonic.workspace = true
 
 [dev-dependencies]
+colored-diff.workspace = true
+enum-map.workspace = true
 maelstrom-test.workspace = true
 maplit.workspace = true

@@ -137,7 +137,7 @@ pub struct WorkerStatistics {
 }
 
 /// Useful information for a client to display about the broker's state.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct BrokerStatistics {
     pub worker_statistics: HashMap<WorkerId, WorkerStatistics>,
     pub job_statistics: JobStatisticsTimeSeries,

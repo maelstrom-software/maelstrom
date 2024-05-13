@@ -2961,6 +2961,8 @@ dependencies = [
  "atomicbox",
  "bracoxide",
  "chrono",
+ "colored-diff",
+ "enum-map",
  "futures",
  "globset",
  "itertools 0.10.5",
