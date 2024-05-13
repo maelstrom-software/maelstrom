@@ -1,7 +1,8 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobNetwork, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
@@ -13,7 +14,7 @@ pub struct TestDirective {
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
     pub image: Option<String>,
     pub include_shared_libraries: Option<bool>,
-    pub enable_loopback: Option<bool>,
+    pub network: Option<JobNetwork>,
     pub enable_writable_file_system: Option<bool>,
     pub user: Option<UserId>,
     pub group: Option<GroupId>,
@@ -34,7 +35,7 @@ pub struct TestDirective {
 enum DirectiveField {
     Filter,
     IncludeSharedLibraries,
-    EnableLoopback,
+    Network,
     EnableWritableFileSystem,
     User,
     Group,
@@ -66,7 +67,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
     {
         let mut filter = None;
         let mut include_shared_libraries = None;
-        let mut enable_loopback = None;
+        let mut network = None;
         let mut enable_writable_file_system = None;
         let mut user = None;
         let mut group = None;
@@ -93,8 +94,8 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                 DirectiveField::IncludeSharedLibraries => {
                     include_shared_libraries = Some(map.next_value()?);
                 }
-                DirectiveField::EnableLoopback => {
-                    enable_loopback = Some(map.next_value()?);
+                DirectiveField::Network => {
+                    network = Some(map.next_value()?);
                 }
                 DirectiveField::EnableWritableFileSystem => {
                     enable_writable_file_system = Some(map.next_value()?);
@@ -207,7 +208,7 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
         Ok(TestDirective {
             filter,
             include_shared_libraries,
-            enable_loopback,
+            network,
             enable_writable_file_system,
             user,
             group,
@@ -293,7 +294,7 @@ mod test {
                 r#"
                 filter = "package.equals(package1) && test.equals(test1)"
                 include_shared_libraries = true
-                enable_loopback = false
+                network = "loopback"
                 enable_writable_file_system = true
                 user = 101
                 group = 202
@@ -308,7 +309,7 @@ mod test {
                         .unwrap()
                 ),
                 include_shared_libraries: Some(true),
-                enable_loopback: Some(false),
+                network: Some(JobNetwork::Loopback),
                 enable_writable_file_system: Some(true),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),

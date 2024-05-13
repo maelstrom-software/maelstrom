@@ -3,8 +3,10 @@
 # Copy any shared libraries the test depends on along with the binary.
 include_shared_libraries = true
 
-# Don't bother enabling loopback, we only need this if our tests uses localhost.
-enable_loopback = false
+# Don't bother enabling the network. We can set to "loopback" to run on the
+# cluster using only the loopback network, or to "local" to only run on the
+# local machine but with full network access.
+network = "disabled"
 
 # Don't bother creating a writable container for our test. It can still write to /tmp .
 enable_writable_file_system = false

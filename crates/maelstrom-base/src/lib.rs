@@ -121,6 +121,7 @@ pub struct JobMount {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum JobNetwork {
     #[default]
     Disabled,

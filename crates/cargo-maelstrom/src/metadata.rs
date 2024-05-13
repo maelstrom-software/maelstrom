@@ -5,7 +5,7 @@ use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, JobNetwork, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage};
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -55,7 +55,7 @@ impl Default for AllMetadata {
             filter: None,
             // Include any shared libraries needed for running the binary
             include_shared_libraries: Some(true),
-            enable_loopback: Some(false),
+            network: Some(JobNetwork::Disabled),
             enable_writable_file_system: Some(false),
             working_directory: Some(PossiblyImage::Explicit(Utf8PathBuf::from("/"))),
             user: Some(UserId::from(0)),
@@ -121,7 +121,7 @@ fn all_metadata_default_matches_default_file() {
 pub struct TestMetadata {
     include_shared_libraries: Option<bool>,
     pub image: Option<ImageSpec>,
-    pub enable_loopback: bool,
+    pub network: JobNetwork,
     pub enable_writable_file_system: bool,
     pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
@@ -138,7 +138,7 @@ impl Default for TestMetadata {
         Self {
             image: None,
             include_shared_libraries: Default::default(),
-            enable_loopback: Default::default(),
+            network: Default::default(),
             enable_writable_file_system: Default::default(),
             working_directory: Some(Utf8PathBuf::from("/")),
             user: UserId::from(0),
@@ -171,7 +171,7 @@ impl TestMetadata {
             filter: _,
             ref image,
             include_shared_libraries,
-            enable_loopback,
+            network,
             enable_writable_file_system,
             user,
             group,
@@ -199,7 +199,7 @@ impl TestMetadata {
         });
 
         self.include_shared_libraries = include_shared_libraries.or(self.include_shared_libraries);
-        self.enable_loopback = enable_loopback.unwrap_or(self.enable_loopback);
+        self.network = network.unwrap_or(self.network);
         self.enable_writable_file_system =
             enable_writable_file_system.unwrap_or(self.enable_writable_file_system);
         self.user = user.unwrap_or(self.user);
@@ -416,33 +416,46 @@ mod test {
     }
 
     #[test]
-    fn enable_loopback() {
+    fn network() {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
             filter = "package.equals(package1)"
-            enable_loopback = true
+            network = "disabled"
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
-            enable_loopback = false
+            network = "loopback"
+
+            [[directives]]
+            filter = "package.equals(package1) && name.equals(test2)"
+            network = "local"
             "#,
         )
         .unwrap();
-        assert!(
-            !all.get_metadata_for_test(&test_ctx("package1", "test1"))
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test1"))
                 .unwrap()
-                .enable_loopback
+                .network,
+            JobNetwork::Loopback,
         );
-        assert!(
+        assert_eq!(
             all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
-                .enable_loopback
+                .network,
+            JobNetwork::Local,
         );
-        assert!(
-            !all.get_metadata_for_test(&test_ctx("package2", "test1"))
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package1", "test3"))
                 .unwrap()
-                .enable_loopback
+                .network,
+            JobNetwork::Disabled,
+        );
+        assert_eq!(
+            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+                .unwrap()
+                .network,
+            JobNetwork::Disabled,
         );
     }
 
