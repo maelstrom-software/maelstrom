@@ -33,7 +33,7 @@ pub trait Deps {
 
     // Only in standalone mode.
     fn send_message_to_local_worker(&mut self, message: local_worker::Message);
-    fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64>;
+    fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64>;
 }
 
 pub enum Message<DepsT: Deps> {
@@ -224,7 +224,7 @@ impl Deps for Adapter {
         let _ = self.local_worker_sender.send(message);
     }
 
-    fn link_artifact_for_local_worker(&mut self, from: &Path, to: &Path) -> Result<u64> {
+    fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64> {
         self.fs.symlink(from, to)?;
         Ok(self.fs.metadata(to)?.len())
     }
