@@ -32,7 +32,12 @@ pub trait Deps {
     fn start_artifact_transfer_to_broker(&self, digest: Sha256Digest, path: PathBuf);
 
     // Only in standalone mode.
-    fn send_message_to_local_worker(&mut self, message: local_worker::Message);
+    fn send_enqueue_job_to_local_worker(&self, jid: JobId, spec: JobSpec);
+    fn send_artifact_fetch_completed_to_local_worker(
+        &self,
+        digest: Sha256Digest,
+        result: Result<u64>,
+    );
     fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64>;
 }
 
@@ -97,16 +102,13 @@ impl<DepsT: Deps> Router<DepsT> {
                     } else {
                         self.counts[JobState::Pending] += 1;
                     }
-                    self.deps
-                        .send_message_to_local_worker(local_worker::Message::Broker(
-                            BrokerToWorker::EnqueueJob(
-                                JobId {
-                                    cid: ClientId::from(0),
-                                    cjid,
-                                },
-                                spec,
-                            ),
-                        ));
+                    self.deps.send_enqueue_job_to_local_worker(
+                        JobId {
+                            cid: ClientId::from(0),
+                            cjid,
+                        },
+                        spec,
+                    );
                 } else {
                     self.deps.send_job_request_to_broker(cjid, spec);
                 }
@@ -152,7 +154,7 @@ impl<DepsT: Deps> Router<DepsT> {
             }
             Message::LocalWorkerStartArtifactFetch(digest, path) => {
                 assert!(self.standalone);
-                let response = local_worker::Message::ArtifactFetchCompleted(
+                self.deps.send_artifact_fetch_completed_to_local_worker(
                     digest.clone(),
                     match self.artifacts.get(&digest) {
                         None => Err(anyhow!("no artifact found for digest {digest}")),
@@ -161,7 +163,6 @@ impl<DepsT: Deps> Router<DepsT> {
                             .link_artifact_for_local_worker(stored_path.as_path(), path.as_path()),
                     },
                 );
-                self.deps.send_message_to_local_worker(response);
             }
         }
     }
@@ -220,8 +221,22 @@ impl Deps for Adapter {
             .send(artifact_pusher::Message { digest, path });
     }
 
-    fn send_message_to_local_worker(&mut self, message: local_worker::Message) {
-        let _ = self.local_worker_sender.send(message);
+    fn send_enqueue_job_to_local_worker(&self, jid: JobId, spec: JobSpec) {
+        let _ = self.local_worker_sender.send(local_worker::Message::Broker(
+            BrokerToWorker::EnqueueJob(jid, spec),
+        ));
+    }
+
+    fn send_artifact_fetch_completed_to_local_worker(
+        &self,
+        digest: Sha256Digest,
+        result: Result<u64>,
+    ) {
+        let _ = self
+            .local_worker_sender
+            .send(local_worker::Message::ArtifactFetchCompleted(
+                digest, result,
+            ));
     }
 
     fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64> {
