@@ -26,9 +26,6 @@ pub trait Deps {
     type JobStateCountsHandle;
     fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts);
 
-    type AllJobsCompleteHandle;
-    fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle);
-
     // Only in remote broker mode.
     fn send_message_to_broker(&mut self, message: ClientToBroker);
     fn start_artifact_transfer_to_broker(&mut self, digest: Sha256Digest, path: &Path);
@@ -60,7 +57,6 @@ struct Router<DepsT: Deps> {
     next_client_job_id: u32,
     job_handles: HashMap<ClientJobId, DepsT::JobHandle>,
     job_state_counts_handles: VecDeque<DepsT::JobStateCountsHandle>,
-    all_jobs_complete_handles: Vec<DepsT::AllJobsCompleteHandle>,
     counts: JobStateCounts,
 }
 
@@ -74,7 +70,6 @@ impl<DepsT: Deps> Router<DepsT> {
             next_client_job_id: Default::default(),
             job_handles: Default::default(),
             job_state_counts_handles: Default::default(),
-            all_jobs_complete_handles: Default::default(),
             counts: Default::default(),
         }
     }
@@ -82,11 +77,6 @@ impl<DepsT: Deps> Router<DepsT> {
     fn receive_job_response(&mut self, cjid: ClientJobId, result: JobOutcomeResult) {
         let handle = self.job_handles.remove(&cjid).unwrap();
         self.deps.job_done(handle, cjid, result);
-        if self.job_handles.is_empty() {
-            for handle in self.all_jobs_complete_handles.drain(..) {
-                self.deps.all_jobs_complete(handle);
-            }
-        }
     }
 
     fn receive_message(&mut self, message: Message<DepsT>) {
@@ -210,11 +200,6 @@ impl Deps for Adapter {
 
     fn job_state_counts(&self, handle: Self::JobStateCountsHandle, counts: JobStateCounts) {
         handle.send(counts).ok();
-    }
-
-    type AllJobsCompleteHandle = oneshot::Sender<()>;
-    fn all_jobs_complete(&self, handle: Self::AllJobsCompleteHandle) {
-        handle.send(()).ok();
     }
 
     fn send_message_to_broker(&mut self, message: ClientToBroker) {
