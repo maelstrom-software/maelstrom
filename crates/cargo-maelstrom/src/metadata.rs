@@ -325,10 +325,10 @@ impl AllMetadata {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::enum_set;
+    use maelstrom_base::{enum_set, BindMountAccess};
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
@@ -1029,6 +1029,7 @@ mod test {
             mounts = [
                 { fs_type = "tmp", mount_point = "/tmp" },
                 { fs_type = "sys", mount_point = "/sys" },
+                { fs_type = "bind", mount_point = "/foo", local_path = "/local", access = "read-only" },
             ]
             "#,
         )
@@ -1040,10 +1041,15 @@ mod test {
                 .mounts,
             vec![
                 JobMount::Tmp {
-                    mount_point: utf8_path_buf!("/tmp")
+                    mount_point: utf8_path_buf!("/tmp"),
                 },
                 JobMount::Sys {
-                    mount_point: utf8_path_buf!("/sys")
+                    mount_point: utf8_path_buf!("/sys"),
+                },
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/foo"),
+                    local_path: utf8_path_buf!("/local"),
+                    access: BindMountAccess::ReadOnly,
                 },
             ],
         );
@@ -1089,7 +1095,7 @@ mod test {
             filter = "package.equals(package1) && name.equals(test2)"
             added_mounts = [
                 { fs_type = "tmp", mount_point = "/tmp" },
-                { fs_type = "proc", mount_point = "/proc" },
+                { fs_type = "bind", mount_point = "/foo", local_path = "/local", access = "writable-private" },
             ]
 
             [[directives]]
@@ -1132,8 +1138,10 @@ mod test {
                 JobMount::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 },
-                JobMount::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/foo"),
+                    local_path: utf8_path_buf!("/local"),
+                    access: BindMountAccess::WritablePrivate,
                 },
             ],
         );

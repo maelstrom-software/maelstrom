@@ -374,10 +374,10 @@ impl<'de> de::Deserialize<'de> for Job {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::{enum_set, nonempty, JobMount};
+    use maelstrom_base::{enum_set, nonempty, BindMountAccess, JobMount};
     use maelstrom_test::{digest, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
@@ -957,7 +957,8 @@ mod test {
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
                     "mounts": [
-                        { "fs_type": "tmp", "mount_point": "/tmp" }
+                        { "fs_type": "tmp", "mount_point": "/tmp" },
+                        { "fs_type": "bind", "mount_point": "/bind", "local_path": "/a", "access": "writable-shared" }
                     ]
                 }"#,
             )
@@ -966,9 +967,13 @@ mod test {
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .mounts([JobMount::Tmp {
-                    mount_point: utf8_path_buf!("/tmp"),
-                }])
+                .mounts([
+                    JobMount::Tmp { mount_point: utf8_path_buf!("/tmp") },
+                    JobMount::Bind {
+                        mount_point: utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/a"),
+                        access: BindMountAccess::WritableShared},
+                ])
         )
     }
 

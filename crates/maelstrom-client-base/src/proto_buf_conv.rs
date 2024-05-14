@@ -428,6 +428,15 @@ impl IntoProtoBuf for maelstrom_base::JobMount {
             Self::Sys { mount_point } => proto::job_mount::Mount::Sys(proto::SysMount {
                 mount_point: mount_point.into_proto_buf(),
             }),
+            Self::Bind {
+                mount_point,
+                local_path,
+                access,
+            } => proto::job_mount::Mount::Bind(proto::BindMount {
+                mount_point: mount_point.into_proto_buf(),
+                local_path: local_path.into_proto_buf(),
+                access: access.into_proto_buf(),
+            }),
         };
         Self::ProtoBufType { mount: Some(mount) }
     }
@@ -447,6 +456,11 @@ impl TryFromProtoBuf for maelstrom_base::JobMount {
             },
             proto::job_mount::Mount::Sys(sys_mount) => maelstrom_base::JobMount::Sys {
                 mount_point: TryFromProtoBuf::try_from_proto_buf(sys_mount.mount_point)?,
+            },
+            proto::job_mount::Mount::Bind(bind_mount) => maelstrom_base::JobMount::Bind {
+                mount_point: TryFromProtoBuf::try_from_proto_buf(bind_mount.mount_point)?,
+                local_path: TryFromProtoBuf::try_from_proto_buf(bind_mount.local_path)?,
+                access: TryFromProtoBuf::try_from_proto_buf(bind_mount.access)?,
             },
         })
     }

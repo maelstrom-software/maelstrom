@@ -106,20 +106,50 @@ impl From<JobDeviceListDeserialize> for JobDevice {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum BindMountAccess {
+    ReadOnly,
+    WritablePrivate,
+    WritableShared,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 #[serde(tag = "fs_type")]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
 pub enum JobMountForTomlAndJson {
-    Proc { mount_point: Utf8PathBuf },
-    Tmp { mount_point: Utf8PathBuf },
-    Sys { mount_point: Utf8PathBuf },
+    Proc {
+        mount_point: Utf8PathBuf,
+    },
+    Tmp {
+        mount_point: Utf8PathBuf,
+    },
+    Sys {
+        mount_point: Utf8PathBuf,
+    },
+    Bind {
+        mount_point: Utf8PathBuf,
+        local_path: Utf8PathBuf,
+        access: BindMountAccess,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
 pub enum JobMount {
-    Proc { mount_point: Utf8PathBuf },
-    Tmp { mount_point: Utf8PathBuf },
-    Sys { mount_point: Utf8PathBuf },
+    Proc {
+        mount_point: Utf8PathBuf,
+    },
+    Tmp {
+        mount_point: Utf8PathBuf,
+    },
+    Sys {
+        mount_point: Utf8PathBuf,
+    },
+    Bind {
+        mount_point: Utf8PathBuf,
+        local_path: Utf8PathBuf,
+        access: BindMountAccess,
+    },
 }
 
 impl JobMount {
@@ -128,6 +158,7 @@ impl JobMount {
             JobMount::Proc { mount_point } => mount_point.as_path(),
             JobMount::Tmp { mount_point } => mount_point.as_path(),
             JobMount::Sys { mount_point } => mount_point.as_path(),
+            JobMount::Bind { mount_point, .. } => mount_point.as_path(),
         }
     }
 }
@@ -138,6 +169,15 @@ impl From<JobMountForTomlAndJson> for JobMount {
             JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc { mount_point },
             JobMountForTomlAndJson::Tmp { mount_point } => JobMount::Tmp { mount_point },
             JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys { mount_point },
+            JobMountForTomlAndJson::Bind {
+                mount_point,
+                local_path,
+                access,
+            } => JobMount::Bind {
+                mount_point,
+                local_path,
+                access,
+            },
         }
     }
 }

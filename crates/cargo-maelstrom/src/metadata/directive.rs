@@ -237,10 +237,11 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::enum_set;
+    use indoc::indoc;
+    use maelstrom_base::{enum_set, BindMountAccess};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
@@ -344,16 +345,22 @@ mod test {
     #[test]
     fn mounts() {
         assert_eq!(
-            parse_test_directive(
-                r#"
-                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-                "#
-            )
+            parse_test_directive(indoc! {r#"
+                mounts = [
+                    { fs_type = "proc", mount_point = "/proc" },
+                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", access = "read-only" },
+                ]
+            "#})
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![JobMountForTomlAndJson::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
-                }]),
+                mounts: Some(vec![
+                    JobMountForTomlAndJson::Proc { mount_point: utf8_path_buf!("/proc") },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/local"),
+                        access: BindMountAccess::ReadOnly,
+                    }
+                ]),
                 ..Default::default()
             }
         );
@@ -362,16 +369,22 @@ mod test {
     #[test]
     fn added_mounts() {
         assert_eq!(
-            parse_test_directive(
-                r#"
-                added_mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-                "#
-            )
+            parse_test_directive(indoc! {r#"
+                added_mounts = [
+                    { fs_type = "proc", mount_point = "/proc" },
+                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", access = "read-only" },
+                ]
+            "#})
             .unwrap(),
             TestDirective {
-                added_mounts: vec![JobMountForTomlAndJson::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
-                }],
+                added_mounts: vec![
+                    JobMountForTomlAndJson::Proc { mount_point: utf8_path_buf!("/proc") },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/local"),
+                        access: BindMountAccess::ReadOnly,
+                    }
+                ],
                 ..Default::default()
             }
         );
@@ -380,12 +393,10 @@ mod test {
     #[test]
     fn mounts_before_added_mounts() {
         assert_eq!(
-            parse_test_directive(
-                r#"
+            parse_test_directive(indoc! {r#"
                 mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
                 added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
-                "#
-            )
+            "#})
             .unwrap(),
             TestDirective {
                 mounts: Some(vec![JobMountForTomlAndJson::Proc {
@@ -402,51 +413,65 @@ mod test {
     #[test]
     fn mounts_after_added_mounts() {
         assert_toml_error(
-            parse_test_directive(
-                r#"
+            parse_test_directive(indoc! {r#"
                 added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
                 mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-                "#,
-            )
+            "#})
             .unwrap_err(),
             "field `mounts` cannot be set after `added_mounts`",
         );
     }
 
     #[test]
-    fn unknown_field_in_mount() {
+    fn unknown_field_in_simple_mount() {
         assert_toml_error(
-            parse_test_directive(
-                r#"
+            parse_test_directive(indoc! {r#"
                 mounts = [ { fs_type = "proc", mount_point = "/proc", unknown = "true" } ]
-                "#,
-            )
+            "#})
             .unwrap_err(),
             "unknown field `unknown`, expected",
         );
     }
 
     #[test]
-    fn missing_field_in_mount() {
+    fn unknown_field_in_bind_mount() {
         assert_toml_error(
-            parse_test_directive(
-                r#"
+            parse_test_directive(indoc! {r#"
+                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a", access = "read-only", unknown = "true" } ]
+            "#})
+            .unwrap_err(),
+            "unknown field `unknown`, expected",
+        );
+    }
+
+    #[test]
+    fn missing_field_in_simple_mount() {
+        assert_toml_error(
+            parse_test_directive(indoc! {r#"
                 mounts = [ { fs_type = "proc" } ]
-                "#,
-            )
+            "#})
             .unwrap_err(),
             "missing field `mount_point`",
         );
     }
 
     #[test]
+    fn missing_field_in_bind_mount() {
+        assert_toml_error(
+            parse_test_directive(indoc! {r#"
+                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a" } ]
+            "#})
+            .unwrap_err(),
+            "missing field `access`",
+        );
+    }
+
+    #[test]
     fn devices() {
         assert_eq!(
-            parse_test_directive(
-                r#"
+            parse_test_directive(indoc! {r#"
                 devices = [ "null", "zero" ]
-                "#
-            )
+            "#})
             .unwrap(),
             TestDirective {
                 devices: Some(enum_set!(JobDevice::Null | JobDevice::Zero)),

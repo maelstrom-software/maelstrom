@@ -665,6 +665,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     MountFlags::default(),
                     "sysfs",
                 ),
+                JobMount::Bind { .. } => todo!(),
             };
             builder.push(
                 Syscall::Mount(None, mount_point_cstr, Some(fs_type), flags, None),
