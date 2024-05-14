@@ -867,12 +867,7 @@ mod tests {
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{path::PathBuf, sync::Arc};
     use tempfile::TempDir;
-    use tokio::{
-        io::{AsyncBufReadExt as _, AsyncWriteExt as _},
-        net::TcpListener,
-        sync::Mutex,
-        task,
-    };
+    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::Mutex, task};
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -1003,6 +998,7 @@ mod tests {
 
             assert_eq!(stderr, self.expected_stderr);
             assert_eq!(status, self.expected_status);
+            assert_eq!(stdout, self.expected_stdout);
             assert_eq!(duration, self.expected_duration);
         }
     }
@@ -1235,7 +1231,7 @@ mod tests {
                     s.connect(("127.0.0.1", 1234))
                     s.sendall(b"hello")
                     s.shutdown(socket.SHUT_WR)
-                    print(s.recv(1024), end = "")
+                    print(s.recv(1024).decode(), end="")
             "#})
             .network(JobNetwork::Local),
         )
