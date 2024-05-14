@@ -4,7 +4,10 @@ use crate::{
     IdVendor,
 };
 use anyhow::Result;
-use maelstrom_base::{proto::Hello, ClientId, WorkerId};
+use maelstrom_base::{
+    proto::{ClientToBroker, Hello},
+    ClientId, WorkerId,
+};
 use maelstrom_util::net;
 use serde::Serialize;
 use slog::{debug, error, info, o, warn, Logger};
@@ -117,6 +120,9 @@ async fn unassigned_connection_main(
                 SchedulerMessage::ClientDisconnected,
                 |scheduler_sender| async move {
                     let _ = net::async_socket_reader(read_stream, scheduler_sender, move |msg| {
+                        if let ClientToBroker::JobRequest(_, spec) = &msg {
+                            assert!(!spec.must_be_run_locally());
+                        }
                         SchedulerMessage::FromClient(id, msg)
                     })
                     .await;
