@@ -348,6 +348,10 @@ impl JobSpec {
 
     pub fn must_be_run_locally(&self) -> bool {
         self.network == JobNetwork::Local
+            || self
+                .mounts
+                .iter()
+                .any(|mount| matches!(mount, JobMount::Bind { .. }))
     }
 }
 
@@ -788,9 +792,29 @@ mod tests {
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
         );
         assert_eq!(spec.must_be_run_locally(), false);
+
         let spec = spec.network(JobNetwork::Loopback);
         assert_eq!(spec.must_be_run_locally(), false);
+
         let spec = spec.network(JobNetwork::Local);
         assert_eq!(spec.must_be_run_locally(), true);
+
+        let spec = spec.mounts([
+            JobMount::Sys {
+                mount_point: Utf8PathBuf::from("/sys"),
+            },
+            JobMount::Bind {
+                mount_point: Utf8PathBuf::from("/bind"),
+                local_path: Utf8PathBuf::from("/a"),
+                access: BindMountAccess::ReadOnly,
+            },
+        ]);
+        assert_eq!(spec.must_be_run_locally(), true);
+
+        let spec = spec.network(JobNetwork::Disabled);
+        assert_eq!(spec.must_be_run_locally(), true);
+
+        let spec = spec.mounts([]);
+        assert_eq!(spec.must_be_run_locally(), false);
     }
 }
