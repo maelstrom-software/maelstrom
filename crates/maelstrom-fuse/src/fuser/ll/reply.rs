@@ -499,7 +499,7 @@ impl DirEntPlusList {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use std::num::NonZeroI32;
 
     use super::super::test::ioslice_to_vec;

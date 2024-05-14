@@ -663,7 +663,7 @@ impl ReplyLseek {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::fuser::{FileAttr, FileType};
     use std::io::IoSlice;

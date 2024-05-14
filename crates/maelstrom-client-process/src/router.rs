@@ -279,7 +279,7 @@ pub fn start_task(
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::{Message::*, *};
     use enum_map::enum_map;
     use maelstrom_base::{stats::BrokerStatistics, JobNetwork};

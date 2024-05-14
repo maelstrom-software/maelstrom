@@ -490,7 +490,7 @@ impl ConvertedImage {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer};
     use maplit::btreemap;
