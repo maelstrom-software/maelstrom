@@ -77,15 +77,24 @@ enum JobDevice {
     Zero = 6;
 }
 
-enum JobMountFsType {
-    Proc = 0;
-    Tmp = 1;
-    Sys = 2;
+message JobMount {
+    oneof Mount {
+        ProcMount proc = 1;
+        TmpMount tmp = 2;
+        SysMount sys = 3;
+    }
 }
 
-message JobMount {
-    JobMountFsType fs_type = 1;
-    string mount_point = 2;
+message ProcMount {
+    string mount_point = 1;
+}
+
+message TmpMount {
+    string mount_point = 1;
+}
+
+message SysMount {
+    string mount_point = 1;
 }
 
 enum JobNetwork {

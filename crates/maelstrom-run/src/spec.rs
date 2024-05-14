@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobNetwork,
-    NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMountForTomlAndJson,
+    JobNetwork, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
@@ -53,7 +53,7 @@ struct Job {
     layers: PossiblyImage<NonEmpty<Layer>>,
     added_layers: Vec<Layer>,
     devices: Option<EnumSet<JobDeviceListDeserialize>>,
-    mounts: Option<Vec<JobMount>>,
+    mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
     working_directory: Option<PossiblyImage<Utf8PathBuf>>,
@@ -138,7 +138,12 @@ impl Job {
                 .into_iter()
                 .map(JobDevice::from)
                 .collect(),
-            mounts: self.mounts.unwrap_or_default(),
+            mounts: self
+                .mounts
+                .unwrap_or_default()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
             network: self.network.unwrap_or_default(),
             enable_writable_file_system: self.enable_writable_file_system.unwrap_or_default(),
             working_directory,
@@ -372,7 +377,7 @@ impl<'de> de::Deserialize<'de> for Job {
 mod test {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::{enum_set, nonempty, JobMountFsType};
+    use maelstrom_base::{enum_set, nonempty, JobMount};
     use maelstrom_test::{digest, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
@@ -402,8 +407,7 @@ mod test {
                 arguments: Some(string_vec!["arg1", "arg2"]),
                 environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
                 devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
-                mounts: Some(vec![JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                mounts: Some(vec![JobMountForTomlAndJson::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 }]),
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
@@ -417,8 +421,7 @@ mod test {
                 .arguments(["arg1", "arg2"])
                 .environment([("BAR", "bar"), ("FOO", "foo")])
                 .devices(enum_set! {JobDevice::Null})
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                .mounts([JobMount::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 }])
                 .working_directory("/working-directory")
@@ -963,8 +966,7 @@ mod test {
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                .mounts([JobMount::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 }])
         )

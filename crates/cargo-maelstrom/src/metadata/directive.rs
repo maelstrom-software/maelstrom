@@ -1,8 +1,8 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMount, JobNetwork, Timeout, UserId,
-    Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMountForTomlAndJson, JobNetwork,
+    Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
@@ -21,8 +21,8 @@ pub struct TestDirective {
     pub timeout: Option<Option<Timeout>>,
     pub layers: Option<PossiblyImage<Vec<Layer>>>,
     pub added_layers: Vec<Layer>,
-    pub mounts: Option<Vec<JobMount>>,
-    pub added_mounts: Vec<JobMount>,
+    pub mounts: Option<Vec<JobMountForTomlAndJson>>,
+    pub added_mounts: Vec<JobMountForTomlAndJson>,
     pub devices: Option<EnumSet<JobDevice>>,
     pub added_devices: EnumSet<JobDevice>,
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
@@ -240,7 +240,7 @@ impl<'de> de::Deserialize<'de> for TestDirective {
 mod test {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, JobMountFsType};
+    use maelstrom_base::enum_set;
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
@@ -351,8 +351,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![JobMount {
-                    fs_type: JobMountFsType::Proc,
+                mounts: Some(vec![JobMountForTomlAndJson::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
                 ..Default::default()
@@ -370,8 +369,7 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                added_mounts: vec![JobMount {
-                    fs_type: JobMountFsType::Proc,
+                added_mounts: vec![JobMountForTomlAndJson::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }],
                 ..Default::default()
@@ -390,12 +388,10 @@ mod test {
             )
             .unwrap(),
             TestDirective {
-                mounts: Some(vec![JobMount {
-                    fs_type: JobMountFsType::Proc,
+                mounts: Some(vec![JobMountForTomlAndJson::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
-                added_mounts: vec![JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                added_mounts: vec![JobMountForTomlAndJson::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 }],
                 ..Default::default()

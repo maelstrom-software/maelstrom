@@ -7,8 +7,8 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobMountFsType,
-    JobNetwork, JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -642,20 +642,30 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let child_mount_points = spec
             .mounts
             .iter()
-            .map(|m| bump_c_str(&bump, m.mount_point.as_str()));
+            .map(|m| bump_c_str(&bump, m.mount_point().as_str()));
         for (mount, mount_point) in iter::zip(spec.mounts.iter(), child_mount_points) {
             let mount_point_cstr = mount_point.map_err(syserr)?;
 
-            let (fs_type, flags, type_name) = match mount.fs_type {
-                JobMountFsType::Proc => (
+            let (mount_point, fs_type, flags, type_name) = match mount {
+                JobMount::Proc { mount_point } => (
+                    mount_point.as_str(),
                     c"proc",
                     MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
                     "proc",
                 ),
-                JobMountFsType::Tmp => (c"tmpfs", MountFlags::default(), "tmpfs"),
-                JobMountFsType::Sys => (c"sysfs", MountFlags::default(), "sysfs"),
+                JobMount::Tmp { mount_point } => (
+                    mount_point.as_str(),
+                    c"tmpfs",
+                    MountFlags::default(),
+                    "tmpfs",
+                ),
+                JobMount::Sys { mount_point } => (
+                    mount_point.as_str(),
+                    c"sysfs",
+                    MountFlags::default(),
+                    "sysfs",
+                ),
             };
-            let mount_point = mount.mount_point.as_str();
             builder.push(
                 Syscall::Mount(None, mount_point_cstr, Some(fs_type), flags, None),
                 // We have to be careful doing bump.alloc here with the move. The drop method is
@@ -1183,8 +1193,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/cat")
                 .arguments(["/sys/class/net/lo/carrier"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Sys,
+                .mounts([JobMount::Sys {
                     mount_point: utf8_path_buf!("/sys"),
                 }]),
         )
@@ -1202,8 +1211,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/cat")
                 .arguments(["/sys/class/net/lo/carrier"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Sys,
+                .mounts([JobMount::Sys {
                     mount_point: utf8_path_buf!("/sys"),
                 }])
                 .network(JobNetwork::Loopback),
@@ -1275,14 +1283,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn close_range() {
-        Test::from_spec(
-            test_spec("/bin/ls")
-                .arguments(["/proc/self/fd"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Proc,
-                    mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
+        Test::from_spec(test_spec("/bin/ls").arguments(["/proc/self/fd"]).mounts([
+            JobMount::Proc {
+                mount_point: utf8_path_buf!("/proc"),
+            },
+        ]))
         .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")))
         .run()
@@ -1481,8 +1486,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/grep")
                 .arguments(["^tmpfs /tmp", "/proc/self/mounts"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Proc,
+                .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
@@ -1498,12 +1502,10 @@ mod tests {
             test_spec("/bin/awk")
                 .arguments([r#"/^none \/tmp/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
                 .mounts([
-                    JobMount {
-                        fs_type: JobMountFsType::Proc,
+                    JobMount::Proc {
                         mount_point: utf8_path_buf!("/proc"),
                     },
-                    JobMount {
-                        fs_type: JobMountFsType::Tmp,
+                    JobMount::Tmp {
                         mount_point: utf8_path_buf!("/tmp"),
                     },
                 ]),
@@ -1519,8 +1521,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/grep")
                 .arguments(["^sysfs /sys", "/proc/self/mounts"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Proc,
+                .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
@@ -1536,12 +1537,10 @@ mod tests {
             test_spec("/bin/awk")
                 .arguments([r#"/^none \/sys/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
                 .mounts([
-                    JobMount {
-                        fs_type: JobMountFsType::Proc,
+                    JobMount::Proc {
                         mount_point: utf8_path_buf!("/proc"),
                     },
-                    JobMount {
-                        fs_type: JobMountFsType::Sys,
+                    JobMount::Sys {
                         mount_point: utf8_path_buf!("/sys"),
                     },
                 ]),
@@ -1565,8 +1564,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/grep")
                 .arguments(["proc", "/proc/self/mounts"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Proc,
+                .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
@@ -1583,8 +1581,7 @@ mod tests {
         Test::from_spec(
             test_spec("/bin/wc")
                 .arguments(["-l", "/proc/self/mounts"])
-                .mounts([JobMount {
-                    fs_type: JobMountFsType::Proc,
+                .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )

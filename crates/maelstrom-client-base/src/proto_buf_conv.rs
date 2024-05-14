@@ -414,6 +414,44 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
+impl IntoProtoBuf for maelstrom_base::JobMount {
+    type ProtoBufType = proto::JobMount;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        let mount = match self {
+            Self::Proc { mount_point } => proto::job_mount::Mount::Proc(proto::ProcMount {
+                mount_point: mount_point.into_proto_buf(),
+            }),
+            Self::Tmp { mount_point } => proto::job_mount::Mount::Tmp(proto::TmpMount {
+                mount_point: mount_point.into_proto_buf(),
+            }),
+            Self::Sys { mount_point } => proto::job_mount::Mount::Sys(proto::SysMount {
+                mount_point: mount_point.into_proto_buf(),
+            }),
+        };
+        Self::ProtoBufType { mount: Some(mount) }
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobMount {
+    type ProtoBufType = proto::JobMount;
+
+    fn try_from_proto_buf(protobuf: Self::ProtoBufType) -> Result<Self> {
+        let mount = protobuf.mount.ok_or(anyhow!("malformed JobMount"))?;
+        Ok(match mount {
+            proto::job_mount::Mount::Proc(proc_mount) => maelstrom_base::JobMount::Proc {
+                mount_point: TryFromProtoBuf::try_from_proto_buf(proc_mount.mount_point)?,
+            },
+            proto::job_mount::Mount::Tmp(tmp_mount) => maelstrom_base::JobMount::Tmp {
+                mount_point: TryFromProtoBuf::try_from_proto_buf(tmp_mount.mount_point)?,
+            },
+            proto::job_mount::Mount::Sys(sys_mount) => maelstrom_base::JobMount::Sys {
+                mount_point: TryFromProtoBuf::try_from_proto_buf(sys_mount.mount_point)?,
+            },
+        })
+    }
+}
+
 //      _       _
 //     | | ___ | |__ __/\__
 //  _  | |/ _ \| '_ \\    /

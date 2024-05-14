@@ -4,18 +4,15 @@ use std::str::from_utf8;
 
 const INTO_RESULT: [&str; 3] = ["RunJobRequest", "AddLayerRequest", "AddLayerResponse"];
 
-const ENUM_PROTO: [(&str, &str); 5] = [
+const ENUM_PROTO: [(&str, &str); 4] = [
     ("JobDevice", "maelstrom_base::JobDevice"),
-    ("JobMountFsType", "maelstrom_base::JobMountFsType"),
     ("ArtifactType", "maelstrom_base::ArtifactType"),
     ("JobCompleted.status", "maelstrom_base::JobStatus"),
     ("JobNetwork", "maelstrom_base::JobNetwork"),
 ];
 
-const MSG_PROTO: [(&str, &str, &str); 2] = [
-    ("JobMount", "maelstrom_base::JobMount", ""),
-    ("JobEffects", "maelstrom_base::JobEffects", "option_all"),
-];
+const MSG_PROTO: [(&str, &str, &str); 1] =
+    [("JobEffects", "maelstrom_base::JobEffects", "option_all")];
 
 fn test_for_protoc() -> Option<PathBuf> {
     if let Ok(o) = Command::new("protoc").arg("--version").output() {

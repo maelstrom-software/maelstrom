@@ -106,18 +106,40 @@ impl From<JobDeviceListDeserialize> for JobDevice {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[serde(tag = "fs_type")]
 #[serde(rename_all = "kebab-case")]
-pub enum JobMountFsType {
-    Proc,
-    Tmp,
-    Sys,
+#[serde(deny_unknown_fields)]
+pub enum JobMountForTomlAndJson {
+    Proc { mount_point: Utf8PathBuf },
+    Tmp { mount_point: Utf8PathBuf },
+    Sys { mount_point: Utf8PathBuf },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct JobMount {
-    pub fs_type: JobMountFsType,
-    pub mount_point: Utf8PathBuf,
+pub enum JobMount {
+    Proc { mount_point: Utf8PathBuf },
+    Tmp { mount_point: Utf8PathBuf },
+    Sys { mount_point: Utf8PathBuf },
+}
+
+impl JobMount {
+    pub fn mount_point(&self) -> &Utf8Path {
+        match self {
+            JobMount::Proc { mount_point } => mount_point.as_path(),
+            JobMount::Tmp { mount_point } => mount_point.as_path(),
+            JobMount::Sys { mount_point } => mount_point.as_path(),
+        }
+    }
+}
+
+impl From<JobMountForTomlAndJson> for JobMount {
+    fn from(job_mount: JobMountForTomlAndJson) -> JobMount {
+        match job_mount {
+            JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc { mount_point },
+            JobMountForTomlAndJson::Tmp { mount_point } => JobMount::Tmp { mount_point },
+            JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys { mount_point },
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]

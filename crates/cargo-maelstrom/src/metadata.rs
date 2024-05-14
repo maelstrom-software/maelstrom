@@ -5,7 +5,8 @@ use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobMount, JobMountFsType, JobNetwork, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId,
+    Utf8PathBuf,
 };
 use maelstrom_client::spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage};
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
@@ -71,20 +72,17 @@ impl Default for AllMetadata {
             environment: None,
             mounts: Some(vec![
                 // Mount a tempfs at /tmp. Many tests use this for creating temporary files.
-                JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                JobMountForTomlAndJson::Tmp {
                     mount_point: "/tmp".into(),
                 },
                 // Mount proc at /proc. It is somewhat common to access information about the
                 // current process via files in /proc/self
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
+                JobMountForTomlAndJson::Proc {
                     mount_point: "/proc".into(),
                 },
                 // Mount sys at /sys. Accessing OS configuration values in /sys/kernel can be
                 // somewhat common.
-                JobMount {
-                    fs_type: JobMountFsType::Sys,
+                JobMountForTomlAndJson::Sys {
                     mount_point: "/sys".into(),
                 },
             ]),
@@ -219,10 +217,11 @@ impl TestMetadata {
         }
         self.layers.extend(added_layers.iter().cloned());
 
-        self.mounts = mounts
-            .as_ref()
-            .map_or(self.mounts, |mounts| mounts.to_vec());
-        self.mounts.extend(added_mounts.iter().cloned());
+        self.mounts = mounts.as_ref().map_or(self.mounts, |mounts| {
+            mounts.iter().cloned().map(Into::into).collect()
+        });
+        self.mounts
+            .extend(added_mounts.iter().cloned().map(Into::into));
 
         self.devices = devices.unwrap_or(self.devices).union(added_devices);
 
@@ -329,7 +328,7 @@ impl AllMetadata {
 mod test {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, JobMountFsType};
+    use maelstrom_base::enum_set;
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
@@ -1040,13 +1039,11 @@ mod test {
                 .unwrap()
                 .mounts,
             vec![
-                JobMount {
-                    fs_type: JobMountFsType::Tmp,
-                    mount_point: utf8_path_buf!("/tmp"),
+                JobMount::Tmp {
+                    mount_point: utf8_path_buf!("/tmp")
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Sys,
-                    mount_point: utf8_path_buf!("/sys"),
+                JobMount::Sys {
+                    mount_point: utf8_path_buf!("/sys")
                 },
             ],
         );
@@ -1054,10 +1051,9 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test2"))
                 .unwrap()
                 .mounts,
-            vec![JobMount {
-                fs_type: JobMountFsType::Proc,
-                mount_point: utf8_path_buf!("/proc"),
-            },],
+            vec![JobMount::Proc {
+                mount_point: utf8_path_buf!("/proc")
+            }],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"))
@@ -1111,16 +1107,13 @@ mod test {
                 .unwrap()
                 .mounts,
             vec![
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Sys,
+                JobMount::Sys {
                     mount_point: utf8_path_buf!("/sys"),
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                JobMount::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 },
             ],
@@ -1130,20 +1123,16 @@ mod test {
                 .unwrap()
                 .mounts,
             vec![
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Sys,
+                JobMount::Sys {
                     mount_point: utf8_path_buf!("/sys"),
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Tmp,
+                JobMount::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 },
-                JobMount {
-                    fs_type: JobMountFsType::Proc,
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 },
             ],
@@ -1152,19 +1141,17 @@ mod test {
             all.get_metadata_for_test(&test_ctx("package1", "test3"))
                 .unwrap()
                 .mounts,
-            vec![JobMount {
-                fs_type: JobMountFsType::Tmp,
-                mount_point: utf8_path_buf!("/tmp"),
-            },],
+            vec![JobMount::Tmp {
+                mount_point: utf8_path_buf!("/tmp")
+            }],
         );
         assert_eq!(
             all.get_metadata_for_test(&test_ctx("package2", "test1"))
                 .unwrap()
                 .mounts,
-            vec![JobMount {
-                fs_type: JobMountFsType::Tmp,
-                mount_point: utf8_path_buf!("/tmp"),
-            },],
+            vec![JobMount::Tmp {
+                mount_point: utf8_path_buf!("/tmp")
+            }],
         );
     }
 
