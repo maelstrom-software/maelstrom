@@ -5,7 +5,7 @@
 extern crate std;
 
 use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
-use derive_more::{BitOr, Display, Into};
+use derive_more::{BitOr, BitOrAssign, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
     pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, socklen_t, uid_t,
@@ -42,7 +42,7 @@ impl CloneArgs {
     }
 }
 
-#[derive(BitOr, Clone, Copy, Default)]
+#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
 pub struct CloneFlags(c_int);
 
 impl CloneFlags {

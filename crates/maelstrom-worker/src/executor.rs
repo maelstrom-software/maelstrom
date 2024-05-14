@@ -388,35 +388,47 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
 
-        if let JobNetwork::Loopback = spec.network {
-            // In order to have a loopback network interface, we need to create a netlink socket and
-            // configure things with the kernel. This creates the socket.
-            builder.push(
-                Syscall::SocketAndSaveFd(
-                    SocketDomain::NETLINK,
-                    SocketType::RAW,
-                    SocketProtocol::NETLINK_ROUTE,
-                ),
-                &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
-            );
-            // This binds the socket.
-            builder.push(
-                Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
-                &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
-            );
-            // This sends the message to the kernel.
-            builder.push(
-                Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
-                &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
-            );
-            // This receives the reply from the kernel.
-            // TODO: actually parse the reply to validate that we set up the loopback interface.
-            let rtnetlink_response = bump.alloc_slice_fill_default(1024);
-            builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
-                syserr(anyhow!("receiving rtnetlink message: {err}"))
-            });
-            // We don't need to close the socket because that will happen automatically for us when we
-            // exec.
+        let newnet;
+        match spec.network {
+            JobNetwork::Disabled => {
+                newnet = true;
+            }
+            JobNetwork::Local => {
+                newnet = false;
+            }
+            JobNetwork::Loopback => {
+                newnet = true;
+
+                // In order to have a loopback network interface, we need to create a netlink
+                // socket and configure things with the kernel. This creates the socket.
+                builder.push(
+                    Syscall::SocketAndSaveFd(
+                        SocketDomain::NETLINK,
+                        SocketType::RAW,
+                        SocketProtocol::NETLINK_ROUTE,
+                    ),
+                    &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
+                );
+                // This binds the socket.
+                builder.push(
+                    Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
+                    &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
+                );
+                // This sends the message to the kernel.
+                builder.push(
+                    Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
+                    &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
+                );
+                // This receives the reply from the kernel.
+                // TODO: actually parse the reply to validate that we set up the loopback
+                // interface.
+                let rtnetlink_response = bump.alloc_slice_fill_default(1024);
+                builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
+                    syserr(anyhow!("receiving rtnetlink message: {err}"))
+                });
+                // We don't need to close the socket because that will happen automatically for us
+                // when we exec.
+            }
         }
 
         // We now need to set up the new user namespace. This first set of syscalls sets up the
@@ -700,16 +712,17 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         );
 
         // We're finally ready to actually clone the child.
+        let mut clone_flags = CloneFlags::NEWCGROUP
+            | CloneFlags::NEWIPC
+            | CloneFlags::NEWNS
+            | CloneFlags::NEWPID
+            | CloneFlags::NEWUSER
+            | CloneFlags::VM;
+        if newnet {
+            clone_flags |= CloneFlags::NEWNET;
+        }
         let mut clone_args = CloneArgs::default()
-            .flags(
-                CloneFlags::NEWCGROUP
-                    | CloneFlags::NEWIPC
-                    | CloneFlags::NEWNET
-                    | CloneFlags::NEWNS
-                    | CloneFlags::NEWPID
-                    | CloneFlags::NEWUSER
-                    | CloneFlags::VM,
-            )
+            .flags(clone_flags)
             .exit_signal(Signal::CHLD);
         let mut args = maelstrom_worker_child::ChildArgs {
             write_sock: write_sock.as_fd(),
@@ -847,13 +860,19 @@ mod tests {
     use super::*;
     use assert_matches::*;
     use bytesize::ByteSize;
+    use indoc::indoc;
     use maelstrom_base::{nonempty, ArtifactType, JobStatus};
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{path::PathBuf, sync::Arc};
     use tempfile::TempDir;
-    use tokio::sync::Mutex;
+    use tokio::{
+        io::{AsyncBufReadExt as _, AsyncWriteExt as _},
+        net::TcpListener,
+        sync::Mutex,
+        task,
+    };
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -898,9 +917,7 @@ mod tests {
         fn spawn(&self, fd: linux::OwnedFd) {
             let layer_fs = LayerFs::from_path(&self.data_path, &self.blob_dir).unwrap();
             let cache = self.cache.clone();
-            tokio::task::spawn(async move {
-                layer_fs.run_fuse(test_logger(), cache, fd).await.unwrap()
-            });
+            task::spawn(async move { layer_fs.run_fuse(test_logger(), cache, fd).await.unwrap() });
         }
     }
 
@@ -964,7 +981,7 @@ mod tests {
                         stderr,
                         duration,
                     },
-            } = tokio::task::spawn_blocking(move || {
+            } = task::spawn_blocking(move || {
                 let (_kill_event_sender, kill_event_receiver) = sync::event();
                 Executor::new(
                     RootBuf::new(tempfile::tempdir().unwrap().into_path()),
@@ -984,9 +1001,8 @@ mod tests {
             .unwrap()
             .unwrap();
 
-            assert_eq!(status, self.expected_status);
-            assert_eq!(stdout, self.expected_stdout);
             assert_eq!(stderr, self.expected_stderr);
+            assert_eq!(status, self.expected_status);
             assert_eq!(duration, self.expected_duration);
         }
     }
@@ -1200,6 +1216,35 @@ mod tests {
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))
         .run()
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn local_network() {
+        let listening_task = task::spawn(async move {
+            let listener = TcpListener::bind("127.0.0.1:1234").await.unwrap();
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut contents = String::new();
+            socket.read_to_string(&mut contents).await.unwrap();
+            assert_eq!(contents, "hello");
+            socket.write_all(b"goodbye").await.unwrap();
+        });
+        Test::from_spec(
+            python_spec(indoc! {r#"
+                import socket
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.connect(("127.0.0.1", 1234))
+                    s.sendall(b"hello")
+                    s.shutdown(socket.SHUT_WR)
+                    print(s.recv(1024), end = "")
+            "#})
+            .network(JobNetwork::Local),
+        )
+        .await
+        .expected_status(JobStatus::Exited(0))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"goodbye")))
+        .run()
+        .await;
+        listening_task.await.unwrap()
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1577,7 +1622,7 @@ mod tests {
         let spec = JobSpec::from_spec(spec);
         let (_kill_event_sender, kill_event_receiver) = sync::event();
         assert_matches!(
-            tokio::task::spawn_blocking(move || {
+            task::spawn_blocking(move || {
                 Executor::new(
                     RootBuf::new(tempfile::tempdir().unwrap().into_path()),
                     RootBuf::new(tempfile::tempdir().unwrap().into_path()),

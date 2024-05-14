@@ -43,6 +43,7 @@ xdg.workspace = true
 assert_matches.workspace = true
 anyhow.workspace = true
 colored-diff.workspace = true
+indoc.workspace = true
 itertools.workspace = true
 maplit.workspace = true
 maelstrom-linux = { workspace = true, features = ["std", "test"] }
