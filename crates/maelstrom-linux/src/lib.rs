@@ -238,6 +238,7 @@ impl Fd {
     pub const STDIN: Self = Self(libc::STDIN_FILENO);
     pub const STDOUT: Self = Self(libc::STDOUT_FILENO);
     pub const STDERR: Self = Self(libc::STDERR_FILENO);
+    pub const AT_FDCWD: Self = Self(libc::AT_FDCWD);
 
     fn from_c_long(fd: c_long) -> Self {
         Self(fd.try_into().unwrap())
@@ -305,6 +306,14 @@ impl MountFlags {
     pub const NODEV: Self = Self(libc::MS_NODEV);
 }
 
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct MoveMountFlags(c_uint);
+
+impl MoveMountFlags {
+    pub const F_EMPTY_PATH: Self = Self(libc::MOVE_MOUNT_F_EMPTY_PATH);
+    pub const T_EMPTY_PATH: Self = Self(libc::MOVE_MOUNT_T_EMPTY_PATH);
+}
+
 #[repr(C)]
 pub struct NetlinkSocketAddr {
     sin_family: sa_family_t,
@@ -332,6 +341,16 @@ impl OpenFlags {
     pub const WRONLY: Self = Self(libc::O_WRONLY);
     pub const TRUNC: Self = Self(libc::O_TRUNC);
     pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct OpenTreeFlags(c_uint);
+
+impl OpenTreeFlags {
+    pub const CLOEXEC: Self = Self(libc::OPEN_TREE_CLOEXEC);
+    pub const CLONE: Self = Self(libc::OPEN_TREE_CLONE);
+    pub const RECURSIVE: Self = Self(libc::AT_RECURSIVE as c_uint);
+    pub const EMPTY_PATH: Self = Self(libc::AT_EMPTY_PATH as c_uint);
 }
 
 pub struct OwnedFd(Fd);
@@ -644,12 +663,41 @@ pub fn mount(
         .map(drop)
 }
 
+pub fn move_mount(
+    from_dirfd: Fd,
+    from_path: &CStr,
+    to_dirfd: Fd,
+    to_path: &CStr,
+    flags: MoveMountFlags,
+) -> Result<(), Errno> {
+    let from_path_ptr = from_path.as_ptr();
+    let to_path_ptr = to_path.as_ptr();
+    Errno::result(unsafe {
+        libc::syscall(
+            libc::SYS_move_mount,
+            from_dirfd.0,
+            from_path_ptr,
+            to_dirfd.0,
+            to_path_ptr,
+            flags.0,
+        )
+    })
+    .map(drop)
+}
+
 pub fn open(path: &CStr, flags: OpenFlags, mode: FileMode) -> Result<OwnedFd, Errno> {
     let path_ptr = path.as_ptr();
     let fd = Errno::result(unsafe { libc::open(path_ptr, flags.0, mode.0) })
         .map(Fd)
         .map(OwnedFd)?;
     Ok(fd)
+}
+
+pub fn open_tree(dirfd: Fd, path: &CStr, flags: OpenTreeFlags) -> Result<OwnedFd, Errno> {
+    let path_ptr = path.as_ptr();
+    Errno::result(unsafe { libc::syscall(libc::SYS_open_tree, dirfd.0, path_ptr, flags.0) })
+        .map(Fd::from_c_long)
+        .map(OwnedFd)
 }
 
 pub fn pause() {
