@@ -72,8 +72,8 @@ pub fn start_task(
         // canceled. In either case, it means the process is shutting down.
         //
         // We have to be careful not to let the join_set grow indefinitely. This is why we select!
-        // below. We always wait on the join_set's join_next, and ignore the results. This way we
-        // immediately clean up when a task completes.
+        // below. We always wait on the join_set's join_next. If it's an actual error, we propagate
+        // it, which will immediately cancel all the other outstanding tasks.
         let mut join_set = JoinSet::new();
         loop {
             tokio::select! {

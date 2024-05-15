@@ -31,7 +31,7 @@ use maelstrom_util::{
     sync,
 };
 use maelstrom_worker::local_worker;
-use slog::{debug, Logger};
+use slog::{debug, warn, Logger};
 use state_machine::StateMachine;
 use std::{
     collections::{HashMap, HashSet},
@@ -258,22 +258,22 @@ impl Client {
                         },
                     )
                     .await
-                    .inspect_err(|err| debug!(log_clone, "error reading broker message"; "err" => ?err))
+                    .inspect_err(
+                        |err| debug!(log_clone, "error reading broker message"; "err" => ?err),
+                    )
                     .context("reading from broker")
                 });
 
                 // Spawn a task to read from the broker's channel and write to the socket.
                 let log_clone = log.clone();
                 join_set.spawn(async move {
-                    net::async_socket_writer(
-                        broker_receiver,
-                        broker_socket_write_half,
-                        |msg| {
-                            debug!(log_clone, "sending broker message"; "msg" => ?msg);
-                        },
-                    )
+                    net::async_socket_writer(broker_receiver, broker_socket_write_half, |msg| {
+                        debug!(log_clone, "sending broker message"; "msg" => ?msg);
+                    })
                     .await
-                    .inspect_err(|err| debug!(log_clone, "error writing broker message"; "err" => ?err))
+                    .inspect_err(
+                        |err| debug!(log_clone, "error writing broker message"; "err" => ?err),
+                    )
                     .context("writing to broker")
                 });
 
@@ -409,15 +409,27 @@ impl Client {
                 let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
                     while let Some(res) = join_set.join_next().await {
-                        // We ignore Ok(_) because we expect to hear about the real error later.
-                        if let Err(err) = res {
-                            debug!(log, "client failing because task completed with error: {err}");
-                            state_machine_clone.fail(err.to_string()).assert_is_true();
-                            return;
+                        match res {
+                            Err(err) => {
+                                // This means that the task was either cancelled or it panicked.
+                                warn!(log, "task join failed"; "err" => ?err);
+                                state_machine_clone.fail(err.to_string()).assert_is_true();
+                                return;
+                            }
+                            Ok(Err(err)) => {
+                                // One of the tasks ran into an error. Log it and return.
+                                debug!(log, "task completed with error"; "err" => ?err);
+                                state_machine_clone.fail(err.to_string()).assert_is_true();
+                                return;
+                            }
+                            Ok(Ok(())) => {
+                                // We ignore Ok(_) because we expect to hear about the real error later.
+                                continue;
+                            }
                         }
                     }
                     // Somehow we didn't get a real error. That's not good!
-                    debug!(log, "client failing because all tasks completed, but without errors!");
+                    warn!(log, "all tasks exited, but none completed with an error");
                     state_machine_clone
                         .fail("client unexpectedly exited prematurely".to_string())
                         .assert_is_true();
