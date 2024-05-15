@@ -248,7 +248,20 @@ impl Fs {
                 .truncate(false)
                 .open(path)
                 .await
-                .with_context(|| format!("open_or_create(\"{}\")", path.display()))?,
+                .with_context(|| format!("open_or_create_file(\"{}\")", path.display()))?,
+            path: path.into(),
+        })
+    }
+
+    pub async fn open_or_create_file_append<P: AsRef<Path>>(&self, path: P) -> Result<File> {
+        let path = path.as_ref();
+        Ok(File {
+            inner: tokio::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(path)
+                .await
+                .with_context(|| format!("open_or_create_file_append(\"{}\")", path.display()))?,
             path: path.into(),
         })
     }
@@ -258,7 +271,7 @@ impl Fs {
         Ok(File {
             inner: tokio::fs::File::create(path)
                 .await
-                .with_context(|| format!("create(\"{}\")", path.display()))?,
+                .with_context(|| format!("create_file(\"{}\")", path.display()))?,
             path: path.into(),
         })
     }
@@ -272,7 +285,7 @@ impl Fs {
                 .write(true)
                 .open(path)
                 .await
-                .with_context(|| format!("create(\"{}\")", path.display()))?,
+                .with_context(|| format!("create_file_read_write(\"{}\")", path.display()))?,
             path: path.into(),
         })
     }
@@ -287,7 +300,9 @@ impl Fs {
                 .truncate(false)
                 .open(path)
                 .await
-                .with_context(|| format!("create(\"{}\")", path.display()))?,
+                .with_context(|| {
+                    format!("open_or_create_file_read_write(\"{}\")", path.display())
+                })?,
             path: path.into(),
         })
     }

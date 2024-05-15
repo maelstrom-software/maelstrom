@@ -160,7 +160,7 @@ impl Client {
         ) -> Result<Logger> {
             struct LogFile;
             let log_file = fs
-                .open_or_create_file(state_dir.join::<LogFile>("client-process.log"))
+                .open_or_create_file_append(state_dir.join::<LogFile>("client-process.log"))
                 .await?;
             Ok(maelstrom_util::log::file_logger(
                 log_level,
