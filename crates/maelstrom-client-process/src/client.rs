@@ -252,13 +252,14 @@ impl Client {
                     net::async_socket_reader(
                         broker_socket_read_half,
                         local_broker_sender_clone,
-                        move |msg| {
+                        |msg| {
                             debug!(log_clone, "received broker message"; "msg" => ?msg);
                             router::Message::Broker(msg)
                         },
                     )
                     .await
-                    .with_context(|| "Reading from broker")
+                    .inspect_err(|err| debug!(log_clone, "error reading broker message"; "err" => ?err))
+                    .context("reading from broker")
                 });
 
                 // Spawn a task to read from the broker's channel and write to the socket.
@@ -267,12 +268,13 @@ impl Client {
                     net::async_socket_writer(
                         broker_receiver,
                         broker_socket_write_half,
-                        move |msg| {
+                        |msg| {
                             debug!(log_clone, "sending broker message"; "msg" => ?msg);
                         },
                     )
                     .await
-                    .with_context(|| "Writing to broker")
+                    .inspect_err(|err| debug!(log_clone, "error writing broker message"; "err" => ?err))
+                    .context("writing to broker")
                 });
 
                 // Spawn a task for the artifact_pusher.
@@ -401,17 +403,21 @@ impl Client {
         .await;
         match result {
             Ok((state, mut join_set)) => {
+                let log = state.log.clone();
+                debug!(log, "client started successfully");
                 activation_handle.activate(state);
                 let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
                     while let Some(res) = join_set.join_next().await {
                         // We ignore Ok(_) because we expect to hear about the real error later.
                         if let Err(err) = res {
+                            debug!(log, "client failing because task completed with error: {err}");
                             state_machine_clone.fail(err.to_string()).assert_is_true();
                             return;
                         }
                     }
                     // Somehow we didn't get a real error. That's not good!
+                    debug!(log, "client failing because all tasks completed, but without errors!");
                     state_machine_clone
                         .fail("client unexpectedly exited prematurely".to_string())
                         .assert_is_true();
