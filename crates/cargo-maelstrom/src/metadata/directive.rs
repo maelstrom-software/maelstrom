@@ -241,7 +241,7 @@ mod tests {
     use super::*;
     use anyhow::Error;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, BindMountFlagForTomlAndJson, JobMount};
+    use maelstrom_base::{enum_set, BindMountFlagForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
