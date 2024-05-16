@@ -7,13 +7,13 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
-    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    BindMountFlag, EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount,
+    JobNetwork, JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, NetlinkSocketAddr, OpenFlags, OwnedFd, Signal, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags, WaitStatus,
+    Fd, FileMode, MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd,
+    Signal, SocketDomain, SocketProtocol, SocketType, UmountFlags, WaitStatus,
 };
 use maelstrom_util::{
     config::common::InlineLimit,
@@ -24,14 +24,17 @@ use maelstrom_util::{
 use maelstrom_worker_child::Syscall;
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
-use std::os::unix::fs::MetadataExt;
 use std::{
+    cell::UnsafeCell,
     ffi::{CStr, CString},
     fmt::Write as _,
     fs::File,
     io::Read as _,
-    iter, mem,
-    os::{fd, unix::ffi::OsStrExt as _},
+    mem,
+    os::{
+        fd,
+        unix::{ffi::OsStrExt as _, fs::MetadataExt},
+    },
     path::Path,
     pin::Pin,
     task::{Context, Poll},
@@ -384,6 +387,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // directly. If it encounters an error, it will write the script index back to the parent
         // via the exec_result pipe. The parent will then map that to a closure for generating the
         // error.
+        //
+        // We have to be careful doing bump.alloc with the closures below. The drop method is not
+        // going to be run on the closure, which means drop won't be run on any captured-and-moved
+        // variables. Since we only pass references, we're okay.
 
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
@@ -628,6 +635,35 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             );
         }
 
+        let mut local_path_fds = Vec::new();
+        for mount in &spec.mounts {
+            let JobMount::Bind {
+                local_path, flags, ..
+            } = mount
+            else {
+                continue;
+            };
+            let fd = &*bump.alloc(UnsafeCell::new(Fd::from_raw(-1)));
+            local_path_fds.push(fd);
+            let mut open_tree_flags = OpenTreeFlags::CLOEXEC | OpenTreeFlags::CLONE;
+            if flags.contains(BindMountFlag::Recursive) {
+                open_tree_flags |= OpenTreeFlags::RECURSIVE;
+            }
+            builder.push(
+                Syscall::OpenTreeAndSaveFd(
+                    Fd::AT_FDCWD,
+                    bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
+                    open_tree_flags,
+                    fd,
+                ),
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error opening local path {local_path} for bind mount: {err}",
+                    ))
+                }),
+            );
+        }
+
         // Pivot root to be the new root. See man 2 pivot_root.
         builder.push(Syscall::PivotRoot(c".", c"."), &|err| {
             syserr(anyhow!("pivot_root: {err}"))
@@ -639,46 +675,97 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
         // unless they are already mounted. So we have to do this before we unmount the old root.
         // If we do the unmount first, then we'll get permission errors mounting those fs types.
-        let child_mount_points = spec
-            .mounts
-            .iter()
-            .map(|m| bump_c_str(&bump, m.mount_point().as_str()));
-        for (mount, mount_point) in iter::zip(spec.mounts.iter(), child_mount_points) {
-            let mount_point_cstr = mount_point.map_err(syserr)?;
-
-            let (mount_point, fs_type, flags, type_name) = match mount {
-                JobMount::Proc { mount_point } => (
-                    mount_point.as_str(),
-                    c"proc",
-                    MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
-                    "proc",
-                ),
-                JobMount::Tmp { mount_point } => (
-                    mount_point.as_str(),
-                    c"tmpfs",
-                    MountFlags::default(),
-                    "tmpfs",
-                ),
-                JobMount::Sys { mount_point } => (
-                    mount_point.as_str(),
-                    c"sysfs",
-                    MountFlags::default(),
-                    "sysfs",
-                ),
-                JobMount::Bind { .. } => todo!(),
+        let mut local_path_fds = local_path_fds.into_iter();
+        for mount in &spec.mounts {
+            match mount {
+                JobMount::Proc { mount_point } => {
+                    builder.push(
+                        Syscall::Mount(
+                            None,
+                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            Some(c"proc"),
+                            MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
+                            None,
+                        ),
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of proc file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Tmp { mount_point } => {
+                    builder.push(
+                        Syscall::Mount(
+                            None,
+                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            Some(c"tmpfs"),
+                            MountFlags::default(),
+                            None,
+                        ),
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of tmpfs file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Sys { mount_point } => {
+                    builder.push(
+                        Syscall::Mount(
+                            None,
+                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            Some(c"sysfs"),
+                            MountFlags::default(),
+                            None,
+                        ),
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of sysfs file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Bind {
+                    mount_point,
+                    local_path,
+                    flags,
+                } => {
+                    let mount_local_path_fd = local_path_fds.next().unwrap();
+                    let mount_point_cstr =
+                        bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?;
+                    builder.push(
+                        Syscall::MoveMountUsingSavedFd(
+                            mount_local_path_fd,
+                            c"",
+                            Fd::AT_FDCWD,
+                            mount_point_cstr,
+                            MoveMountFlags::F_EMPTY_PATH,
+                        ),
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "bind mount of {local_path} to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                    if flags.contains(BindMountFlag::ReadOnly) {
+                        builder.push(
+                            Syscall::Mount(
+                                None,
+                                mount_point_cstr,
+                                None,
+                                MountFlags::BIND | MountFlags::REMOUNT | MountFlags::RDONLY,
+                                None,
+                            ),
+                            bump.alloc(move |err| {
+                                JobError::Execution(anyhow!(
+                                    "remounting bind mount of {mount_point} as read-only: {err}",
+                                ))
+                            }),
+                        );
+                    }
+                }
             };
-            builder.push(
-                Syscall::Mount(None, mount_point_cstr, Some(fs_type), flags, None),
-                // We have to be careful doing bump.alloc here with the move. The drop method is
-                // not going to be run on the closure, which means drop won't be run on any
-                // captured-and-moved variables. Since we're using a static string for `type_name`,
-                // and since mount_point is just a reference, we're okay.
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
-                        "mount of file system of type {type_name} to {mount_point}: {err}",
-                    ))
-                }),
-            );
         }
 
         // Unmount the old root. See man 2 pivot_root.
@@ -872,12 +959,12 @@ mod tests {
     use assert_matches::*;
     use bytesize::ByteSize;
     use indoc::indoc;
-    use maelstrom_base::{nonempty, ArtifactType, JobStatus};
+    use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path};
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::{path::PathBuf, sync::Arc};
-    use tempfile::TempDir;
+    use std::{fs, path::PathBuf, sync::Arc};
+    use tempfile::{NamedTempFile, TempDir};
     use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::Mutex, task};
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
@@ -1575,6 +1662,95 @@ mod tests {
         )))
         .run()
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bind_mount_writable() {
+        let temp_file = NamedTempFile::new().unwrap();
+        Test::from_spec(
+            bash_spec(&format!(
+                "echo hello > /mnt/{}",
+                temp_file.path().file_name().unwrap().to_str().unwrap()
+            ))
+            .mounts([JobMount::Bind {
+                mount_point: utf8_path_buf!("/mnt"),
+                local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
+                    .unwrap()
+                    .to_owned(),
+                flags: Default::default(),
+            }]),
+        )
+        .await
+        .run()
+        .await;
+        let contents = fs::read_to_string(temp_file).unwrap();
+        assert_eq!(contents, "hello\n");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bind_mount_read_only() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let fs = async_fs::Fs::new();
+        fs.write(temp_file.path(), b"hello\n").await.unwrap();
+        Test::from_spec(
+            bash_spec(&format!(
+                "(echo goodbye > /mnt/{}) 2>/dev/null",
+                temp_file.path().file_name().unwrap().to_str().unwrap()
+            ))
+            .devices(enum_set!(JobDevice::Null))
+            .mounts([JobMount::Bind {
+                mount_point: utf8_path_buf!("/mnt"),
+                local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
+                    .unwrap()
+                    .to_owned(),
+                flags: enum_set!(BindMountFlag::ReadOnly),
+            }]),
+        )
+        .await
+        .expected_status(JobStatus::Exited(1))
+        .run()
+        .await;
+        let contents = fs::read_to_string(temp_file).unwrap();
+        assert_eq!(contents, "hello\n");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bind_mount_with_recursive_flag() {
+        struct Mount(Utf8PathBuf);
+        impl Drop for Mount {
+            fn drop(&mut self) {
+                linux::umount2(&CString::new(self.0.as_str()).unwrap(), Default::default())
+                    .unwrap();
+            }
+        }
+        let fs = async_fs::Fs::new();
+        let temp_dir = TempDir::new().unwrap();
+        let temp_dir_path = Utf8PathBuf::try_from(temp_dir.path().to_owned()).unwrap();
+        let subdir1_path = temp_dir_path.join("subdir1");
+        fs.create_dir(&subdir1_path).await.unwrap();
+        let subdir2_path = temp_dir_path.join("subdir2");
+        fs.create_dir(&subdir2_path).await.unwrap();
+        let file1_path = subdir2_path.join("file1");
+        fs.write(&file1_path, b"hello\n").await.unwrap();
+        linux::mount(
+            Some(&CString::new(subdir2_path.as_str()).unwrap()),
+            &CString::new(subdir1_path.as_str()).unwrap(),
+            Some(c"bind"),
+            MountFlags::BIND,
+            None,
+        )
+        .unwrap();
+        let _mount = Mount(subdir1_path.clone());
+
+        Test::from_spec(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
+            mount_point: utf8_path_buf!("/mnt"),
+            local_path: temp_dir_path,
+            flags: enum_set!(BindMountFlag::Recursive),
+        }]))
+        .await
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"file1\n")))
+        .run()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

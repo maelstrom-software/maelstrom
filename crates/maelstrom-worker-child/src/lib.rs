@@ -6,11 +6,11 @@
 //! its dependencies carefully.
 #![no_std]
 
-use core::{ffi::CStr, fmt::Write as _, result};
+use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
     self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
-    MountFlags, NetlinkSocketAddr, OpenFlags, SocketDomain, SocketProtocol, SocketType,
-    UmountFlags,
+    MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, SocketDomain,
+    SocketProtocol, SocketType, UmountFlags,
 };
 
 struct SliceFmt<'a> {
@@ -63,6 +63,8 @@ pub enum Syscall<'a> {
     Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
     FuseMountUsingSavedFd(&'a CStr, &'a CStr, MountFlags, u32, linux::Uid, linux::Gid),
     SendMsgSavedFd(&'a [u8]),
+    OpenTreeAndSaveFd(Fd, &'a CStr, OpenTreeFlags, &'a UnsafeCell<Fd>),
+    MoveMountUsingSavedFd(&'a UnsafeCell<Fd>, &'a CStr, Fd, &'a CStr, MoveMountFlags),
 }
 
 impl<'a> Syscall<'a> {
@@ -116,6 +118,17 @@ impl<'a> Syscall<'a> {
                 let count = write_sock.send_with_fd(buffer, *saved_fd)?;
                 assert_eq!(count, buffer.len());
                 Ok(())
+            }
+            Syscall::OpenTreeAndSaveFd(dirfd, path, flags, dest) => {
+                let fsfd = linux::open_tree(*dirfd, path, *flags)?;
+                let dest_ptr = dest.get();
+                unsafe { *dest_ptr = fsfd.into_fd() };
+                Ok(())
+            }
+            Syscall::MoveMountUsingSavedFd(from_dirfd, from_path, to_dirfd, to_path, flags) => {
+                let from_dirfd_ptr = from_dirfd.get();
+                let from_dirfd = unsafe { *from_dirfd_ptr };
+                linux::move_mount(from_dirfd, from_path, *to_dirfd, to_path, *flags)
             }
         }
     }
