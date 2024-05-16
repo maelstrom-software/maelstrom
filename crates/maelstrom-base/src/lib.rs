@@ -113,7 +113,7 @@ pub enum BindMountAccess {
     WritableShared,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "fs_type")]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
@@ -134,7 +134,7 @@ pub enum JobMountForTomlAndJson {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 pub enum JobMount {
     Proc {
         mount_point: Utf8PathBuf,

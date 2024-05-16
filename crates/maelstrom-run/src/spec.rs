@@ -44,7 +44,7 @@ pub fn job_spec_iter_from_reader(
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, PartialEq)]
 struct Job {
     program: Utf8PathBuf,
     arguments: Option<Vec<String>>,

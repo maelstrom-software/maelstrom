@@ -41,7 +41,7 @@ pub fn maybe_write_default_test_metadata(
     Ok(())
 }
 
-#[derive(PartialEq, Eq, Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata {
     directives: Vec<TestDirective>,

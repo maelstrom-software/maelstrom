@@ -8,7 +8,7 @@ use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::BTreeMap, str};
 
-#[derive(PartialEq, Eq, Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct TestDirective {
     pub filter: Option<pattern::Pattern>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
