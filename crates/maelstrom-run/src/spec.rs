@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMountForTomlAndJson,
+    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMountForTomlAndJson,
     JobNetwork, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
@@ -52,7 +52,7 @@ struct Job {
     use_image_environment: bool,
     layers: PossiblyImage<NonEmpty<Layer>>,
     added_layers: Vec<Layer>,
-    devices: Option<EnumSet<JobDeviceListDeserialize>>,
+    devices: Option<EnumSet<JobDeviceForTomlAndJson>>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
@@ -406,7 +406,7 @@ mod tests {
             Job {
                 arguments: Some(string_vec!["arg1", "arg2"]),
                 environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
-                devices: Some(enum_set! {JobDeviceListDeserialize::Null}),
+                devices: Some(enum_set! {JobDeviceForTomlAndJson::Null}),
                 mounts: Some(vec![JobMountForTomlAndJson::Tmp {
                     mount_point: utf8_path_buf!("/tmp"),
                 }]),

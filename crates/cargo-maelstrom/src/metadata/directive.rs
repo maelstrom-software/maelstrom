@@ -1,7 +1,7 @@
 use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceListDeserialize, JobMountForTomlAndJson, JobNetwork,
+    EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMountForTomlAndJson, JobNetwork,
     Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
@@ -124,11 +124,11 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
                         &added_devices,
                         "field `devices` cannot be set after `added_devices`",
                     )?;
-                    let d = map.next_value::<EnumSet<JobDeviceListDeserialize>>()?;
+                    let d = map.next_value::<EnumSet<JobDeviceForTomlAndJson>>()?;
                     devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
                 DirectiveField::AddedDevices => {
-                    let d = map.next_value::<EnumSet<JobDeviceListDeserialize>>()?;
+                    let d = map.next_value::<EnumSet<JobDeviceForTomlAndJson>>()?;
                     added_devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
                 DirectiveField::Image => {

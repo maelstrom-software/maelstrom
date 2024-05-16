@@ -81,7 +81,7 @@ pub enum JobDevice {
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[enumset(serialize_repr = "list")]
-pub enum JobDeviceListDeserialize {
+pub enum JobDeviceForTomlAndJson {
     Full,
     Fuse,
     Null,
@@ -91,16 +91,16 @@ pub enum JobDeviceListDeserialize {
     Zero,
 }
 
-impl From<JobDeviceListDeserialize> for JobDevice {
-    fn from(value: JobDeviceListDeserialize) -> JobDevice {
+impl From<JobDeviceForTomlAndJson> for JobDevice {
+    fn from(value: JobDeviceForTomlAndJson) -> JobDevice {
         match value {
-            JobDeviceListDeserialize::Full => JobDevice::Full,
-            JobDeviceListDeserialize::Fuse => JobDevice::Fuse,
-            JobDeviceListDeserialize::Null => JobDevice::Null,
-            JobDeviceListDeserialize::Random => JobDevice::Random,
-            JobDeviceListDeserialize::Tty => JobDevice::Tty,
-            JobDeviceListDeserialize::Urandom => JobDevice::Urandom,
-            JobDeviceListDeserialize::Zero => JobDevice::Zero,
+            JobDeviceForTomlAndJson::Full => JobDevice::Full,
+            JobDeviceForTomlAndJson::Fuse => JobDevice::Fuse,
+            JobDeviceForTomlAndJson::Null => JobDevice::Null,
+            JobDeviceForTomlAndJson::Random => JobDevice::Random,
+            JobDeviceForTomlAndJson::Tty => JobDevice::Tty,
+            JobDeviceForTomlAndJson::Urandom => JobDevice::Urandom,
+            JobDeviceForTomlAndJson::Zero => JobDevice::Zero,
         }
     }
 }
