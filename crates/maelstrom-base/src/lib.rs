@@ -105,12 +105,27 @@ impl From<JobDeviceForTomlAndJson> for JobDevice {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, PartialOrd, Ord, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum BindMountAccess {
+#[derive(Debug, Deserialize, EnumIter, EnumSetType, Serialize)]
+pub enum BindMountFlag {
     ReadOnly,
-    WritablePrivate,
-    WritableShared,
+    Recursive,
+}
+
+#[derive(Debug, Deserialize, EnumSetType, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[enumset(serialize_repr = "list")]
+pub enum BindMountFlagForTomlAndJson {
+    ReadOnly,
+    Recursive,
+}
+
+impl From<BindMountFlagForTomlAndJson> for BindMountFlag {
+    fn from(value: BindMountFlagForTomlAndJson) -> Self {
+        match value {
+            BindMountFlagForTomlAndJson::ReadOnly => Self::ReadOnly,
+            BindMountFlagForTomlAndJson::Recursive => Self::Recursive,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -130,7 +145,8 @@ pub enum JobMountForTomlAndJson {
     Bind {
         mount_point: Utf8PathBuf,
         local_path: Utf8PathBuf,
-        access: BindMountAccess,
+        #[serde(default)]
+        flags: EnumSet<BindMountFlagForTomlAndJson>,
     },
 }
 
@@ -148,7 +164,7 @@ pub enum JobMount {
     Bind {
         mount_point: Utf8PathBuf,
         local_path: Utf8PathBuf,
-        access: BindMountAccess,
+        flags: EnumSet<BindMountFlag>,
     },
 }
 
@@ -172,11 +188,11 @@ impl From<JobMountForTomlAndJson> for JobMount {
             JobMountForTomlAndJson::Bind {
                 mount_point,
                 local_path,
-                access,
+                flags,
             } => JobMount::Bind {
                 mount_point,
                 local_path,
-                access,
+                flags: flags.into_iter().map(BindMountFlag::from).collect(),
             },
         }
     }
@@ -596,6 +612,7 @@ impl Error for Sha256DigestVerificationError {}
 mod tests {
     use super::*;
     use enumset::enum_set;
+    use heck::ToKebabCase;
     use strum::IntoEnumIterator as _;
 
     #[test]
@@ -808,7 +825,7 @@ mod tests {
             JobMount::Bind {
                 mount_point: Utf8PathBuf::from("/bind"),
                 local_path: Utf8PathBuf::from("/a"),
-                access: BindMountAccess::ReadOnly,
+                flags: Default::default(),
             },
         ]);
         assert_eq!(spec.must_be_run_locally(), true);
@@ -858,10 +875,41 @@ mod tests {
     #[test]
     fn job_device_for_toml_and_json_and_job_device_match() {
         for job_device in JobDevice::iter() {
-            let repr = format!(r#""{job_device:?}""#).to_lowercase();
+            let repr = format!(r#""{}""#, format!("{job_device:?}").to_kebab_case());
             assert_eq!(
                 JobDevice::from(deserialize_value::<JobDeviceForTomlAndJson>(&repr)),
                 job_device
+            );
+        }
+    }
+
+    #[test]
+    fn enumset_bind_mount_flag_for_toml_and_json_deserialized_as_list() {
+        let devices: EnumSet<BindMountFlagForTomlAndJson> =
+            deserialize_value(r#"["read-only", "recursive"]"#);
+        let devices: EnumSet<_> = devices
+            .into_iter()
+            .map(Into::<BindMountFlag>::into)
+            .collect();
+        assert_eq!(
+            devices,
+            enum_set!(BindMountFlag::ReadOnly | BindMountFlag::Recursive)
+        );
+    }
+
+    #[test]
+    fn enumset_bind_mount_flag_for_toml_and_json_deserialize_unknown_field() {
+        deserialize_value_error::<EnumSet<BindMountFlagForTomlAndJson>>(r#"["unknown"]"#)
+            .assert_error("unknown variant `unknown`");
+    }
+
+    #[test]
+    fn bind_mount_flag_for_toml_and_json_and_bind_mount_flag_match() {
+        for flag in BindMountFlag::iter() {
+            let repr = format!(r#""{}""#, format!("{flag:?}").to_kebab_case());
+            assert_eq!(
+                BindMountFlag::from(deserialize_value::<BindMountFlagForTomlAndJson>(&repr)),
+                flag
             );
         }
     }

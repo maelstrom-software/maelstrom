@@ -4,8 +4,9 @@ use std::str::from_utf8;
 
 const INTO_RESULT: [&str; 3] = ["RunJobRequest", "AddLayerRequest", "AddLayerResponse"];
 
-const ENUM_PROTO: [(&str, &str); 5] = [
+const ENUM_PROTO: [(&str, &str); 6] = [
     ("JobDevice", "maelstrom_base::JobDevice"),
+    ("BindMountFlag", "maelstrom_base::BindMountFlag"),
     ("ArtifactType", "maelstrom_base::ArtifactType"),
     ("JobCompleted.status", "maelstrom_base::JobStatus"),
     ("JobNetwork", "maelstrom_base::JobNetwork"),

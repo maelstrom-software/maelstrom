@@ -328,7 +328,7 @@ impl AllMetadata {
 mod tests {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, BindMountAccess};
+    use maelstrom_base::{enum_set, BindMountFlag};
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
@@ -1029,7 +1029,7 @@ mod tests {
             mounts = [
                 { fs_type = "tmp", mount_point = "/tmp" },
                 { fs_type = "sys", mount_point = "/sys" },
-                { fs_type = "bind", mount_point = "/foo", local_path = "/local", access = "read-only" },
+                { fs_type = "bind", mount_point = "/foo", local_path = "/local", flags = ["read-only"] },
             ]
             "#,
         )
@@ -1049,7 +1049,7 @@ mod tests {
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/foo"),
                     local_path: utf8_path_buf!("/local"),
-                    access: BindMountAccess::ReadOnly,
+                    flags: enum_set!(BindMountFlag::ReadOnly),
                 },
             ],
         );
@@ -1095,7 +1095,7 @@ mod tests {
             filter = "package.equals(package1) && name.equals(test2)"
             added_mounts = [
                 { fs_type = "tmp", mount_point = "/tmp" },
-                { fs_type = "bind", mount_point = "/foo", local_path = "/local", access = "writable-private" },
+                { fs_type = "bind", mount_point = "/foo", local_path = "/local" },
             ]
 
             [[directives]]
@@ -1141,7 +1141,7 @@ mod tests {
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/foo"),
                     local_path: utf8_path_buf!("/local"),
-                    access: BindMountAccess::WritablePrivate,
+                    flags: Default::default(),
                 },
             ],
         );

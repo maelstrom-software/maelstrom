@@ -377,7 +377,7 @@ impl<'de> de::Deserialize<'de> for Job {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::{enum_set, nonempty, BindMountAccess, JobMount};
+    use maelstrom_base::{enum_set, nonempty, BindMountFlag, JobMount};
     use maelstrom_test::{digest, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
@@ -958,7 +958,8 @@ mod tests {
                     "layers": [ { "tar": "1" } ],
                     "mounts": [
                         { "fs_type": "tmp", "mount_point": "/tmp" },
-                        { "fs_type": "bind", "mount_point": "/bind", "local_path": "/a", "access": "writable-shared" }
+                        { "fs_type": "bind", "mount_point": "/bind", "local_path": "/a" },
+                        { "fs_type": "bind", "mount_point": "/bind2", "local_path": "/b", "flags": ["read-only"] }
                     ]
                 }"#,
             )
@@ -972,7 +973,13 @@ mod tests {
                     JobMount::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/a"),
-                        access: BindMountAccess::WritableShared},
+                        flags: Default::default(),
+                    },
+                    JobMount::Bind {
+                        mount_point: utf8_path_buf!("/bind2"),
+                        local_path: utf8_path_buf!("/b"),
+                        flags: enum_set!(BindMountFlag::ReadOnly),
+                    },
                 ])
         )
     }

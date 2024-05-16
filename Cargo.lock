@@ -2859,6 +2859,7 @@ dependencies = [
  "derive_more",
  "enum-map",
  "enumset",
+ "heck 0.5.0",
  "hex",
  "nonempty",
  "serde",

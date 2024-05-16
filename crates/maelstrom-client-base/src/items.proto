@@ -98,16 +98,15 @@ message SysMount {
     string mount_point = 1;
 }
 
-enum BindMountAccess {
+enum BindMountFlag {
     ReadOnly = 0;
-    WritablePrivate = 1;
-    WritableShared = 2;
+    Recursive = 2;
 }
 
 message BindMount {
     string mount_point = 1;
     string local_path = 2;
-    BindMountAccess access = 3;
+    repeated BindMountFlag flags = 3;
 }
 
 enum JobNetwork {

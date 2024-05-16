@@ -241,7 +241,7 @@ mod tests {
     use super::*;
     use anyhow::Error;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, BindMountAccess};
+    use maelstrom_base::{enum_set, BindMountFlagForTomlAndJson, JobMount};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
@@ -348,7 +348,8 @@ mod tests {
             parse_test_directive(indoc! {r#"
                 mounts = [
                     { fs_type = "proc", mount_point = "/proc" },
-                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", access = "read-only" },
+                    { fs_type = "bind", mount_point = "/bind", local_path = "/local" },
+                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", flags = [ "recursive" ] },
                 ]
             "#})
             .unwrap(),
@@ -358,8 +359,13 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        access: BindMountAccess::ReadOnly,
-                    }
+                        flags: Default::default(),
+                    },
+                    JobMountForTomlAndJson::Bind {
+                        mount_point: utf8_path_buf!("/bind"),
+                        local_path: utf8_path_buf!("/local"),
+                        flags: enum_set!(BindMountFlagForTomlAndJson::Recursive),
+                    },
                 ]),
                 ..Default::default()
             }
@@ -372,7 +378,7 @@ mod tests {
             parse_test_directive(indoc! {r#"
                 added_mounts = [
                     { fs_type = "proc", mount_point = "/proc" },
-                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", access = "read-only" },
+                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only", "recursive"] },
                 ]
             "#})
             .unwrap(),
@@ -382,7 +388,7 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        access: BindMountAccess::ReadOnly,
+                        flags: enum_set!(BindMountFlagForTomlAndJson::ReadOnly | BindMountFlagForTomlAndJson::Recursive),
                     }
                 ],
                 ..Default::default()
@@ -437,7 +443,7 @@ mod tests {
     fn unknown_field_in_bind_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a", access = "read-only", unknown = "true" } ]
+                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
             "#})
             .unwrap_err(),
             "unknown field `unknown`, expected",
@@ -459,10 +465,28 @@ mod tests {
     fn missing_field_in_bind_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a" } ]
+                mounts = [ { fs_type = "bind", mount_point = "/bind" } ]
             "#})
             .unwrap_err(),
-            "missing field `access`",
+            "missing field `local_path`",
+        );
+    }
+
+    #[test]
+    fn missing_flags_field_in_bind_mount_is_okay() {
+        assert_eq!(
+            parse_test_directive(indoc! {r#"
+                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a" } ]
+            "#})
+            .unwrap(),
+            TestDirective {
+                mounts: Some(vec![JobMountForTomlAndJson::Bind {
+                    mount_point: utf8_path_buf!("/bind"),
+                    local_path: utf8_path_buf!("/a"),
+                    flags: Default::default(),
+                }]),
+                ..Default::default()
+            }
         );
     }
 
