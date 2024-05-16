@@ -22,6 +22,7 @@ use std::{
     str::{self, FromStr},
     time::Duration,
 };
+use strum::EnumIter;
 
 /// ID of a client connection. These share the same ID space as [`WorkerId`].
 #[derive(
@@ -66,8 +67,7 @@ pub struct JobId {
     pub cjid: ClientJobId,
 }
 
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
-#[enumset(serialize_deny_unknown)]
+#[derive(Debug, Deserialize, EnumIter, EnumSetType, Serialize)]
 pub enum JobDevice {
     Full,
     Fuse,
@@ -595,6 +595,8 @@ impl Error for Sha256DigestVerificationError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use enumset::enum_set;
+    use strum::IntoEnumIterator as _;
 
     #[test]
     fn client_id_display() {
@@ -816,5 +818,51 @@ mod tests {
 
         let spec = spec.mounts([]);
         assert_eq!(spec.must_be_run_locally(), false);
+    }
+
+    trait AssertError {
+        fn assert_error(&self, expected: &str);
+    }
+
+    impl AssertError for toml::de::Error {
+        fn assert_error(&self, expected: &str) {
+            let message = self.message();
+            assert!(message.starts_with(expected), "message: {message}");
+        }
+    }
+
+    fn deserialize_value<T: for<'a> Deserialize<'a>>(file: &str) -> T {
+        T::deserialize(toml::de::ValueDeserializer::new(file)).unwrap()
+    }
+
+    fn deserialize_value_error<T: for<'a> Deserialize<'a> + Debug>(file: &str) -> toml::de::Error {
+        match T::deserialize(toml::de::ValueDeserializer::new(file)) {
+            Err(err) => err,
+            Ok(val) => panic!("expected a toml error but instead got value: {val:?}"),
+        }
+    }
+
+    #[test]
+    fn enumset_job_device_for_toml_and_json_deserialized_as_list() {
+        let devices: EnumSet<JobDeviceForTomlAndJson> = deserialize_value(r#"["full", "null"]"#);
+        let devices: EnumSet<_> = devices.into_iter().map(Into::<JobDevice>::into).collect();
+        assert_eq!(devices, enum_set!(JobDevice::Full | JobDevice::Null));
+    }
+
+    #[test]
+    fn enumset_job_device_for_toml_and_json_deserialize_unknown_field() {
+        deserialize_value_error::<EnumSet<JobDeviceForTomlAndJson>>(r#"["bull", "null"]"#)
+            .assert_error("unknown variant `bull`");
+    }
+
+    #[test]
+    fn job_device_for_toml_and_json_and_job_device_match() {
+        for job_device in JobDevice::iter() {
+            let repr = format!(r#""{job_device:?}""#).to_lowercase();
+            assert_eq!(
+                JobDevice::from(deserialize_value::<JobDeviceForTomlAndJson>(&repr)),
+                job_device
+            );
+        }
     }
 }
