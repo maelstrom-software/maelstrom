@@ -1022,14 +1022,14 @@ mod tests {
             r#"
             [[directives]]
             filter = "package.equals(package1)"
-            mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
+            mounts = [ { type = "proc", mount_point = "/proc" } ]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
             mounts = [
-                { fs_type = "tmp", mount_point = "/tmp" },
-                { fs_type = "sys", mount_point = "/sys" },
-                { fs_type = "bind", mount_point = "/foo", local_path = "/local", flags = ["read-only"] },
+                { type = "tmp", mount_point = "/tmp" },
+                { type = "sys", mount_point = "/sys" },
+                { type = "bind", mount_point = "/foo", local_path = "/local", flags = ["read-only"] },
             ]
             "#,
         )
@@ -1074,35 +1074,35 @@ mod tests {
         let all = AllMetadata::from_str(
             r#"
             [[directives]]
-            added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+            added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
 
             [[directives]]
             filter = "package.equals(package1)"
             mounts = [
-                { fs_type = "proc", mount_point = "/proc" },
+                { type = "proc", mount_point = "/proc" },
             ]
             added_mounts = [
-                { fs_type = "sys", mount_point = "/sys" },
+                { type = "sys", mount_point = "/sys" },
             ]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test1)"
             added_mounts = [
-                { fs_type = "tmp", mount_point = "/tmp" },
+                { type = "tmp", mount_point = "/tmp" },
             ]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test2)"
             added_mounts = [
-                { fs_type = "tmp", mount_point = "/tmp" },
-                { fs_type = "bind", mount_point = "/foo", local_path = "/local" },
+                { type = "tmp", mount_point = "/tmp" },
+                { type = "bind", mount_point = "/foo", local_path = "/local" },
             ]
 
             [[directives]]
             filter = "package.equals(package1) && name.equals(test3)"
             mounts = []
             added_mounts = [
-                { fs_type = "tmp", mount_point = "/tmp" },
+                { type = "tmp", mount_point = "/tmp" },
             ]
             "#,
         )

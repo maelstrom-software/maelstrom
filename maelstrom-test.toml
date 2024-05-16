@@ -5,9 +5,9 @@ include_shared_libraries = true
 filter = "package.equals(maelstrom-worker) && name.starts_with(executor::)"
 layers = [{ stubs = [ "/proc/", "/sys/", "/tmp/", "dev/{fuse,full,null,random,tty,urandom,zero}" ] }]
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
-    { fs_type = "sys", mount_point = "/sys" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
 ]
 devices = ["fuse", "full", "null", "random", "tty", "urandom", "zero"]
 
@@ -21,8 +21,8 @@ filter = """
 package.equals(cargo-maelstrom)"""
 layers = [{ stubs = ["/proc/", "/tmp/"] }]
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
 ]
 
 [[directives]]
@@ -32,8 +32,8 @@ layers = [
     { paths = ["<build_dir>/maelstrom-client"], canonicalize = true }
 ]
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
 ]
 devices = ["null", "fuse"]
 environment = { HOME = "/tmp" }
@@ -45,12 +45,12 @@ package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||
 package.equals(maelstrom-util)"""
 layers = [{ stubs = ["/tmp/"] }]
-mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 [[directives]]
 filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
 added_mounts = [
-    { fs_type = "proc", mount_point = "/proc" },
+    { type = "proc", mount_point = "/proc" },
 ]
 added_layers = [{ stubs = [ "proc/" ] }]
 
@@ -68,8 +68,8 @@ prepend_prefix = "/etc/"
 [[directives]]
 filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
 ]
 working_directory = "/root"
 added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }]
@@ -85,10 +85,10 @@ added_layers = [
 ]
 devices = ["full", "fuse", "null", "urandom", "random", "zero"]
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "tmp", mount_point = "/root" },
-    { fs_type = "proc", mount_point = "/proc" },
-    { fs_type = "sys", mount_point = "/sys" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "tmp", mount_point = "/root" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
 ]
 
 [[directives]]

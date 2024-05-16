@@ -129,7 +129,7 @@ impl From<BindMountFlagForTomlAndJson> for BindMountFlag {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(tag = "fs_type")]
+#[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
 pub enum JobMountForTomlAndJson {

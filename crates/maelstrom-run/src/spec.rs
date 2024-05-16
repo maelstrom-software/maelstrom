@@ -957,9 +957,9 @@ mod tests {
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
                     "mounts": [
-                        { "fs_type": "tmp", "mount_point": "/tmp" },
-                        { "fs_type": "bind", "mount_point": "/bind", "local_path": "/a" },
-                        { "fs_type": "bind", "mount_point": "/bind2", "local_path": "/b", "flags": ["read-only"] }
+                        { "type": "tmp", "mount_point": "/tmp" },
+                        { "type": "bind", "mount_point": "/bind", "local_path": "/a" },
+                        { "type": "bind", "mount_point": "/bind2", "local_path": "/b", "flags": ["read-only"] }
                     ]
                 }"#,
             )

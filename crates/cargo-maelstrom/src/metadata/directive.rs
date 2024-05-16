@@ -347,9 +347,9 @@ mod tests {
         assert_eq!(
             parse_test_directive(indoc! {r#"
                 mounts = [
-                    { fs_type = "proc", mount_point = "/proc" },
-                    { fs_type = "bind", mount_point = "/bind", local_path = "/local" },
-                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", flags = [ "recursive" ] },
+                    { type = "proc", mount_point = "/proc" },
+                    { type = "bind", mount_point = "/bind", local_path = "/local" },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = [ "recursive" ] },
                 ]
             "#})
             .unwrap(),
@@ -377,8 +377,8 @@ mod tests {
         assert_eq!(
             parse_test_directive(indoc! {r#"
                 added_mounts = [
-                    { fs_type = "proc", mount_point = "/proc" },
-                    { fs_type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only", "recursive"] },
+                    { type = "proc", mount_point = "/proc" },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only", "recursive"] },
                 ]
             "#})
             .unwrap(),
@@ -400,8 +400,8 @@ mod tests {
     fn mounts_before_added_mounts() {
         assert_eq!(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
-                added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
+                mounts = [ { type = "proc", mount_point = "/proc" } ]
+                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
             "#})
             .unwrap(),
             TestDirective {
@@ -420,8 +420,8 @@ mod tests {
     fn mounts_after_added_mounts() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                added_mounts = [ { fs_type = "tmp", mount_point = "/tmp" } ]
-                mounts = [ { fs_type = "proc", mount_point = "/proc" } ]
+                added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
+                mounts = [ { type = "proc", mount_point = "/proc" } ]
             "#})
             .unwrap_err(),
             "field `mounts` cannot be set after `added_mounts`",
@@ -432,7 +432,7 @@ mod tests {
     fn unknown_field_in_simple_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "proc", mount_point = "/proc", unknown = "true" } ]
+                mounts = [ { type = "proc", mount_point = "/proc", unknown = "true" } ]
             "#})
             .unwrap_err(),
             "unknown field `unknown`, expected",
@@ -443,7 +443,7 @@ mod tests {
     fn unknown_field_in_bind_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
+                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a", unknown = "true" } ]
             "#})
             .unwrap_err(),
             "unknown field `unknown`, expected",
@@ -454,7 +454,7 @@ mod tests {
     fn missing_field_in_simple_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "proc" } ]
+                mounts = [ { type = "proc" } ]
             "#})
             .unwrap_err(),
             "missing field `mount_point`",
@@ -465,7 +465,7 @@ mod tests {
     fn missing_field_in_bind_mount() {
         assert_toml_error(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "bind", mount_point = "/bind" } ]
+                mounts = [ { type = "bind", mount_point = "/bind" } ]
             "#})
             .unwrap_err(),
             "missing field `local_path`",
@@ -476,7 +476,7 @@ mod tests {
     fn missing_flags_field_in_bind_mount_is_okay() {
         assert_eq!(
             parse_test_directive(indoc! {r#"
-                mounts = [ { fs_type = "bind", mount_point = "/bind", local_path = "/a" } ]
+                mounts = [ { type = "bind", mount_point = "/bind", local_path = "/a" } ]
             "#})
             .unwrap(),
             TestDirective {
