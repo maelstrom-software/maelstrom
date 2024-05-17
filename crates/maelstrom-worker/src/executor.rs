@@ -1043,7 +1043,7 @@ mod tests {
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{collections::HashSet, fs, path::PathBuf, str, sync::Arc};
     use tempfile::{NamedTempFile, TempDir};
-    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::Mutex, task};
+    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::oneshot, sync::Mutex, task};
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -1378,23 +1378,31 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn local_network() {
+        let (port_sender, port_receiver) = oneshot::channel();
         let listening_task = task::spawn(async move {
-            let listener = TcpListener::bind("127.0.0.1:1234").await.unwrap();
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            port_sender
+                .send(listener.local_addr().unwrap().port())
+                .unwrap();
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut contents = String::new();
             socket.read_to_string(&mut contents).await.unwrap();
             assert_eq!(contents, "hello");
             socket.write_all(b"goodbye").await.unwrap();
         });
+        let port = port_receiver.await.unwrap();
         Test::new(
-            python_spec(indoc! {r#"
-                import socket
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                    s.connect(("127.0.0.1", 1234))
-                    s.sendall(b"hello")
-                    s.shutdown(socket.SHUT_WR)
-                    print(s.recv(1024).decode(), end="")
-            "#})
+            python_spec(&format!(
+                indoc! {r#"
+                    import socket
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.connect(("127.0.0.1", {port}))
+                        s.sendall(b"hello")
+                        s.shutdown(socket.SHUT_WR)
+                        print(s.recv(1024).decode(), end="")
+                "#},
+                port = port
+            ))
             .network(JobNetwork::Local),
         )
         .expected_status(JobStatus::Exited(0))
@@ -1747,7 +1755,7 @@ mod tests {
                 local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
                     .unwrap()
                     .to_owned(),
-                flags: Default::default(),
+                flags: enum_set!(BindMountFlag::Recursive),
             }]),
         )
         .run()
@@ -1772,7 +1780,7 @@ mod tests {
                 local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
                     .unwrap()
                     .to_owned(),
-                flags: enum_set!(BindMountFlag::ReadOnly),
+                flags: enum_set!(BindMountFlag::ReadOnly | BindMountFlag::Recursive),
             }]),
         )
         .expected_status(JobStatus::Exited(1))
@@ -1784,13 +1792,6 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn bind_mount_with_recursive_flag() {
-        struct Mount(Utf8PathBuf);
-        impl Drop for Mount {
-            fn drop(&mut self) {
-                linux::umount2(&CString::new(self.0.as_str()).unwrap(), Default::default())
-                    .unwrap();
-            }
-        }
         let fs = async_fs::Fs::new();
         let temp_dir = TempDir::new().unwrap();
         let temp_dir_path = Utf8PathBuf::try_from(temp_dir.path().to_owned()).unwrap();
@@ -1808,7 +1809,6 @@ mod tests {
             None,
         )
         .unwrap();
-        let _mount = Mount(subdir1_path.clone());
 
         Test::new(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
             mount_point: utf8_path_buf!("/mnt"),
