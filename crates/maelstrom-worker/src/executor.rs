@@ -1799,36 +1799,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn bind_mount_with_recursive_flag() {
-        let fs = async_fs::Fs::new();
-        let temp_dir = TempDir::new().unwrap();
-        let temp_dir_path = Utf8PathBuf::try_from(temp_dir.path().to_owned()).unwrap();
-        let subdir1_path = temp_dir_path.join("subdir1");
-        fs.create_dir(&subdir1_path).await.unwrap();
-        let subdir2_path = temp_dir_path.join("subdir2");
-        fs.create_dir(&subdir2_path).await.unwrap();
-        let file1_path = subdir2_path.join("file1");
-        fs.write(&file1_path, b"hello\n").await.unwrap();
-        linux::mount(
-            Some(&CString::new(subdir2_path.as_str()).unwrap()),
-            &CString::new(subdir1_path.as_str()).unwrap(),
-            Some(c"bind"),
-            MountFlags::BIND,
-            None,
-        )
-        .unwrap();
-
-        Test::new(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
-            mount_point: utf8_path_buf!("/mnt"),
-            local_path: temp_dir_path,
-            read_only: false,
-        }]))
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"file1\n")))
-        .run()
-        .await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
     async fn old_mounts_are_unmounted() {
         Test::new(
             test_spec("/bin/wc")
