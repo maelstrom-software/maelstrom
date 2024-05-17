@@ -12,8 +12,8 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd,
-    Signal, SocketDomain, SocketProtocol, SocketType, UmountFlags, WaitStatus,
+    Fd, FileMode, Gid, MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags,
+    OwnedFd, Signal, SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
 };
 use maelstrom_util::{
     config::common::InlineLimit,
@@ -21,7 +21,7 @@ use maelstrom_util::{
     sync::EventReceiver,
     time::{Clock, ClockInstant as _},
 };
-use maelstrom_worker_child::Syscall;
+use maelstrom_worker_child::{FdSlot, Syscall};
 use netlink_packet_core::{NetlinkMessage, NLM_F_ACK, NLM_F_CREATE, NLM_F_EXCL, NLM_F_REQUEST};
 use netlink_packet_route::{rtnl::constants::RTM_SETLINK, LinkMessage, RtnlMessage, IFF_UP};
 use std::{
@@ -392,8 +392,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // going to be run on the closure, which means drop won't be run on any captured-and-moved
         // variables. Since we only pass references, we're okay.
 
+        fn new_fd_slot(bump: &Bump) -> FdSlot<'_> {
+            FdSlot::new(bump.alloc(UnsafeCell::new(Fd::from_raw(-1))))
+        }
+
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
+        let fd = new_fd_slot(&bump);
 
         let newnet;
         match spec.network {
@@ -409,30 +414,41 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 // In order to have a loopback network interface, we need to create a netlink
                 // socket and configure things with the kernel. This creates the socket.
                 builder.push(
-                    Syscall::SocketAndSaveFd(
-                        SocketDomain::NETLINK,
-                        SocketType::RAW,
-                        SocketProtocol::NETLINK_ROUTE,
-                    ),
+                    Syscall::Socket {
+                        domain: SocketDomain::NETLINK,
+                        type_: SocketType::RAW,
+                        protocol: SocketProtocol::NETLINK_ROUTE,
+                        out: fd,
+                    },
                     &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
                 );
                 // This binds the socket.
                 builder.push(
-                    Syscall::BindNetlinkUsingSavedFd(&self.netlink_socket_addr),
+                    Syscall::BindNetlink {
+                        fd,
+                        addr: &self.netlink_socket_addr,
+                    },
                     &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
                 );
                 // This sends the message to the kernel.
                 builder.push(
-                    Syscall::WriteUsingSavedFd(self.netlink_message.as_ref()),
+                    Syscall::Write {
+                        fd,
+                        buf: self.netlink_message.as_ref(),
+                    },
                     &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
                 );
                 // This receives the reply from the kernel.
                 // TODO: actually parse the reply to validate that we set up the loopback
                 // interface.
                 let rtnetlink_response = bump.alloc_slice_fill_default(1024);
-                builder.push(Syscall::ReadUsingSavedFd(rtnetlink_response), &|err| {
-                    syserr(anyhow!("receiving rtnetlink message: {err}"))
-                });
+                builder.push(
+                    Syscall::Read {
+                        fd,
+                        buf: rtnetlink_response,
+                    },
+                    &|err| syserr(anyhow!("receiving rtnetlink message: {err}")),
+                );
                 // We don't need to close the socket because that will happen automatically for us
                 // when we exec.
             }
@@ -443,15 +459,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
         writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
         builder.push(
-            Syscall::OpenAndSaveFd(
-                c"/proc/self/uid_map",
-                OpenFlags::WRONLY | OpenFlags::TRUNC,
-                FileMode::default(),
-            ),
+            Syscall::Open {
+                path: c"/proc/self/uid_map",
+                flags: OpenFlags::WRONLY | OpenFlags::TRUNC,
+                mode: FileMode::default(),
+                out: fd,
+            },
             &|err| syserr(anyhow!("opening /proc/self/uid_map for writing: {err}")),
         );
         builder.push(
-            Syscall::WriteUsingSavedFd(uid_map_contents.into_bump_str().as_bytes()),
+            Syscall::Write {
+                fd,
+                buf: uid_map_contents.into_bump_str().as_bytes(),
+            },
             &|err| syserr(anyhow!("writing to /proc/self/uid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
@@ -460,14 +480,15 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // This set of syscalls disables setgroups, which is required for setting up the gid
         // mapping.
         builder.push(
-            Syscall::OpenAndSaveFd(
-                c"/proc/self/setgroups",
-                OpenFlags::WRONLY | OpenFlags::TRUNC,
-                FileMode::default(),
-            ),
+            Syscall::Open {
+                path: c"/proc/self/setgroups",
+                flags: OpenFlags::WRONLY | OpenFlags::TRUNC,
+                mode: FileMode::default(),
+                out: fd,
+            },
             &|err| syserr(anyhow!("opening /proc/self/setgroups for writing: {err}")),
         );
-        builder.push(Syscall::WriteUsingSavedFd(b"deny\n"), &|err| {
+        builder.push(Syscall::Write { fd, buf: b"deny\n" }, &|err| {
             syserr(anyhow!("writing to /proc/self/setgroups: {err}"))
         });
         // We don't need to close the file because that will happen automatically for us when we
@@ -477,15 +498,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
         writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
         builder.push(
-            Syscall::OpenAndSaveFd(
-                c"/proc/self/gid_map",
-                OpenFlags::WRONLY | OpenFlags::TRUNC,
-                FileMode::default(),
-            ),
+            Syscall::Open {
+                path: c"/proc/self/gid_map",
+                flags: OpenFlags::WRONLY | OpenFlags::TRUNC,
+                mode: FileMode::default(),
+                out: fd,
+            },
             &|err| syserr(anyhow!("opening /proc/self/gid_map for writing: {err}")),
         );
         builder.push(
-            Syscall::WriteUsingSavedFd(gid_map_contents.into_bump_str().as_bytes()),
+            Syscall::Write {
+                fd,
+                buf: gid_map_contents.into_bump_str().as_bytes(),
+            },
             &|err| syserr(anyhow!("writing to /proc/self/gid_map: {err}")),
         );
         // We don't need to close the file because that will happen automatically for us when we
@@ -506,30 +531,36 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         });
 
         builder.push(
-            Syscall::OpenAndSaveFd(
-                c"/dev/fuse",
-                OpenFlags::RDWR | OpenFlags::NONBLOCK,
-                FileMode::default(),
-            ),
+            Syscall::Open {
+                path: c"/dev/fuse",
+                flags: OpenFlags::RDWR | OpenFlags::NONBLOCK,
+                mode: FileMode::default(),
+                out: fd,
+            },
             &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
         );
 
         let new_root_path = self.mount_dir.as_c_str();
         builder.push(
-            Syscall::FuseMountUsingSavedFd(
-                c"Maelstrom LayerFS",
-                new_root_path,
-                MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
-                self.root_mode,
-                linux::Uid::from_u32(spec.user.as_u32()),
-                linux::Gid::from_u32(spec.group.as_u32()),
-            ),
+            Syscall::FuseMount {
+                source: c"Maelstrom LayerFS",
+                target: new_root_path,
+                flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
+                root_mode: self.root_mode,
+                uid: Uid::from_u32(spec.user.as_u32()),
+                gid: Gid::from_u32(spec.group.as_u32()),
+                fuse_fd: fd,
+            },
             &|err| JobError::System(anyhow!("fuse mount: {err}")),
         );
 
-        builder.push(Syscall::SendMsgSavedFd(&[0xFF; 8]), &|err| {
-            JobError::System(anyhow!("sendmsg: {err}"))
-        });
+        builder.push(
+            Syscall::SendMsg {
+                buf: &[0xFF; 8],
+                fd_to_send: fd,
+            },
+            &|err| JobError::System(anyhow!("sendmsg: {err}")),
+        );
 
         // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
         builder.push(
@@ -643,19 +674,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             else {
                 continue;
             };
-            let fd = &*bump.alloc(UnsafeCell::new(Fd::from_raw(-1)));
-            local_path_fds.push(fd);
+            let dirfd = new_fd_slot(&bump);
+            local_path_fds.push(dirfd);
             let mut open_tree_flags = OpenTreeFlags::CLOEXEC | OpenTreeFlags::CLONE;
             if flags.contains(BindMountFlag::Recursive) {
                 open_tree_flags |= OpenTreeFlags::RECURSIVE;
             }
             builder.push(
-                Syscall::OpenTreeAndSaveFd(
-                    Fd::AT_FDCWD,
-                    bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
-                    open_tree_flags,
-                    fd,
-                ),
+                Syscall::OpenTree {
+                    dirfd: Fd::AT_FDCWD,
+                    path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
+                    flags: open_tree_flags,
+                    out: dirfd,
+                },
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!(
                         "error opening local path {local_path} for bind mount: {err}",
@@ -735,13 +766,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     let mount_point_cstr =
                         bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?;
                     builder.push(
-                        Syscall::MoveMountUsingSavedFd(
-                            mount_local_path_fd,
-                            c"",
-                            Fd::AT_FDCWD,
-                            mount_point_cstr,
-                            MoveMountFlags::F_EMPTY_PATH,
-                        ),
+                        Syscall::MoveMount {
+                            from_dirfd: mount_local_path_fd,
+                            from_path: c"",
+                            to_dirfd: Fd::AT_FDCWD,
+                            to_path: mount_point_cstr,
+                            flags: MoveMountFlags::F_EMPTY_PATH,
+                        },
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
                                 "bind mount of {local_path} to {mount_point}: {err}",

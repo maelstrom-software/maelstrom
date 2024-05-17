@@ -8,9 +8,9 @@
 
 use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
-    self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
-    MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, SocketDomain,
-    SocketProtocol, SocketType, UmountFlags,
+    self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode, Gid,
+    MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, SocketDomain,
+    SocketProtocol, SocketType, Uid, UmountFlags,
 };
 
 struct SliceFmt<'a> {
@@ -38,14 +38,52 @@ impl<'a> core::fmt::Write for SliceFmt<'a> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct FdSlot<'a>(&'a UnsafeCell<Fd>);
+
+impl<'a> FdSlot<'a> {
+    pub fn new(slot: &'a UnsafeCell<Fd>) -> Self {
+        Self(slot)
+    }
+
+    pub fn set(&self, fd: Fd) {
+        let fd_ptr = self.0.get();
+        unsafe { *fd_ptr = fd };
+    }
+
+    pub fn get(&self) -> Fd {
+        let fd_ptr = self.0.get();
+        unsafe { *fd_ptr }
+    }
+}
+
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
-    OpenAndSaveFd(&'a CStr, OpenFlags, FileMode),
-    SocketAndSaveFd(SocketDomain, SocketType, SocketProtocol),
-    BindNetlinkUsingSavedFd(&'a NetlinkSocketAddr),
-    ReadUsingSavedFd(&'a mut [u8]),
-    WriteUsingSavedFd(&'a [u8]),
+    Open {
+        path: &'a CStr,
+        flags: OpenFlags,
+        mode: FileMode,
+        out: FdSlot<'a>,
+    },
+    Socket {
+        domain: SocketDomain,
+        type_: SocketType,
+        protocol: SocketProtocol,
+        out: FdSlot<'a>,
+    },
+    BindNetlink {
+        fd: FdSlot<'a>,
+        addr: &'a NetlinkSocketAddr,
+    },
+    Read {
+        fd: FdSlot<'a>,
+        buf: &'a mut [u8],
+    },
+    Write {
+        fd: FdSlot<'a>,
+        buf: &'a [u8],
+    },
     SetSid,
     Dup2(Fd, Fd),
     CloseRange(CloseRangeFirst, CloseRangeLast, CloseRangeFlags),
@@ -61,31 +99,58 @@ pub enum Syscall<'a> {
     PivotRoot(&'a CStr, &'a CStr),
     Umount2(&'a CStr, UmountFlags),
     Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
-    FuseMountUsingSavedFd(&'a CStr, &'a CStr, MountFlags, u32, linux::Uid, linux::Gid),
-    SendMsgSavedFd(&'a [u8]),
-    OpenTreeAndSaveFd(Fd, &'a CStr, OpenTreeFlags, &'a UnsafeCell<Fd>),
-    MoveMountUsingSavedFd(&'a UnsafeCell<Fd>, &'a CStr, Fd, &'a CStr, MoveMountFlags),
+    FuseMount {
+        source: &'a CStr,
+        target: &'a CStr,
+        flags: MountFlags,
+        root_mode: u32,
+        uid: Uid,
+        gid: Gid,
+        fuse_fd: FdSlot<'a>,
+    },
+    SendMsg {
+        buf: &'a [u8],
+        fd_to_send: FdSlot<'a>,
+    },
+    OpenTree {
+        dirfd: Fd,
+        path: &'a CStr,
+        flags: OpenTreeFlags,
+        out: FdSlot<'a>,
+    },
+    MoveMount {
+        from_dirfd: FdSlot<'a>,
+        from_path: &'a CStr,
+        to_dirfd: Fd,
+        to_path: &'a CStr,
+        flags: MoveMountFlags,
+    },
 }
 
 impl<'a> Syscall<'a> {
-    fn call(
-        &mut self,
-        write_sock: &linux::UnixStream,
-        saved_fd: &mut Fd,
-    ) -> result::Result<(), Errno> {
+    fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
         match self {
-            Syscall::SocketAndSaveFd(domain, sock_type, protocol) => {
-                linux::socket(*domain, *sock_type, *protocol).map(|fd| {
-                    *saved_fd = fd.into_fd();
-                })
+            Syscall::Socket {
+                domain,
+                type_,
+                protocol,
+                out,
+            } => {
+                out.set(linux::socket(*domain, *type_, *protocol).map(OwnedFd::into_fd)?);
+                Ok(())
             }
-            Syscall::BindNetlinkUsingSavedFd(sockaddr) => linux::bind_netlink(*saved_fd, sockaddr),
-            Syscall::ReadUsingSavedFd(buf) => linux::read(*saved_fd, buf).map(drop),
-            Syscall::OpenAndSaveFd(filename, flags, mode) => linux::open(filename, *flags, *mode)
-                .map(|fd| {
-                    *saved_fd = fd.into_fd();
-                }),
-            Syscall::WriteUsingSavedFd(buf) => linux::write(*saved_fd, buf).map(drop),
+            Syscall::BindNetlink { fd, addr } => linux::bind_netlink(fd.get(), addr),
+            Syscall::Read { fd, buf } => linux::read(fd.get(), buf).map(drop),
+            Syscall::Open {
+                path,
+                flags,
+                mode,
+                out,
+            } => {
+                out.set(linux::open(path, *flags, *mode).map(OwnedFd::into_fd)?);
+                Ok(())
+            }
+            Syscall::Write { fd, buf } => linux::write(fd.get(), buf).map(drop),
             Syscall::SetSid => linux::setsid(),
             Syscall::Dup2(from, to) => linux::dup2(*from, *to).map(drop),
             Syscall::CloseRange(first, last, flags) => linux::close_range(*first, *last, *flags),
@@ -99,12 +164,20 @@ impl<'a> Syscall<'a> {
             Syscall::Execve(program, arguments, environment) => {
                 linux::execve(program, arguments, environment)
             }
-            Syscall::FuseMountUsingSavedFd(source, target, flags, root_mode, uid, gid) => {
+            Syscall::FuseMount {
+                source,
+                target,
+                flags,
+                root_mode,
+                uid,
+                gid,
+                fuse_fd,
+            } => {
                 let mut options = [0; 100];
                 write!(
                     SliceFmt::new(&mut options),
                     "fd={},rootmode={:o},user_id={},group_id={}\0",
-                    saved_fd.as_c_int(),
+                    fuse_fd.get().as_c_int(),
                     root_mode,
                     uid.as_u32(),
                     gid.as_u32()
@@ -114,22 +187,27 @@ impl<'a> Syscall<'a> {
                 let fstype = Some(c"fuse");
                 linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
             }
-            Syscall::SendMsgSavedFd(buffer) => {
-                let count = write_sock.send_with_fd(buffer, *saved_fd)?;
-                assert_eq!(count, buffer.len());
+            Syscall::SendMsg { buf, fd_to_send } => {
+                let count = write_sock.send_with_fd(buf, fd_to_send.get())?;
+                assert_eq!(count, buf.len());
                 Ok(())
             }
-            Syscall::OpenTreeAndSaveFd(dirfd, path, flags, dest) => {
-                let fsfd = linux::open_tree(*dirfd, path, *flags)?;
-                let dest_ptr = dest.get();
-                unsafe { *dest_ptr = fsfd.into_fd() };
+            Syscall::OpenTree {
+                dirfd,
+                path,
+                flags,
+                out,
+            } => {
+                out.set(linux::open_tree(*dirfd, path, *flags).map(OwnedFd::into_fd)?);
                 Ok(())
             }
-            Syscall::MoveMountUsingSavedFd(from_dirfd, from_path, to_dirfd, to_path, flags) => {
-                let from_dirfd_ptr = from_dirfd.get();
-                let from_dirfd = unsafe { *from_dirfd_ptr };
-                linux::move_mount(from_dirfd, from_path, *to_dirfd, to_path, *flags)
-            }
+            Syscall::MoveMount {
+                from_dirfd,
+                from_path,
+                to_dirfd,
+                to_path,
+                flags,
+            } => linux::move_mount(from_dirfd.get(), from_path, *to_dirfd, to_path, *flags),
         }
     }
 }
@@ -141,9 +219,8 @@ fn start_and_exec_in_child_inner(
     write_sock: &linux::UnixStream,
     syscalls: &mut [Syscall],
 ) -> (usize, Errno) {
-    let mut saved_fd = Fd::STDIN; // STDIN is arbitrary.
     for (index, syscall) in syscalls.iter_mut().enumerate() {
-        if let Err(errno) = syscall.call(write_sock, &mut saved_fd) {
+        if let Err(errno) = syscall.call(write_sock) {
             return (index, errno);
         }
     }
