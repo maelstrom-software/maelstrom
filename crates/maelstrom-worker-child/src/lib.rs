@@ -85,20 +85,42 @@ pub enum Syscall<'a> {
         buf: &'a [u8],
     },
     SetSid,
-    Dup2(Fd, Fd),
-    CloseRange(CloseRangeFirst, CloseRangeLast, CloseRangeFlags),
-    Mount(
-        Option<&'a CStr>,
-        &'a CStr,
-        Option<&'a CStr>,
-        MountFlags,
-        Option<&'a [u8]>,
-    ),
-    Chdir(&'a CStr),
-    Mkdir(&'a CStr, FileMode),
-    PivotRoot(&'a CStr, &'a CStr),
-    Umount2(&'a CStr, UmountFlags),
-    Execve(&'a CStr, &'a [Option<&'a u8>], &'a [Option<&'a u8>]),
+    Dup2 {
+        from: Fd,
+        to: Fd,
+    },
+    CloseRange {
+        first: CloseRangeFirst,
+        last: CloseRangeLast,
+        flags: CloseRangeFlags,
+    },
+    Mount {
+        source: Option<&'a CStr>,
+        target: &'a CStr,
+        fstype: Option<&'a CStr>,
+        flags: MountFlags,
+        data: Option<&'a [u8]>,
+    },
+    Chdir {
+        path: &'a CStr,
+    },
+    Mkdir {
+        path: &'a CStr,
+        mode: FileMode,
+    },
+    PivotRoot {
+        new_root: &'a CStr,
+        put_old: &'a CStr,
+    },
+    Umount2 {
+        path: &'a CStr,
+        flags: UmountFlags,
+    },
+    Execve {
+        path: &'a CStr,
+        argv: &'a [Option<&'a u8>],
+        envp: &'a [Option<&'a u8>],
+    },
     FuseMount {
         source: &'a CStr,
         target: &'a CStr,
@@ -152,18 +174,20 @@ impl<'a> Syscall<'a> {
             }
             Syscall::Write { fd, buf } => linux::write(fd.get(), buf).map(drop),
             Syscall::SetSid => linux::setsid(),
-            Syscall::Dup2(from, to) => linux::dup2(*from, *to).map(drop),
-            Syscall::CloseRange(first, last, flags) => linux::close_range(*first, *last, *flags),
-            Syscall::Mount(source, target, fstype, flags, data) => {
-                linux::mount(*source, target, *fstype, *flags, *data)
-            }
-            Syscall::Chdir(path) => linux::chdir(path),
-            Syscall::Mkdir(path, mode) => linux::mkdir(path, *mode),
-            Syscall::PivotRoot(new_root, put_old) => linux::pivot_root(new_root, put_old),
-            Syscall::Umount2(path, flags) => linux::umount2(path, *flags),
-            Syscall::Execve(program, arguments, environment) => {
-                linux::execve(program, arguments, environment)
-            }
+            Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
+            Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
+            Syscall::Mount {
+                source,
+                target,
+                fstype,
+                flags,
+                data,
+            } => linux::mount(*source, target, *fstype, *flags, *data),
+            Syscall::Chdir { path } => linux::chdir(path),
+            Syscall::Mkdir { path, mode } => linux::mkdir(path, *mode),
+            Syscall::PivotRoot { new_root, put_old } => linux::pivot_root(new_root, put_old),
+            Syscall::Umount2 { path, flags } => linux::umount2(path, *flags),
+            Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
             Syscall::FuseMount {
                 source,
                 target,

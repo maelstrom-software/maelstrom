@@ -523,12 +523,20 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
         // and stderr, and the close_range will close the open pipes.
-        builder.push(Syscall::Dup2(stdout_write_fd.as_fd(), Fd::STDOUT), &|err| {
-            syserr(anyhow!("dup2-ing to stdout: {err}"))
-        });
-        builder.push(Syscall::Dup2(stderr_write_fd.as_fd(), Fd::STDERR), &|err| {
-            syserr(anyhow!("dup2-ing to stderr: {err}"))
-        });
+        builder.push(
+            Syscall::Dup2 {
+                from: stdout_write_fd.as_fd(),
+                to: Fd::STDOUT,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Dup2 {
+                from: stderr_write_fd.as_fd(),
+                to: Fd::STDERR,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
+        );
 
         builder.push(
             Syscall::Open {
@@ -564,11 +572,11 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
         builder.push(
-            Syscall::CloseRange(
-                CloseRangeFirst::AfterStderr,
-                CloseRangeLast::Max,
-                CloseRangeFlags::CLOEXEC,
-            ),
+            Syscall::CloseRange {
+                first: CloseRangeFirst::AfterStderr,
+                last: CloseRangeLast::Max,
+                flags: CloseRangeFlags::CLOEXEC,
+            },
             &|err| {
                 syserr(anyhow!(
                     "setting CLOEXEC on range of open file descriptors: {err}"
@@ -588,13 +596,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             // We need to create an upperdir and workdir. Create a temporary file system to contain
             // both of them.
             builder.push(
-                Syscall::Mount(
-                    None,
-                    self.tmpfs_dir.as_c_str(),
-                    Some(c"tmpfs"),
-                    MountFlags::default(),
-                    None,
-                ),
+                Syscall::Mount {
+                    source: None,
+                    target: self.tmpfs_dir.as_c_str(),
+                    fstype: Some(c"tmpfs"),
+                    flags: MountFlags::default(),
+                    data: None,
+                },
                 &|err| {
                     syserr(anyhow!(
                         "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"
@@ -602,31 +610,40 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 },
             );
             builder.push(
-                Syscall::Mkdir(self.upper_dir.as_c_str(), FileMode::RWXU),
+                Syscall::Mkdir {
+                    path: self.upper_dir.as_c_str(),
+                    mode: FileMode::RWXU,
+                },
                 &|err| syserr(anyhow!("making uppderdir for overlayfs: {err}")),
             );
             builder.push(
-                Syscall::Mkdir(self.work_dir.as_c_str(), FileMode::RWXU),
+                Syscall::Mkdir {
+                    path: self.work_dir.as_c_str(),
+                    mode: FileMode::RWXU,
+                },
                 &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
             );
             options.push_str(self.comma_upperdir_comma_workdir.as_str());
             options.push('\0');
             builder.push(
-                Syscall::Mount(
-                    None,
-                    new_root_path,
-                    Some(c"overlay"),
-                    MountFlags::default(),
-                    Some(options.into_bytes().into_bump_slice()),
-                ),
+                Syscall::Mount {
+                    source: None,
+                    target: new_root_path,
+                    fstype: Some(c"overlay"),
+                    flags: MountFlags::default(),
+                    data: Some(options.into_bytes().into_bump_slice()),
+                },
                 &|err| syserr(anyhow!("mounting overlayfs: {err}")),
             );
         }
 
         // Chdir to what will be the new root.
-        builder.push(Syscall::Chdir(new_root_path), &|err| {
-            syserr(anyhow!("chdir to target root directory: {err}"))
-        });
+        builder.push(
+            Syscall::Chdir {
+                path: new_root_path,
+            },
+            &|err| syserr(anyhow!("chdir to target root directory: {err}")),
+        );
 
         // Create all of the supported devices by bind mounting them from the host's /dev
         // directory. We don't assume we're running as root, and as such, we can't create device
@@ -655,7 +672,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 JobDevice::Zero => dev!("zero"),
             };
             builder.push(
-                Syscall::Mount(Some(source), target, None, MountFlags::BIND, None),
+                Syscall::Mount {
+                    source: Some(source),
+                    target,
+                    fstype: None,
+                    flags: MountFlags::BIND,
+                    data: None,
+                },
                 // We have to be careful doing bump.alloc here with the move. The drop method is
                 // not going to be run on the closure, which means drop won't be run on any
                 // captured-and-moved variables. Since we're using a static string for
@@ -696,9 +719,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
 
         // Pivot root to be the new root. See man 2 pivot_root.
-        builder.push(Syscall::PivotRoot(c".", c"."), &|err| {
-            syserr(anyhow!("pivot_root: {err}"))
-        });
+        builder.push(
+            Syscall::PivotRoot {
+                new_root: c".",
+                put_old: c".",
+            },
+            &|err| syserr(anyhow!("pivot_root: {err}")),
+        );
 
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
         // within the container.
@@ -711,13 +738,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             match mount {
                 JobMount::Proc { mount_point } => {
                     builder.push(
-                        Syscall::Mount(
-                            None,
-                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            Some(c"proc"),
-                            MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
-                            None,
-                        ),
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"proc"),
+                            flags: MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
+                            data: None,
+                        },
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
                                 "mount of proc file system to {mount_point}: {err}",
@@ -727,13 +754,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 }
                 JobMount::Tmp { mount_point } => {
                     builder.push(
-                        Syscall::Mount(
-                            None,
-                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            Some(c"tmpfs"),
-                            MountFlags::default(),
-                            None,
-                        ),
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"tmpfs"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
                                 "mount of tmpfs file system to {mount_point}: {err}",
@@ -743,13 +770,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 }
                 JobMount::Sys { mount_point } => {
                     builder.push(
-                        Syscall::Mount(
-                            None,
-                            bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            Some(c"sysfs"),
-                            MountFlags::default(),
-                            None,
-                        ),
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"sysfs"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
                                 "mount of sysfs file system to {mount_point}: {err}",
@@ -781,13 +808,13 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     );
                     if flags.contains(BindMountFlag::ReadOnly) {
                         builder.push(
-                            Syscall::Mount(
-                                None,
-                                mount_point_cstr,
-                                None,
-                                MountFlags::BIND | MountFlags::REMOUNT | MountFlags::RDONLY,
-                                None,
-                            ),
+                            Syscall::Mount {
+                                source: None,
+                                target: mount_point_cstr,
+                                fstype: None,
+                                flags: MountFlags::BIND | MountFlags::REMOUNT | MountFlags::RDONLY,
+                                data: None,
+                            },
                             bump.alloc(move |err| {
                                 JobError::Execution(anyhow!(
                                     "remounting bind mount of {mount_point} as read-only: {err}",
@@ -800,18 +827,25 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
 
         // Unmount the old root. See man 2 pivot_root.
-        builder.push(Syscall::Umount2(c".", UmountFlags::DETACH), &|err| {
-            syserr(anyhow!("umount of old root: {err}"))
-        });
+        builder.push(
+            Syscall::Umount2 {
+                path: c".",
+                flags: UmountFlags::DETACH,
+            },
+            &|err| syserr(anyhow!("umount of old root: {err}")),
+        );
 
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
             let working_directory =
                 bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
                     .map_err(syserr)?;
-            builder.push(Syscall::Chdir(working_directory), &|err| {
-                JobError::Execution(anyhow!("chdir: {err}"))
-            });
+            builder.push(
+                Syscall::Chdir {
+                    path: working_directory,
+                },
+                &|err| JobError::Execution(anyhow!("chdir: {err}")),
+            );
         }
 
         // Finally, do the exec.
@@ -832,11 +866,11 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
         environment.push(None);
         builder.push(
-            Syscall::Execve(
-                program,
-                arguments.into_bump_slice(),
-                environment.into_bump_slice(),
-            ),
+            Syscall::Execve {
+                path: program,
+                argv: arguments.into_bump_slice(),
+                envp: environment.into_bump_slice(),
+            },
             &|err| JobError::Execution(anyhow!("execvc: {err}")),
         );
 
