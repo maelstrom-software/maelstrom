@@ -98,14 +98,10 @@ message SysMount {
     string mount_point = 1;
 }
 
-enum BindMountFlag {
-    ReadOnly = 0;
-}
-
 message BindMount {
     string mount_point = 1;
     string local_path = 2;
-    repeated BindMountFlag flags = 3;
+    bool read_only = 3;
 }
 
 enum JobNetwork {

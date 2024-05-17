@@ -328,7 +328,7 @@ impl AllMetadata {
 mod tests {
     use super::*;
     use anyhow::Error;
-    use maelstrom_base::{enum_set, BindMountFlag};
+    use maelstrom_base::enum_set;
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
@@ -1029,7 +1029,7 @@ mod tests {
             mounts = [
                 { type = "tmp", mount_point = "/tmp" },
                 { type = "sys", mount_point = "/sys" },
-                { type = "bind", mount_point = "/foo", local_path = "/local", flags = ["read-only"] },
+                { type = "bind", mount_point = "/foo", local_path = "/local", read_only = true },
             ]
             "#,
         )
@@ -1049,7 +1049,7 @@ mod tests {
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/foo"),
                     local_path: utf8_path_buf!("/local"),
-                    flags: enum_set!(BindMountFlag::ReadOnly),
+                    read_only: true,
                 },
             ],
         );
@@ -1141,7 +1141,7 @@ mod tests {
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/foo"),
                     local_path: utf8_path_buf!("/local"),
-                    flags: Default::default(),
+                    read_only: false,
                 },
             ],
         );

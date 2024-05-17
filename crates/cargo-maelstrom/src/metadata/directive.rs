@@ -241,7 +241,7 @@ mod tests {
     use super::*;
     use anyhow::Error;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, BindMountFlagForTomlAndJson};
+    use maelstrom_base::enum_set;
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
@@ -349,7 +349,7 @@ mod tests {
                 mounts = [
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = [] },
+                    { type = "bind", mount_point = "/bind2", local_path = "/local2", read_only = true },
                 ]
             "#})
             .unwrap(),
@@ -361,12 +361,12 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        flags: Default::default(),
+                        read_only: false,
                     },
                     JobMountForTomlAndJson::Bind {
-                        mount_point: utf8_path_buf!("/bind"),
-                        local_path: utf8_path_buf!("/local"),
-                        flags: Default::default(),
+                        mount_point: utf8_path_buf!("/bind2"),
+                        local_path: utf8_path_buf!("/local2"),
+                        read_only: true,
                     },
                 ]),
                 ..Default::default()
@@ -380,7 +380,7 @@ mod tests {
             parse_test_directive(indoc! {r#"
                 added_mounts = [
                     { type = "proc", mount_point = "/proc" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only"] },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", read_only = true },
                 ]
             "#})
             .unwrap(),
@@ -390,7 +390,7 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        flags: enum_set!(BindMountFlagForTomlAndJson::ReadOnly),
+                        read_only: true,
                     }
                 ],
                 ..Default::default()
@@ -485,7 +485,7 @@ mod tests {
                 mounts: Some(vec![JobMountForTomlAndJson::Bind {
                     mount_point: utf8_path_buf!("/bind"),
                     local_path: utf8_path_buf!("/a"),
-                    flags: Default::default(),
+                    read_only: false,
                 }]),
                 ..Default::default()
             }

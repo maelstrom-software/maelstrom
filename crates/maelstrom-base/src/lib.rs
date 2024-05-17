@@ -105,26 +105,6 @@ impl From<JobDeviceForTomlAndJson> for JobDevice {
     }
 }
 
-#[derive(Debug, Deserialize, EnumIter, EnumSetType, Serialize)]
-pub enum BindMountFlag {
-    ReadOnly,
-}
-
-#[derive(Debug, Deserialize, EnumSetType, Serialize)]
-#[serde(rename_all = "kebab-case")]
-#[enumset(serialize_repr = "list")]
-pub enum BindMountFlagForTomlAndJson {
-    ReadOnly,
-}
-
-impl From<BindMountFlagForTomlAndJson> for BindMountFlag {
-    fn from(value: BindMountFlagForTomlAndJson) -> Self {
-        match value {
-            BindMountFlagForTomlAndJson::ReadOnly => Self::ReadOnly,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
@@ -143,7 +123,7 @@ pub enum JobMountForTomlAndJson {
         mount_point: Utf8PathBuf,
         local_path: Utf8PathBuf,
         #[serde(default)]
-        flags: EnumSet<BindMountFlagForTomlAndJson>,
+        read_only: bool,
     },
 }
 
@@ -161,7 +141,7 @@ pub enum JobMount {
     Bind {
         mount_point: Utf8PathBuf,
         local_path: Utf8PathBuf,
-        flags: EnumSet<BindMountFlag>,
+        read_only: bool,
     },
 }
 
@@ -185,11 +165,11 @@ impl From<JobMountForTomlAndJson> for JobMount {
             JobMountForTomlAndJson::Bind {
                 mount_point,
                 local_path,
-                flags,
+                read_only,
             } => JobMount::Bind {
                 mount_point,
                 local_path,
-                flags: flags.into_iter().map(BindMountFlag::from).collect(),
+                read_only,
             },
         }
     }
@@ -822,7 +802,7 @@ mod tests {
             JobMount::Bind {
                 mount_point: Utf8PathBuf::from("/bind"),
                 local_path: Utf8PathBuf::from("/a"),
-                flags: Default::default(),
+                read_only: false,
             },
         ]);
         assert_eq!(spec.must_be_run_locally(), true);
@@ -881,29 +861,17 @@ mod tests {
     }
 
     #[test]
-    fn enumset_bind_mount_flag_for_toml_and_json_deserialized_as_list() {
-        let devices: EnumSet<BindMountFlagForTomlAndJson> = deserialize_value(r#"["read-only"]"#);
-        let devices: EnumSet<_> = devices
-            .into_iter()
-            .map(Into::<BindMountFlag>::into)
-            .collect();
-        assert_eq!(devices, enum_set!(BindMountFlag::ReadOnly));
-    }
-
-    #[test]
-    fn enumset_bind_mount_flag_for_toml_and_json_deserialize_unknown_field() {
-        deserialize_value_error::<EnumSet<BindMountFlagForTomlAndJson>>(r#"["unknown"]"#)
-            .assert_error("unknown variant `unknown`");
-    }
-
-    #[test]
-    fn bind_mount_flag_for_toml_and_json_and_bind_mount_flag_match() {
-        for flag in BindMountFlag::iter() {
-            let repr = format!(r#""{}""#, format!("{flag:?}").to_kebab_case());
-            assert_eq!(
-                BindMountFlag::from(deserialize_value::<BindMountFlagForTomlAndJson>(&repr)),
-                flag
-            );
-        }
+    fn bind_mount_no_read_only() {
+        let job_mount: JobMountForTomlAndJson =
+            deserialize_value(r#"{ type = "bind", mount_point = "/mnt", local_path = "/a" }"#);
+        let job_mount: JobMount = job_mount.into();
+        assert_eq!(
+            job_mount,
+            JobMount::Bind {
+                mount_point: Utf8PathBuf::from("/mnt"),
+                local_path: Utf8PathBuf::from("/a"),
+                read_only: false,
+            }
+        );
     }
 }

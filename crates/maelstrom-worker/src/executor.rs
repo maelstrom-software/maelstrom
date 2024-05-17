@@ -7,8 +7,8 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    BindMountFlag, EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount,
-    JobNetwork, JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -793,7 +793,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 JobMount::Bind {
                     mount_point,
                     local_path,
-                    flags,
+                    read_only,
                 } => {
                     let mount_local_path_fd = local_path_fds.next().unwrap();
                     let mount_point_cstr =
@@ -812,7 +812,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                             ))
                         }),
                     );
-                    if flags.contains(BindMountFlag::ReadOnly) {
+                    if *read_only {
                         builder.push(
                             Syscall::Mount {
                                 source: None,
@@ -1468,7 +1468,7 @@ mod tests {
                 JobMount::Bind {
                     mount_point: utf8_path_buf!("/mnt"),
                     local_path: utf8_path_buf!("/"),
-                    flags: Default::default(),
+                    read_only: false,
                 },
             ])
             .devices([JobDevice::Null]);
@@ -1763,7 +1763,7 @@ mod tests {
                 local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
                     .unwrap()
                     .to_owned(),
-                flags: Default::default(),
+                read_only: false,
             }]),
         )
         .run()
@@ -1788,7 +1788,7 @@ mod tests {
                 local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
                     .unwrap()
                     .to_owned(),
-                flags: enum_set!(BindMountFlag::ReadOnly),
+                read_only: true,
             }]),
         )
         .expected_status(JobStatus::Exited(1))
@@ -1821,7 +1821,7 @@ mod tests {
         Test::new(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
             mount_point: utf8_path_buf!("/mnt"),
             local_path: temp_dir_path,
-            flags: Default::default(),
+            read_only: false,
         }]))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"file1\n")))
         .run()
