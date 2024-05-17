@@ -388,17 +388,27 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // via the exec_result pipe. The parent will then map that to a closure for generating the
         // error.
         //
-        // We have to be careful doing bump.alloc with the closures below. The drop method is not
-        // going to be run on the closure, which means drop won't be run on any captured-and-moved
-        // variables. Since we only pass references, we're okay.
+        // A few things to keep in mind in the code below:
+        //
+        // We don't have to worry about closing file descriptors in the child,
+        // or even explicitly marking them close-on-exec, because one of the last things we do is
+        // mark all file descriptors -- except for stdin, stdout, and stderr -- as close-on-exec.
+        //
+        // We have to be careful about the move closures and bump.alloc. The drop method won't be
+        // run on the closure, which means drop won't be run on any captured-and-moved variables.
+        // As long as we only pass references in those variables, we're okay.
+
+        let bump = Bump::new();
+        let mut builder = ScriptBuilder::new(&bump);
 
         fn new_fd_slot(bump: &Bump) -> FdSlot<'_> {
             FdSlot::new(bump.alloc(UnsafeCell::new(Fd::from_raw(-1))))
         }
 
-        let bump = Bump::new();
-        let mut builder = ScriptBuilder::new(&bump);
         let fd = new_fd_slot(&bump);
+
+        // First we set up the network namespace. It's possible that we won't even create a new
+        // network namespace, if JobNetwork::Local is specified.
 
         let newnet;
         match spec.network {
@@ -412,7 +422,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 newnet = true;
 
                 // In order to have a loopback network interface, we need to create a netlink
-                // socket and configure things with the kernel. This creates the socket.
+                // socket and configure things with the kernel.
+
+                // Create the socket.
                 builder.push(
                     Syscall::Socket {
                         domain: SocketDomain::NETLINK,
@@ -422,7 +434,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     },
                     &|err| syserr(anyhow!("opening rtnetlink socket: {err}")),
                 );
-                // This binds the socket.
+
+                // Bind the socket.
                 builder.push(
                     Syscall::BindNetlink {
                         fd,
@@ -430,7 +443,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     },
                     &|err| syserr(anyhow!("binding rtnetlink socket: {err}")),
                 );
-                // This sends the message to the kernel.
+
+                // Send the message to the kernel.
                 builder.push(
                     Syscall::Write {
                         fd,
@@ -438,7 +452,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     },
                     &|err| syserr(anyhow!("writing rtnetlink message: {err}")),
                 );
-                // This receives the reply from the kernel.
+
+                // Receive the reply from the kernel.
                 // TODO: actually parse the reply to validate that we set up the loopback
                 // interface.
                 let rtnetlink_response = bump.alloc_slice_fill_default(1024);
@@ -449,13 +464,12 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     },
                     &|err| syserr(anyhow!("receiving rtnetlink message: {err}")),
                 );
-                // We don't need to close the socket because that will happen automatically for us
-                // when we exec.
             }
         }
 
-        // We now need to set up the new user namespace. This first set of syscalls sets up the
-        // uid mapping.
+        // Set up the user namespace.
+
+        // This first set of syscalls sets up the uid mapping.
         let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
         writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
         builder.push(
@@ -474,8 +488,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             },
             &|err| syserr(anyhow!("writing to /proc/self/uid_map: {err}")),
         );
-        // We don't need to close the file because that will happen automatically for us when we
-        // exec.
 
         // This set of syscalls disables setgroups, which is required for setting up the gid
         // mapping.
@@ -491,8 +503,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         builder.push(Syscall::Write { fd, buf: b"deny\n" }, &|err| {
             syserr(anyhow!("writing to /proc/self/setgroups: {err}"))
         });
-        // We don't need to close the file because that will happen automatically for us when we
-        // exec.
 
         // Finally, we set up the gid mapping.
         let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
@@ -513,8 +523,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             },
             &|err| syserr(anyhow!("writing to /proc/self/gid_map: {err}")),
         );
-        // We don't need to close the file because that will happen automatically for us when we
-        // exec.
 
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
@@ -522,7 +530,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
 
         // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
-        // and stderr, and the close_range will close the open pipes.
+        // and stderr. We don't have to worry about closing the old fds because they will be marked
+        // close-on-exec below.
         builder.push(
             Syscall::Dup2 {
                 from: stdout_write_fd.as_fd(),
@@ -538,6 +547,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
         );
 
+        let new_root_path = self.mount_dir.as_c_str();
+
+        // Create the fuse mount. We need to do this in the child's namespace, then pass the file
+        // descriptor back to the parent.
         builder.push(
             Syscall::Open {
                 path: c"/dev/fuse",
@@ -547,8 +560,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             },
             &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
         );
-
-        let new_root_path = self.mount_dir.as_c_str();
         builder.push(
             Syscall::FuseMount {
                 source: c"Maelstrom LayerFS",
@@ -562,6 +573,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| JobError::System(anyhow!("fuse mount: {err}")),
         );
 
+        // Send the fuse mount file descriptor from the child to the parent.
         builder.push(
             Syscall::SendMsg {
                 buf: &[0xFF; 8],
