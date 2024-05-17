@@ -740,7 +740,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                             source: None,
                             target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
                             fstype: Some(c"proc"),
-                            flags: MountFlags::NOSUID | MountFlags::NOEXEC | MountFlags::NODEV,
+                            flags: MountFlags::default(),
                             data: None,
                         },
                         bump.alloc(move |err| {
@@ -1736,7 +1736,7 @@ mod tests {
                 }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
-            b"none /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
+            b"none /proc proc rw,relatime 0 0\n"
         )))
         .run()
         .await
