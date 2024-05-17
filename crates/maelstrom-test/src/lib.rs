@@ -191,7 +191,7 @@ macro_rules! short_path {
 
 #[macro_export]
 macro_rules! boxed_u8 {
-    ($n:literal) => {
+    ($n:expr) => {
         $n.to_vec().into_boxed_slice()
     };
 }

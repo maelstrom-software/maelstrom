@@ -1195,15 +1195,15 @@ mod tests {
     // input from stdin.
     #[tokio::test(flavor = "multi_thread")]
     async fn signaled_11() {
-        Test::new(python_spec(concat!(
-            "import os;",
-            "import sys;",
-            "print('a');",
-            "sys.stdout.flush();",
-            "print('b', file=sys.stderr);",
-            "sys.stderr.flush();",
-            "os.abort()",
-        )))
+        Test::new(python_spec(indoc! {r#"
+            import os
+            import sys
+            print('a')
+            sys.stdout.flush()
+            print('b', file=sys.stderr)
+            sys.stderr.flush()
+            os.abort()
+        "#}))
         .expected_status(JobStatus::Signaled(11))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"b\n")))
@@ -1314,16 +1314,19 @@ mod tests {
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
         // We should have pgid 1, indicating that we're the group leader.
         // We should have sid 1, indicating that we're the session leader.
-        Test::new(python_spec(concat!(
-            "import os;",
-            "print('pid:', os.getpid());",
-            "print('ppid:', os.getppid());",
-            "print('pgid:', os.getpgid(0));",
-            "print('sid:', os.getsid(0));",
-        )))
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(
-            b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n"
-        )))
+        Test::new(python_spec(indoc! {r#"
+            import os
+            print('pid:', os.getpid())
+            print('ppid:', os.getppid())
+            print('pgid:', os.getpgid(0))
+            print('sid:', os.getsid(0))
+        "#}))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
+            pid: 1
+            ppid: 0
+            pgid: 1
+            sid: 1
+        "})))
         .run()
         .await;
     }
@@ -1390,12 +1393,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn user_and_group_0() {
-        Test::new(python_spec(concat!(
-            "import os;",
-            "print('uid:', os.getuid());",
-            "print('gid:', os.getgid());",
-        )))
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")))
+        Test::new(python_spec(indoc! {r#"
+            import os
+            print('uid:', os.getuid())
+            print('gid:', os.getgid())
+        "#}))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
+            uid: 0
+            gid: 0
+        "})))
         .run()
         .await;
     }
@@ -1403,15 +1409,18 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn user_and_group_nonzero() {
         Test::new(
-            python_spec(concat!(
-                "import os;",
-                "print('uid:', os.getuid());",
-                "print('gid:', os.getgid());",
-            ))
+            python_spec(indoc! {r#"
+                import os
+                print('uid:', os.getuid())
+                print('gid:', os.getgid())
+            "#})
             .user(UserId::from(43))
             .group(GroupId::from(100)),
         )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 43\ngid: 100\n")))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
+            uid: 43
+            gid: 100
+        "})))
         .run()
         .await;
     }
@@ -1425,7 +1434,12 @@ mod tests {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
+            0
+            1
+            2
+            3
+        "})))
         .run()
         .await;
     }
