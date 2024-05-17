@@ -128,17 +128,17 @@ message JobSpec {
     string program = 1;
     repeated string arguments = 2;
     optional ImageSpec image = 3;
-    repeated EnvironmentSpec environment = 4;
-    repeated LayerSpec layers = 6;
+    repeated LayerSpec layers = 4;
+    bool enable_writable_file_system = 5;
+    repeated EnvironmentSpec environment = 6;
+    optional string working_directory = 7;
     repeated JobDevice devices = 8;
     repeated JobMount mounts = 9;
     JobNetwork network = 10;
-    bool enable_writable_file_system = 11;
-    optional string working_directory = 12;
-    uint32 user = 13;
-    uint32 group = 14;
-    optional uint32 timeout = 15;
-    optional Duration estimated_duration = 16;
+    uint32 user = 11;
+    uint32 group = 12;
+    optional uint32 timeout = 13;
+    optional Duration estimated_duration = 14;
 }
 
 message RunJobRequest {
