@@ -1079,19 +1079,44 @@ mod tests {
         }
     }
 
+    async fn run(
+        spec: maelstrom_base::JobSpec,
+        inline_limit: InlineLimit,
+    ) -> JobResult<JobCompleted, Error> {
+        let clock = TickingClock::new();
+        let mount = TarMount::new().await;
+        let spec = JobSpec::from_spec(spec);
+        let (_kill_event_sender, kill_event_receiver) = sync::event();
+        task::spawn_blocking(move || {
+            Executor::new(
+                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                &clock,
+            )
+            .unwrap()
+            .run_job(
+                &spec,
+                inline_limit,
+                kill_event_receiver,
+                |fd| mount.spawn(fd),
+                runtime::Handle::current(),
+            )
+        })
+        .await
+        .unwrap()
+    }
+
     struct Test {
-        spec: JobSpec,
+        spec: maelstrom_base::JobSpec,
         inline_limit: InlineLimit,
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
         expected_duration: std::time::Duration,
-        mount: TarMount,
-        clock: TickingClock,
     }
 
     impl Test {
-        fn new(spec: JobSpec, mount: TarMount) -> Self {
+        fn new(spec: maelstrom_base::JobSpec) -> Self {
             Test {
                 spec,
                 inline_limit: InlineLimit::from(ByteSize::b(1000)),
@@ -1099,15 +1124,7 @@ mod tests {
                 expected_stdout: JobOutputResult::None,
                 expected_stderr: JobOutputResult::None,
                 expected_duration: std::time::Duration::from_secs(1),
-                mount,
-                clock: TickingClock::new(),
             }
-        }
-
-        async fn from_spec(spec: maelstrom_base::JobSpec) -> Self {
-            let mount = TarMount::new().await;
-            let spec = JobSpec::from_spec(spec);
-            Self::new(spec, mount)
         }
 
         fn inline_limit(mut self, inline_limit: impl Into<InlineLimit>) -> Self {
@@ -1139,25 +1156,7 @@ mod tests {
                         stderr,
                         duration,
                     },
-            } = task::spawn_blocking(move || {
-                let (_kill_event_sender, kill_event_receiver) = sync::event();
-                Executor::new(
-                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                    &self.clock,
-                )
-                .unwrap()
-                .run_job(
-                    &self.spec,
-                    self.inline_limit,
-                    kill_event_receiver,
-                    |fd| self.mount.spawn(fd),
-                    runtime::Handle::current(),
-                )
-            })
-            .await
-            .unwrap()
-            .unwrap();
+            } = run(self.spec, self.inline_limit).await.unwrap();
 
             assert_eq!(stderr, self.expected_stderr);
             assert_eq!(status, self.expected_status);
@@ -1180,13 +1179,12 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn exited_0() {
-        Test::from_spec(bash_spec("exit 0")).await.run().await;
+        Test::new(bash_spec("exit 0")).run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn exited_1() {
-        Test::from_spec(bash_spec("exit 1"))
-            .await
+        Test::new(bash_spec("exit 1"))
             .expected_status(JobStatus::Exited(1))
             .run()
             .await;
@@ -1197,7 +1195,7 @@ mod tests {
     // input from stdin.
     #[tokio::test(flavor = "multi_thread")]
     async fn signaled_11() {
-        Test::from_spec(python_spec(concat!(
+        Test::new(python_spec(concat!(
             "import os;",
             "import sys;",
             "print('a');",
@@ -1206,7 +1204,6 @@ mod tests {
             "sys.stderr.flush();",
             "os.abort()",
         )))
-        .await
         .expected_status(JobStatus::Signaled(11))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"b\n")))
@@ -1216,8 +1213,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stdout_inline_limit_0() {
-        Test::from_spec(bash_spec("echo a"))
-            .await
+        Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(0))
             .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b""),
@@ -1229,8 +1225,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stdout_inline_limit_1() {
-        Test::from_spec(bash_spec("echo a"))
-            .await
+        Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(1))
             .expected_stdout(JobOutputResult::Truncated {
                 first: boxed_u8!(b"a"),
@@ -1242,8 +1237,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stdout_inline_limit_2() {
-        Test::from_spec(bash_spec("echo a"))
-            .await
+        Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(2))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
@@ -1252,8 +1246,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stdout_inline_limit_3() {
-        Test::from_spec(bash_spec("echo a"))
-            .await
+        Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(3))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
@@ -1262,8 +1255,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stderr_inline_limit_0() {
-        Test::from_spec(bash_spec("echo a >&2"))
-            .await
+        Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(0))
             .expected_stderr(JobOutputResult::Truncated {
                 first: boxed_u8!(b""),
@@ -1275,8 +1267,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stderr_inline_limit_1() {
-        Test::from_spec(bash_spec("echo a >&2"))
-            .await
+        Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(1))
             .expected_stderr(JobOutputResult::Truncated {
                 first: boxed_u8!(b"a"),
@@ -1288,8 +1279,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stderr_inline_limit_2() {
-        Test::from_spec(bash_spec("echo a >&2"))
-            .await
+        Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(2))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
@@ -1298,8 +1288,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stderr_inline_limit_3() {
-        Test::from_spec(bash_spec("echo a >&2"))
-            .await
+        Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(3))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(b"a\n")))
             .run()
@@ -1308,8 +1297,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn environment() {
-        Test::from_spec(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
-            .await
+        Test::new(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"3 - 4")))
             .run()
             .await;
@@ -1317,7 +1305,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stdin_empty() {
-        Test::from_spec(test_spec("/bin/cat")).await.run().await;
+        Test::new(test_spec("/bin/cat")).run().await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1326,14 +1314,13 @@ mod tests {
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
         // We should have pgid 1, indicating that we're the group leader.
         // We should have sid 1, indicating that we're the session leader.
-        Test::from_spec(python_spec(concat!(
+        Test::new(python_spec(concat!(
             "import os;",
             "print('pid:', os.getpid());",
             "print('ppid:', os.getppid());",
             "print('pgid:', os.getpgid(0));",
             "print('sid:', os.getsid(0));",
         )))
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"pid: 1\nppid: 0\npgid: 1\nsid: 1\n"
         )))
@@ -1343,14 +1330,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_loopback() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/cat")
                 .arguments(["/sys/class/net/lo/carrier"])
                 .mounts([JobMount::Sys {
                     mount_point: utf8_path_buf!("/sys"),
                 }]),
         )
-        .await
         .expected_status(JobStatus::Exited(1))
         .expected_stderr(JobOutputResult::Inline(boxed_u8!(
             b"cat: read error: Invalid argument\n"
@@ -1361,7 +1347,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn loopback() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/cat")
                 .arguments(["/sys/class/net/lo/carrier"])
                 .mounts([JobMount::Sys {
@@ -1369,7 +1355,6 @@ mod tests {
                 }])
                 .network(JobNetwork::Loopback),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1\n")))
         .run()
         .await;
@@ -1385,7 +1370,7 @@ mod tests {
             assert_eq!(contents, "hello");
             socket.write_all(b"goodbye").await.unwrap();
         });
-        Test::from_spec(
+        Test::new(
             python_spec(indoc! {r#"
                 import socket
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -1396,7 +1381,6 @@ mod tests {
             "#})
             .network(JobNetwork::Local),
         )
-        .await
         .expected_status(JobStatus::Exited(0))
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"goodbye")))
         .run()
@@ -1406,12 +1390,11 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn user_and_group_0() {
-        Test::from_spec(python_spec(concat!(
+        Test::new(python_spec(concat!(
             "import os;",
             "print('uid:', os.getuid());",
             "print('gid:', os.getgid());",
         )))
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 0\ngid: 0\n")))
         .run()
         .await;
@@ -1419,7 +1402,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn user_and_group_nonzero() {
-        Test::from_spec(
+        Test::new(
             python_spec(concat!(
                 "import os;",
                 "print('uid:', os.getuid());",
@@ -1428,7 +1411,6 @@ mod tests {
             .user(UserId::from(43))
             .group(GroupId::from(100)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"uid: 43\ngid: 100\n")))
         .run()
         .await;
@@ -1436,12 +1418,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn close_range() {
-        Test::from_spec(test_spec("/bin/ls").arguments(["/proc/self/fd"]).mounts([
-            JobMount::Proc {
-                mount_point: utf8_path_buf!("/proc"),
-            },
-        ]))
-        .await
+        Test::new(
+            test_spec("/bin/ls")
+                .arguments(["/proc/self/fd"])
+                .mounts([JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                }]),
+        )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0\n1\n2\n3\n")))
         .run()
         .await;
@@ -1449,8 +1432,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn one_layer_is_read_only() {
-        Test::from_spec(test_spec("/bin/touch").arguments(["/foo"]))
-            .await
+        Test::new(test_spec("/bin/touch").arguments(["/foo"]))
             .expected_status(JobStatus::Exited(1))
             .expected_stderr(JobOutputResult::Inline(boxed_u8!(
                 b"touch: /foo: Read-only file system\n"
@@ -1461,16 +1443,14 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn one_layer_with_writable_file_system_is_writable() {
-        Test::from_spec(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
-            .await
+        Test::new(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
             .expected_status(JobStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
             .await;
 
         // Run another job to ensure that the file doesn't persist.
-        Test::from_spec(bash_spec("test -e /foo"))
-            .await
+        Test::new(bash_spec("test -e /foo"))
             .expected_status(JobStatus::Exited(1))
             .run()
             .await;
@@ -1478,20 +1458,16 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn multiple_layers_with_writable_file_system_is_writable() {
-        let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec(
-            bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true),
-        );
-        Test::new(spec, mount)
+        let spec = bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true);
+        Test::new(spec)
             .expected_status(JobStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
             .await;
 
         // Run another job to ensure that the file doesn't persist.
-        let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec(bash_spec("test -e /foo").enable_writable_file_system(true));
-        Test::new(spec, mount)
+        let spec = bash_spec("test -e /foo").enable_writable_file_system(true);
+        Test::new(spec)
             .expected_status(JobStatus::Exited(1))
             .run()
             .await;
@@ -1499,8 +1475,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_full() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1508,11 +1483,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_full() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Full)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
         .run()
         .await;
@@ -1520,8 +1494,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_null() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1529,11 +1502,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_null() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Null)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
         .run()
         .await;
@@ -1541,19 +1513,17 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_null_write() {
-        Test::from_spec(
+        Test::new(
             bash_spec("echo foo > /dev/null && cat /dev/null")
                 .devices(EnumSet::only(JobDevice::Null)),
         )
-        .await
         .run()
         .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_random() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1561,11 +1531,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_random() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Random)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
         .run()
         .await;
@@ -1573,8 +1542,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_tty() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1582,11 +1550,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_tty() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Tty)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
         .run()
         .await;
@@ -1594,8 +1561,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_urandom() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1603,11 +1569,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_urandom() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Urandom)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
         .run()
         .await;
@@ -1615,8 +1580,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_dev_zero() {
-        Test::from_spec(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
-            .await
+        Test::new(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
             .run()
             .await;
@@ -1624,11 +1588,10 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn dev_zero() {
-        Test::from_spec(
+        Test::new(
             bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
                 .devices(EnumSet::only(JobDevice::Zero)),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
         .run()
         .await;
@@ -1636,14 +1599,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_tmpfs() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/grep")
                 .arguments(["^tmpfs /tmp", "/proc/self/mounts"])
                 .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .await
         .expected_status(JobStatus::Exited(1))
         .run()
         .await;
@@ -1651,7 +1613,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn tmpfs() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/awk")
                 .arguments([r#"/^none \/tmp/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
                 .mounts([
@@ -1663,7 +1625,6 @@ mod tests {
                     },
                 ]),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /tmp tmpfs\n")))
         .run()
         .await;
@@ -1671,14 +1632,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_sysfs() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/grep")
                 .arguments(["^sysfs /sys", "/proc/self/mounts"])
                 .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .await
         .expected_status(JobStatus::Exited(1))
         .run()
         .await;
@@ -1686,7 +1646,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn sysfs() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/awk")
                 .arguments([r#"/^none \/sys/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
                 .mounts([
@@ -1698,7 +1658,6 @@ mod tests {
                     },
                 ]),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /sys sysfs\n")))
         .run()
         .await;
@@ -1706,22 +1665,20 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn no_procfs() {
-        Test::from_spec(test_spec("/bin/ls").arguments(["/proc"]))
-            .await
+        Test::new(test_spec("/bin/ls").arguments(["/proc"]))
             .run()
             .await
     }
 
     #[tokio::test(flavor = "multi_thread")]
     async fn procfs() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/grep")
                 .arguments(["proc", "/proc/self/mounts"])
                 .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"none /proc proc rw,nosuid,nodev,noexec,relatime 0 0\n"
         )))
@@ -1732,7 +1689,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bind_mount_writable() {
         let temp_file = NamedTempFile::new().unwrap();
-        Test::from_spec(
+        Test::new(
             bash_spec(&format!(
                 "echo hello > /mnt/{}",
                 temp_file.path().file_name().unwrap().to_str().unwrap()
@@ -1745,7 +1702,6 @@ mod tests {
                 flags: Default::default(),
             }]),
         )
-        .await
         .run()
         .await;
         let contents = fs::read_to_string(temp_file).unwrap();
@@ -1757,7 +1713,7 @@ mod tests {
         let temp_file = NamedTempFile::new().unwrap();
         let fs = async_fs::Fs::new();
         fs.write(temp_file.path(), b"hello\n").await.unwrap();
-        Test::from_spec(
+        Test::new(
             bash_spec(&format!(
                 "(echo goodbye > /mnt/{}) 2>/dev/null",
                 temp_file.path().file_name().unwrap().to_str().unwrap()
@@ -1771,7 +1727,6 @@ mod tests {
                 flags: enum_set!(BindMountFlag::ReadOnly),
             }]),
         )
-        .await
         .expected_status(JobStatus::Exited(1))
         .run()
         .await;
@@ -1807,12 +1762,11 @@ mod tests {
         .unwrap();
         let _mount = Mount(subdir1_path.clone());
 
-        Test::from_spec(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
+        Test::new(bash_spec("ls /mnt/subdir1").mounts([JobMount::Bind {
             mount_point: utf8_path_buf!("/mnt"),
             local_path: temp_dir_path,
             flags: enum_set!(BindMountFlag::Recursive),
         }]))
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"file1\n")))
         .run()
         .await;
@@ -1820,14 +1774,13 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn old_mounts_are_unmounted() {
-        Test::from_spec(
+        Test::new(
             test_spec("/bin/wc")
                 .arguments(["-l", "/proc/self/mounts"])
                 .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
         )
-        .await
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"2 /proc/self/mounts\n")))
         .run()
         .await;
@@ -1835,8 +1788,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn working_directory_root() {
-        Test::from_spec(bash_spec("pwd"))
-            .await
+        Test::new(bash_spec("pwd"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/\n")))
             .run()
             .await;
@@ -1844,36 +1796,15 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn working_directory_not_root() {
-        Test::from_spec(bash_spec("pwd").working_directory("/usr/bin"))
-            .await
+        Test::new(bash_spec("pwd").working_directory("/usr/bin"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")))
             .run()
             .await;
     }
 
     async fn assert_execution_error(spec: maelstrom_base::JobSpec) {
-        let clock = TickingClock::new();
-        let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec(spec);
-        let (_kill_event_sender, kill_event_receiver) = sync::event();
         assert_matches!(
-            task::spawn_blocking(move || {
-                Executor::new(
-                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                    RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                    &clock,
-                )
-                .unwrap()
-                .run_job(
-                    &spec,
-                    ByteSize::b(0).into(),
-                    kill_event_receiver,
-                    |fd| mount.spawn(fd),
-                    runtime::Handle::current(),
-                )
-            })
-            .await
-            .unwrap(),
+            run(spec, "0".parse().unwrap()).await,
             Err(JobError::Execution(_))
         );
     }
@@ -1904,31 +1835,10 @@ mod tests {
                 },
             ])
             .devices([JobDevice::Null]);
-        let clock = TickingClock::new();
-        let mount = TarMount::new().await;
-        let spec = JobSpec::from_spec(spec);
-        let (_kill_event_sender, kill_event_receiver) = sync::event();
         let JobCompleted {
             status,
             effects: JobEffects { stdout, stderr, .. },
-        } = task::spawn_blocking(move || {
-            Executor::new(
-                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
-                &clock,
-            )
-            .unwrap()
-            .run_job(
-                &spec,
-                ByteSize::b(100).into(),
-                kill_event_receiver,
-                |fd| mount.spawn(fd),
-                runtime::Handle::current(),
-            )
-        })
-        .await
-        .unwrap()
-        .unwrap();
+        } = run(spec, "100".parse().unwrap()).await.unwrap();
         assert_eq!(status, JobStatus::Exited(0));
         assert_eq!(stderr, JobOutputResult::None);
         let JobOutputResult::Inline(contents) = stdout else {
