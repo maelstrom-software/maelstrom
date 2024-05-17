@@ -635,7 +635,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             );
         }
 
-        let mut local_path_fds = Vec::new();
+        let mut local_path_fds = BumpVec::new_in(&bump);
         for mount in &spec.mounts {
             let JobMount::Bind { local_path, .. } = mount else {
                 continue;
