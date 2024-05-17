@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Major Changes
+
+There are two major changes in this release, plus a lot of smaller changes and
+bug fixes.
+
+#### LPT Scheduling
+
+The first big change is that Maelstrom now uses [Longest-processing-time-first
+(LPT)](https://en.wikipedia.org/wiki/Longest-processing-time-first_scheduling)
+scheduling. This brings narrows the theoretical upper bound on the difference
+between our schedules and optimal schedules (which are NP-hard to compute). In
+practice, this greatly helps situations where there are a few long-running
+tests mixed in with a bunch of faster ones.
+
+`cargo-maelstrom` now remembers how long the last few runs of each test took.
+It uses that information to predict how long the next run will take. Those
+tests that are predicted to run the longest are run first.
+
+#### Local Jobs
+
+The second big change is that Maelstrom now has an "escape hatch" that one can
+use to force a job to be run on the local machine, with access to the local
+file system and/or network.
+
+There is now a "local" network option, which means that a job will run on the
+local machine, without being put in its own network namespace. In other words,
+it will have all the same network access as any program on the local machine.
+
+There is also now a "bind" mount type, which allows one to expose parts of the
+local file system to the job. For example, the `./target` directory could be
+provided to a job, mounted at `/target` inside of the job's container.
+
+Jobs that use either of these features are forced to run on the local worker,
+even if all other jobs are going to a remote cluster.
+
 ### `cargo-maelstrom`
 - Added a new `container-image-depot-root` configuration value. The default is
   `$XDG_CACHE_HOME/maelstrom/container`, which is what was hard-coded before.
@@ -21,6 +56,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `-s` (`--cache-size`)
   - `-I` (`--inline-limit`)
   - `-S` (`--slots`)
+- Fixed a few race conditions in the outputting of tests results.
+  \[[279](https://github.com/maelstrom-software/maelstrom/issues/279)\]
+- Fixed a bug with tar files with `/` entries (as demonstrated by the busybox
+  image).
+  \[[272](https://github.com/maelstrom-software/maelstrom/issues/272)\]
+- Fixed two bugs related to `cargo-maelstrom` hanging instead of exiting when
+  there is a remote error.
+- Improved error messages when a container image or tag doesn't exist.
+- Restored container image download progress bars.
+- Swap order of "side" progress bars (artifact upload and container download)
+  so that they align on the right.
+- The format for mounts has now changed. The `fs_type` field has been renamed
+  `type`, and a new `"bind"` type has been added.
+- The `enable_loopback` field has been replaced with a new `network` field that
+  can have one of the three values: `"disabled"`, `"local"`, or `"loopback"`.
+  The new `"local"` option is used to give a job unfettered access to the local
+  machine's network.
 
 ### `maelstrom-run`
 - Added a new `container-image-depot-root` configuration value. The default is
@@ -40,6 +92,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `-s` (`--cache-size`)
   - `-i` (`--inline-limit`)
   - `-S` (`--slots`)
+- Fixed a bug where we weren't properly waiting for job callbacks.
+- Improved error messages when a container image or tag doesn't exist.
+- The `mounts` and `enable_loopback` fields have been changed as in
+  `cargo-maelstrom`.
+- The `environment` field now support multiple layers of substitution, just
+  like in `cargo-maelstrom`.
+
+### Client Internals
+- Changed the gRPC protobuf to remove cruft and make it easier to use.
+- The client process now does environment variable substitution, so it's not
+  available to all clients, not just Rust.
 
 ### `maelstrom-worker`
 - Remove the following short command-line option aliases:
