@@ -1427,21 +1427,42 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn close_range() {
-        Test::new(
-            test_spec("/bin/ls")
-                .arguments(["/proc/self/fd"])
-                .mounts([JobMount::Proc {
+        // Throw the kitchen sink in the spec: we want an example of anything that opens a file
+        // descriptor.
+        let spec = test_spec("/bin/ls")
+            .arguments(["/proc/self/fd"])
+            .network(JobNetwork::Loopback)
+            .mounts([
+                JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
-                }]),
-        )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(indoc! {b"
-            0
-            1
-            2
-            3
-        "})))
-        .run()
-        .await;
+                },
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/mnt"),
+                    local_path: utf8_path_buf!("/"),
+                    flags: enum_set!(BindMountFlag::Recursive),
+                },
+            ])
+            .devices([JobDevice::Null]);
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = run(spec, "100".parse().unwrap()).await.unwrap();
+        assert_eq!(stderr, JobOutputResult::None);
+        assert_eq!(status, JobStatus::Exited(0));
+        let JobOutputResult::Inline(contents) = stdout else {
+            panic!("expected JobOutputResult::Inline, got {stdout:?}");
+        };
+        let fds: HashSet<u32> = str::from_utf8(&contents)
+            .unwrap()
+            .split_whitespace()
+            .map(|fd| fd.parse().unwrap())
+            .collect();
+        assert!(fds.is_superset(&HashSet::from([0, 1, 2])));
+        assert_eq!(
+            fds.len(),
+            4,
+            "expected fds to just be stdin, stdout, stderr, and one more, got {fds:?}"
+        );
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1831,43 +1852,5 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn no_fds_are_leaked() {
-        let spec = test_spec("/bin/ls")
-            .arguments(["/proc/self/fd"])
-            .network(JobNetwork::Loopback)
-            .mounts([
-                JobMount::Proc {
-                    mount_point: utf8_path_buf!("/proc"),
-                },
-                JobMount::Bind {
-                    mount_point: utf8_path_buf!("/mnt"),
-                    local_path: utf8_path_buf!("/"),
-                    flags: enum_set!(BindMountFlag::Recursive),
-                },
-            ])
-            .devices([JobDevice::Null]);
-        let JobCompleted {
-            status,
-            effects: JobEffects { stdout, stderr, .. },
-        } = run(spec, "100".parse().unwrap()).await.unwrap();
-        assert_eq!(status, JobStatus::Exited(0));
-        assert_eq!(stderr, JobOutputResult::None);
-        let JobOutputResult::Inline(contents) = stdout else {
-            panic!("expected JobOutputResult::Inline, got {stdout:?}");
-        };
-        let fds: HashSet<u32> = str::from_utf8(&contents)
-            .unwrap()
-            .split_whitespace()
-            .map(|fd| fd.parse().unwrap())
-            .collect();
-        assert!(fds.is_superset(&HashSet::from([0, 1, 2])));
-        assert_eq!(
-            fds.len(),
-            4,
-            "expected fds to just be stdin, stdout, stderr, and one more, got {fds:?}"
-        );
     }
 }
