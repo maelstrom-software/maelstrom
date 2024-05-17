@@ -97,6 +97,7 @@ num_enum = "0.7"
 num-traits = "0.2"
 oci-spec = "0.6"
 page_size = "0.6.0"
+pathdiff = { version = "0.2.1", features = ["camino"] }
 pin-project = "1"
 pretty_assertions = "1.4.0"
 proc-macro2 = "1"

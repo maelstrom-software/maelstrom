@@ -635,6 +635,43 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             );
         }
 
+        let mut local_path_fds = Vec::new();
+        for mount in &spec.mounts {
+            let JobMount::Bind { local_path, .. } = mount else {
+                continue;
+            };
+            let dirfd = new_fd_slot(&bump);
+            local_path_fds.push(dirfd);
+            builder.push(
+                Syscall::OpenTree {
+                    dirfd: Fd::AT_FDCWD,
+                    path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
+                    // We always pass recursive here because non-recursive bind mounts don't make a
+                    // lot of sense in this context. The reason is that, when a new mount namespace
+                    // is created in Linux, all pre-existing mounts become locked. These locked
+                    // mounts can't be unmounted or have their mount flags adjusted. In this
+                    // context, we're always in a new mount namespace, hence all mounts on the
+                    // system are locked.
+                    //
+                    // When you try to call open_tree without AT_RECURSIVE on a tree that has
+                    // mounts under it, you get an error. The reason is that allowing the binding
+                    // of this subtree would have the effect of revealing what was underneath those
+                    // locked mounts -- in effect, unmounting them.
+                    //
+                    // If we allowed the user to specify the recursive flag, it would just mean
+                    // that their mount would fail if there happened to be any mount at that point
+                    // or lower in the tree. That's probably not what they want.
+                    flags: OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
+                    out: dirfd,
+                },
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error opening local path {local_path} for bind mount: {err}",
+                    ))
+                }),
+            );
+        }
+
         // Chdir to what will be the new root.
         builder.push(
             Syscall::Chdir {
@@ -683,43 +720,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 // `device_name`, we're okay.
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!("bind mount of device {device_name}: {err}",))
-                }),
-            );
-        }
-
-        let mut local_path_fds = Vec::new();
-        for mount in &spec.mounts {
-            let JobMount::Bind { local_path, .. } = mount else {
-                continue;
-            };
-            let dirfd = new_fd_slot(&bump);
-            local_path_fds.push(dirfd);
-            builder.push(
-                Syscall::OpenTree {
-                    dirfd: Fd::AT_FDCWD,
-                    path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
-                    // We always pass recursive here because non-recursive bind mounts don't make a
-                    // lot of sense in this context. The reason is that, when a new mount namespace
-                    // is created in Linux, all pre-existing mounts become locked. These locked
-                    // mounts can't be unmounted or have their mount flags adjusted. In this
-                    // context, we're always in a new mount namespace, hence all mounts on the
-                    // system are locked.
-                    //
-                    // When you try to call open_tree without AT_RECURSIVE on a tree that has
-                    // mounts under it, you get an error. The reason is that allowing the binding
-                    // of this subtree would have the effect of revealing what was underneath those
-                    // locked mounts -- in effect, unmounting them.
-                    //
-                    // If we allowed the user to specify the recursive flag, it would just mean
-                    // that their mount would fail if there happened to be any mount at that point
-                    // or lower in the tree. That's probably not what they want.
-                    flags: OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
-                    out: dirfd,
-                },
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
-                        "error opening local path {local_path} for bind mount: {err}",
-                    ))
                 }),
             );
         }
@@ -1049,7 +1049,7 @@ mod tests {
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::{collections::HashSet, fs, path::PathBuf, str, sync::Arc};
+    use std::{collections::HashSet, env, fs, path::PathBuf, str, sync::Arc};
     use tempfile::{NamedTempFile, TempDir};
     use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::oneshot, sync::Mutex, task};
 
@@ -1796,6 +1796,33 @@ mod tests {
         .await;
         let contents = fs::read_to_string(temp_file).unwrap();
         assert_eq!(contents, "hello\n");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn bind_mount_path_is_relative_to_pwd() {
+        let temp_file = NamedTempFile::new().unwrap();
+        let temp_dir_path = temp_file.path().parent().unwrap();
+        let pwd = env::current_dir().unwrap();
+        let temp_dir_relative_path =
+            Utf8PathBuf::from_path_buf(pathdiff::diff_paths(&temp_dir_path, pwd).unwrap()).unwrap();
+        let fs = async_fs::Fs::new();
+        fs.write(temp_file.path(), b"hello\n").await.unwrap();
+        Test::new(
+            test_spec("/bin/cat")
+                .arguments([format!(
+                    "/mnt/{}",
+                    temp_file.path().file_name().unwrap().to_str().unwrap()
+                )])
+                .mounts([JobMount::Bind {
+                    mount_point: utf8_path_buf!("/mnt"),
+                    local_path: temp_dir_relative_path,
+                    read_only: true,
+                }]),
+        )
+        .expected_status(JobStatus::Exited(0))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"hello\n")))
+        .run()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
