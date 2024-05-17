@@ -1028,7 +1028,7 @@ mod tests {
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::{fs, path::PathBuf, sync::Arc};
+    use std::{collections::HashSet, fs, path::PathBuf, str, sync::Arc};
     use tempfile::{NamedTempFile, TempDir};
     use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::Mutex, task};
 
@@ -1886,5 +1886,64 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_fds_are_leaked() {
+        let spec = test_spec("/bin/ls")
+            .arguments(["/proc/self/fd"])
+            .network(JobNetwork::Loopback)
+            .mounts([
+                JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                },
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/mnt"),
+                    local_path: utf8_path_buf!("/"),
+                    flags: enum_set!(BindMountFlag::Recursive),
+                },
+            ])
+            .devices([JobDevice::Null]);
+        let clock = TickingClock::new();
+        let mount = TarMount::new().await;
+        let spec = JobSpec::from_spec(spec);
+        let (_kill_event_sender, kill_event_receiver) = sync::event();
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = task::spawn_blocking(move || {
+            Executor::new(
+                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                RootBuf::new(tempfile::tempdir().unwrap().into_path()),
+                &clock,
+            )
+            .unwrap()
+            .run_job(
+                &spec,
+                ByteSize::b(100).into(),
+                kill_event_receiver,
+                |fd| mount.spawn(fd),
+                runtime::Handle::current(),
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(status, JobStatus::Exited(0));
+        assert_eq!(stderr, JobOutputResult::None);
+        let JobOutputResult::Inline(contents) = stdout else {
+            panic!("expected JobOutputResult::Inline, got {stdout:?}");
+        };
+        let fds: HashSet<u32> = str::from_utf8(&contents)
+            .unwrap()
+            .split_whitespace()
+            .map(|fd| fd.parse().unwrap())
+            .collect();
+        assert!(fds.is_superset(&HashSet::from([0, 1, 2])));
+        assert_eq!(
+            fds.len(),
+            4,
+            "expected fds to just be stdin, stdout, stderr, and one more, got {fds:?}"
+        );
     }
 }
