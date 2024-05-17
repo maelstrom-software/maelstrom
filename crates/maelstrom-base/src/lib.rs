@@ -108,7 +108,6 @@ impl From<JobDeviceForTomlAndJson> for JobDevice {
 #[derive(Debug, Deserialize, EnumIter, EnumSetType, Serialize)]
 pub enum BindMountFlag {
     ReadOnly,
-    Recursive,
 }
 
 #[derive(Debug, Deserialize, EnumSetType, Serialize)]
@@ -116,14 +115,12 @@ pub enum BindMountFlag {
 #[enumset(serialize_repr = "list")]
 pub enum BindMountFlagForTomlAndJson {
     ReadOnly,
-    Recursive,
 }
 
 impl From<BindMountFlagForTomlAndJson> for BindMountFlag {
     fn from(value: BindMountFlagForTomlAndJson) -> Self {
         match value {
             BindMountFlagForTomlAndJson::ReadOnly => Self::ReadOnly,
-            BindMountFlagForTomlAndJson::Recursive => Self::Recursive,
         }
     }
 }
@@ -885,16 +882,12 @@ mod tests {
 
     #[test]
     fn enumset_bind_mount_flag_for_toml_and_json_deserialized_as_list() {
-        let devices: EnumSet<BindMountFlagForTomlAndJson> =
-            deserialize_value(r#"["read-only", "recursive"]"#);
+        let devices: EnumSet<BindMountFlagForTomlAndJson> = deserialize_value(r#"["read-only"]"#);
         let devices: EnumSet<_> = devices
             .into_iter()
             .map(Into::<BindMountFlag>::into)
             .collect();
-        assert_eq!(
-            devices,
-            enum_set!(BindMountFlag::ReadOnly | BindMountFlag::Recursive)
-        );
+        assert_eq!(devices, enum_set!(BindMountFlag::ReadOnly));
     }
 
     #[test]

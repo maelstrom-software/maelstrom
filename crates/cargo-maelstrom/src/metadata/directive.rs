@@ -349,13 +349,15 @@ mod tests {
                 mounts = [
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = [ "recursive" ] },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = [] },
                 ]
             "#})
             .unwrap(),
             TestDirective {
                 mounts: Some(vec![
-                    JobMountForTomlAndJson::Proc { mount_point: utf8_path_buf!("/proc") },
+                    JobMountForTomlAndJson::Proc {
+                        mount_point: utf8_path_buf!("/proc")
+                    },
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
@@ -364,7 +366,7 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        flags: enum_set!(BindMountFlagForTomlAndJson::Recursive),
+                        flags: Default::default(),
                     },
                 ]),
                 ..Default::default()
@@ -378,7 +380,7 @@ mod tests {
             parse_test_directive(indoc! {r#"
                 added_mounts = [
                     { type = "proc", mount_point = "/proc" },
-                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only", "recursive"] },
+                    { type = "bind", mount_point = "/bind", local_path = "/local", flags = ["read-only"] },
                 ]
             "#})
             .unwrap(),
@@ -388,7 +390,7 @@ mod tests {
                     JobMountForTomlAndJson::Bind {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
-                        flags: enum_set!(BindMountFlagForTomlAndJson::ReadOnly | BindMountFlagForTomlAndJson::Recursive),
+                        flags: enum_set!(BindMountFlagForTomlAndJson::ReadOnly),
                     }
                 ],
                 ..Default::default()

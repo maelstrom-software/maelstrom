@@ -100,7 +100,6 @@ message SysMount {
 
 enum BindMountFlag {
     ReadOnly = 0;
-    Recursive = 2;
 }
 
 message BindMount {

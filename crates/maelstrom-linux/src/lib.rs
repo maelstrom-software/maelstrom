@@ -343,7 +343,7 @@ impl OpenFlags {
     pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
 }
 
-#[derive(BitOr, BitOrAssign, Clone, Copy, Default)]
+#[derive(BitOr, Clone, Copy, Default)]
 pub struct OpenTreeFlags(c_uint);
 
 impl OpenTreeFlags {
