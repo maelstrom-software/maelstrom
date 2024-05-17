@@ -570,20 +570,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| JobError::System(anyhow!("sendmsg: {err}")),
         );
 
-        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr.
-        builder.push(
-            Syscall::CloseRange {
-                first: CloseRangeFirst::AfterStderr,
-                last: CloseRangeLast::Max,
-                flags: CloseRangeFlags::CLOEXEC,
-            },
-            &|err| {
-                syserr(anyhow!(
-                    "setting CLOEXEC on range of open file descriptors: {err}"
-                ))
-            },
-        );
-
         if spec.enable_writable_file_system {
             // Use overlayfs.
             let mut options = BumpString::with_capacity_in(1000, &bump);
@@ -699,7 +685,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             };
             let dirfd = new_fd_slot(&bump);
             local_path_fds.push(dirfd);
-            let mut open_tree_flags = OpenTreeFlags::CLOEXEC | OpenTreeFlags::CLONE;
+            let mut open_tree_flags = OpenTreeFlags::CLONE;
             if flags.contains(BindMountFlag::Recursive) {
                 open_tree_flags |= OpenTreeFlags::RECURSIVE;
             }
@@ -847,6 +833,21 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 &|err| JobError::Execution(anyhow!("chdir: {err}")),
             );
         }
+
+        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr. We do this
+        // last thing, right before the exec, so that we catch any file descriptors opened above.
+        builder.push(
+            Syscall::CloseRange {
+                first: CloseRangeFirst::AfterStderr,
+                last: CloseRangeLast::Max,
+                flags: CloseRangeFlags::CLOEXEC,
+            },
+            &|err| {
+                syserr(anyhow!(
+                    "setting CLOEXEC on range of open file descriptors: {err}"
+                ))
+            },
+        );
 
         // Finally, do the exec.
         let program = bump_c_str(&bump, spec.program.as_str()).map_err(syserr)?;
