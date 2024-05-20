@@ -65,13 +65,14 @@ def format_duration(dur: Duration) -> str:
 
 def get_shared_library_deps(path: str) -> List[str]:
     paths = []
-    output = subprocess.check_output(['ldd', path]).decode()
+    output = subprocess.check_output(["ldd", path]).decode()
     for line in output.splitlines():
-        if 'ld-linux' in line:
-            paths.append(line.split(' => ')[0].strip())
-        elif ' => ' in line:
-            paths.append(line.split(' => ')[1].split(' ')[0])
+        if "ld-linux" in line:
+            paths.append(line.split(" => ")[0].strip())
+        elif " => " in line:
+            paths.append(line.split(" => ")[1].split(" ")[0])
     return paths
+
 
 def wait_for_job(name: str, job: RunJobFuture) -> None:
     result = job.result()
@@ -79,10 +80,6 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
         if result.result.outcome.completed.exited == 0:
             dur = format_duration(result.result.outcome.completed.effects.duration)
             print(f"{name} completed success took {dur}")
-            stdout = result.result.outcome.completed.effects.stdout.inline.decode()
-            sys.stdout.write(stdout)
-            stderr = result.result.outcome.completed.effects.stderr.inline.decode()
-            sys.stderr.write(stderr)
         else:
             print(f"{name} completed failure")
             stdout = result.result.outcome.completed.effects.stdout.inline.decode()
@@ -120,7 +117,13 @@ def main() -> None:
 
     layers.append(
         client.add_layer(
-            StubsLayer(stubs=["/dev/{null,random,urandom}", "/{proc,tmp,root}/", f"{work}/.pytest_cache/"])
+            StubsLayer(
+                stubs=[
+                    "/dev/{null,random,urandom,fuse}",
+                    "/{proc,tmp,root}/",
+                    f"{work}/.pytest_cache/",
+                ]
+            )
         )
     )
 
@@ -132,7 +135,7 @@ def main() -> None:
             PathsLayer(
                 paths=[
                     "py/maelstrom_client/maelstrom-client",
-                    "crates/maelstrom-worker/src/executor-test-deps.tar"
+                    "crates/maelstrom-worker/src/executor-test-deps.tar",
                 ],
                 prefix_options=PrefixOptions(
                     canonicalize=False, follow_symlinks=True, prepend_prefix=work
@@ -144,9 +147,7 @@ def main() -> None:
         client.add_layer(
             PathsLayer(
                 paths=get_shared_library_deps("py/maelstrom_client/maelstrom-client"),
-                prefix_options=PrefixOptions(
-                    canonicalize=False, follow_symlinks=True
-                ),
+                prefix_options=PrefixOptions(canonicalize=False, follow_symlinks=True),
             )
         )
     )
@@ -174,7 +175,7 @@ def main() -> None:
         file = os.path.relpath(file, ".")
 
         case_ = case_.replace(".", "::")
-        script = f"/usr/local/bin/python -m pytest {file}::{case_}"
+        script = f"/usr/local/bin/python -m pytest --verbose {file}::{case_}"
 
         # for debugging
         # script = 'rm -f /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | /static-nc -l 127.0.0.1 9129 > /tmp/f'
@@ -187,7 +188,12 @@ def main() -> None:
             user=0,
             group=0,
             # environment=[EnvironmentSpec(vars={'PYTHONDONTWRITEBYTECODE': '1'}, extend=True)],
-            devices=[JobDevice.Null, JobDevice.Random, JobDevice.Urandom],
+            devices=[
+                JobDevice.Null,
+                JobDevice.Random,
+                JobDevice.Urandom,
+                JobDevice.Fuse,
+            ],
             mounts=[
                 JobMount(tmp=TmpMount(mount_point="/tmp")),
                 JobMount(proc=ProcMount(mount_point="/proc")),
