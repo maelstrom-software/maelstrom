@@ -93,7 +93,7 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
 def main() -> None:
     client = Client(slots=24)
     image = ImageSpec(
-        name="python", tag="3.11.9-bullseye", use_layers=True, use_environment=True
+        name="python", tag="3.11.9-slim", use_layers=True, use_environment=True
     )
 
     work = os.path.abspath(".")
