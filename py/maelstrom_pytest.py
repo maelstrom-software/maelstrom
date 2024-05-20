@@ -81,10 +81,19 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
         print("error:", str(result.result.error).strip())
 
 
+def get_python_version() -> str:
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
 def main() -> None:
     client = Client(slots=24)
+
+    python_version = get_python_version()
     image = ImageSpec(
-        name="python", tag="3.11.9-slim", use_layers=True, use_environment=True
+        name="python",
+        tag=f"{python_version}-slim",
+        use_layers=True,
+        use_environment=True,
     )
 
     work = os.path.abspath(".")
@@ -98,7 +107,7 @@ def main() -> None:
     layers.append(
         client.add_layer(
             GlobLayer(
-                glob=f"{venv_dir}/lib/python3.11/site-packages/**",
+                glob=f"{venv_dir}/lib/python{python_version}/site-packages/**",
                 prefix_options=PrefixOptions(
                     canonicalize=False,
                     follow_symlinks=False,
