@@ -19,6 +19,7 @@ from maelstrom_client import (
     JobMount,
     JobNetwork,
     JobSpec,
+    LayerType,
     PathsLayer,
     PrefixOptions,
     ProcMount,
@@ -90,6 +91,61 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
         print("error:", str(result.result.error).strip())
 
 
+def testing_layers(work: str) -> List[LayerType]:
+    return [
+        StubsLayer(
+            stubs=[
+                "/dev/{null,random,urandom,fuse}",
+                "/{proc,tmp,root}/",
+                f"{work}/.pytest_cache/",
+            ]
+        ),
+        GlobLayer(
+            glob="py/**.{py,pyc}",
+            prefix_options=PrefixOptions(
+                canonicalize=False, follow_symlinks=False, prepend_prefix=work
+            ),
+        ),
+        GlobLayer(
+            glob="target/py/**.{py,pyc}",
+            prefix_options=PrefixOptions(
+                canonicalize=False, follow_symlinks=False, prepend_prefix=work
+            ),
+        ),
+        PathsLayer(
+            paths=[
+                "py/maelstrom_client/maelstrom-client",
+                "crates/maelstrom-worker/src/executor-test-deps.tar",
+            ],
+            prefix_options=PrefixOptions(
+                canonicalize=False, follow_symlinks=True, prepend_prefix=work
+            ),
+        ),
+        PathsLayer(
+            paths=get_shared_library_deps("py/maelstrom_client/maelstrom-client"),
+            prefix_options=PrefixOptions(canonicalize=False, follow_symlinks=True),
+        ),
+    ]
+
+
+def testing_devices() -> List[JobDevice]:
+    return [
+        JobDevice.Null,
+        JobDevice.Random,
+        JobDevice.Urandom,
+        JobDevice.Fuse,
+    ]
+
+
+def testing_mounts(work: str) -> List[JobMount]:
+    return [
+        JobMount(tmp=TmpMount(mount_point="/tmp")),
+        JobMount(proc=ProcMount(mount_point="/proc")),
+        JobMount(tmp=TmpMount(mount_point=f"/{work}/.pytest_cache")),
+        JobMount(tmp=TmpMount(mount_point=f"/root")),
+    ]
+
+
 def main() -> None:
     client = Client(slots=24)
     image = ImageSpec(
@@ -104,64 +160,22 @@ def main() -> None:
 
     print("creating layers")
     layers = []
-    layer = GlobLayer(
-        glob=f"{venv_dir}/lib/python3.11/site-packages/**",
-        prefix_options=PrefixOptions(
-            canonicalize=False,
-            follow_symlinks=False,
-            strip_prefix=f"{venv_dir}/",
-            prepend_prefix=f"/usr/local/",
-        ),
-    )
-    layers.append(client.add_layer(layer))
-
     layers.append(
         client.add_layer(
-            StubsLayer(
-                stubs=[
-                    "/dev/{null,random,urandom,fuse}",
-                    "/{proc,tmp,root}/",
-                    f"{work}/.pytest_cache/",
-                ]
-            )
-        )
-    )
-
-    opt = PrefixOptions(canonicalize=False, follow_symlinks=False, prepend_prefix=work)
-    layers.append(client.add_layer(GlobLayer(glob="**.py", prefix_options=opt)))
-    layers.append(client.add_layer(GlobLayer(glob="**.pyc", prefix_options=opt)))
-    layers.append(
-        client.add_layer(
-            PathsLayer(
-                paths=[
-                    "py/maelstrom_client/maelstrom-client",
-                    "crates/maelstrom-worker/src/executor-test-deps.tar",
-                ],
+            GlobLayer(
+                glob=f"{venv_dir}/lib/python3.11/site-packages/**",
                 prefix_options=PrefixOptions(
-                    canonicalize=False, follow_symlinks=True, prepend_prefix=work
+                    canonicalize=False,
+                    follow_symlinks=False,
+                    strip_prefix=f"{venv_dir}/",
+                    prepend_prefix=f"/usr/local/",
                 ),
             )
         )
     )
-    layers.append(
-        client.add_layer(
-            PathsLayer(
-                paths=get_shared_library_deps("py/maelstrom_client/maelstrom-client"),
-                prefix_options=PrefixOptions(canonicalize=False, follow_symlinks=True),
-            )
-        )
-    )
-    # for debugging
-    # layers.append(
-    #     client.add_layer(
-    #         PathsLayer(
-    #             paths=['static-nc'],
-    #             prefix_options=PrefixOptions(
-    #                 canonicalize=False, follow_symlinks=True
-    #             ),
-    #         )
-    #     )
-    # )
+
+    for layer in testing_layers(work):
+        layers.append(client.add_layer(layer))
 
     print("collecting tests")
     tests = collect_pytest_tests()
@@ -177,9 +191,6 @@ def main() -> None:
         case_ = case_.replace(".", "::")
         script = f"/usr/local/bin/python -m pytest --verbose {file}::{case_}"
 
-        # for debugging
-        # script = 'rm -f /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | /static-nc -l 127.0.0.1 9129 > /tmp/f'
-
         spec = JobSpec(
             program="/bin/sh",
             arguments=["-c", script],
@@ -187,19 +198,8 @@ def main() -> None:
             layers=layers,
             user=0,
             group=0,
-            # environment=[EnvironmentSpec(vars={'PYTHONDONTWRITEBYTECODE': '1'}, extend=True)],
-            devices=[
-                JobDevice.Null,
-                JobDevice.Random,
-                JobDevice.Urandom,
-                JobDevice.Fuse,
-            ],
-            mounts=[
-                JobMount(tmp=TmpMount(mount_point="/tmp")),
-                JobMount(proc=ProcMount(mount_point="/proc")),
-                JobMount(tmp=TmpMount(mount_point=f"/{work}/.pytest_cache")),
-                JobMount(tmp=TmpMount(mount_point=f"/root")),
-            ],
+            devices=testing_devices(),
+            mounts=testing_mounts(work),
             network=JobNetwork.Loopback,
             working_directory=work,
         )

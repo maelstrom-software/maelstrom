@@ -1,4 +1,4 @@
-from .client import Client, RunJobFuture
+from .client import Client, RunJobFuture, LayerType
 
 from .items_pb2 import (
     AddLayerRequest,
