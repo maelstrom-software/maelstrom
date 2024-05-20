@@ -86,6 +86,7 @@ def get_python_version() -> str:
 
 
 def main() -> None:
+    test_filter = sys.argv[1] if len(sys.argv) > 1 else None
     client = Client(slots=24)
 
     python_version = get_python_version()
@@ -131,9 +132,13 @@ def main() -> None:
         if not str(file).endswith(".py"):
             continue
         file = os.path.relpath(file, ".")
-
         case_ = case_.replace(".", "::")
-        script = f"/usr/local/bin/python -m pytest --verbose {file}::{case_}"
+        file_and_case = f'{file}::{case_}'
+
+        if test_filter and test_filter not in file_and_case:
+            continue
+
+        script = f"/usr/local/bin/python -m pytest --verbose {file_and_case}"
 
         spec = JobSpec(
             program="/bin/sh",
@@ -148,7 +153,7 @@ def main() -> None:
             working_directory=work,
         )
         job = client.run_job(spec)
-        t = threading.Thread(target=wait_for_job, args=(f"{file}::{case_}", job))
+        t = threading.Thread(target=wait_for_job, args=(file_and_case, job))
         t.start()
         job_threads.append(t)
     print(f"running {len(job_threads)} jobs")
