@@ -580,6 +580,10 @@ impl FuseFileSystem for LayerFsFuseAdapter {
             FileData::Digest { .. } => Err(Errno::EIO),
         }
     }
+
+    async fn access(&self, _req: Request, _ino: u64, _mask: i32) -> ErrnoResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

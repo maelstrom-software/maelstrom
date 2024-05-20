@@ -5,7 +5,7 @@ pub mod fuser;
 
 use anyhow::Result;
 pub use fuser::{FileAttr, FileType};
-use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
+use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::{self as linux, Errno};
 use maelstrom_util::r#async::await_and_every_sec;
@@ -196,6 +196,12 @@ impl ErrorResponse for ReplyData {
     }
 }
 
+impl ErrorResponse for ReplyEmpty {
+    fn error(self, e: i32) -> impl Future<Output = ()> {
+        ReplyEmpty::error(self, e)
+    }
+}
+
 trait Response {
     type Reply: ErrorResponse;
     fn send(self, reply: Self::Reply) -> impl Future<Output = ()>;
@@ -344,6 +350,16 @@ impl<FileSystemT: FuseFileSystem + Send + Sync + 'static> fuser::Filesystem
             drop(permit);
         });
     }
+
+    async fn access(&mut self, req: &fuser::Request<'_>, ino: u64, mask: i32, reply: ReplyEmpty) {
+        let handler = self.handler.clone();
+        let permit = self.sem.clone().acquire_owned().await.unwrap();
+        let request = req.into();
+        tokio::task::spawn(async move {
+            handle_resp(handler.access(request, ino, mask).await, reply).await;
+            drop(permit);
+        });
+    }
 }
 
 /// Passed to all the [`FuseFileSystem`] request functions and contains information about who is
@@ -438,6 +454,14 @@ impl Response for ReadLinkResponse {
 
     async fn send(self, reply: ReplyData) {
         reply.data(&self.data).await
+    }
+}
+
+impl Response for () {
+    type Reply = ReplyEmpty;
+
+    async fn send(self, reply: ReplyEmpty) {
+        reply.ok().await
     }
 }
 
@@ -565,10 +589,14 @@ pub trait FuseFileSystem {
     fn statfs(&mut self, _req: Request, _ino: u64, reply: ReplyStatfs) {
         reply.statfs(0, 0, 0, 0, 0, 512, 255, 0);
     }
-
-    fn access(&mut self, _req: Request, ino: u64, mask: i32, reply: ReplyEmpty) {
-        debug!("[Not Implemented] access(ino: {:#x?}, mask: {})", ino, mask);
-        reply.error(ENOSYS);
-    }
     */
+
+    fn access(
+        &self,
+        _req: Request,
+        _ino: u64,
+        _mask: i32,
+    ) -> impl Future<Output = ErrnoResult<()>> + Send {
+        async move { Err(Errno::ENOSYS) }
+    }
 }
