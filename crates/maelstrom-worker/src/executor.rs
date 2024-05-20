@@ -701,6 +701,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 JobDevice::Full => dev!("full"),
                 JobDevice::Fuse => dev!("fuse"),
                 JobDevice::Null => dev!("null"),
+                JobDevice::Shm => dev!("shm"),
                 JobDevice::Random => dev!("random"),
                 JobDevice::Tty => dev!("tty"),
                 JobDevice::Urandom => dev!("urandom"),
