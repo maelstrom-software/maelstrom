@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import pytest
+import shutil
 import subprocess
 import sys
 import threading
@@ -48,8 +49,16 @@ def collect_pytest_tests() -> List[pytest.Item]:
 
 
 def create_venv(requirements: str, dest: str) -> None:
-    if not os.path.exists(dest):
-        os.mkdir(dest)
+    os.makedirs(dest, exist_ok=True)
+
+    cached_requirements = os.path.join(dest, "requirements.txt")
+    if os.path.exists(cached_requirements):
+        with open(requirements, "r") as req_in:
+            with open(cached_requirements, "r") as cached_req:
+                if req_in.read() == cached_req.read():
+                    print("no update to venv needed")
+                    return
+
     subprocess.check_output(["python", "-m", "venv", dest])
     subprocess.check_output(
         [
@@ -58,6 +67,7 @@ def create_venv(requirements: str, dest: str) -> None:
             f"source {dest}/bin/activate && pip install --ignore-installed -r {requirements}",
         ],
     )
+    shutil.copyfile(requirements, cached_requirements)
 
 
 def format_duration(dur: Duration) -> str:
@@ -133,7 +143,7 @@ def main() -> None:
             continue
         file = os.path.relpath(file, ".")
         case_ = case_.replace(".", "::")
-        file_and_case = f'{file}::{case_}'
+        file_and_case = f"{file}::{case_}"
 
         if test_filter and test_filter not in file_and_case:
             continue
