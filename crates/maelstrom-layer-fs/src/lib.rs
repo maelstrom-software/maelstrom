@@ -415,7 +415,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
         })
     }
 
-    async fn get_attr(&self, _req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
+    async fn get_attr(&self, req: Request, ino: u64) -> ErrnoResult<AttrResponse> {
         let file = to_einval(self.log.clone(), FileId::try_from(ino))?;
         let reader = to_eio(
             self.log.clone(),
@@ -438,8 +438,8 @@ impl FuseFileSystem for LayerFsFuseAdapter {
                 kind,
                 perm: u32::from(attrs.mode) as u16,
                 nlink: 1,
-                uid: 1000,
-                gid: 1000,
+                uid: req.uid,
+                gid: req.gid,
                 rdev: 0,
                 blksize: 512,
             },
