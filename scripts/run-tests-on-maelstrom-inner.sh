@@ -28,4 +28,5 @@ fi
 
 cargo test --release --doc
 
+py/protobuf_compile.sh
 py/maelstrom_pytest.py
