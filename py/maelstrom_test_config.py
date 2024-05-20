@@ -13,6 +13,8 @@ from maelstrom_client import (
     TmpMount,
 )
 
+ENABLE_WRITABLE_FILE_SYSTEM = False
+
 def get_shared_library_deps(path: str) -> List[str]:
     paths = []
     output = subprocess.check_output(["ldd", path]).decode()

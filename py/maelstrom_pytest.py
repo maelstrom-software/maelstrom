@@ -28,7 +28,12 @@ from maelstrom_client import (
     StubsLayer,
     TmpMount,
 )
-from maelstrom_test_config import testing_layers, testing_devices, testing_mounts
+from maelstrom_test_config import (
+    testing_layers,
+    testing_devices,
+    testing_mounts,
+    ENABLE_WRITABLE_FILE_SYSTEM,
+)
 
 
 class Plugin:
@@ -161,6 +166,7 @@ def main() -> None:
             mounts=testing_mounts(work),
             network=JobNetwork.Loopback,
             working_directory=work,
+            enable_writable_file_system=ENABLE_WRITABLE_FILE_SYSTEM,
         )
         job = client.run_job(spec)
         t = threading.Thread(target=wait_for_job, args=(file_and_case, job))
