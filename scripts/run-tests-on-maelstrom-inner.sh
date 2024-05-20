@@ -26,4 +26,6 @@ if [ $CARGO_MAELSTROM_STATUS != 0 ]; then
 	exit $CARGO_MAELSTROM_STATUS
 fi
 
-exec cargo test --release --doc
+cargo test --release --doc
+
+py/maelstrom_pytest.py
