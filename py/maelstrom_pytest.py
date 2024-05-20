@@ -10,7 +10,6 @@ from contextlib import redirect_stdout
 from io import StringIO
 from maelstrom_client import (
     AddLayerRequest,
-    RunJobFuture,
     Client,
     Duration,
     EnvironmentSpec,
@@ -18,10 +17,14 @@ from maelstrom_client import (
     ImageSpec,
     JobDevice,
     JobMount,
-    JobMountFsType,
+    JobNetwork,
     JobSpec,
+    PathsLayer,
     PrefixOptions,
+    ProcMount,
+    RunJobFuture,
     StubsLayer,
+    TmpMount,
 )
 
 
@@ -38,7 +41,7 @@ class Plugin:
 def collect_pytest_tests() -> List[pytest.Item]:
     plugin = Plugin()
     with redirect_stdout(StringIO()):
-        pytest.main(args=["-n", "1", "--co"], plugins=[plugin])
+        pytest.main(args=["--co"], plugins=[plugin])
     return plugin.items
 
 
@@ -50,7 +53,7 @@ def create_venv(requirements: str, dest: str) -> None:
         [
             "/bin/bash",
             "-c",
-            f"source {dest}/bin/activate && pip install -r {requirements}",
+            f"source {dest}/bin/activate && pip install --ignore-installed -r {requirements}",
         ],
     )
 
@@ -60,12 +63,26 @@ def format_duration(dur: Duration) -> str:
     return f"{dur.seconds}.{int(frac)}s"
 
 
+def get_shared_library_deps(path: str) -> List[str]:
+    paths = []
+    output = subprocess.check_output(['ldd', path]).decode()
+    for line in output.splitlines():
+        if 'ld-linux' in line:
+            paths.append(line.split(' => ')[0].strip())
+        elif ' => ' in line:
+            paths.append(line.split(' => ')[1].split(' ')[0])
+    return paths
+
 def wait_for_job(name: str, job: RunJobFuture) -> None:
     result = job.result()
     if result.result.HasField("outcome"):
         if result.result.outcome.completed.exited == 0:
             dur = format_duration(result.result.outcome.completed.effects.duration)
             print(f"{name} completed success took {dur}")
+            stdout = result.result.outcome.completed.effects.stdout.inline.decode()
+            sys.stdout.write(stdout)
+            stderr = result.result.outcome.completed.effects.stderr.inline.decode()
+            sys.stderr.write(stderr)
         else:
             print(f"{name} completed failure")
             stdout = result.result.outcome.completed.effects.stdout.inline.decode()
@@ -79,11 +96,11 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
 def main() -> None:
     client = Client(slots=24)
     image = ImageSpec(
-        name="python", tag="3.12-alpine3.19", use_layers=True, use_environment=True
+        name="python", tag="3.11.9-bullseye", use_layers=True, use_environment=True
     )
 
     work = os.path.abspath(".")
-    venv_dir = "maelstrom_venv"
+    venv_dir = "target/maelstrom_venv"
 
     print("creating venv")
     create_venv("test-requirements.txt", venv_dir)
@@ -91,7 +108,7 @@ def main() -> None:
     print("creating layers")
     layers = []
     layer = GlobLayer(
-        glob=f"{venv_dir}/lib/python3.12/site-packages/**",
+        glob=f"{venv_dir}/lib/python3.11/site-packages/**",
         prefix_options=PrefixOptions(
             canonicalize=False,
             follow_symlinks=False,
@@ -103,13 +120,47 @@ def main() -> None:
 
     layers.append(
         client.add_layer(
-            StubsLayer(stubs=["/dev/null", "/tmp/", f"{work}/.pytest_cache/"])
+            StubsLayer(stubs=["/dev/{null,random,urandom}", "/{proc,tmp,root}/", f"{work}/.pytest_cache/"])
         )
     )
 
     opt = PrefixOptions(canonicalize=False, follow_symlinks=False, prepend_prefix=work)
     layers.append(client.add_layer(GlobLayer(glob="**.py", prefix_options=opt)))
     layers.append(client.add_layer(GlobLayer(glob="**.pyc", prefix_options=opt)))
+    layers.append(
+        client.add_layer(
+            PathsLayer(
+                paths=[
+                    "py/maelstrom_client/maelstrom-client",
+                    "crates/maelstrom-worker/src/executor-test-deps.tar"
+                ],
+                prefix_options=PrefixOptions(
+                    canonicalize=False, follow_symlinks=True, prepend_prefix=work
+                ),
+            )
+        )
+    )
+    layers.append(
+        client.add_layer(
+            PathsLayer(
+                paths=get_shared_library_deps("py/maelstrom_client/maelstrom-client"),
+                prefix_options=PrefixOptions(
+                    canonicalize=False, follow_symlinks=True
+                ),
+            )
+        )
+    )
+    # for debugging
+    # layers.append(
+    #     client.add_layer(
+    #         PathsLayer(
+    #             paths=['static-nc'],
+    #             prefix_options=PrefixOptions(
+    #                 canonicalize=False, follow_symlinks=True
+    #             ),
+    #         )
+    #     )
+    # )
 
     print("collecting tests")
     tests = collect_pytest_tests()
@@ -123,7 +174,10 @@ def main() -> None:
         file = os.path.relpath(file, ".")
 
         case_ = case_.replace(".", "::")
-        script = f"/usr/local/bin/python -m pytest -n 1 {file}::{case_}"
+        script = f"/usr/local/bin/python -m pytest {file}::{case_}"
+
+        # for debugging
+        # script = 'rm -f /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | /static-nc -l 127.0.0.1 9129 > /tmp/f'
 
         spec = JobSpec(
             program="/bin/sh",
@@ -133,21 +187,20 @@ def main() -> None:
             user=0,
             group=0,
             # environment=[EnvironmentSpec(vars={'PYTHONDONTWRITEBYTECODE': '1'}, extend=True)],
-            devices=[JobDevice.Null],
+            devices=[JobDevice.Null, JobDevice.Random, JobDevice.Urandom],
             mounts=[
-                JobMount(fs_type=JobMountFsType.Tmp, mount_point="/tmp"),
-                JobMount(
-                    fs_type=JobMountFsType.Tmp, mount_point=f"{work}/.pytest_cache"
-                ),
+                JobMount(tmp=TmpMount(mount_point="/tmp")),
+                JobMount(proc=ProcMount(mount_point="/proc")),
+                JobMount(tmp=TmpMount(mount_point=f"/{work}/.pytest_cache")),
+                JobMount(tmp=TmpMount(mount_point=f"/root")),
             ],
+            network=JobNetwork.Loopback,
             working_directory=work,
-            enable_writable_file_system=True,
         )
         job = client.run_job(spec)
         t = threading.Thread(target=wait_for_job, args=(f"{file}::{case_}", job))
         t.start()
         job_threads.append(t)
-        break
     print(f"running {len(job_threads)} jobs")
 
     for t in job_threads:

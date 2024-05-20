@@ -1,0 +1,4 @@
+grpcio==1.62.1
+protobuf==4.24.4
+pytest==8.1.1
+xdg_base_dirs==6.0.1
