@@ -80,7 +80,7 @@ def format_duration(dur: Duration) -> str:
     return f"{dur.seconds}.{int(frac)}s"
 
 
-def wait_for_job(name: str, job: RunJobFuture) -> None:
+def wait_for_job(name: str, job: RunJobFuture, failed: List[str]) -> None:
     result = job.result()
     if result.result.HasField("outcome"):
         if result.result.outcome.completed.exited == 0:
@@ -92,8 +92,10 @@ def wait_for_job(name: str, job: RunJobFuture) -> None:
             sys.stdout.write(stdout)
             stderr = result.result.outcome.completed.effects.stderr.inline.decode()
             sys.stderr.write(stderr)
+            failed.append(name)
     else:
         print("error:", str(result.result.error).strip())
+        failed.append(name)
 
 
 def get_python_version() -> str:
@@ -142,6 +144,7 @@ def main() -> None:
 
     print("enqueuing")
     job_threads = []
+    failed: List[str] = []
     for item in tests:
         (file, _, case_) = item.reportinfo()
         if not str(file).endswith(".py"):
@@ -169,13 +172,18 @@ def main() -> None:
             enable_writable_file_system=ENABLE_WRITABLE_FILE_SYSTEM,
         )
         job = client.run_job(spec)
-        t = threading.Thread(target=wait_for_job, args=(file_and_case, job))
+        t = threading.Thread(target=wait_for_job, args=(file_and_case, job, failed))
         t.start()
         job_threads.append(t)
     print(f"running {len(job_threads)} jobs")
 
     for t in job_threads:
         t.join()
+
+    if failed:
+        print(f"{len(failed)} tests failed")
+        for f in failed:
+            print(f"    {f}")
 
 
 if __name__ == "__main__":
