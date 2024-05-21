@@ -1149,9 +1149,7 @@ where
 {
     let cargo_metadata = read_cargo_metadata(&config)?;
     if extra_options.test_metadata.init {
-        let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
-        metadata::maybe_write_default_test_metadata(&Fs, workspace_dir)?;
-        Ok(ExitCode::SUCCESS)
+        alternative_mains::init(&cargo_metadata.workspace_root)
     } else if extra_options.list.packages {
         alternative_mains::list_packages(
             &cargo_metadata.workspace_packages(),

@@ -15,31 +15,9 @@ use std::str;
 
 /// This file is what we write out for the user when `--init` is provided. It should contain the
 /// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
-const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
+pub const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
 
-const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
-
-/// Write out a default config file to `<workspace-root>/<MAELSTROM_TEST_TOML>` if nothing exists
-/// there already.
-pub fn maybe_write_default_test_metadata(
-    fs: &Fs,
-    workspace_dir: impl AsRef<Root<WorkspaceDir>>,
-) -> Result<()> {
-    struct MaelstromTestTomlFile;
-    let path = workspace_dir
-        .as_ref()
-        .join::<MaelstromTestTomlFile>(MAELSTROM_TEST_TOML);
-    if !fs.exists(&path) {
-        fs.write(&path, DEFAULT_TEST_METADATA)?;
-        println!("Wrote default config to {}.", path.display());
-    } else {
-        println!(
-            "Config already exists at {}. Doing nothing.",
-            path.display()
-        );
-    }
-    Ok(())
-}
+pub const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
