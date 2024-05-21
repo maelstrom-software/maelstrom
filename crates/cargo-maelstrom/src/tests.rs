@@ -77,15 +77,26 @@ impl Default for FakeTestCase {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct FakeTestBinary {
     name: String,
+    kind: ArtifactKind,
     tests: Vec<FakeTestCase>,
 }
 
 impl FakeTestBinary {
     fn artifact_key(&self) -> ArtifactKey {
-        ArtifactKey::new(&self.name, ArtifactKind::Library)
+        ArtifactKey::new(&self.name, self.kind)
+    }
+}
+
+impl Default for FakeTestBinary {
+    fn default() -> Self {
+        Self {
+            name: Default::default(),
+            kind: ArtifactKind::Library,
+            tests: Default::default(),
+        }
     }
 }
 
@@ -145,10 +156,10 @@ impl FakeTests {
                     "targets": [
                         {
                           "kind": [
-                            "lib"
+                            b.kind.short_name(),
                           ],
                           "crate_types": [
-                            "lib"
+                            b.kind.short_name(),
                           ],
                           "name": &b.name,
                           "src_path": "foo.rs",
@@ -181,7 +192,7 @@ impl FakeTests {
                     "executable": exe.to_str().unwrap(),
                     "target": {
                         "name": &b.name,
-                        "kind": ["lib"],
+                        "kind": [b.kind.short_name()],
                         "src_path": "foo.rs"
                     },
                     "profile": {
@@ -553,6 +564,7 @@ fn no_tests_all_tests_sync() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
+            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -579,6 +591,7 @@ fn no_tests_all_tests_sync_listing() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
+            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -601,6 +614,7 @@ fn two_tests_all_tests_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -608,6 +622,7 @@ fn two_tests_all_tests_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -641,6 +656,7 @@ fn two_tests_all_tests_sync_listing() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -648,6 +664,7 @@ fn two_tests_all_tests_sync_listing() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -666,7 +683,7 @@ fn two_tests_all_tests_sync_listing() {
             foo
         "},
         indoc! {"
-            bar (library)
+            bar (binary)
             foo (library)
         "},
         indoc! {"
@@ -683,6 +700,7 @@ fn four_tests_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it2".into(),
                     ..Default::default()
@@ -690,6 +708,7 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
+                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "testy".into(),
                     ..Default::default()
@@ -697,6 +716,7 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "bin".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -704,6 +724,7 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -720,7 +741,7 @@ fn four_tests_filtered_sync() {
                 "name.equals(test_it)".into(),
                 "name.equals(test_it2)".into()
             ],
-            vec!["package.equals(bin)".into()]
+            vec!["package.equals(bin) || bin".into()]
         ),
         "\
         bar test_it2...........................OK   1.000s\n\
@@ -740,6 +761,7 @@ fn four_tests_filtered_sync_listing() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it2".into(),
                     ..Default::default()
@@ -747,6 +769,7 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "baz".into(),
+                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "testy".into(),
                     ..Default::default()
@@ -754,6 +777,7 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "bin".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -761,6 +785,7 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -776,7 +801,7 @@ fn four_tests_filtered_sync_listing() {
             "name.equals(test_it)".into(),
             "name.equals(test_it2)".into(),
         ],
-        vec!["package.equals(bin)".into()],
+        vec!["package.equals(bin) || bin".into()],
         indoc! {"
             bar
             baz
@@ -784,7 +809,6 @@ fn four_tests_filtered_sync_listing() {
         "},
         indoc! {"
             bar (library)
-            baz (library)
             foo (library)
         "},
         indoc! {"
@@ -801,6 +825,7 @@ fn three_tests_single_package_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -808,6 +833,7 @@ fn three_tests_single_package_sync() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -815,6 +841,7 @@ fn three_tests_single_package_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -847,6 +874,7 @@ fn three_tests_single_package_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![
                     FakeTestCase {
                         name: "test_it".into(),
@@ -860,6 +888,7 @@ fn three_tests_single_package_filtered_sync() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -867,6 +896,7 @@ fn three_tests_single_package_filtered_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -899,6 +929,7 @@ fn ignored_test_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -906,6 +937,7 @@ fn ignored_test_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -913,6 +945,7 @@ fn ignored_test_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ignored: true,
@@ -950,6 +983,7 @@ fn two_tests_all_tests_sync_quiet() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -957,6 +991,7 @@ fn two_tests_all_tests_sync_quiet() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -1032,6 +1067,7 @@ fn failed_tests() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: failed_outcome.clone(),
@@ -1040,6 +1076,7 @@ fn failed_tests() {
             },
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: failed_outcome.clone(),
@@ -1096,6 +1133,7 @@ fn waiting_for_artifacts() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::WaitingForArtifacts,
@@ -1104,6 +1142,7 @@ fn waiting_for_artifacts() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::WaitingForArtifacts,
@@ -1130,6 +1169,7 @@ fn pending() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Pending,
@@ -1138,6 +1178,7 @@ fn pending() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Pending,
@@ -1164,6 +1205,7 @@ fn running() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1172,6 +1214,7 @@ fn running() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1198,6 +1241,7 @@ fn complete() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Complete,
@@ -1206,6 +1250,7 @@ fn complete() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1233,6 +1278,7 @@ fn complete_quiet() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Complete,
@@ -1241,6 +1287,7 @@ fn complete_quiet() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1264,6 +1311,7 @@ fn expected_count_updates_packages() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -1271,6 +1319,7 @@ fn expected_count_updates_packages() {
             },
             FakeTestBinary {
                 name: "bar".into(),
+                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: JobOutcome::TimedOut(JobEffects {
@@ -1303,6 +1352,7 @@ fn expected_count_updates_packages() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
+            kind: ArtifactKind::Library,
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
                 expected_estimated_duration: Some(Duration::from_secs(1)),
@@ -1331,6 +1381,7 @@ fn expected_count_updates_cases() {
     let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
+            kind: ArtifactKind::Library,
             name: "foo".into(),
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
@@ -1358,6 +1409,7 @@ fn expected_count_updates_cases() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
+            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -1383,6 +1435,7 @@ fn filtering_none_does_not_build() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
+            kind: ArtifactKind::Library,
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
                 ..Default::default()

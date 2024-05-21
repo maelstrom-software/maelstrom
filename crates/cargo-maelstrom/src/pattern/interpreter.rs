@@ -43,6 +43,16 @@ impl ArtifactKind {
             Self::Library
         }
     }
+
+    pub fn short_name(&self) -> &'static str {
+        match self {
+            ArtifactKind::Library => "lib",
+            ArtifactKind::Binary => "bin",
+            ArtifactKind::Test => "test",
+            ArtifactKind::Benchmark => "bench",
+            ArtifactKind::Example => "example",
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
