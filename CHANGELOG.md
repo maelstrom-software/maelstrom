@@ -73,6 +73,10 @@ even if all other jobs are going to a remote cluster.
   can have one of the three values: `"disabled"`, `"local"`, or `"loopback"`.
   The new `"local"` option is used to give a job unfettered access to the local
   machine's network.
+- Clarified that when running `--list-binaries`, the provided filters match
+  against the package and the binary. Previously, we would only match against
+  the package in these scenarios, which was confusing.
+- Added the `shm` device type.
 
 ### `maelstrom-run`
 - Added a new `container-image-depot-root` configuration value. The default is
@@ -98,10 +102,11 @@ even if all other jobs are going to a remote cluster.
   `cargo-maelstrom`.
 - The `environment` field now support multiple layers of substitution, just
   like in `cargo-maelstrom`.
+- Added the `shm` device type.
 
 ### Client Internals
 - Changed the gRPC protobuf to remove cruft and make it easier to use.
-- The client process now does environment variable substitution, so it's not
+- The client process now does environment variable substitution, so it's now
   available to all clients, not just Rust.
 
 ### `maelstrom-worker`
