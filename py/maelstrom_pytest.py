@@ -7,6 +7,7 @@ import sys
 import threading
 
 from _pytest.nodes import Node as PytestNode
+from tqdm import tqdm
 from typing import Optional, Sequence, Tuple, List
 from contextlib import redirect_stdout
 from io import StringIO
@@ -81,14 +82,14 @@ def format_duration(dur: Duration) -> str:
     return f"{dur.seconds}.{int(frac)}s"
 
 
-def wait_for_job(name: str, job: RunJobFuture, failed: List[str]) -> None:
+def wait_for_job(name: str, job: RunJobFuture, failed: List[str], bar: tqdm) -> None:
     result = job.result()
     if result.result.HasField("outcome"):
         if result.result.outcome.completed.exited == 0:
             dur = format_duration(result.result.outcome.completed.effects.duration)
-            print(f"{name} completed success took {dur}")
+            bar.write(f"{name} completed success took {dur}")
         else:
-            print(f"{name} completed failure")
+            bar.write(f"{name} completed failure")
             stdout = result.result.outcome.completed.effects.stdout.inline.decode()
             sys.stdout.write(stdout)
             stderr = result.result.outcome.completed.effects.stderr.inline.decode()
@@ -97,6 +98,7 @@ def wait_for_job(name: str, job: RunJobFuture, failed: List[str]) -> None:
     else:
         print("error:", str(result.result.error).strip())
         failed.append(name)
+    bar.update()
 
 
 def get_python_version() -> str:
@@ -184,7 +186,8 @@ def main() -> None:
     print("collecting tests")
     tests = collect_pytest_tests()
 
-    print("enqueuing")
+    bar = tqdm(total=len(tests))
+    bar.write(f"enqueuing {len(tests)} tests")
     job_threads = []
     failed: List[str] = []
     for item in tests:
@@ -209,11 +212,11 @@ def main() -> None:
             enable_writable_file_system=ENABLE_WRITABLE_FILE_SYSTEM,
         )
         job = client.run_job(spec)
-        t = threading.Thread(target=wait_for_job, args=(test_name, job, failed))
+        t = threading.Thread(target=wait_for_job, args=(test_name, job, failed, bar))
         t.start()
         job_threads.append(t)
 
-    print(f"running {len(job_threads)} jobs")
+    bar.write(f"done enqueuing, waiting for {len(job_threads)} jobs")
 
     for t in job_threads:
         t.join()

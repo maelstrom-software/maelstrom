@@ -52,6 +52,7 @@ let
       python3
       python311Packages.grpcio-tools
       python311Packages.pytest
+      python311Packages.tqdm
       python311Packages.types-protobuf
       python311Packages.xdg-base-dirs
       mdbook
