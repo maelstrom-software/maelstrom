@@ -1,15 +1,20 @@
 # Local Worker
 
-The `cargo-maelstrom` and `maelstrom-run` clients can run in "standalone mode".
-In this mode, they don't submit jobs to a Maelstrom cluster, but instead run
-the jobs locally, using a local worker.
+Every client &mdash; like <span style="white-space: nowrap;">`cargo-maelstrom`</span> and 
+<span style="white-space: nowrap;">`maelstrom-run`</span> &mdash; 
+has a local worker. This worker is used two in two scenarios.
 
-Standalone mode is specified when no `broker` [configuration value](config.md)
-is provided.
+First, if no `broker` [configuration value](config.md) is specified, then the
+client runs in **standalone mode**. In this mode, all jobs are handled by the local worker.
 
-Currently, clients won't use the local worker if they are connected to a cluster.
-We will change this in the future so that the local worker is utilized even
-when the client is connected to a cluster.
+Second, some jobs are considered **local-only**. These jobs must be run on the
+local machine because they utilize some resource that is only avaiable locally.
+These jobs are always run on the local worker, even if the client is connected
+to a broker.
+
+Currently, when a client is connected to a broker, it will only use the local
+worker for local-only jobs. We will change this in the future so that the local
+worker is utilized even when the client is connected to a cluster.
 
 Clients have the following configuration values to configure their local
 workers:
@@ -20,7 +25,7 @@ Value                                                    | Type    | Description
 <span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured stdout and stderr](#inline-limit) | `"1 MB"`
 `slots`                                                  | number  | [job slots available](#slots)                                 | 1 per CPU
 
-## `cache-size`
+## <span style="white-space: nowrap;">`cache-size`</span>
 
 The <span style="white-space: nowrap;">`cache-size`</span> configuration value
 specifies a target size for the cache. Its default value is 1&nbsp;GB. When the
@@ -38,7 +43,7 @@ style="white-space: nowrap;">`cache-size`</span>.
 For these reasons, it's important to leave some wiggle room in the <span
 style="white-space: nowrap;">`cache-size`</span> setting.
 
-## `inline-limit`
+## <span style="white-space: nowrap;">`inline-limit`</span>
 
 The <span style="white-space: nowrap;">`inline-limit`</span> configuration
 value specifies how many bytes of stdout or stderr will be captured from jobs.

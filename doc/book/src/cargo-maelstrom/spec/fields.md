@@ -61,7 +61,8 @@ Sometimes it makes sense to build your test's container from an OCI container
 image. For example, when we do integration tests of `cargo-maelstrom`, we want
 to run in an environment with `cargo` installed.
 
-This is what the `image` field is for.
+This is what the `image` field is for. It is used to set the job spec's
+[`image`](../../spec.md#image) field.
 
 ```toml
 [[directives]]
@@ -239,15 +240,24 @@ mounts = [
     { fs_type = "tmp", mount_point = "/tmp" },
     { fs_type = "proc", mount_point = "/proc" },
     { fs_type = "sys", mount_point = "/sys" },
+    { fs_type = "bind", mount_point = "/mnt", local_path = "data-for-job", read_only = true },
 ]
 ```
 
 This field sets the [`mounts`](../../spec.md#mounts) field of
 the job spec. It must be a list of tables, each of which must have two fields:
   - `fs_type`: This indicates the type of special file system to mount, and
-    must be one of the following strings: `"tmp"`, `"proc"`, or `"sys"`.
+    must be one of the following strings: `"tmp"`, `"proc"`, `"sys"`, or `"bind"`.
   - `mount_point`: This must be a string. It specifies the mount point within
     the container for the file system.
+  - `local_path`: This must be provided for `"bind"` mounts, and may not be
+    provided for any other type. It must be a string. It specifies the local
+    directory to bind into the job's container. See [here](../../spec.md#bind)
+    for more information.
+  - `read_only`: This may only be provided for `"bind"` mounts. It is optional
+    and defaults to `false`. It specifies whether the mounted directory should
+    be read-only or read-write. See [here](../../spec.md#bind) for more
+    information.
 
 ## `added_mounts`
 
@@ -267,6 +277,7 @@ the job spec. It must be a list of strings, whose elements must be one of:
   - `"fuse"`
   - `"null"`
   - `"random"`
+  - `"shm"`
   - `"tty"`
   - `"urandom"`
   - `"zero"`
@@ -293,16 +304,15 @@ the job spec. It must be a string.
 This field can't be set in the same directive as `image` if the `image.use`
 contains `"working_directory"`.
 
-## `enable_loopback`
+## `network`
 
 ```toml
 [[directives]]
-enable_loopback = true
+network = "loopback"
 ```
 
-This field sets the
-[`enable_loopback`](../../spec.md#enable_loopback) field of
-the job spec. It must be a boolean.
+This field sets the [`network`](../../spec.md#nework) field of the job spec. It
+must be a string. It defaults to `"disabled"`.
 
 ## `enable_writable_file_system`
 
