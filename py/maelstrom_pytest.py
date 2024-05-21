@@ -6,7 +6,8 @@ import subprocess
 import sys
 import threading
 
-from typing import Sequence, List
+from _pytest.nodes import Node as PytestNode
+from typing import Optional, Sequence, Tuple, List
 from contextlib import redirect_stdout
 from io import StringIO
 from maelstrom_client import (
@@ -102,6 +103,47 @@ def get_python_version() -> str:
     return f"{sys.version_info.major}.{sys.version_info.minor}"
 
 
+def build_test_name(start: pytest.Item) -> str:
+    base_parent = None
+
+    def get_info(item: PytestNode) -> Optional[Tuple[str, str]]:
+        if hasattr(item, "reportinfo"):
+            (file, _, case) = item.reportinfo()
+            return (str(file), case)
+        else:
+            return None
+
+    computed_file = None
+    computed_case = None
+
+    i: PytestNode = start
+    while True:
+        i_info = get_info(i)
+        if i_info is not None:
+            (file, case_) = i_info
+            computed_file = file
+
+            if computed_case is None:
+                computed_case = case_.replace(".", "::")
+            else:
+                computed_case = case_.replace(".", "::") + "::" + computed_case
+
+            if not file.endswith(".py"):
+                computed_case = os.path.basename(file) + "::" + computed_case
+
+            if file.endswith(".py"):
+                break
+        assert i.parent is not None
+        i = i.parent
+    assert computed_file is not None
+    assert computed_case is not None
+
+    base_parent = i
+
+    computed_file = os.path.relpath(computed_file, ".")
+    return f"{computed_file}::{computed_case}"
+
+
 def main() -> None:
     test_filter = sys.argv[1] if len(sys.argv) > 1 else None
     client = Client(slots=24)
@@ -146,17 +188,12 @@ def main() -> None:
     job_threads = []
     failed: List[str] = []
     for item in tests:
-        (file, _, case_) = item.reportinfo()
-        if not str(file).endswith(".py"):
-            continue
-        file = os.path.relpath(file, ".")
-        case_ = case_.replace(".", "::")
-        file_and_case = f"{file}::{case_}"
+        test_name = build_test_name(item)
 
-        if test_filter and test_filter not in file_and_case:
+        if test_filter and test_filter not in test_name:
             continue
 
-        script = f"/usr/local/bin/python -m pytest --verbose {file_and_case}"
+        script = f"/usr/local/bin/python -m pytest --verbose {test_name}"
 
         spec = JobSpec(
             program="/bin/sh",
@@ -172,9 +209,10 @@ def main() -> None:
             enable_writable_file_system=ENABLE_WRITABLE_FILE_SYSTEM,
         )
         job = client.run_job(spec)
-        t = threading.Thread(target=wait_for_job, args=(file_and_case, job, failed))
+        t = threading.Thread(target=wait_for_job, args=(test_name, job, failed))
         t.start()
         job_threads.append(t)
+
     print(f"running {len(job_threads)} jobs")
 
     for t in job_threads:
