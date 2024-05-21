@@ -56,7 +56,6 @@ use visitor::{JobStatusTracker, JobStatusVisitor};
 #[derive(Debug)]
 pub enum ListAction {
     ListTests,
-    ListBinaries,
 }
 
 /// Returns `true` if the given `CargoPackage` matches the given pattern
@@ -910,28 +909,6 @@ where
     }
 }
 
-fn list_binaries<ProgressIndicatorT>(
-    ind: &ProgressIndicatorT,
-    packages: &BTreeMap<PackageId, CargoPackage>,
-) where
-    ProgressIndicatorT: ProgressIndicator,
-{
-    let printer = ind.lock_printing();
-    for pkg in packages.values() {
-        for tgt in &pkg.targets {
-            if tgt.test {
-                let pkg_kind = pattern::ArtifactKind::from_target(tgt);
-                let mut binary_name = String::new();
-                if tgt.name != pkg.name {
-                    binary_name += " ";
-                    binary_name += &tgt.name;
-                }
-                printer.println(format!("{}{} ({})", &pkg.name, binary_name, pkg_kind));
-            }
-        }
-    }
-}
-
 #[derive(Default)]
 struct LoggingOutputInner {
     prog: Option<Box<dyn io::Write + Send + Sync + 'static>>,
@@ -1012,10 +989,6 @@ where
         .logging_output
         .update(progress::ProgressWriteAdapter::new(prog.clone()));
     slog::debug!(state.log, "main app created");
-
-    if let Some(ListAction::ListBinaries) = state.queuing_state.list_action {
-        list_binaries(&prog, &state.queuing_state.packages);
-    }
 
     let queuing = JobQueuing::new(
         state.log.clone(),
@@ -1157,6 +1130,13 @@ where
             &extra_options.exclude,
             &mut io::stdout().lock(),
         )
+    } else if extra_options.list.binaries {
+        alternative_mains::list_binaries(
+            &cargo_metadata.workspace_packages(),
+            &extra_options.include,
+            &extra_options.exclude,
+            &mut io::stdout().lock(),
+        )
     } else {
         let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
         let logging_output = LoggingOutput::default();
@@ -1164,7 +1144,6 @@ where
 
         let list_action = match (extra_options.list.tests, extra_options.list.binaries) {
             (true, _) => Some(ListAction::ListTests),
-            (_, true) => Some(ListAction::ListBinaries),
             (_, _) => None,
         };
 

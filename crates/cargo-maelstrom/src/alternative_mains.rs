@@ -34,3 +34,28 @@ pub fn list_packages(
     }
     Ok(ExitCode::SUCCESS)
 }
+
+pub fn list_binaries(
+    workspace_packages: &[&Package],
+    include: &[String],
+    exclude: &[String],
+    out: &mut impl Write,
+) -> Result<ExitCode> {
+    let filter = pattern::compile_filter(include, exclude)?;
+    for package in workspace_packages {
+        if crate::filter_package(package, &filter) {
+            for target in &package.targets {
+                if target.test {
+                    let target_kind = pattern::ArtifactKind::from_target(target);
+                    let mut binary_name = String::new();
+                    if target.name != package.name {
+                        binary_name += " ";
+                        binary_name += &target.name;
+                    }
+                    writeln!(out, "{}{} ({})", &package.name, binary_name, target_kind)?;
+                }
+            }
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
