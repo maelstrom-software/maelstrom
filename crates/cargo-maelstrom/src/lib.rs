@@ -1,3 +1,4 @@
+pub mod alternative_mains;
 pub mod artifacts;
 pub mod cargo;
 pub mod cli;
@@ -56,7 +57,6 @@ use visitor::{JobStatusTracker, JobStatusVisitor};
 pub enum ListAction {
     ListTests,
     ListBinaries,
-    ListPackages,
 }
 
 /// Returns `true` if the given `CargoPackage` matches the given pattern
@@ -910,18 +910,6 @@ where
     }
 }
 
-fn list_packages<ProgressIndicatorT>(
-    ind: &ProgressIndicatorT,
-    packages: &BTreeMap<PackageId, CargoPackage>,
-) where
-    ProgressIndicatorT: ProgressIndicator,
-{
-    let printer = ind.lock_printing();
-    for pkg in packages.values() {
-        printer.println(pkg.name.to_string());
-    }
-}
-
 fn list_binaries<ProgressIndicatorT>(
     ind: &ProgressIndicatorT,
     packages: &BTreeMap<PackageId, CargoPackage>,
@@ -1025,11 +1013,8 @@ where
         .update(progress::ProgressWriteAdapter::new(prog.clone()));
     slog::debug!(state.log, "main app created");
 
-    match state.queuing_state.list_action {
-        Some(ListAction::ListPackages) => list_packages(&prog, &state.queuing_state.packages),
-
-        Some(ListAction::ListBinaries) => list_binaries(&prog, &state.queuing_state.packages),
-        _ => {}
+    if let Some(ListAction::ListBinaries) = state.queuing_state.list_action {
+        list_binaries(&prog, &state.queuing_state.packages);
     }
 
     let queuing = JobQueuing::new(
@@ -1163,78 +1148,80 @@ where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
     let cargo_metadata = read_cargo_metadata(&config)?;
-    let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
-    let fs = Fs::new();
     if extra_options.test_metadata.init {
-        metadata::maybe_write_default_test_metadata(&fs, workspace_dir)?;
-        return Ok(ExitCode::SUCCESS);
-    }
+        let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
+        metadata::maybe_write_default_test_metadata(&Fs, workspace_dir)?;
+        Ok(ExitCode::SUCCESS)
+    } else if extra_options.list.packages {
+        alternative_mains::list_packages(
+            &cargo_metadata.workspace_packages(),
+            &extra_options.include,
+            &extra_options.exclude,
+            &mut io::stdout().lock(),
+        )
+    } else {
+        let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
+        let logging_output = LoggingOutput::default();
+        let log = logger.build(logging_output.clone());
 
-    let logging_output = LoggingOutput::default();
-    let log = logger.build(logging_output.clone());
+        let list_action = match (extra_options.list.tests, extra_options.list.binaries) {
+            (true, _) => Some(ListAction::ListTests),
+            (_, true) => Some(ListAction::ListBinaries),
+            (_, _) => None,
+        };
 
-    let list_action = match (
-        extra_options.list.tests,
-        extra_options.list.binaries,
-        extra_options.list.packages,
-    ) {
-        (true, _, _) => Some(ListAction::ListTests),
-        (_, true, _) => Some(ListAction::ListBinaries),
-        (_, _, true) => Some(ListAction::ListPackages),
-        (_, _, _) => None,
-    };
+        let target_dir = Root::<TargetDir>::new(cargo_metadata.target_directory.as_std_path());
+        let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
+        let state_dir = maelstrom_target_dir.join::<StateDir>("state");
+        let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
 
-    let target_dir = Root::<TargetDir>::new(cargo_metadata.target_directory.as_std_path());
-    let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
-    let state_dir = maelstrom_target_dir.join::<StateDir>("state");
-    let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
+        Fs.create_dir_all(&state_dir)?;
+        Fs.create_dir_all(&cache_dir)?;
 
-    fs.create_dir_all(&state_dir)?;
-    fs.create_dir_all(&cache_dir)?;
-
-    let deps = DefaultMainAppDeps::new(
-        bg_proc,
-        config.broker,
-        workspace_dir.transmute::<ProjectDir>(),
-        &state_dir,
-        config.container_image_depot_root,
-        cache_dir,
-        config.cache_size,
-        config.inline_limit,
-        config.slots,
-        log.clone(),
-    )?;
-
-    let state = MainAppState::new(
-        deps,
-        extra_options.include,
-        extra_options.exclude,
-        list_action,
-        stderr_is_tty,
-        workspace_dir,
-        &cargo_metadata.workspace_packages(),
-        &state_dir,
-        target_dir,
-        config.cargo_feature_selection_options,
-        config.cargo_compilation_options,
-        config.cargo_manifest_options,
-        logging_output,
-        log,
-    )?;
-
-    let res = std::thread::scope(|scope| {
-        let mut app = main_app_new(
-            &state,
-            stdout_is_tty,
-            config.quiet,
-            terminal,
-            progress::DefaultProgressDriver::new(scope),
-            config.timeout.map(Timeout::new),
+        let deps = DefaultMainAppDeps::new(
+            bg_proc,
+            config.broker,
+            workspace_dir.transmute::<ProjectDir>(),
+            &state_dir,
+            config.container_image_depot_root,
+            cache_dir,
+            config.cache_size,
+            config.inline_limit,
+            config.slots,
+            log.clone(),
         )?;
-        while !app.enqueue_one()?.is_done() {}
-        app.drain()?;
-        app.finish()
-    });
-    drop(state);
-    maybe_print_build_error(res)
+
+        let state = MainAppState::new(
+            deps,
+            extra_options.include,
+            extra_options.exclude,
+            list_action,
+            stderr_is_tty,
+            workspace_dir,
+            &cargo_metadata.workspace_packages(),
+            &state_dir,
+            target_dir,
+            config.cargo_feature_selection_options,
+            config.cargo_compilation_options,
+            config.cargo_manifest_options,
+            logging_output,
+            log,
+        )?;
+
+        let res = std::thread::scope(|scope| {
+            let mut app = main_app_new(
+                &state,
+                stdout_is_tty,
+                config.quiet,
+                terminal,
+                progress::DefaultProgressDriver::new(scope),
+                config.timeout.map(Timeout::new),
+            )?;
+            while !app.enqueue_one()?.is_done() {}
+            app.drain()?;
+            app.finish()
+        });
+        drop(state);
+        maybe_print_build_error(res)
+    }
 }

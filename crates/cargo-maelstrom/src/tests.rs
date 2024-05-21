@@ -1,4 +1,5 @@
 use crate::{
+    alternative_mains,
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     config::Quiet,
     main_app_new,
@@ -10,6 +11,7 @@ use crate::{
 use anyhow::Result;
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use indicatif::InMemoryTerm;
+use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ArtifactType, ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult,
@@ -485,6 +487,22 @@ fn run_all_tests_sync(
     )
 }
 
+fn list_packages_sync(
+    fake_tests: &FakeTests,
+    include_filter: &Vec<String>,
+    exclude_filter: &Vec<String>,
+) -> String {
+    let mut out = Vec::new();
+    alternative_mains::list_packages(
+        &fake_tests.packages().iter().collect::<Vec<_>>(),
+        include_filter,
+        exclude_filter,
+        &mut out,
+    )
+    .unwrap();
+    String::from_utf8(out).unwrap()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn list_all_tests_sync(
     tmp_dir: &Root<TmpDir>,
@@ -516,14 +534,7 @@ fn list_all_tests_sync(
     );
     assert_eq!(listing, expected_binaries);
 
-    let listing = run_or_list_all_tests_sync(
-        tmp_dir,
-        fake_tests.clone(),
-        quiet.clone(),
-        include_filter.clone(),
-        exclude_filter.clone(),
-        Some(ListAction::ListPackages),
-    );
+    let listing = list_packages_sync(&fake_tests, &include_filter, &exclude_filter);
     assert_eq!(listing, expected_packages);
 }
 
@@ -568,7 +579,7 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        "foo",
+        "foo\n",
         "foo (library)",
         "",
     );
@@ -641,18 +652,18 @@ fn two_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        "\
-        bar\n\
-        foo\
-        ",
-        "\
-        bar (library)\n\
-        foo (library)\
-        ",
-        "\
-        bar test_it\n\
-        foo test_it\
-        ",
+        indoc! {"
+            bar
+            foo
+        "},
+        indoc! {"
+            bar (library)
+            foo (library)\
+        "},
+        indoc! {"
+            bar test_it
+            foo test_it\
+        "},
     );
 }
 
@@ -757,20 +768,20 @@ fn four_tests_filtered_sync_listing() {
             "name.equals(test_it2)".into(),
         ],
         vec!["package.equals(bin)".into()],
-        "\
-        bar\n\
-        baz\n\
-        foo\
-        ",
-        "\
-        bar (library)\n\
-        baz (library)\n\
-        foo (library)\
-        ",
-        "\
-        bar test_it2\n\
-        foo test_it\
-        ",
+        indoc! {"
+            bar
+            baz
+            foo
+        "},
+        indoc! {"
+            bar (library)
+            baz (library)
+            foo (library)\
+        "},
+        indoc! {"
+            bar test_it2
+            foo test_it\
+        "},
     );
 }
 
