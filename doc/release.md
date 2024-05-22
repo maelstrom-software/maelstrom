@@ -121,9 +121,9 @@ Build the code with the release profile
 cargo build --release
 ```
 
-The uploda the artifacts to GitHub:
+The upload the artifacts to GitHub:
 ```bash
-cargo xtask distribute v$VERSION
+cargo xtask distribute "v$VERSION"
 ```
 
 Repeat this step on all supported architectures. Make sure you are at the release revision.
@@ -183,3 +183,38 @@ server](https://discord.gg/8xN4QvjjmF). Announce the release.
 Go to the [discussions page](https://github.com/maelstrom-software/maelstrom/discussions).
 Announce the release. Pin the new release announcement and unpin the old
 release announcement.
+
+Make a "This Week in Rust" pull request. Go to [our
+fork](https://github.com/maelstrom-software/this-week-in-rust), sync it, then create a PR.
+
+## Make Build Artifacts for ARM
+
+Turn on the AWS ARM builder instance. Ssh in using the `Maelstrom\ Dev.pem` key.
+
+Set the `VERSION` environment variable:
+
+```bash
+VERSION=1.2.0
+```
+
+Check out the current version:
+```bash
+git checkout "v$VERSION"
+```
+
+Build:
+```bash
+cargo build --release
+```
+
+Validate `gh` login status:
+```bash
+gh auth status
+```
+
+Now push the just-built artifact:
+```bash
+cargo xtask distribute "v$VERSION"
+```
+
+Then stop the instance.
