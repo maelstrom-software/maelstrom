@@ -1,6 +1,6 @@
 [project]
 name = "maelstrom-client"
-version = "0.9.0-dev"
+version = "0.10.0-dev"
 
 [project.urls]
 Homepage = "https://maelstrom-software.com"
