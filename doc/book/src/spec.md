@@ -411,7 +411,7 @@ system at the provided mount point.
 
 ### Bind
 
-```
+```protobuf
 message BindMount {
     string mount_point = 1;
     string local_path = 2;
