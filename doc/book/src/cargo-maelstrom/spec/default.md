@@ -18,9 +18,9 @@ layers = [
 
 # Provide /tmp, /proc, /sys. These are used pretty commonly by tests.
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
-    { fs_type = "sys", mount_point = "/sys" },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
 ]
 
 # Mount these devices in /dev/. These are used pretty commonly by tests.

@@ -24,7 +24,7 @@ include_shared_libraries = true
 
 [[directives]]
 filter = "package.equals(maelstrom-util) && name.equals(io::splicer)"
-added_mounts = [{ fs_type = "proc", mount_point = "/proc" }]
+added_mounts = [{ type = "proc", mount_point = "/proc" }]
 added_layers = [{ stubs = [ "proc/" ] }]
 ```
 

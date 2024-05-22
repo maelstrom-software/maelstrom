@@ -21,7 +21,7 @@ package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||
 package.equals(maelstrom-util)"""
 layers = [{ stubs = ["/tmp/"] }]
-mounts = [{ fs_type = "tmp", mount_point = "/tmp" }]
+mounts = [{ type = "tmp", mount_point = "/tmp" }]
 ```
 
 ## `include_shared_libraries`
@@ -237,16 +237,16 @@ any of the other environment variables.
 ```toml
 [[directives]]
 mounts = [
-    { fs_type = "tmp", mount_point = "/tmp" },
-    { fs_type = "proc", mount_point = "/proc" },
-    { fs_type = "sys", mount_point = "/sys" },
-    { fs_type = "bind", mount_point = "/mnt", local_path = "data-for-job", read_only = true },
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "bind", mount_point = "/mnt", local_path = "data-for-job", read_only = true },
 ]
 ```
 
 This field sets the [`mounts`](../../spec.md#mounts) field of
 the job spec. It must be a list of tables, each of which must have two fields:
-  - `fs_type`: This indicates the type of special file system to mount, and
+  - `type`: This indicates the type of special file system to mount, and
     must be one of the following strings: `"tmp"`, `"proc"`, `"sys"`, or `"bind"`.
   - `mount_point`: This must be a string. It specifies the mount point within
     the container for the file system.
