@@ -185,7 +185,7 @@ message EnvironmentSpec {
 The `environment` field specifies the environment variables passed to
 [`program`](#program). This will be a map of key-value pairs of strings.
 
-The compute the environment-variable map for a job, the client starts with
+To compute the environment-variable map for a job, the client starts with
 either an empty map or with the environment variables provided by an image
 provided by the [`image`](#image) field, and then only if the
 [`use_environment`](#use_environment) flag is set. This map is called the
@@ -201,7 +201,7 @@ resulting map into the candidate map. Once this has been done for every
 If the `extend` flag is `false`, then the element's newly-computed
 environment-variable map will overwrite the candidate map.
 
-If the `extend` flags is `true`, then the element's newly-computed
+If the `extend` flag is `true`, then the element's newly-computed
 environment-variable map will be merged into the candidate map: All variables
 specified in the element's map will overwrite the old values in the candidate
 map, but values not specified in the element's map will be left unchanged.
