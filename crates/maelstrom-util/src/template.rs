@@ -72,12 +72,8 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
     let template_re = Regex::new(
         "(?x) # verbose mode
         (?:
-            # non-backslash or start followed by identifier surrounded by carets
-            (?:[^\\\\]|^) (?<var><[a-zA-Z-][a-zA-Z0-9-]*>) |
-
-            # simultaneously look for escaped carets to fix
-            (?<escape_open>\\\\<) |
-            (?<escape_close>\\\\>)
+            # opening angle braces followed by identifier ending with a single closing angle brace
+            (?<var><+[a-zA-Z-][a-zA-Z0-9-]*>)
         )
     ",
     )
@@ -85,28 +81,31 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
     let mut last = 0;
     let mut output = String::new();
     for cap in template_re.captures_iter(input) {
-        let (m, value) = if let Some(m) = cap.name("var") {
+        let (range, value) = if let Some(m) = cap.name("var") {
             let m_str = m.as_str();
-            let ident = &m_str[1..(m_str.len() - 1)];
-
-            (
-                m,
-                vars.0
+            let starting_angle = m_str.chars().take_while(|c| *c == '<').count();
+            if starting_angle % 2 == 1 {
+                let ident = &m_str[starting_angle..(m_str.len() - 1)];
+                let new_angle = "<".repeat((starting_angle - 1) / 2);
+                let value = vars
+                    .0
                     .get(ident)
                     .ok_or_else(|| anyhow!("unknown template variable {ident:?}"))?
-                    .as_str(),
-            )
-        } else if let Some(m) = cap.name("escape_open") {
-            (m, "<")
-        } else if let Some(m) = cap.name("escape_close") {
-            (m, ">")
+                    .as_str();
+                (m.range(), format!("{new_angle}{value}"))
+            } else {
+                let start = m.range().start;
+                (
+                    start..(start + starting_angle),
+                    "<".repeat(starting_angle / 2).to_string(),
+                )
+            }
         } else {
             unreachable!()
         };
 
-        let range = m.range();
         output += &input[last..range.start];
-        output += value;
+        output += &value;
         last = range.end;
     }
     output += &input[last..];
@@ -164,7 +163,17 @@ fn template_failure() {
 
 #[test]
 fn template_escaping() {
-    template_success_test("foo", "bar", "/he\\<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
-    template_success_test("foo", "bar", "/he\\<llo\\>/<foo>/<foo>", "/he<llo>/bar/bar");
-    template_success_test("foo", "bar", "/he<llo\\>/<foo>/<foo>", "/he<llo>/bar/bar");
+    template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
+    template_success_test("foo", "bar", "/he<<llo>/<foo>/<foo>", "/he<llo>/bar/bar");
+    template_success_test("foo", "bar", "/he<<<foo>", "/he<bar");
+    template_success_test("foo", "bar", "/he<<<foo>>", "/he<bar>");
+    template_success_test("foo", "bar", "/he<<<<foo>>", "/he<<foo>>");
+    template_success_test("foo", "bar", "/he<<", "/he<<");
+    template_success_test("foo", "bar", "/he<some/thing>", "/he<some/thing>");
+    template_success_test(
+        "foo-dude",
+        "bar",
+        "/he<<llo>/<foo-dude>/<foo-dude>",
+        "/he<llo>/bar/bar",
+    );
 }
