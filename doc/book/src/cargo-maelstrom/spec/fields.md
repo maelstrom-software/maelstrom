@@ -151,6 +151,30 @@ This would create a layer containing all of the files and directories
 This field can't be set in the same directive as `image` if the `image.use`
 contains `"layers"`.
 
+### Path Templating
+
+Anywhere a path is accepted in a layer, certain template variables can be used. These variables are
+replaced with corresponding values in the path they are present in. Template variables are
+surrounded by `<` and `>`. The leading `<` can be escaped with a double `<<` in cases where it
+precedes a valid template variable expression and no template substitution is desired.
+
+The following are valid template variables for `cargo-maelstrom`
+
+- `<build-path>` The path to the directory where cargo stores build output for the current profile.
+
+As an example, suppose you have an integration test for a binary named `foo` and want access to
+that binary when running the test. Cargo will provide the `CARGO_BIN_EXE_foo` environment variable
+at compile time which expands to the absolute path to `foo`. If we want to execute it in the test
+though, we have to include `foo` in a layer at the right place.
+
+```toml
+[[directives]]
+filter = "test.equals(foo_integration_test)"
+layers = [
+    { paths = ["<build-path>/foo"], canonicalize = true }
+]
+```
+
 ## `added_layers`
 
 This field is like [`layers`](#layers), except it appends to the job spec's

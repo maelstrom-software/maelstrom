@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### `cargo-maelstrom`
+The test configuration language now supports a single template argument in
+paths. When `<build-dir>` is found in a path, it will be replaced with a path to
+the build output directory for the current profile.
+
 ## [0.9.0] - 2024-05-21
 
 ### Major Changes
