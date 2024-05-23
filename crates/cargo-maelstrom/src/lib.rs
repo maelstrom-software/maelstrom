@@ -98,7 +98,7 @@ fn do_template_replacement(
         .to_str()
         .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
     let vars = TemplateVars::new()
-        .with_var("build_dir", build_dir)
+        .with_var("build-dir", build_dir)
         .unwrap();
     test_metadata.replace_template_vars(&vars)?;
     Ok(())

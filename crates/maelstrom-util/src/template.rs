@@ -8,7 +8,7 @@ pub struct Ident(String);
 
 impl Ident {
     pub fn new(value: &str) -> Result<Self> {
-        let ident_re = Regex::new("^[a-zA-Z_][a-zA-Z0-9_]*$").unwrap();
+        let ident_re = Regex::new("^[a-zA-Z-][a-zA-Z0-9-]*$").unwrap();
         if !ident_re.is_match(value) {
             bail!("invalid identifier {value:?}");
         }
@@ -32,18 +32,18 @@ impl Borrow<str> for Ident {
 
 #[test]
 fn ident_valid() {
-    // Underscore okay.
-    Ident::new("foo_bar").unwrap();
+    // Dash okay.
+    Ident::new("foo-bar").unwrap();
     // Mixed case okay. Numbers okay if not at beginning.
-    Ident::new("foo_Bar12").unwrap();
+    Ident::new("foo-Bar12").unwrap();
 }
 
 #[test]
 fn ident_invalid() {
-    // No dash.
-    Ident::new("foo-bar").unwrap_err();
+    // No underscore.
+    Ident::new("foo_bar").unwrap_err();
     // Can't start with number.
-    Ident::new("1foo_bar").unwrap_err();
+    Ident::new("1foo-bar").unwrap_err();
 }
 
 #[derive(Default)]
@@ -73,7 +73,7 @@ pub fn replace_template_vars(input: &str, vars: &TemplateVars) -> Result<String>
         "(?x) # verbose mode
         (?:
             # non-backslash or start followed by identifier surrounded by carets
-            (?:[^\\\\]|^) (?<var><[a-zA-Z_][a-zA-Z0-9_]*>) |
+            (?:[^\\\\]|^) (?<var><[a-zA-Z-][a-zA-Z0-9-]*>) |
 
             # simultaneously look for escaped carets to fix
             (?<escape_open>\\\\<) |

@@ -29,7 +29,7 @@ mounts = [
 filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
 layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
-    { paths = ["<build_dir>/maelstrom-client"], canonicalize = true }
+    { paths = ["<build-dir>/maelstrom-client"], canonicalize = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
@@ -81,7 +81,7 @@ image.name = "rust:alpine"
 image.use = ["layers", "environment"]
 added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
-    { paths = ["<build_dir>/client-bg-proc"], canonicalize = true }
+    { paths = ["<build-dir>/client-bg-proc"], canonicalize = true }
 ]
 devices = ["full", "fuse", "null", "urandom", "random", "zero"]
 mounts = [
