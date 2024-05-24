@@ -636,6 +636,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
 
         let mut local_path_fds = BumpVec::new_in(&bump);
+
+        // Resolve all of the source paths for bind mounts before we chdir or pivot_root. Each path
+        // gets opened as a fsfd and pushed on the `local_path_fds` vec.
         for mount in &spec.mounts {
             let JobMount::Bind { local_path, .. } = mount else {
                 continue;
@@ -672,6 +675,51 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             );
         }
 
+        struct Device {
+            cstr: &'static CStr,
+            str: &'static str,
+        }
+
+        impl Device {
+            fn new(device: JobDevice) -> Self {
+                let (cstr, str) = match device {
+                    JobDevice::Full => (c"/dev/full", "/dev/full"),
+                    JobDevice::Fuse => (c"/dev/fuse", "/dev/fuse"),
+                    JobDevice::Null => (c"/dev/null", "/dev/null"),
+                    JobDevice::Shm => (c"/dev/shm", "/dev/shm"),
+                    JobDevice::Random => (c"/dev/random", "/dev/random"),
+                    JobDevice::Tty => (c"/dev/tty", "/dev/tty"),
+                    JobDevice::Urandom => (c"/dev/urandom", "/dev/urandom"),
+                    JobDevice::Zero => (c"/dev/zero", "/dev/zero"),
+                };
+                Self { cstr, str }
+            }
+        }
+
+        // Open all of the source paths for devices before we chdir or pivot_root. We create
+        // devices in the container my bind mounting them from the host instead of creating
+        // devices. We do this because we don't assume we're running as root, and as such, we can't
+        // create device files.
+        for device in spec.devices.iter() {
+            let Device { cstr, str } = Device::new(device);
+            let dirfd = new_fd_slot(&bump);
+            local_path_fds.push(dirfd);
+            builder.push(
+                Syscall::OpenTree {
+                    dirfd: Fd::AT_FDCWD,
+                    path: cstr,
+                    // We don't pass recursive because we assume we're just cloning a file.
+                    flags: OpenTreeFlags::CLONE,
+                    out: dirfd,
+                },
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error opening local path for bind mount of device {str}: {err}",
+                    ))
+                }),
+            );
+        }
+
         // Chdir to what will be the new root.
         builder.push(
             Syscall::Chdir {
@@ -679,51 +727,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             },
             &|err| syserr(anyhow!("chdir to target root directory: {err}")),
         );
-
-        // Create all of the supported devices by bind mounting them from the host's /dev
-        // directory. We don't assume we're running as root, and as such, we can't create device
-        // files. However, we can bind mount them.
-        for device in spec.devices.iter() {
-            macro_rules! dev {
-                ($dev:literal) => {
-                    (
-                        unsafe {
-                            CStr::from_ptr(concat!("/dev/", $dev, "\0").as_ptr() as *const _)
-                        },
-                        unsafe {
-                            CStr::from_ptr(concat!("./dev/", $dev, "\0").as_ptr() as *const _)
-                        },
-                        concat!("/dev/", $dev),
-                    )
-                };
-            }
-            let (source, target, device_name) = match device {
-                JobDevice::Full => dev!("full"),
-                JobDevice::Fuse => dev!("fuse"),
-                JobDevice::Null => dev!("null"),
-                JobDevice::Shm => dev!("shm"),
-                JobDevice::Random => dev!("random"),
-                JobDevice::Tty => dev!("tty"),
-                JobDevice::Urandom => dev!("urandom"),
-                JobDevice::Zero => dev!("zero"),
-            };
-            builder.push(
-                Syscall::Mount {
-                    source: Some(source),
-                    target,
-                    fstype: None,
-                    flags: MountFlags::BIND,
-                    data: None,
-                },
-                // We have to be careful doing bump.alloc here with the move. The drop method is
-                // not going to be run on the closure, which means drop won't be run on any
-                // captured-and-moved variables. Since we're using a static string for
-                // `device_name`, we're okay.
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!("bind mount of device {device_name}: {err}",))
-                }),
-            );
-        }
 
         // Pivot root to be the new root. See man 2 pivot_root.
         builder.push(
@@ -831,6 +834,26 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     }
                 }
             };
+        }
+
+        // Complete the bind mounting of devices.
+        for device in spec.devices.iter() {
+            let Device { cstr, str } = Device::new(device);
+            let mount_local_path_fd = local_path_fds.next().unwrap();
+            builder.push(
+                Syscall::MoveMount {
+                    from_dirfd: mount_local_path_fd,
+                    from_path: c"",
+                    to_dirfd: Fd::AT_FDCWD,
+                    to_path: cstr,
+                    flags: MoveMountFlags::F_EMPTY_PATH,
+                },
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error doing move_mount for bind mount of device {str}: {err}",
+                    ))
+                }),
+            );
         }
 
         // Unmount the old root. See man 2 pivot_root.
