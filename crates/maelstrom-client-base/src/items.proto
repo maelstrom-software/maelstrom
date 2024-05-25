@@ -84,6 +84,8 @@ message JobMount {
         TmpMount tmp = 2;
         SysMount sys = 3;
         BindMount bind = 4;
+        DevptsMount devpts = 5;
+        MqueueMount mqueue = 6;
     }
 }
 
@@ -103,6 +105,14 @@ message BindMount {
     string mount_point = 1;
     string local_path = 2;
     bool read_only = 3;
+}
+
+message DevptsMount {
+    string mount_point = 1;
+}
+
+message MqueueMount {
+    string mount_point = 1;
 }
 
 enum JobNetwork {

@@ -128,6 +128,12 @@ pub enum JobMountForTomlAndJson {
         #[serde(default)]
         read_only: bool,
     },
+    Devpts {
+        mount_point: Utf8PathBuf,
+    },
+    Mqueue {
+        mount_point: Utf8PathBuf,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
@@ -146,6 +152,12 @@ pub enum JobMount {
         local_path: Utf8PathBuf,
         read_only: bool,
     },
+    Devpts {
+        mount_point: Utf8PathBuf,
+    },
+    Mqueue {
+        mount_point: Utf8PathBuf,
+    },
 }
 
 impl JobMount {
@@ -155,6 +167,8 @@ impl JobMount {
             JobMount::Tmp { mount_point } => mount_point.as_path(),
             JobMount::Sys { mount_point } => mount_point.as_path(),
             JobMount::Bind { mount_point, .. } => mount_point.as_path(),
+            JobMount::Devpts { mount_point } => mount_point.as_path(),
+            JobMount::Mqueue { mount_point } => mount_point.as_path(),
         }
     }
 }
@@ -174,6 +188,8 @@ impl From<JobMountForTomlAndJson> for JobMount {
                 local_path,
                 read_only,
             },
+            JobMountForTomlAndJson::Devpts { mount_point } => JobMount::Devpts { mount_point },
+            JobMountForTomlAndJson::Mqueue { mount_point } => JobMount::Mqueue { mount_point },
         }
     }
 }

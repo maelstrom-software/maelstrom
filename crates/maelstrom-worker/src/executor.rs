@@ -833,6 +833,38 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         );
                     }
                 }
+                JobMount::Devpts { mount_point } => {
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"devpts"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of devpts file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Mqueue { mount_point } => {
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"mqueue"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of mqueue file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
             };
         }
 
@@ -1772,6 +1804,72 @@ mod tests {
         )))
         .run()
         .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_devpty() {
+        Test::new(
+            test_spec("/bin/grep")
+                .arguments(["^devpty /dev/pty", "/proc/self/mounts"])
+                .mounts([JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                }]),
+        )
+        .expected_status(JobStatus::Exited(1))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn devpty() {
+        Test::new(
+            test_spec("/bin/awk")
+                .arguments([r#"/^none \/dev\/pts/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .mounts([
+                    JobMount::Proc {
+                        mount_point: utf8_path_buf!("/proc"),
+                    },
+                    JobMount::Devpts {
+                        mount_point: utf8_path_buf!("/dev/pts"),
+                    },
+                ]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /dev/pts devpts\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mqueue() {
+        Test::new(
+            test_spec("/bin/grep")
+                .arguments(["^mqueue /dev/mqueue", "/proc/self/mounts"])
+                .mounts([JobMount::Proc {
+                    mount_point: utf8_path_buf!("/proc"),
+                }]),
+        )
+        .expected_status(JobStatus::Exited(1))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mqueue() {
+        Test::new(
+            test_spec("/bin/awk")
+                .arguments([r#"/^none \/dev\/mqueue/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .mounts([
+                    JobMount::Proc {
+                        mount_point: utf8_path_buf!("/proc"),
+                    },
+                    JobMount::Mqueue {
+                        mount_point: utf8_path_buf!("/dev/mqueue"),
+                    },
+                ]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /dev/mqueue mqueue\n")))
+        .run()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]
