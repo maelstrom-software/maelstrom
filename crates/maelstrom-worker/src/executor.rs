@@ -746,54 +746,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let mut local_path_fds = local_path_fds.into_iter();
         for mount in &spec.mounts {
             match mount {
-                JobMount::Proc { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"proc"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of proc file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
-                }
-                JobMount::Tmp { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"tmpfs"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of tmpfs file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
-                }
-                JobMount::Sys { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"sysfs"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of sysfs file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
-                }
                 JobMount::Bind {
                     mount_point,
                     local_path,
@@ -861,6 +813,54 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
                                 "mount of mqueue file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Proc { mount_point } => {
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"proc"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of proc file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Sys { mount_point } => {
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"sysfs"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of sysfs file system to {mount_point}: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Tmp { mount_point } => {
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
+                            fstype: Some(c"tmpfs"),
+                            flags: MountFlags::default(),
+                            data: None,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "mount of tmpfs file system to {mount_point}: {err}",
                             ))
                         }),
                     );
@@ -1824,7 +1824,10 @@ mod tests {
     async fn devpty() {
         Test::new(
             test_spec("/bin/awk")
-                .arguments([r#"/^none \/dev\/pts/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .arguments([
+                    r#"/^none \/dev\/pts/ { print $1, $2, $3 }"#,
+                    "/proc/self/mounts",
+                ])
                 .mounts([
                     JobMount::Proc {
                         mount_point: utf8_path_buf!("/proc"),
@@ -1834,7 +1837,9 @@ mod tests {
                     },
                 ]),
         )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /dev/pts devpts\n")))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(
+            b"none /dev/pts devpts\n"
+        )))
         .run()
         .await;
     }
@@ -1857,7 +1862,10 @@ mod tests {
     async fn mqueue() {
         Test::new(
             test_spec("/bin/awk")
-                .arguments([r#"/^none \/dev\/mqueue/ { print $1, $2, $3 }"#, "/proc/self/mounts"])
+                .arguments([
+                    r#"/^none \/dev\/mqueue/ { print $1, $2, $3 }"#,
+                    "/proc/self/mounts",
+                ])
                 .mounts([
                     JobMount::Proc {
                         mount_point: utf8_path_buf!("/proc"),
@@ -1867,7 +1875,9 @@ mod tests {
                     },
                 ]),
         )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"none /dev/mqueue mqueue\n")))
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(
+            b"none /dev/mqueue mqueue\n"
+        )))
         .run()
         .await;
     }

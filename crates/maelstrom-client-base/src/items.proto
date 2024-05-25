@@ -80,25 +80,13 @@ enum JobDevice {
 
 message JobMount {
     oneof Mount {
-        ProcMount proc = 1;
-        TmpMount tmp = 2;
-        SysMount sys = 3;
         BindMount bind = 4;
         DevptsMount devpts = 5;
         MqueueMount mqueue = 6;
+        ProcMount proc = 1;
+        SysMount sys = 3;
+        TmpMount tmp = 2;
     }
-}
-
-message ProcMount {
-    string mount_point = 1;
-}
-
-message TmpMount {
-    string mount_point = 1;
-}
-
-message SysMount {
-    string mount_point = 1;
 }
 
 message BindMount {
@@ -112,6 +100,18 @@ message DevptsMount {
 }
 
 message MqueueMount {
+    string mount_point = 1;
+}
+
+message ProcMount {
+    string mount_point = 1;
+}
+
+message SysMount {
+    string mount_point = 1;
+}
+
+message TmpMount {
     string mount_point = 1;
 }
 
