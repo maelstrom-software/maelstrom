@@ -745,6 +745,29 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // If we do the unmount first, then we'll get permission errors mounting those fs types.
         let mut local_path_fds = local_path_fds.into_iter();
         for mount in &spec.mounts {
+            fn normal_mount<'a>(
+                bump: &'a Bump,
+                builder: &mut ScriptBuilder<'a>,
+                mount_point: &'a Utf8PathBuf,
+                cfstype: &'static CStr,
+                fstype: &'static str,
+            ) -> JobResult<(), Error> {
+                builder.push(
+                    Syscall::Mount {
+                        source: None,
+                        target: bump_c_str(bump, mount_point.as_str()).map_err(syserr)?,
+                        fstype: Some(cfstype),
+                        flags: MountFlags::default(),
+                        data: None,
+                    },
+                    bump.alloc(move |err| {
+                        JobError::Execution(anyhow!(
+                            "mount of {fstype} file system to {mount_point}: {err}",
+                        ))
+                    }),
+                );
+                Ok(())
+            }
             match mount {
                 JobMount::Bind {
                     mount_point,
@@ -786,84 +809,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     }
                 }
                 JobMount::Devpts { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"devpts"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of devpts file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
+                    normal_mount(&bump, &mut builder, mount_point, c"devpts", "devpts")?;
                 }
                 JobMount::Mqueue { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"mqueue"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of mqueue file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
+                    normal_mount(&bump, &mut builder, mount_point, c"mqueue", "mqueue")?;
                 }
                 JobMount::Proc { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"proc"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of proc file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
+                    normal_mount(&bump, &mut builder, mount_point, c"proc", "proc")?;
                 }
                 JobMount::Sys { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"sysfs"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of sysfs file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
+                    normal_mount(&bump, &mut builder, mount_point, c"sysfs", "sysfs")?;
                 }
                 JobMount::Tmp { mount_point } => {
-                    builder.push(
-                        Syscall::Mount {
-                            source: None,
-                            target: bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?,
-                            fstype: Some(c"tmpfs"),
-                            flags: MountFlags::default(),
-                            data: None,
-                        },
-                        bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
-                                "mount of tmpfs file system to {mount_point}: {err}",
-                            ))
-                        }),
-                    );
+                    normal_mount(&bump, &mut builder, mount_point, c"tmpfs", "tmpfs")?;
                 }
             };
         }
