@@ -189,7 +189,7 @@ fn generate_artifacts(
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
     let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    artifacts::add_generated_artifacts(deps, &binary, log)
+    artifacts::add_generated_artifacts(deps.client(), &binary, log)
 }
 
 impl<'a, ProgressIndicatorT, MainAppDepsT> ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>
@@ -256,7 +256,7 @@ where
             .iter()
             .map(|layer| {
                 slog::debug!(self.log, "adding layer"; "layer" => ?layer);
-                self.deps.add_layer(layer.clone())
+                self.deps.client().add_layer(layer.clone())
             })
             .collect::<Result<Vec<_>>>()?;
         let artifacts = self.generated_artifacts.as_ref().unwrap();
@@ -351,7 +351,7 @@ where
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
-        self.deps.add_job(
+        self.deps.client().add_job(
             JobSpec {
                 program: format!("/{binary_name}").into(),
                 arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
@@ -528,16 +528,37 @@ pub trait Wait {
     fn wait(self) -> Result<()>;
 }
 
-pub trait MainAppDeps: Sync {
+pub trait ClientTrait: Sync {
     fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
-
     fn introspect(&self) -> Result<IntrospectResponse>;
-
     fn add_job(
         &self,
         spec: JobSpec,
         handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
     ) -> Result<()>;
+}
+
+impl ClientTrait for maelstrom_client::Client {
+    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
+        maelstrom_client::Client::add_layer(self, layer)
+    }
+
+    fn introspect(&self) -> Result<IntrospectResponse> {
+        maelstrom_client::Client::introspect(self)
+    }
+
+    fn add_job(
+        &self,
+        spec: JobSpec,
+        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
+    ) -> Result<()> {
+        maelstrom_client::Client::add_job(self, spec, handler)
+    }
+}
+
+pub trait MainAppDeps: Sync {
+    type Client: ClientTrait;
+    fn client(&self) -> &Self::Client;
 
     type CargoWaitHandle: Wait;
     type CargoTestArtifactStream: Iterator<Item = Result<CargoArtifact>>;
@@ -842,7 +863,7 @@ where
     let width = term.width() as usize;
     let prog = prog_factory(term.clone());
 
-    prog_driver.drive(&state.deps, prog.clone());
+    prog_driver.drive(state.deps.client(), prog.clone());
     prog.update_length(state.queuing_state.expected_job_count);
 
     state

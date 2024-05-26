@@ -1,5 +1,5 @@
 use super::ProgressIndicator;
-use crate::MainAppDeps;
+use crate::ClientTrait;
 use anyhow::Result;
 use indicatif::ProgressBar;
 use maelstrom_client::RemoteProgress;
@@ -14,9 +14,9 @@ use std::{
 };
 
 pub trait ProgressDriver<'scope> {
-    fn drive<'dep>(&mut self, deps: &'dep impl MainAppDeps, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, deps: &'client impl ClientTrait, ind: impl ProgressIndicator)
     where
-        'dep: 'scope;
+        'client: 'scope;
 
     fn stop(&mut self) -> Result<()>;
 }
@@ -88,9 +88,9 @@ impl Drop for RemoteProgressBarTracker {
 }
 
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
-    fn drive<'dep>(&mut self, deps: &'dep impl MainAppDeps, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, client: &'client impl ClientTrait, ind: impl ProgressIndicator)
     where
-        'dep: 'scope,
+        'client: 'scope,
     {
         let canceled = self.canceled.clone();
         self.handle = Some(self.scope.spawn(move || {
@@ -102,7 +102,7 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                 });
                 let mut remote_bar_tracker = RemoteProgressBarTracker::default();
                 while !canceled.load(Ordering::Acquire) {
-                    let introspect_resp = deps.introspect()?;
+                    let introspect_resp = client.introspect()?;
                     let mut states = introspect_resp.artifact_uploads;
                     states.extend(introspect_resp.image_downloads);
                     remote_bar_tracker.update(&ind, states);

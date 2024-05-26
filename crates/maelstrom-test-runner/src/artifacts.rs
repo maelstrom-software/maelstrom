@@ -1,4 +1,4 @@
-use crate::MainAppDeps;
+use crate::ClientTrait;
 use anyhow::{bail, Result};
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use maelstrom_base::Sha256Digest;
@@ -108,13 +108,14 @@ pub struct GeneratedArtifacts {
 }
 
 pub fn add_generated_artifacts(
-    deps: &impl MainAppDeps,
+    client: &impl ClientTrait,
     binary_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
     let (binary_artifact, _) =
-        deps.add_layer(create_artifact_for_binary(binary_path, log.clone())?)?;
-    let (deps_artifact, _) = deps.add_layer(create_artifact_for_binary_deps(binary_path, log)?)?;
+        client.add_layer(create_artifact_for_binary(binary_path, log.clone())?)?;
+    let (deps_artifact, _) =
+        client.add_layer(create_artifact_for_binary_deps(binary_path, log)?)?;
     Ok(GeneratedArtifacts {
         binary: binary_artifact,
         deps: deps_artifact,

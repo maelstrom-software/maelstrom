@@ -4,11 +4,9 @@ pub mod config;
 use anyhow::{anyhow, bail, Context as _, Result};
 use cargo_metadata::Metadata as CargoMetadata;
 use indicatif::TermLike;
-use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
+use maelstrom_base::Timeout;
 use maelstrom_client::{
-    spec::{JobSpec, Layer},
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
-    StateDir,
+    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
     alternative_mains, main_app_new, progress, ListAction, LoggingOutput, MainAppDeps,
@@ -86,20 +84,10 @@ struct CargoOptions {
 }
 
 impl MainAppDeps for DefaultMainAppDeps {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        self.client.add_layer(layer)
-    }
+    type Client = Client;
 
-    fn introspect(&self) -> Result<IntrospectResponse> {
-        self.client.introspect()
-    }
-
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
-    ) -> Result<()> {
-        self.client.add_job(spec, handler)
+    fn client(&self) -> &Client {
+        &self.client
     }
 
     type CargoWaitHandle = cargo::WaitHandle;

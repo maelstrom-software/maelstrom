@@ -4,8 +4,8 @@ use crate::{
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{ArtifactKey, ArtifactKind, TestListing, TestListingStore},
-    EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir, Wait,
-    WorkspaceDir,
+    ClientTrait, EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir,
+    Wait, WorkspaceDir,
 };
 use anyhow::Result;
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
@@ -261,9 +261,9 @@ struct TestProgressDriver<'scope> {
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
-    fn drive<'dep>(&mut self, _client: &'dep impl MainAppDeps, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, _client: &'client impl ClientTrait, ind: impl ProgressIndicator)
     where
-        'dep: 'scope,
+        'client: 'scope,
     {
         *self.update_func.borrow_mut() = Some(Box::new(move |state| ind.update_job_states(state)));
     }
@@ -291,26 +291,32 @@ struct BinDir;
 struct TmpDir;
 
 struct TestMainAppDeps {
-    tests: FakeTests,
     bin_path: RootBuf<BinDir>,
     target_dir: RootBuf<TargetDir>,
-    next_job_id: AtomicU32,
+    client: TestClient,
 }
 
 impl TestMainAppDeps {
     fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<TargetDir>) -> Self {
         Self {
-            tests,
             bin_path,
             target_dir,
-            next_job_id: AtomicU32::new(1),
+            client: TestClient {
+                next_job_id: AtomicU32::new(1),
+                tests,
+            },
         }
     }
 }
 
 struct TestCargoOptions;
 
-impl MainAppDeps for TestMainAppDeps {
+struct TestClient {
+    next_job_id: AtomicU32,
+    tests: FakeTests,
+}
+
+impl ClientTrait for TestClient {
     fn add_layer(&self, _layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         Ok((digest!(42), ArtifactType::Manifest))
     }
@@ -330,6 +336,14 @@ impl MainAppDeps for TestMainAppDeps {
         }
         Ok(())
     }
+}
+
+impl MainAppDeps for TestMainAppDeps {
+    type Client = TestClient;
+
+    fn client(&self) -> &TestClient {
+        &self.client
+    }
 
     type CargoWaitHandle = WaitForNothing;
     type CargoTestArtifactStream = std::vec::IntoIter<Result<CargoArtifact>>;
@@ -348,14 +362,17 @@ impl MainAppDeps for TestMainAppDeps {
 
         Ok((
             WaitForNothing,
-            self.tests.artifacts(&self.bin_path, &packages).into_iter(),
+            self.client
+                .tests
+                .artifacts(&self.bin_path, &packages)
+                .into_iter(),
         ))
     }
 
     fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
         match filter.as_ref().map(|s| s.as_str()) {
-            Some("--ignored") => Ok(self.tests.ignored_cases(binary)),
-            None => Ok(self.tests.cases(binary)),
+            Some("--ignored") => Ok(self.client.tests.ignored_cases(binary)),
+            None => Ok(self.client.tests.cases(binary)),
             o => panic!("unsupported filter {o:?}"),
         }
     }
