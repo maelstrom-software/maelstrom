@@ -256,9 +256,8 @@ where
         let mut s = self.package_name.to_string();
         s += " ";
 
-        let cargo_artifact = self.artifact.cargo_artifact();
-        let artifact_name = &cargo_artifact.target.name;
-        if artifact_name != &self.package_name {
+        let artifact_name = self.artifact.name();
+        if artifact_name != self.package_name {
             s += artifact_name;
             s += " ";
         }
@@ -548,6 +547,7 @@ pub trait TestArtifact: fmt::Debug {
     fn list_tests(&self) -> Result<Vec<String>>;
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
     fn cargo_artifact(&self) -> &CargoArtifact;
+    fn name(&self) -> &str;
 }
 
 pub trait CollectTests {

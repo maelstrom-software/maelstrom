@@ -108,6 +108,10 @@ impl TestArtifact for CargoTestArtifact {
     fn cargo_artifact(&self) -> &cargo_metadata::Artifact {
         &self.0
     }
+
+    fn name(&self) -> &str {
+        &self.0.target.name
+    }
 }
 
 struct CargoTestArtifactStream(cargo::TestArtifactStream);

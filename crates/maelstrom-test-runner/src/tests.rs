@@ -369,6 +369,10 @@ impl TestArtifact for FakeTestArtifact {
     fn cargo_artifact(&self) -> &CargoArtifact {
         &self.cargo_artifact
     }
+
+    fn name(&self) -> &str {
+        &self.cargo_artifact.target.name
+    }
 }
 
 impl CollectTests for TestCollector {
