@@ -9,8 +9,8 @@ use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    alternative_mains, main_app_new, progress, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, TargetDir, Wait, WorkspaceDir,
+    alternative_mains, main_app_new, progress, CollectTests, ListAction, LoggingOutput,
+    MainAppDeps, MainAppState, TargetDir, TestArtifact, Wait, WorkspaceDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -30,6 +30,7 @@ pub struct MaelstromTargetDir;
 
 struct DefaultMainAppDeps {
     client: Client,
+    test_collector: CargoTestCollector,
 }
 
 impl DefaultMainAppDeps {
@@ -73,7 +74,10 @@ impl DefaultMainAppDeps {
             slots,
             log,
         )?;
-        Ok(Self { client })
+        Ok(Self {
+            client,
+            test_collector: CargoTestCollector,
+        })
     }
 }
 
@@ -83,6 +87,66 @@ struct CargoOptions {
     manifest_options: cargo::ManifestOptions,
 }
 
+struct CargoTestCollector;
+
+#[derive(Debug)]
+struct CargoTestArtifact(cargo_metadata::Artifact);
+
+impl TestArtifact for CargoTestArtifact {
+    fn path(&self) -> &Path {
+        self.0.executable.as_ref().unwrap().as_ref()
+    }
+
+    fn list_tests(&self) -> Result<Vec<String>> {
+        cargo::get_cases_from_binary(self.path(), &None)
+    }
+
+    fn list_ignored_tests(&self) -> Result<Vec<String>> {
+        cargo::get_cases_from_binary(self.path(), &Some("--ignored".into()))
+    }
+
+    fn cargo_artifact(&self) -> &cargo_metadata::Artifact {
+        &self.0
+    }
+}
+
+struct CargoTestArtifactStream(cargo::TestArtifactStream);
+
+impl Iterator for CargoTestArtifactStream {
+    type Item = Result<CargoTestArtifact>;
+
+    fn next(&mut self) -> Option<Result<CargoTestArtifact>> {
+        match self.0.next() {
+            Some(Err(e)) => Some(Err(e)),
+            Some(Ok(v)) => Some(Ok(CargoTestArtifact(v))),
+            None => None,
+        }
+    }
+}
+
+impl CollectTests for CargoTestCollector {
+    type BuildHandle = cargo::WaitHandle;
+    type Artifact = CargoTestArtifact;
+    type ArtifactStream = CargoTestArtifactStream;
+    type Options = CargoOptions;
+
+    fn start(
+        &self,
+        color: bool,
+        options: &CargoOptions,
+        packages: Vec<String>,
+    ) -> Result<(cargo::WaitHandle, CargoTestArtifactStream)> {
+        let (handle, stream) = cargo::run_cargo_test(
+            color,
+            &options.feature_selection_options,
+            &options.compilation_options,
+            &options.manifest_options,
+            packages,
+        )?;
+        Ok((handle, CargoTestArtifactStream(stream)))
+    }
+}
+
 impl MainAppDeps for DefaultMainAppDeps {
     type Client = Client;
 
@@ -90,27 +154,11 @@ impl MainAppDeps for DefaultMainAppDeps {
         &self.client
     }
 
-    type CargoWaitHandle = cargo::WaitHandle;
-    type CargoTestArtifactStream = cargo::TestArtifactStream;
-    type CargoOptions = CargoOptions;
+    type TestCollectorOptions = CargoOptions;
+    type TestCollector = CargoTestCollector;
 
-    fn run_cargo_test(
-        &self,
-        color: bool,
-        options: &CargoOptions,
-        packages: Vec<String>,
-    ) -> Result<(cargo::WaitHandle, cargo::TestArtifactStream)> {
-        cargo::run_cargo_test(
-            color,
-            &options.feature_selection_options,
-            &options.compilation_options,
-            &options.manifest_options,
-            packages,
-        )
-    }
-
-    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
-        cargo::get_cases_from_binary(binary, filter)
+    fn test_collector(&self) -> &CargoTestCollector {
+        &self.test_collector
     }
 
     fn get_template_vars(

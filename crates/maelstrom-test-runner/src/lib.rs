@@ -32,9 +32,9 @@ use progress::{
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
-    io,
+    fmt, io,
     panic::{RefUnwindSafe, UnwindSafe},
-    path::{Path, PathBuf},
+    path::Path,
     str,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -79,7 +79,7 @@ fn filter_case(
 /// among them.
 ///
 /// This object is separate from `MainAppState` because it is lent to `JobQueuing`
-struct JobQueuingState<CargoOptionsT> {
+struct JobQueuingState<CollectorOptionsT> {
     packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
     stderr_color: bool,
@@ -89,10 +89,10 @@ struct JobQueuingState<CargoOptionsT> {
     expected_job_count: u64,
     test_listing: Arc<Mutex<Option<TestListing>>>,
     list_action: Option<ListAction>,
-    cargo_options: CargoOptionsT,
+    collector_options: CollectorOptionsT,
 }
 
-impl<CargoOptionsT> JobQueuingState<CargoOptionsT> {
+impl<CollectorOptionsT> JobQueuingState<CollectorOptionsT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         packages: BTreeMap<PackageId, CargoPackage>,
@@ -101,7 +101,7 @@ impl<CargoOptionsT> JobQueuingState<CargoOptionsT> {
         test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
-        cargo_options: CargoOptionsT,
+        collector_options: CollectorOptionsT,
     ) -> Result<Self> {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -115,7 +115,7 @@ impl<CargoOptionsT> JobQueuingState<CargoOptionsT> {
             expected_job_count,
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
-            cargo_options,
+            collector_options,
         })
     }
 }
@@ -131,12 +131,11 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 /// currently enqueuing from.
 struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
-    artifact: CargoArtifact,
-    binary: PathBuf,
+    artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
     generated_artifacts: Option<GeneratedArtifacts>,
     ignored_cases: HashSet<String>,
     package_name: String,
@@ -150,33 +149,29 @@ struct TestListingResult {
     ignored_cases: HashSet<String>,
 }
 
-fn list_test_cases<CargoOptionsT>(
-    deps: &impl MainAppDeps,
+fn list_test_cases<CollectorOptionsT>(
     log: slog::Logger,
-    queuing_state: &JobQueuingState<CargoOptionsT>,
+    queuing_state: &JobQueuingState<CollectorOptionsT>,
     ind: &impl ProgressIndicator,
-    artifact: &CargoArtifact,
+    artifact: &impl TestArtifact,
     package_name: &str,
 ) -> Result<TestListingResult> {
     ind.update_enqueue_status(format!("getting test list for {package_name}"));
 
-    slog::debug!(log, "listing ignored tests"; "binary" => ?artifact.executable);
-    let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    let ignored_cases: HashSet<_> = deps
-        .get_cases_from_binary(&binary, &Some("--ignored".into()))?
-        .into_iter()
-        .collect();
+    slog::debug!(log, "listing ignored tests"; "artifact" => ?artifact);
+    let ignored_cases: HashSet<_> = artifact.list_ignored_tests()?.into_iter().collect();
 
-    slog::debug!(log, "listing tests"; "binary" => ?artifact.executable);
-    let mut cases = deps.get_cases_from_binary(&binary, &None)?;
+    slog::debug!(log, "listing tests"; "artifact" => ?artifact);
+    let mut cases = artifact.list_tests()?;
 
+    let cargo_artifact = artifact.cargo_artifact();
     let mut listing = queuing_state.test_listing.lock().unwrap();
     listing
         .as_mut()
         .unwrap()
-        .update_artifact_cases(package_name, &artifact.target, &cases);
+        .update_artifact_cases(package_name, &cargo_artifact.target, &cases);
 
-    cases.retain(|c| filter_case(package_name, artifact, c, &queuing_state.filter));
+    cases.retain(|c| filter_case(package_name, cargo_artifact, c, &queuing_state.filter));
     Ok(TestListingResult {
         cases,
         ignored_cases,
@@ -185,11 +180,10 @@ fn list_test_cases<CargoOptionsT>(
 
 fn generate_artifacts(
     deps: &impl MainAppDeps,
-    artifact: &CargoArtifact,
+    artifact_path: &Path,
     log: slog::Logger,
 ) -> Result<GeneratedArtifacts> {
-    let binary = PathBuf::from(artifact.executable.clone().unwrap());
-    artifacts::add_generated_artifacts(deps.client(), &binary, log)
+    artifacts::add_generated_artifacts(deps.client(), artifact_path, log)
 }
 
 impl<'a, ProgressIndicatorT, MainAppDepsT> ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>
@@ -200,26 +194,17 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
-        artifact: CargoArtifact,
+        artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
         package_name: String,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let binary = PathBuf::from(artifact.executable.clone().unwrap());
-
         let running_tests = queuing_state.list_action.is_none();
 
-        let listing = list_test_cases(
-            deps,
-            log.clone(),
-            queuing_state,
-            &ind,
-            &artifact,
-            &package_name,
-        )?;
+        let listing = list_test_cases(log.clone(), queuing_state, &ind, &artifact, &package_name)?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
         slog::debug!(
@@ -228,7 +213,7 @@ where
             "package_name" => &package_name,
             "artifact" => ?artifact);
         let generated_artifacts = running_tests
-            .then(|| generate_artifacts(deps, &artifact, log.clone()))
+            .then(|| generate_artifacts(deps, artifact.path(), log.clone()))
             .transpose()?;
 
         Ok(Self {
@@ -238,7 +223,6 @@ where
             width,
             ind,
             artifact,
-            binary,
             generated_artifacts,
             ignored_cases: listing.ignored_cases,
             package_name,
@@ -272,7 +256,8 @@ where
         let mut s = self.package_name.to_string();
         s += " ";
 
-        let artifact_name = &self.artifact.target.name;
+        let cargo_artifact = self.artifact.cargo_artifact();
+        let artifact_name = &cargo_artifact.target.name;
         if artifact_name != &self.package_name {
             s += artifact_name;
             s += " ";
@@ -292,9 +277,10 @@ where
             return Ok(EnqueueResult::Listed);
         }
 
+        let cargo_artifact = self.artifact.cargo_artifact();
         let filter_context = pattern::Context {
             package: self.package_name.clone(),
-            artifact: Some(pattern::Artifact::from_target(&self.artifact.target)),
+            artifact: Some(pattern::Artifact::from_target(&cargo_artifact.target)),
             case: Some(pattern::Case { name: case.into() }),
         };
 
@@ -318,11 +304,12 @@ where
         ));
         self.queuing_state.tracker.add_outstanding();
 
+        let cargo_artifact = self.artifact.cargo_artifact();
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
             self.package_name.clone(),
-            ArtifactKey::from(&self.artifact.target),
+            ArtifactKey::from(&cargo_artifact.target),
             case.to_owned(),
             case_str.clone(),
             self.width,
@@ -343,14 +330,14 @@ where
             .unwrap()
             .get_timing(
                 &self.package_name,
-                &ArtifactKey::from(&self.artifact.target),
+                &ArtifactKey::from(&cargo_artifact.target),
                 case,
             );
 
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
-        let binary_name = self.binary.file_name().unwrap().to_str().unwrap();
+        let binary_name = self.artifact.path().file_name().unwrap().to_str().unwrap();
         self.deps.client().add_job(
             JobSpec {
                 program: format!("/{binary_name}").into(),
@@ -395,13 +382,13 @@ where
 /// next thing when asked.
 struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
-    wait_handle: Option<MainAppDepsT::CargoWaitHandle>,
+    wait_handle: Option<<MainAppDepsT::TestCollector as CollectTests>::BuildHandle>,
     package_match: bool,
-    artifacts: Option<MainAppDepsT::CargoTestArtifactStream>,
+    artifacts: Option<<MainAppDepsT::TestCollector as CollectTests>::ArtifactStream>,
     artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
 }
@@ -414,7 +401,7 @@ where
 {
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
@@ -434,9 +421,9 @@ where
 
         let (wait_handle, artifacts) = building_tests
             .then(|| {
-                deps.run_cargo_test(
+                deps.test_collector().start(
                     queuing_state.stderr_color,
-                    &queuing_state.cargo_options,
+                    &queuing_state.collector_options,
                     package_names,
                 )
             })
@@ -473,7 +460,7 @@ where
         let package_name = &self
             .queuing_state
             .packages
-            .get(&artifact.package_id)
+            .get(&artifact.cargo_artifact().package_id)
             .expect("artifact for unknown package")
             .name;
 
@@ -556,27 +543,40 @@ impl ClientTrait for maelstrom_client::Client {
     }
 }
 
+pub trait TestArtifact: fmt::Debug {
+    fn path(&self) -> &Path;
+    fn list_tests(&self) -> Result<Vec<String>>;
+    fn list_ignored_tests(&self) -> Result<Vec<String>>;
+    fn cargo_artifact(&self) -> &CargoArtifact;
+}
+
+pub trait CollectTests {
+    type BuildHandle: Wait;
+    type Artifact: TestArtifact;
+    type ArtifactStream: Iterator<Item = Result<Self::Artifact>>;
+
+    type Options;
+
+    fn start(
+        &self,
+        color: bool,
+        options: &Self::Options,
+        packages: Vec<String>,
+    ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
+}
+
 pub trait MainAppDeps: Sync {
     type Client: ClientTrait;
     fn client(&self) -> &Self::Client;
 
-    type CargoWaitHandle: Wait;
-    type CargoTestArtifactStream: Iterator<Item = Result<CargoArtifact>>;
+    type TestCollectorOptions;
+    type TestCollector: CollectTests<Options = Self::TestCollectorOptions>;
 
-    type CargoOptions;
-
-    fn run_cargo_test(
-        &self,
-        color: bool,
-        options: &Self::CargoOptions,
-        packages: Vec<String>,
-    ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)>;
-
-    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>>;
+    fn test_collector(&self) -> &Self::TestCollector;
 
     fn get_template_vars(
         &self,
-        cargo_options: &Self::CargoOptions,
+        options: &Self::TestCollectorOptions,
         target_dir: &Root<TargetDir>,
     ) -> Result<TemplateVars>;
 }
@@ -592,7 +592,7 @@ pub struct TargetDir;
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
-    queuing_state: JobQueuingState<MainAppDepsT::CargoOptions>,
+    queuing_state: JobQueuingState<MainAppDepsT::TestCollectorOptions>,
     test_listing_store: TestListingStore,
     logging_output: LoggingOutput,
     log: slog::Logger,
@@ -622,7 +622,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         workspace_packages: &[&CargoPackage],
         state_dir: impl AsRef<Root<StateDir>>,
         target_directory: impl AsRef<Root<TargetDir>>,
-        cargo_options: MainAppDepsT::CargoOptions,
+        collector_options: MainAppDepsT::TestCollectorOptions,
         logging_output: LoggingOutput,
         log: slog::Logger,
     ) -> Result<Self> {
@@ -652,7 +652,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
         );
 
-        let vars = deps.get_template_vars(&cargo_options, target_directory.as_ref())?;
+        let vars = deps.get_template_vars(&collector_options, target_directory.as_ref())?;
         test_metadata.replace_template_vars(&vars)?;
 
         Ok(Self {
@@ -664,7 +664,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
                 test_metadata,
                 test_listing,
                 list_action,
-                cargo_options,
+                collector_options,
             )?,
             test_listing_store,
             logging_output,

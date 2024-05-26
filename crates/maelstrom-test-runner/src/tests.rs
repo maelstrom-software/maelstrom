@@ -4,8 +4,8 @@ use crate::{
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{ArtifactKey, ArtifactKind, TestListing, TestListingStore},
-    ClientTrait, EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState, TargetDir,
-    Wait, WorkspaceDir,
+    ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState,
+    TargetDir, TestArtifact, Wait, WorkspaceDir,
 };
 use anyhow::Result;
 use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
@@ -291,25 +291,27 @@ struct BinDir;
 struct TmpDir;
 
 struct TestMainAppDeps {
-    bin_path: RootBuf<BinDir>,
-    target_dir: RootBuf<TargetDir>,
     client: TestClient,
+    test_collector: TestCollector,
 }
 
 impl TestMainAppDeps {
     fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<TargetDir>) -> Self {
         Self {
-            bin_path,
-            target_dir,
             client: TestClient {
                 next_job_id: AtomicU32::new(1),
+                tests: tests.clone(),
+            },
+            test_collector: TestCollector {
                 tests,
+                bin_path,
+                target_dir,
             },
         }
     }
 }
 
-struct TestCargoOptions;
+struct TestOptions;
 
 struct TestClient {
     next_job_id: AtomicU32,
@@ -338,6 +340,72 @@ impl ClientTrait for TestClient {
     }
 }
 
+struct TestCollector {
+    tests: FakeTests,
+    bin_path: RootBuf<BinDir>,
+    target_dir: RootBuf<TargetDir>,
+}
+
+#[derive(Debug)]
+struct FakeTestArtifact {
+    cargo_artifact: CargoArtifact,
+    tests: Vec<String>,
+    ignored_tests: Vec<String>,
+}
+
+impl TestArtifact for FakeTestArtifact {
+    fn path(&self) -> &Path {
+        self.cargo_artifact.executable.as_ref().unwrap().as_ref()
+    }
+
+    fn list_tests(&self) -> Result<Vec<String>> {
+        Ok(self.tests.clone())
+    }
+
+    fn list_ignored_tests(&self) -> Result<Vec<String>> {
+        Ok(self.ignored_tests.clone())
+    }
+
+    fn cargo_artifact(&self) -> &CargoArtifact {
+        &self.cargo_artifact
+    }
+}
+
+impl CollectTests for TestCollector {
+    type BuildHandle = WaitForNothing;
+    type Artifact = FakeTestArtifact;
+    type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
+    type Options = TestOptions;
+
+    fn start(
+        &self,
+        _color: bool,
+        _cargo_options: &TestOptions,
+        packages: Vec<String>,
+    ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {
+        let fs = Fs::new();
+        fs.create_dir_all(&self.target_dir).unwrap();
+        fs.write((**self.target_dir).join("cargo_test_run"), "")
+            .unwrap();
+
+        let artifacts: Vec<_> = self
+            .tests
+            .artifacts(&self.bin_path, &packages)
+            .into_iter()
+            .map(|a| {
+                a.map(|a| FakeTestArtifact {
+                    tests: self.tests.cases(a.executable.as_ref().unwrap().as_ref()),
+                    ignored_tests: self
+                        .tests
+                        .ignored_cases(a.executable.as_ref().unwrap().as_ref()),
+                    cargo_artifact: a,
+                })
+            })
+            .collect();
+        Ok((WaitForNothing, artifacts.into_iter()))
+    }
+}
+
 impl MainAppDeps for TestMainAppDeps {
     type Client = TestClient;
 
@@ -345,41 +413,15 @@ impl MainAppDeps for TestMainAppDeps {
         &self.client
     }
 
-    type CargoWaitHandle = WaitForNothing;
-    type CargoTestArtifactStream = std::vec::IntoIter<Result<CargoArtifact>>;
-    type CargoOptions = TestCargoOptions;
-
-    fn run_cargo_test(
-        &self,
-        _color: bool,
-        _cargo_options: &TestCargoOptions,
-        packages: Vec<String>,
-    ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)> {
-        let fs = Fs::new();
-        fs.create_dir_all(&self.target_dir).unwrap();
-        fs.write((**self.target_dir).join("cargo_test_run"), "")
-            .unwrap();
-
-        Ok((
-            WaitForNothing,
-            self.client
-                .tests
-                .artifacts(&self.bin_path, &packages)
-                .into_iter(),
-        ))
-    }
-
-    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
-        match filter.as_ref().map(|s| s.as_str()) {
-            Some("--ignored") => Ok(self.client.tests.ignored_cases(binary)),
-            None => Ok(self.client.tests.cases(binary)),
-            o => panic!("unsupported filter {o:?}"),
-        }
+    type TestCollectorOptions = TestOptions;
+    type TestCollector = TestCollector;
+    fn test_collector(&self) -> &TestCollector {
+        &self.test_collector
     }
 
     fn get_template_vars(
         &self,
-        _cargo_options: &TestCargoOptions,
+        _options: &TestOptions,
         _target_dir: &Root<TargetDir>,
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
@@ -438,7 +480,7 @@ fn run_app(
         &Vec::from_iter(packages.iter()),
         target_directory.join::<StateDir>("maelstrom/state"),
         &target_directory,
-        TestCargoOptions,
+        TestOptions,
         LoggingOutput::default(),
         log.clone(),
     )
