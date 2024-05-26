@@ -18,7 +18,7 @@ network = "loopback"
 [[directives]]
 filter = """
 (package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)) ||
-package.equals(cargo-maelstrom)"""
+package.equals(maelstrom-test-runner)"""
 layers = [{ stubs = ["/proc/", "/tmp/"] }]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },

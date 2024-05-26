@@ -81,6 +81,7 @@ maelstrom-macro = { version = "0.10.0-dev", path = "crates/maelstrom-macro" }
 maelstrom-plot = { version = "0.10.0-dev", path = "crates/maelstrom-plot" }
 maelstrom-simex = { version = "0.10.0-dev", path = "crates/maelstrom-simex" }
 maelstrom-test = { version = "0.10.0-dev", path = "crates/maelstrom-test" }
+maelstrom-test-runner = { version = "0.10.0-dev", path = "crates/maelstrom-test-runner" }
 maelstrom-util = { version = "0.10.0-dev", path = "crates/maelstrom-util" }
 maelstrom-web = { version = "0.10.0-dev", path = "crates/maelstrom-web" }
 maelstrom-worker = { version = "0.10.0-dev", path = "crates/maelstrom-worker" }

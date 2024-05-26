@@ -13,38 +13,11 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-byteorder.workspace = true
-cargo_metadata.workspace = true
-clap.workspace = true
-colored.workspace = true
-combine.workspace = true
 console.workspace = true
-derive_more.workspace = true
-enumset.workspace = true
-globset.workspace = true
 indicatif.workspace = true
-maplit.workspace = true
-maelstrom-base.workspace = true
 maelstrom-client.workspace = true
-maelstrom-macro.workspace = true
+maelstrom-test-runner.workspace = true
 maelstrom-util.workspace = true
-num-derive.workspace = true
-num-traits.workspace = true
-regex.workspace = true
-regex-macro.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-serde_repr.workspace = true
-serde_with.workspace = true
-slog-async.workspace = true
-slog-term.workspace = true
-slog.workspace = true
-strum.workspace = true
-tar.workspace = true
-toml.workspace = true
-unicode-truncate.workspace = true
-unicode-width.workspace = true
-xdg.workspace = true
 
 [dev-dependencies]
 assert_matches.workspace = true
@@ -54,6 +27,7 @@ maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
 maelstrom-worker.workspace = true
 pretty_assertions.workspace = true
+regex.workspace = true
 serde.workspace = true
 tempfile.workspace = true
 
