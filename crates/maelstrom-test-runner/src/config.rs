@@ -1,4 +1,3 @@
-use crate::cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
 use derive_more::From;
 use maelstrom_client::ContainerImageDepotDir;
 use maelstrom_macro::Config;
@@ -89,13 +88,4 @@ pub struct Config {
     /// The number of job slots available.
     #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
-
-    #[config(flatten, next_help_heading = "Feature Selection Config Options")]
-    pub cargo_feature_selection_options: FeatureSelectionOptions,
-
-    #[config(flatten, next_help_heading = "Compilation Config Options")]
-    pub cargo_compilation_options: CompilationOptions,
-
-    #[config(flatten, next_help_heading = "Manifest Config Options")]
-    pub cargo_manifest_options: ManifestOptions,
 }

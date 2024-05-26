@@ -877,12 +877,16 @@ version = "0.10.0-dev"
 dependencies = [
  "anyhow",
  "assert_matches",
+ "cargo_metadata",
+ "clap",
  "console",
  "enum-map",
  "indicatif",
  "indoc",
+ "maelstrom-base",
  "maelstrom-broker",
  "maelstrom-client",
+ "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-test-runner",
  "maelstrom-util",
@@ -890,7 +894,10 @@ dependencies = [
  "pretty_assertions",
  "regex",
  "serde",
+ "serde_json",
+ "slog",
  "tempfile",
+ "xdg",
 ]
 
 [[package]]

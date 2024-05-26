@@ -1,6 +1,5 @@
 use crate::{
     alternative_mains,
-    cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
@@ -26,6 +25,7 @@ use maelstrom_util::{
     fs::Fs,
     log::test_logger,
     root::{Root, RootBuf},
+    template::TemplateVars,
 };
 use pretty_assertions::assert_eq;
 use std::{
@@ -308,6 +308,8 @@ impl TestMainAppDeps {
     }
 }
 
+struct TestCargoOptions;
+
 impl MainAppDeps for TestMainAppDeps {
     fn add_layer(&self, _layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
         Ok((digest!(42), ArtifactType::Manifest))
@@ -331,13 +333,12 @@ impl MainAppDeps for TestMainAppDeps {
 
     type CargoWaitHandle = WaitForNothing;
     type CargoTestArtifactStream = std::vec::IntoIter<Result<CargoArtifact>>;
+    type CargoOptions = TestCargoOptions;
 
     fn run_cargo_test(
         &self,
         _color: bool,
-        _feature_selection_options: &FeatureSelectionOptions,
-        _compilation_options: &CompilationOptions,
-        _manifest_options: &ManifestOptions,
+        _cargo_options: &TestCargoOptions,
         packages: Vec<String>,
     ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)> {
         let fs = Fs::new();
@@ -357,6 +358,14 @@ impl MainAppDeps for TestMainAppDeps {
             None => Ok(self.tests.cases(binary)),
             o => panic!("unsupported filter {o:?}"),
         }
+    }
+
+    fn get_template_vars(
+        &self,
+        _cargo_options: &TestCargoOptions,
+        _target_dir: &Root<TargetDir>,
+    ) -> Result<TemplateVars> {
+        Ok(TemplateVars::new())
     }
 }
 
@@ -412,9 +421,7 @@ fn run_app(
         &Vec::from_iter(packages.iter()),
         target_directory.join::<StateDir>("maelstrom/state"),
         &target_directory,
-        FeatureSelectionOptions::default(),
-        CompilationOptions::default(),
-        ManifestOptions::default(),
+        TestCargoOptions,
         LoggingOutput::default(),
         log.clone(),
     )

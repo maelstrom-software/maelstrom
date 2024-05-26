@@ -47,14 +47,16 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         .unwrap();
 
     let config = Config {
-        broker: None,
-        log_level: LogLevel::Debug,
-        quiet: false.into(),
-        container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
-        timeout: None,
-        cache_size: CacheSize::default(),
-        inline_limit: InlineLimit::default(),
-        slots: Slots::default(),
+        parent: maelstrom_test_runner::config::Config {
+            broker: None,
+            log_level: LogLevel::Debug,
+            quiet: false.into(),
+            container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
+            timeout: None,
+            cache_size: CacheSize::default(),
+            inline_limit: InlineLimit::default(),
+            slots: Slots::default(),
+        },
         cargo_feature_selection_options: FeatureSelectionOptions::default(),
         cargo_compilation_options: CompilationOptions::default(),
         cargo_manifest_options: ManifestOptions {

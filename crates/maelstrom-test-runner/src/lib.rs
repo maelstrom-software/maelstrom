@@ -1,6 +1,5 @@
 pub mod alternative_mains;
 pub mod artifacts;
-pub mod cargo;
 pub mod cli;
 pub mod config;
 pub mod metadata;
@@ -12,26 +11,18 @@ pub mod visitor;
 #[cfg(test)]
 mod tests;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions};
-use cargo_metadata::{
-    Artifact as CargoArtifact, Metadata as CargoMetadata, Package as CargoPackage, PackageId,
-};
+use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
 use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
 use maelstrom_client::{
     spec::{JobSpec, Layer},
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, IntrospectResponse, ProjectDir,
-    StateDir,
+    IntrospectResponse, StateDir,
 };
 use maelstrom_util::{
-    config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    fs::Fs,
-    process::ExitCode,
-    root::Root,
-    template::TemplateVars,
+    config::common::LogLevel, fs::Fs, process::ExitCode, root::Root, template::TemplateVars,
 };
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
@@ -83,33 +74,12 @@ fn filter_case(
     pattern::interpret_pattern(p, &c).expect("case is provided")
 }
 
-fn do_template_replacement(
-    test_metadata: &mut AllMetadata,
-    compilation_options: &CompilationOptions,
-    target_dir: &Root<TargetDir>,
-) -> Result<()> {
-    let profile = compilation_options.profile.clone().unwrap_or("dev".into());
-    let mut target = (**target_dir).to_owned();
-    match profile.as_str() {
-        "dev" => target.push("debug"),
-        other => target.push(other),
-    }
-    let build_dir = target
-        .to_str()
-        .ok_or_else(|| anyhow!("{} contains non-UTF8", target.display()))?;
-    let vars = TemplateVars::new()
-        .with_var("build-dir", build_dir)
-        .unwrap();
-    test_metadata.replace_template_vars(&vars)?;
-    Ok(())
-}
-
 /// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
 ///
 /// This object is separate from `MainAppState` because it is lent to `JobQueuing`
-struct JobQueuingState {
+struct JobQueuingState<CargoOptionsT> {
     packages: BTreeMap<PackageId, CargoPackage>,
     filter: pattern::Pattern,
     stderr_color: bool,
@@ -119,31 +89,21 @@ struct JobQueuingState {
     expected_job_count: u64,
     test_listing: Arc<Mutex<Option<TestListing>>>,
     list_action: Option<ListAction>,
-    feature_selection_options: FeatureSelectionOptions,
-    compilation_options: CompilationOptions,
-    manifest_options: ManifestOptions,
+    cargo_options: CargoOptionsT,
 }
 
-impl JobQueuingState {
+impl<CargoOptionsT> JobQueuingState<CargoOptionsT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
         packages: BTreeMap<PackageId, CargoPackage>,
         filter: pattern::Pattern,
         stderr_color: bool,
-        mut test_metadata: AllMetadata,
+        test_metadata: AllMetadata,
         test_listing: TestListing,
         list_action: Option<ListAction>,
-        target_dir: impl AsRef<Root<TargetDir>>,
-        feature_selection_options: FeatureSelectionOptions,
-        compilation_options: CompilationOptions,
-        manifest_options: ManifestOptions,
+        cargo_options: CargoOptionsT,
     ) -> Result<Self> {
         let expected_job_count = test_listing.expected_job_count(&filter);
-        do_template_replacement(
-            &mut test_metadata,
-            &compilation_options,
-            target_dir.as_ref(),
-        )?;
 
         Ok(Self {
             packages,
@@ -155,9 +115,7 @@ impl JobQueuingState {
             expected_job_count,
             test_listing: Arc::new(Mutex::new(Some(test_listing))),
             list_action,
-            feature_selection_options,
-            compilation_options,
-            manifest_options,
+            cargo_options,
         })
     }
 }
@@ -171,9 +129,9 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT> {
+struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
@@ -192,10 +150,10 @@ struct TestListingResult {
     ignored_cases: HashSet<String>,
 }
 
-fn list_test_cases(
+fn list_test_cases<CargoOptionsT>(
     deps: &impl MainAppDeps,
     log: slog::Logger,
-    queuing_state: &JobQueuingState,
+    queuing_state: &JobQueuingState<CargoOptionsT>,
     ind: &impl ProgressIndicator,
     artifact: &CargoArtifact,
     package_name: &str,
@@ -242,7 +200,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
@@ -437,7 +395,7 @@ where
 /// next thing when asked.
 struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
@@ -456,7 +414,7 @@ where
 {
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::CargoOptions>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
@@ -478,9 +436,7 @@ where
             .then(|| {
                 deps.run_cargo_test(
                     queuing_state.stderr_color,
-                    &queuing_state.feature_selection_options,
-                    &queuing_state.compilation_options,
-                    &queuing_state.manifest_options,
+                    &queuing_state.cargo_options,
                     package_names,
                 )
             })
@@ -572,12 +528,6 @@ pub trait Wait {
     fn wait(self) -> Result<()>;
 }
 
-impl Wait for cargo::WaitHandle {
-    fn wait(self) -> Result<()> {
-        cargo::WaitHandle::wait(self)
-    }
-}
-
 pub trait MainAppDeps: Sync {
     fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
 
@@ -592,20 +542,22 @@ pub trait MainAppDeps: Sync {
     type CargoWaitHandle: Wait;
     type CargoTestArtifactStream: Iterator<Item = Result<CargoArtifact>>;
 
+    type CargoOptions;
+
     fn run_cargo_test(
         &self,
         color: bool,
-        feature_selection_options: &FeatureSelectionOptions,
-        compilation_options: &CompilationOptions,
-        manifest_options: &ManifestOptions,
+        options: &Self::CargoOptions,
         packages: Vec<String>,
     ) -> Result<(Self::CargoWaitHandle, Self::CargoTestArtifactStream)>;
 
     fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>>;
-}
 
-pub struct DefaultMainAppDeps {
-    client: Client,
+    fn get_template_vars(
+        &self,
+        cargo_options: &Self::CargoOptions,
+        target_dir: &Root<TargetDir>,
+    ) -> Result<TemplateVars>;
 }
 
 /// The workspace directory is the top-level Cargo workspace directory. If workspaces aren't
@@ -615,107 +567,17 @@ pub struct WorkspaceDir;
 /// The target directory is usually <workspace-dir>/target, but Cargo lets "target" be overridden.
 pub struct TargetDir;
 
-/// The Maelstrom target directory is <target-dir>/maelstrom.
-pub struct MaelstromTargetDir;
-
-impl DefaultMainAppDeps {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        bg_proc: ClientBgProcess,
-        broker_addr: Option<BrokerAddr>,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        state_dir: impl AsRef<Root<StateDir>>,
-        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
-        cache_dir: impl AsRef<Root<CacheDir>>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
-        log: slog::Logger,
-    ) -> Result<Self> {
-        let project_dir = project_dir.as_ref();
-        let state_dir = state_dir.as_ref();
-        let container_image_depot_dir = container_image_depot_dir.as_ref();
-        let cache_dir = cache_dir.as_ref();
-        slog::debug!(
-            log, "creating app dependencies";
-            "broker_addr" => ?broker_addr,
-            "project_dir" => ?project_dir,
-            "state_dir" => ?state_dir,
-            "container_image_depot_dir" => ?container_image_depot_dir,
-            "cache_dir" => ?cache_dir,
-            "cache_size" => ?cache_size,
-            "inline_limit" => ?inline_limit,
-            "slots" => ?slots,
-        );
-        let client = Client::new(
-            bg_proc,
-            broker_addr,
-            project_dir,
-            state_dir,
-            container_image_depot_dir,
-            cache_dir,
-            cache_size,
-            inline_limit,
-            slots,
-            log,
-        )?;
-        Ok(Self { client })
-    }
-}
-
-impl MainAppDeps for DefaultMainAppDeps {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        self.client.add_layer(layer)
-    }
-
-    fn introspect(&self) -> Result<IntrospectResponse> {
-        self.client.introspect()
-    }
-
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
-    ) -> Result<()> {
-        self.client.add_job(spec, handler)
-    }
-
-    type CargoWaitHandle = cargo::WaitHandle;
-    type CargoTestArtifactStream = cargo::TestArtifactStream;
-
-    fn run_cargo_test(
-        &self,
-        color: bool,
-        feature_selection_options: &FeatureSelectionOptions,
-        compilation_options: &CompilationOptions,
-        manifest_options: &ManifestOptions,
-        packages: Vec<String>,
-    ) -> Result<(cargo::WaitHandle, cargo::TestArtifactStream)> {
-        cargo::run_cargo_test(
-            color,
-            feature_selection_options,
-            compilation_options,
-            manifest_options,
-            packages,
-        )
-    }
-
-    fn get_cases_from_binary(&self, binary: &Path, filter: &Option<String>) -> Result<Vec<String>> {
-        cargo::get_cases_from_binary(binary, filter)
-    }
-}
-
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
-pub struct MainAppState<MainAppDepsT> {
+pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
-    queuing_state: JobQueuingState,
+    queuing_state: JobQueuingState<MainAppDepsT::CargoOptions>,
     test_listing_store: TestListingStore,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
 
-impl<MainAppDepsT> MainAppState<MainAppDepsT> {
+impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
     /// Creates a new `MainAppState`
     ///
     /// `bg_proc`: handle to background client process
@@ -739,9 +601,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
         workspace_packages: &[&CargoPackage],
         state_dir: impl AsRef<Root<StateDir>>,
         target_directory: impl AsRef<Root<TargetDir>>,
-        feature_selection_options: FeatureSelectionOptions,
-        compilation_options: CompilationOptions,
-        manifest_options: ManifestOptions,
+        cargo_options: MainAppDepsT::CargoOptions,
         logging_output: LoggingOutput,
         log: slog::Logger,
     ) -> Result<Self> {
@@ -752,7 +612,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
             "list_action" => ?list_action,
         );
 
-        let test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
+        let mut test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
         let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
         let mut test_listing = test_listing_store.load()?;
         test_listing.retain_packages_and_artifacts(
@@ -771,6 +631,9 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
             "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
         );
 
+        let vars = deps.get_template_vars(&cargo_options, target_directory.as_ref())?;
+        test_metadata.replace_template_vars(&vars)?;
+
         Ok(Self {
             deps,
             queuing_state: JobQueuingState::new(
@@ -780,10 +643,7 @@ impl<MainAppDepsT> MainAppState<MainAppDepsT> {
                 test_metadata,
                 test_listing,
                 list_action,
-                target_directory,
-                feature_selection_options,
-                compilation_options,
-                manifest_options,
+                cargo_options,
             )?,
             test_listing_store,
             logging_output,
@@ -1076,129 +936,5 @@ where
             driver,
             timeout_override,
         )?),
-    }
-}
-
-fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
-    if let Err(e) = &res {
-        if let Some(e) = e.downcast_ref::<cargo::CargoBuildError>() {
-            eprintln!("{}", &e.stderr);
-            return Ok(e.exit_code);
-        }
-    }
-    res
-}
-
-fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
-    let output = std::process::Command::new("cargo")
-        .args(["metadata", "--format-version=1"])
-        .args(config.cargo_feature_selection_options.iter())
-        .args(config.cargo_manifest_options.iter())
-        .output()
-        .context("getting cargo metadata")?;
-    if !output.status.success() {
-        bail!(String::from_utf8(output.stderr)
-            .context("reading stderr")?
-            .trim_end()
-            .trim_start_matches("error: ")
-            .to_owned());
-    }
-    let cargo_metadata: CargoMetadata =
-        serde_json::from_slice(&output.stdout).context("parsing cargo metadata")?;
-    Ok(cargo_metadata)
-}
-
-pub fn main<TermT>(
-    config: config::Config,
-    extra_options: cli::ExtraCommandLineOptions,
-    bg_proc: ClientBgProcess,
-    logger: Logger,
-    stderr_is_tty: bool,
-    stdout_is_tty: bool,
-    terminal: TermT,
-) -> Result<ExitCode>
-where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
-{
-    let cargo_metadata = read_cargo_metadata(&config)?;
-    if extra_options.test_metadata.init {
-        alternative_mains::init(&cargo_metadata.workspace_root)
-    } else if extra_options.list.packages {
-        alternative_mains::list_packages(
-            &cargo_metadata.workspace_packages(),
-            &extra_options.include,
-            &extra_options.exclude,
-            &mut io::stdout().lock(),
-        )
-    } else if extra_options.list.binaries {
-        alternative_mains::list_binaries(
-            &cargo_metadata.workspace_packages(),
-            &extra_options.include,
-            &extra_options.exclude,
-            &mut io::stdout().lock(),
-        )
-    } else {
-        let workspace_dir = Root::<WorkspaceDir>::new(cargo_metadata.workspace_root.as_std_path());
-        let logging_output = LoggingOutput::default();
-        let log = logger.build(logging_output.clone());
-
-        let list_action = match (extra_options.list.tests, extra_options.list.binaries) {
-            (true, _) => Some(ListAction::ListTests),
-            (_, _) => None,
-        };
-
-        let target_dir = Root::<TargetDir>::new(cargo_metadata.target_directory.as_std_path());
-        let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
-        let state_dir = maelstrom_target_dir.join::<StateDir>("state");
-        let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
-
-        Fs.create_dir_all(&state_dir)?;
-        Fs.create_dir_all(&cache_dir)?;
-
-        let deps = DefaultMainAppDeps::new(
-            bg_proc,
-            config.broker,
-            workspace_dir.transmute::<ProjectDir>(),
-            &state_dir,
-            config.container_image_depot_root,
-            cache_dir,
-            config.cache_size,
-            config.inline_limit,
-            config.slots,
-            log.clone(),
-        )?;
-
-        let state = MainAppState::new(
-            deps,
-            extra_options.include,
-            extra_options.exclude,
-            list_action,
-            stderr_is_tty,
-            workspace_dir,
-            &cargo_metadata.workspace_packages(),
-            &state_dir,
-            target_dir,
-            config.cargo_feature_selection_options,
-            config.cargo_compilation_options,
-            config.cargo_manifest_options,
-            logging_output,
-            log,
-        )?;
-
-        let res = std::thread::scope(|scope| {
-            let mut app = main_app_new(
-                &state,
-                stdout_is_tty,
-                config.quiet,
-                terminal,
-                progress::DefaultProgressDriver::new(scope),
-                config.timeout.map(Timeout::new),
-            )?;
-            while !app.enqueue_one()?.is_done() {}
-            app.drain()?;
-            app.finish()
-        });
-        drop(state);
-        maybe_print_build_error(res)
     }
 }
