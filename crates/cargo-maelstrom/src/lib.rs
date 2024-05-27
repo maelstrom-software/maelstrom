@@ -1,4 +1,6 @@
+pub mod alternative_mains;
 pub mod cargo;
+pub mod cli;
 pub mod config;
 
 use anyhow::{anyhow, bail, Context as _, Result};
@@ -9,8 +11,8 @@ use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    alternative_mains, main_app_new, progress, CollectTests, ListAction, LoggingOutput,
-    MainAppDeps, MainAppState, TargetDir, TestArtifact, Wait, WorkspaceDir,
+    main_app_new, progress, CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState,
+    TargetDir, TestArtifact, Wait, WorkspaceDir,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -23,7 +25,7 @@ use std::io;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::Path;
 
-pub use maelstrom_test_runner::{cli, Logger};
+pub use maelstrom_test_runner::Logger;
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;

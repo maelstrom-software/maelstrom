@@ -1,11 +1,10 @@
-use crate::{
-    metadata::{DEFAULT_TEST_METADATA, MAELSTROM_TEST_TOML},
-    pattern,
-    test_listing::ArtifactKey,
-};
 use anyhow::Result;
 use cargo_metadata::Package;
 use maelstrom_base::Utf8Path;
+use maelstrom_test_runner::{
+    metadata::{DEFAULT_TEST_METADATA, MAELSTROM_TEST_TOML},
+    {pattern, test_listing::ArtifactKey},
+};
 use maelstrom_util::{fs::Fs, process::ExitCode};
 use std::io::Write;
 
@@ -31,7 +30,7 @@ pub fn list_packages(
 ) -> Result<ExitCode> {
     let filter = pattern::compile_filter(include, exclude)?;
     for package in workspace_packages {
-        if crate::filter_package(package, &filter) {
+        if maelstrom_test_runner::filter_package(package, &filter) {
             writeln!(out, "{}", &package.name)?;
         }
     }

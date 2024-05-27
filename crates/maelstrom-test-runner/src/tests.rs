@@ -1,5 +1,4 @@
 use crate::{
-    alternative_mains,
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
@@ -568,38 +567,6 @@ fn run_all_tests_sync(
     )
 }
 
-fn list_packages_sync(
-    fake_tests: &FakeTests,
-    include_filter: &Vec<String>,
-    exclude_filter: &Vec<String>,
-) -> String {
-    let mut out = Vec::new();
-    alternative_mains::list_packages(
-        &fake_tests.packages().iter().collect::<Vec<_>>(),
-        include_filter,
-        exclude_filter,
-        &mut out,
-    )
-    .unwrap();
-    String::from_utf8(out).unwrap()
-}
-
-fn list_binaries_sync(
-    fake_tests: &FakeTests,
-    include_filter: &Vec<String>,
-    exclude_filter: &Vec<String>,
-) -> String {
-    let mut out = Vec::new();
-    alternative_mains::list_binaries(
-        &fake_tests.packages().iter().collect::<Vec<_>>(),
-        include_filter,
-        exclude_filter,
-        &mut out,
-    )
-    .unwrap();
-    String::from_utf8(out).unwrap()
-}
-
 #[allow(clippy::too_many_arguments)]
 fn list_all_tests_sync(
     tmp_dir: &Root<TmpDir>,
@@ -607,8 +574,6 @@ fn list_all_tests_sync(
     quiet: Quiet,
     include_filter: Vec<String>,
     exclude_filter: Vec<String>,
-    expected_packages: &str,
-    expected_binaries: &str,
     expected_tests: &str,
 ) {
     let listing = run_or_list_all_tests_sync(
@@ -620,12 +585,6 @@ fn list_all_tests_sync(
         Some(ListAction::ListTests),
     );
     assert_eq!(listing, expected_tests);
-
-    let listing = list_binaries_sync(&fake_tests, &include_filter, &exclude_filter);
-    assert_eq!(listing, expected_binaries);
-
-    let listing = list_packages_sync(&fake_tests, &include_filter, &exclude_filter);
-    assert_eq!(listing, expected_packages);
 }
 
 #[test]
@@ -671,8 +630,6 @@ fn no_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        "foo\n",
-        "foo (library)\n",
         "",
     );
 }
@@ -748,14 +705,6 @@ fn two_tests_all_tests_sync_listing() {
         false.into(),
         vec!["all".into()],
         vec![],
-        indoc! {"
-            bar
-            foo
-        "},
-        indoc! {"
-            bar (binary)
-            foo (library)
-        "},
         indoc! {"
             bar test_it
             foo test_it\
@@ -872,15 +821,6 @@ fn four_tests_filtered_sync_listing() {
             "name.equals(test_it2)".into(),
         ],
         vec!["package.equals(bin) || bin".into()],
-        indoc! {"
-            bar
-            baz
-            foo
-        "},
-        indoc! {"
-            bar (library)
-            foo (library)
-        "},
         indoc! {"
             bar test_it2
             foo test_it\

@@ -1,6 +1,4 @@
-pub mod alternative_mains;
 pub mod artifacts;
-pub mod cli;
 pub mod config;
 pub mod metadata;
 pub mod pattern;
@@ -50,7 +48,7 @@ pub enum ListAction {
 }
 
 /// Returns `true` if the given `CargoPackage` matches the given pattern
-fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
+pub fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
     let c = pattern::Context {
         package: package.name.clone(),
         artifact: None,
