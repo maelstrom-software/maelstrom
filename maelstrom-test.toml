@@ -81,7 +81,7 @@ image.name = "rust:alpine"
 image.use = ["layers", "environment"]
 added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
-    { paths = ["<build-dir>/client-bg-proc"], canonicalize = true }
+    { paths = ["<build-dir>/cargo-client-bg-proc"], canonicalize = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },

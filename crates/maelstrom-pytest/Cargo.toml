@@ -1,8 +1,8 @@
 [package]
-name = "cargo-maelstrom"
-categories = ["command-line-utilities", "development-tools::cargo-plugins", "development-tools::testing", "virtualization"]
-description = "Cargo Test Runner for Maelstrom."
-keywords = ["cargo", "cluster", "containers", "subcommand", "test-runner"]
+name = "maelstrom-pytest"
+categories = ["command-line-utilities", "development-tools::testing", "virtualization"]
+description = "Python Test Runner for Maelstrom."
+keywords = ["python", "cluster", "containers", "subcommand", "test-runner"]
 documentation.workspace = true
 edition.workspace = true
 homepage.workspace = true
@@ -13,7 +13,6 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-cargo_metadata.workspace = true
 clap.workspace = true
 combine.workspace = true
 console.workspace = true
@@ -45,5 +44,5 @@ serde.workspace = true
 tempfile.workspace = true
 
 [[bin]]
-name = "cargo-client-bg-proc"
+name = "pytest-client-bg-proc"
 path = "src/bg_proc_main.rs"

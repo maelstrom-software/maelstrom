@@ -3100,6 +3100,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-pytest"
+version = "0.10.0-dev"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "clap",
+ "combine",
+ "console",
+ "derive_more",
+ "enum-map",
+ "globset",
+ "indicatif",
+ "indoc",
+ "maelstrom-base",
+ "maelstrom-broker",
+ "maelstrom-client",
+ "maelstrom-macro",
+ "maelstrom-test",
+ "maelstrom-test-runner",
+ "maelstrom-util",
+ "maelstrom-worker",
+ "pretty_assertions",
+ "regex",
+ "regex-macro",
+ "serde",
+ "serde_json",
+ "slog",
+ "strum",
+ "tempfile",
+ "xdg",
+]
+
+[[package]]
 name = "maelstrom-run"
 version = "0.10.0-dev"
 dependencies = [

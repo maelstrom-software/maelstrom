@@ -26,7 +26,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
         maelstrom_client::bg_proc_main().unwrap();
     }
 
-    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_client-bg-proc"));
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_cargo-client-bg-proc"));
     ClientBgProcess::new_from_bin(&bin_path).unwrap()
 }
 
