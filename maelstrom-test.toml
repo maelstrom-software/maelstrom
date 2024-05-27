@@ -8,8 +8,8 @@ mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "fuse", "null", "ptmx", "random", "tty", "urandom", "zero"] },
 ]
-devices = ["full", "fuse", "null", "ptmx", "random", "tty", "urandom", "zero"]
 
 [[directives]]
 filter = "package.equals(maelstrom-worker) && name.equals(executor::tests::local_network)"
@@ -34,8 +34,8 @@ layers = [
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
 ]
-devices = ["null", "fuse"]
 environment = { HOME = "/tmp" }
 
 [[directives]]
@@ -70,10 +70,10 @@ filter = "package.equals(maelstrom-fuse) || package.equals(maelstrom-layer-fs)"
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
 ]
 working_directory = "/root"
 added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }]
-added_devices = ["null", "fuse"]
 
 [[directives]]
 filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
@@ -83,12 +83,12 @@ added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
     { paths = ["<build-dir>/client-bg-proc"], canonicalize = true }
 ]
-devices = ["full", "fuse", "null", "urandom", "random", "zero"]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "tmp", mount_point = "/root" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "fuse", "null", "urandom", "random", "zero"] },
 ]
 
 [[directives]]
