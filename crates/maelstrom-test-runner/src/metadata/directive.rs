@@ -5,7 +5,16 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, fmt::Display, marker::PhantomData, str, str::FromStr};
+use std::{
+    collections::BTreeMap,
+    fmt::Display,
+    marker::PhantomData,
+    str::{self, FromStr},
+    sync::OnceLock,
+};
+
+static DEPRECATED_ADDED_DEVICES_WARNING: OnceLock<()> = OnceLock::new();
+static DEPRECATED_DEVICES_WARNING: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TestDirective<TestFilterT> {
@@ -90,7 +99,7 @@ where
                     filter = Some(
                         map.next_value::<String>()?
                             .parse()
-                            .map_err(serde::de::Error::custom)?,
+                            .map_err(de::Error::custom)?,
                     );
                 }
                 DirectiveField::IncludeSharedLibraries => {
@@ -122,6 +131,9 @@ where
                     added_mounts = Some(map.next_value()?);
                 }
                 DirectiveField::Devices => {
+                    if DEPRECATED_DEVICES_WARNING.set(()).is_ok() {
+                        eprintln!("WARNING: field `devices` is deprecated, use a `mounts` of type `devices` instead");
+                    }
                     incompatible(
                         &added_devices,
                         "field `devices` cannot be set after `added_devices`",
@@ -130,6 +142,9 @@ where
                     devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
                 DirectiveField::AddedDevices => {
+                    if DEPRECATED_ADDED_DEVICES_WARNING.set(()).is_ok() {
+                        eprintln!("WARNING: field `added_devices` is deprecated, use an `added_mounts` of type `devices` instead");
+                    }
                     let d = map.next_value::<EnumSet<JobDeviceForTomlAndJson>>()?;
                     added_devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
@@ -249,6 +264,7 @@ mod tests {
     use maelstrom_base::enum_set;
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
+    use std::io::{Read as _, Seek as _};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective<String>> {
@@ -355,6 +371,7 @@ mod tests {
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local" },
                     { type = "bind", mount_point = "/bind2", local_path = "/local2", read_only = true },
+                    { type = "devices", devices = ["null", "zero"] },
                 ]
             "#})
             .unwrap(),
@@ -373,6 +390,11 @@ mod tests {
                         local_path: utf8_path_buf!("/local2"),
                         read_only: true,
                     },
+                    JobMountForTomlAndJson::Devices {
+                        devices: enum_set!(
+                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                        ),
+                    },
                 ]),
                 ..Default::default()
             }
@@ -386,6 +408,7 @@ mod tests {
                 added_mounts = [
                     { type = "proc", mount_point = "/proc" },
                     { type = "bind", mount_point = "/bind", local_path = "/local", read_only = true },
+                    { type = "devices", devices = ["null", "zero"] },
                 ]
             "#})
             .unwrap(),
@@ -396,7 +419,12 @@ mod tests {
                         mount_point: utf8_path_buf!("/bind"),
                         local_path: utf8_path_buf!("/local"),
                         read_only: true,
-                    }
+                    },
+                    JobMountForTomlAndJson::Devices {
+                        devices: enum_set!(
+                            JobDeviceForTomlAndJson::Null | JobDeviceForTomlAndJson::Zero
+                        ),
+                    },
                 ],
                 ..Default::default()
             }
@@ -499,6 +527,12 @@ mod tests {
 
     #[test]
     fn devices() {
+        // We lump all of the tests of devices into this one test because we might be run in cargo
+        // test, which means that multiple threads could be running tests simultaneously, which
+        // means that one of them may generate a warning for the other, or steal another's warning.
+        // However, if we just have one test that generates warnings, we're fine.
+        let mut file = tempfile::tempfile().unwrap();
+        let redirect = gag::Redirect::stderr(file.try_clone().unwrap()).unwrap();
         assert_eq!(
             parse_test_directive(indoc! {r#"
                 devices = [ "null", "zero" ]
@@ -509,10 +543,28 @@ mod tests {
                 ..Default::default()
             }
         );
+        parse_test_directive(indoc! {r#"
+            devices = [ "full", "random" ]
+        "#})
+        .unwrap();
+        drop(redirect);
+        file.rewind().unwrap();
+        let mut output = String::new();
+        file.read_to_string(&mut output).unwrap();
+        assert_eq!(
+            &output[..],
+            "WARNING: field `devices` is deprecated, use a `mounts` of type `devices` instead\n"
+        );
     }
 
     #[test]
     fn added_devices() {
+        // We lump all of the tests of added_devices into this one test because we might be run in
+        // cargo test, which means that multiple threads could be running tests simultaneously,
+        // which means that one of them may generate a warning for the other, or steal another's
+        // warning. However, if we just have one test that generates warnings, we're fine.
+        let mut file = tempfile::tempfile().unwrap();
+        let redirect = gag::Redirect::stderr(file.try_clone().unwrap()).unwrap();
         assert_eq!(
             parse_test_directive(
                 r#"
@@ -524,6 +576,18 @@ mod tests {
                 added_devices: enum_set!(JobDevice::Null | JobDevice::Zero),
                 ..Default::default()
             }
+        );
+        parse_test_directive(indoc! {r#"
+            added_devices = [ "full", "random" ]
+        "#})
+        .unwrap();
+        drop(redirect);
+        file.rewind().unwrap();
+        let mut output = String::new();
+        file.read_to_string(&mut output).unwrap();
+        assert_eq!(
+            &output[..],
+            "WARNING: field `added_devices` is deprecated, use an `added_mounts` of type `devices` instead\n"
         );
     }
 

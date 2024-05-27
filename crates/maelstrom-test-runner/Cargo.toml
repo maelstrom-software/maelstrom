@@ -46,6 +46,7 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 enum-map.workspace = true
+gag.workspace = true
 indoc.workspace = true
 maelstrom-broker.workspace = true
 maelstrom-test.workspace = true
