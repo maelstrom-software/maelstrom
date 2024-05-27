@@ -659,6 +659,30 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         let mut local_path_fds = BumpVec::new_in(&bump);
 
+        // Open all of the source paths for devices before we chdir or pivot_root. We create
+        // devices in the container my bind mounting them from the host instead of creating
+        // devices. We do this because we don't assume we're running as root, and as such, we can't
+        // create device files.
+        for device in spec.devices.iter() {
+            let Device { cstr, str } = Device::new(device);
+            let dirfd = new_fd_slot(&bump);
+            local_path_fds.push(dirfd);
+            builder.push(
+                Syscall::OpenTree {
+                    dirfd: Fd::AT_FDCWD,
+                    path: cstr,
+                    // We don't pass recursive because we assume we're just cloning a file.
+                    flags: OpenTreeFlags::CLONE,
+                    out: dirfd,
+                },
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error opening local path for bind mount of device {str}: {err}",
+                    ))
+                }),
+            );
+        }
+
         // Resolve all of the source paths for bind mounts before we chdir or pivot_root. Each path
         // gets opened as a fsfd and pushed on the `local_path_fds` vec.
         for mount in &spec.mounts {
@@ -725,30 +749,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             }
         }
 
-        // Open all of the source paths for devices before we chdir or pivot_root. We create
-        // devices in the container my bind mounting them from the host instead of creating
-        // devices. We do this because we don't assume we're running as root, and as such, we can't
-        // create device files.
-        for device in spec.devices.iter() {
-            let Device { cstr, str } = Device::new(device);
-            let dirfd = new_fd_slot(&bump);
-            local_path_fds.push(dirfd);
-            builder.push(
-                Syscall::OpenTree {
-                    dirfd: Fd::AT_FDCWD,
-                    path: cstr,
-                    // We don't pass recursive because we assume we're just cloning a file.
-                    flags: OpenTreeFlags::CLONE,
-                    out: dirfd,
-                },
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
-                        "error opening local path for bind mount of device {str}: {err}",
-                    ))
-                }),
-            );
-        }
-
         // Chdir to what will be the new root.
         builder.push(
             Syscall::Chdir {
@@ -766,13 +766,34 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| syserr(anyhow!("pivot_root: {err}")),
         );
 
+        let mut local_path_fds = local_path_fds.into_iter();
+
+        // Complete the bind mounting of devices.
+        for device in spec.devices.iter() {
+            let Device { cstr, str } = Device::new(device);
+            let mount_local_path_fd = local_path_fds.next().unwrap();
+            builder.push(
+                Syscall::MoveMount {
+                    from_dirfd: mount_local_path_fd,
+                    from_path: c"",
+                    to_dirfd: Fd::AT_FDCWD,
+                    to_path: cstr,
+                    flags: MoveMountFlags::F_EMPTY_PATH,
+                },
+                bump.alloc(move |err| {
+                    JobError::Execution(anyhow!(
+                        "error doing move_mount for bind mount of device {str}: {err}",
+                    ))
+                }),
+            );
+        }
+
         // Set up the mounts after we've called pivot_root so the absolute paths specified stay
         // within the container.
         //
         // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
         // unless they are already mounted. So we have to do this before we unmount the old root.
         // If we do the unmount first, then we'll get permission errors mounting those fs types.
-        let mut local_path_fds = local_path_fds.into_iter();
         for mount in &spec.mounts {
             fn normal_mount<'a>(
                 bump: &'a Bump,
@@ -873,26 +894,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     normal_mount(&bump, &mut builder, mount_point, c"tmpfs", "tmpfs")?;
                 }
             };
-        }
-
-        // Complete the bind mounting of devices.
-        for device in spec.devices.iter() {
-            let Device { cstr, str } = Device::new(device);
-            let mount_local_path_fd = local_path_fds.next().unwrap();
-            builder.push(
-                Syscall::MoveMount {
-                    from_dirfd: mount_local_path_fd,
-                    from_path: c"",
-                    to_dirfd: Fd::AT_FDCWD,
-                    to_path: cstr,
-                    flags: MoveMountFlags::F_EMPTY_PATH,
-                },
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
-                        "error doing move_mount for bind mount of device {str}: {err}",
-                    ))
-                }),
-            );
         }
 
         // Unmount the old root. See man 2 pivot_root.
