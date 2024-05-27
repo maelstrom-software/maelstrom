@@ -1,10 +1,8 @@
+use crate::{pattern, CargoArtifactKey};
 use anyhow::Result;
-use cargo_metadata::Package;
+use cargo_metadata::Package as CargoPackage;
 use maelstrom_base::Utf8Path;
-use maelstrom_test_runner::{
-    metadata::{DEFAULT_TEST_METADATA, MAELSTROM_TEST_TOML},
-    {pattern, test_listing::ArtifactKey},
-};
+use maelstrom_test_runner::metadata::{DEFAULT_TEST_METADATA, MAELSTROM_TEST_TOML};
 use maelstrom_util::{fs::Fs, process::ExitCode};
 use std::io::Write;
 
@@ -22,15 +20,25 @@ pub fn init(workspace_root: &Utf8Path) -> Result<ExitCode> {
     }
 }
 
+/// Returns `true` if the given `CargoPackage` matches the given pattern
+pub fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
+    let c = pattern::Context {
+        package: package.name.clone(),
+        artifact: None,
+        case: None,
+    };
+    pattern::interpret_pattern(p, &c).unwrap_or(true)
+}
+
 pub fn list_packages(
-    workspace_packages: &[&Package],
+    workspace_packages: &[&CargoPackage],
     include: &[String],
     exclude: &[String],
     out: &mut impl Write,
 ) -> Result<ExitCode> {
     let filter = pattern::compile_filter(include, exclude)?;
     for package in workspace_packages {
-        if maelstrom_test_runner::filter_package(package, &filter) {
+        if filter_package(package, &filter) {
             writeln!(out, "{}", &package.name)?;
         }
     }
@@ -38,7 +46,7 @@ pub fn list_packages(
 }
 
 pub fn list_binaries(
-    workspace_packages: &[&Package],
+    workspace_packages: &[&CargoPackage],
     include: &[String],
     exclude: &[String],
     out: &mut impl Write,
@@ -46,7 +54,7 @@ pub fn list_binaries(
     let filter = pattern::compile_filter(include, exclude)?;
     for package in workspace_packages {
         for target in &package.targets {
-            let artifact_key = ArtifactKey::from(target);
+            let artifact_key = CargoArtifactKey::from(target);
             let c = pattern::Context {
                 package: package.name.clone(),
                 artifact: Some(pattern::Artifact {

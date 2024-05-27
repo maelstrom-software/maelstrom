@@ -1,5 +1,6 @@
 use crate::progress::{ProgressIndicator, ProgressPrinter};
-use crate::test_listing::{ArtifactKey, TestListing};
+use crate::test_listing::TestListing;
+use crate::TestArtifactKey;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -127,24 +128,26 @@ impl JobStatusTracker {
     }
 }
 
-pub struct JobStatusVisitor<ProgressIndicatorT> {
+pub struct JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey> {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestListing>>>,
+    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
     package: String,
-    artifact: ArtifactKey,
+    artifact: ArtifactKeyT,
     case: String,
     case_str: String,
     width: usize,
     ind: ProgressIndicatorT,
 }
 
-impl<ProgressIndicatorT> JobStatusVisitor<ProgressIndicatorT> {
+impl<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestListing>>>,
+        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
         package: String,
-        artifact: ArtifactKey,
+        artifact: ArtifactKeyT,
         case: String,
         case_str: String,
         width: usize,
@@ -277,7 +280,9 @@ fn format_test_output(
     test_output_lines
 }
 
-impl<ProgressIndicatorT: ProgressIndicator> JobStatusVisitor<ProgressIndicatorT> {
+impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT: TestArtifactKey>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT>
+{
     fn print_job_result(
         &self,
         result_str: ColoredString,

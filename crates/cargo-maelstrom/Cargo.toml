@@ -15,7 +15,10 @@ version.workspace = true
 anyhow.workspace = true
 cargo_metadata.workspace = true
 clap.workspace = true
+combine.workspace = true
 console.workspace = true
+derive_more.workspace = true
+globset.workspace = true
 indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
@@ -23,8 +26,11 @@ maelstrom-macro.workspace = true
 maelstrom-test-runner.workspace = true
 maelstrom-util.workspace = true
 regex.workspace = true
+regex-macro.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 slog.workspace = true
+strum.workspace = true
 xdg.workspace = true
 
 [dev-dependencies]

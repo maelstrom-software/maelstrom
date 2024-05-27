@@ -1,7 +1,5 @@
-use crate::pattern;
-pub use crate::pattern::ArtifactKind;
+use crate::{TestArtifactKey, TestFilter};
 use anyhow::{anyhow, bail, Result};
-use cargo_metadata::Target as CargoTarget;
 use maelstrom_client::StateDir;
 use maelstrom_util::{
     fs::Fs,
@@ -14,10 +12,8 @@ use serde_repr::{Deserialize_repr, Serialize_repr};
 use serde_with::{serde_as, DisplayFromStr, DurationSecondsWithFrac};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
-    fmt::{self, Display, Formatter},
+    marker::PhantomData,
     path::Path,
-    result,
-    str::FromStr,
     time::Duration,
 };
 
@@ -29,51 +25,6 @@ use std::{
  *                                                |___/
  *  FIGLET: in memory
  */
-
-const MISSING_RIGHT_PAREN: &str = "last character was not ')'";
-const MISSING_LEFT_PAREN: &str = "could not find opening '('";
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct ArtifactKey {
-    pub name: String,
-    pub kind: ArtifactKind,
-}
-
-impl ArtifactKey {
-    pub fn new(name: impl Into<String>, kind: ArtifactKind) -> Self {
-        Self {
-            name: name.into(),
-            kind,
-        }
-    }
-}
-
-impl From<&CargoTarget> for ArtifactKey {
-    fn from(target: &CargoTarget) -> Self {
-        Self::new(&target.name, ArtifactKind::from_target(target))
-    }
-}
-
-impl Display for ArtifactKey {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        format!("{}({})", self.name, self.kind).fmt(f)
-    }
-}
-
-impl FromStr for ArtifactKey {
-    type Err = String;
-    fn from_str(s: &str) -> result::Result<Self, Self::Err> {
-        let Some(s) = s.strip_suffix(')') else {
-            return Err(MISSING_RIGHT_PAREN.to_string());
-        };
-        let Some((name, kind)) = s.rsplit_once('(') else {
-            return Err(MISSING_LEFT_PAREN.to_string());
-        };
-        let kind = ArtifactKind::from_str(kind).map_err(|e| format!("{e}"))?;
-        let name = name.to_owned();
-        Ok(Self { name, kind })
-    }
-}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Artifact {
@@ -88,12 +39,22 @@ impl<K: Into<String>, V: IntoIterator<Item = Duration>> FromIterator<(K, V)> for
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct Package {
-    pub artifacts: HashMap<ArtifactKey, Artifact>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Package<ArtifactKeyT: TestArtifactKey> {
+    pub artifacts: HashMap<ArtifactKeyT, Artifact>,
 }
 
-impl<K: Into<ArtifactKey>, V: Into<Artifact>> FromIterator<(K, V)> for Package {
+impl<ArtifactKeyT: TestArtifactKey> Default for Package<ArtifactKeyT> {
+    fn default() -> Self {
+        Self {
+            artifacts: HashMap::new(),
+        }
+    }
+}
+
+impl<ArtifactKeyT: TestArtifactKey, K: Into<ArtifactKeyT>, V: Into<Artifact>> FromIterator<(K, V)>
+    for Package<ArtifactKeyT>
+{
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self {
             artifacts: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
@@ -101,12 +62,22 @@ impl<K: Into<ArtifactKey>, V: Into<Artifact>> FromIterator<(K, V)> for Package {
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct TestListing {
-    pub packages: HashMap<String, Package>,
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestListing<ArtifactKeyT: TestArtifactKey> {
+    pub packages: HashMap<String, Package<ArtifactKeyT>>,
 }
 
-impl<K: Into<String>, V: Into<Package>> FromIterator<(K, V)> for TestListing {
+impl<ArtifactKeyT: TestArtifactKey> Default for TestListing<ArtifactKeyT> {
+    fn default() -> Self {
+        Self {
+            packages: HashMap::new(),
+        }
+    }
+}
+
+impl<ArtifactKeyT: TestArtifactKey, K: Into<String>, V: Into<Package<ArtifactKeyT>>>
+    FromIterator<(K, V)> for TestListing<ArtifactKeyT>
+{
     fn from_iter<T: IntoIterator<Item = (K, V)>>(iter: T) -> Self {
         Self {
             packages: HashMap::from_iter(iter.into_iter().map(|(k, v)| (k.into(), v.into()))),
@@ -114,10 +85,10 @@ impl<K: Into<String>, V: Into<Package>> FromIterator<(K, V)> for TestListing {
     }
 }
 
-impl TestListing {
+impl<ArtifactKeyT: TestArtifactKey> TestListing<ArtifactKeyT> {
     pub fn update_artifact_cases<K, I, T>(&mut self, package_name: &str, artifact_key: K, cases: I)
     where
-        K: Into<ArtifactKey>,
+        K: Into<ArtifactKeyT>,
         I: IntoIterator<Item = T>,
         T: Into<String>,
     {
@@ -137,7 +108,7 @@ impl TestListing {
         PI: IntoIterator<Item = (PN, AI)>,
         PN: Into<&'a str>,
         AI: IntoIterator<Item = AK>,
-        AK: Into<ArtifactKey>,
+        AK: Into<ArtifactKeyT>,
     {
         let existing_packages: HashMap<_, HashSet<_>> = existing_packages
             .into_iter()
@@ -154,24 +125,7 @@ impl TestListing {
         });
     }
 
-    pub fn expected_job_count(&self, filter: &pattern::Pattern) -> u64 {
-        fn filter_case(
-            package: &str,
-            artifact: &ArtifactKey,
-            case: &str,
-            filter: &pattern::Pattern,
-        ) -> bool {
-            let c = pattern::Context {
-                package: package.into(),
-                artifact: Some(pattern::Artifact {
-                    name: artifact.name.clone(),
-                    kind: artifact.kind,
-                }),
-                case: Some(pattern::Case { name: case.into() }),
-            };
-            pattern::interpret_pattern(filter, &c).expect("case is provided")
-        }
-
+    pub fn expected_job_count(&self, filter: &impl TestFilter<ArtifactKey = ArtifactKeyT>) -> u64 {
         self.packages
             .iter()
             .flat_map(|(p, a)| {
@@ -179,14 +133,18 @@ impl TestListing {
                     .iter()
                     .flat_map(move |(a, c)| c.cases.keys().map(move |c| (p, a, c)))
             })
-            .filter(|(p, a, c)| filter_case(p, a, c, filter))
+            .filter(|(p, a, c)| {
+                filter
+                    .filter(p, Some(a), Some(c))
+                    .expect("case is provided")
+            })
             .count() as u64
     }
 
     pub fn add_timing(
         &mut self,
         package_name: &str,
-        artifact_key: ArtifactKey,
+        artifact_key: ArtifactKeyT,
         case_name: &str,
         timing: Duration,
     ) {
@@ -203,7 +161,7 @@ impl TestListing {
     pub fn get_timing(
         &self,
         package_name: &str,
-        artifact_key: &ArtifactKey,
+        artifact_key: &ArtifactKeyT,
         case_name: &str,
     ) -> Option<Duration> {
         let package = self.packages.get(package_name)?;
@@ -252,27 +210,35 @@ struct OnDiskArtifact {
 #[serde_as]
 #[derive(Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
-struct OnDiskArtifactKey {
+struct OnDiskArtifactKey<ArtifactKeyT: TestArtifactKey> {
     #[serde_as(as = "DisplayFromStr")]
-    key: ArtifactKey,
+    #[serde(bound(serialize = ""))]
+    #[serde(bound(deserialize = ""))]
+    key: ArtifactKeyT,
 }
 
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 #[serde(transparent)]
-struct OnDiskPackage {
-    artifacts: BTreeMap<OnDiskArtifactKey, OnDiskArtifact>,
+struct OnDiskPackage<ArtifactKeyT: TestArtifactKey> {
+    #[serde(bound(serialize = ""))]
+    #[serde(bound(deserialize = ""))]
+    artifacts: BTreeMap<OnDiskArtifactKey<ArtifactKeyT>, OnDiskArtifact>,
 }
 
 #[derive(Serialize, Deserialize)]
-struct OnDiskTestListing {
+struct OnDiskTestListing<ArtifactKeyT: TestArtifactKey> {
     version: OnDiskTestListingVersion,
     #[serde(flatten)]
-    packages: BTreeMap<String, OnDiskPackage>,
+    #[serde(bound(serialize = ""))]
+    #[serde(bound(deserialize = ""))]
+    packages: BTreeMap<String, OnDiskPackage<ArtifactKeyT>>,
 }
 
-impl From<TestListing> for OnDiskTestListing {
-    fn from(in_memory: TestListing) -> Self {
+impl<ArtifactKeyT: TestArtifactKey> From<TestListing<ArtifactKeyT>>
+    for OnDiskTestListing<ArtifactKeyT>
+{
+    fn from(in_memory: TestListing<ArtifactKeyT>) -> Self {
         Self {
             version: OnDiskTestListingVersion::V2,
             packages: in_memory
@@ -316,8 +282,10 @@ impl From<TestListing> for OnDiskTestListing {
     }
 }
 
-impl From<OnDiskTestListing> for TestListing {
-    fn from(on_disk: OnDiskTestListing) -> Self {
+impl<ArtifactKeyT: TestArtifactKey> From<OnDiskTestListing<ArtifactKeyT>>
+    for TestListing<ArtifactKeyT>
+{
+    fn from(on_disk: OnDiskTestListing<ArtifactKeyT>) -> Self {
         Self::from_iter(on_disk.packages.into_iter().map(|(package_name, package)| {
             (
                 package_name,
@@ -373,7 +341,8 @@ impl TestListingStoreDeps for Fs {
 
 struct TestListingFile;
 
-pub struct TestListingStore<DepsT = Fs> {
+pub struct TestListingStore<ArtifactKeyT, DepsT = Fs> {
+    artifact_key: PhantomData<ArtifactKeyT>,
     deps: DepsT,
     test_listing_file: RootBuf<TestListingFile>,
 }
@@ -382,15 +351,20 @@ const MISSING_VERSION: &str = "missing version";
 const VERSION_NOT_AN_INTEGER: &str = "version field is not an integer";
 const TEST_LISTING_FILE: &str = "test-listing.toml";
 
-impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
+impl<ArtifactKeyT, DepsT> TestListingStore<ArtifactKeyT, DepsT> {
     pub fn new(deps: DepsT, state_dir: impl AsRef<Root<StateDir>>) -> Self {
         Self {
+            artifact_key: PhantomData,
             deps,
             test_listing_file: state_dir.as_ref().join(TEST_LISTING_FILE),
         }
     }
+}
 
-    pub fn load(&self) -> Result<TestListing> {
+impl<ArtifactKeyT: TestArtifactKey, DepsT: TestListingStoreDeps>
+    TestListingStore<ArtifactKeyT, DepsT>
+{
+    pub fn load(&self) -> Result<TestListing<ArtifactKeyT>> {
         let Some(contents) = self
             .deps
             .read_to_string_if_exists(&self.test_listing_file)?
@@ -405,17 +379,21 @@ impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
         match OnDiskTestListingVersion::from_i64(version) {
             None => Ok(Default::default()),
             Some(OnDiskTestListingVersion::V2) => {
-                Ok(toml::from_str::<OnDiskTestListing>(&contents)?.into())
+                Ok(toml::from_str::<OnDiskTestListing<ArtifactKeyT>>(&contents)?.into())
             }
         }
     }
+}
 
-    pub fn save(&self, job_listing: TestListing) -> Result<()> {
+impl<ArtifactKeyT: TestArtifactKey, DepsT: TestListingStoreDeps>
+    TestListingStore<ArtifactKeyT, DepsT>
+{
+    pub fn save(&self, job_listing: TestListing<ArtifactKeyT>) -> Result<()> {
         self.deps
             .create_dir_all(self.test_listing_file.parent().unwrap())?;
         self.deps.write(
             &self.test_listing_file,
-            toml::to_string::<OnDiskTestListing>(&job_listing.into())?,
+            toml::to_string::<OnDiskTestListing<ArtifactKeyT>>(&job_listing.into())?,
         )
     }
 }
@@ -423,6 +401,7 @@ impl<DepsT: TestListingStoreDeps> TestListingStore<DepsT> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SimpleFilter, StringArtifactKey};
     use indoc::indoc;
     use maelstrom_test::millis;
     use maelstrom_util::ext::OptionExt as _;
@@ -436,47 +415,11 @@ mod tests {
     }
 
     #[test]
-    fn artifact_key_display() {
-        let key = ArtifactKey::new("foo", ArtifactKind::Library);
-        assert_eq!(format!("{key}"), "foo(library)");
-    }
-
-    #[test]
-    fn artifact_key_from_str_empty_string() {
-        let err = ArtifactKey::from_str("").unwrap_err();
-        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
-    }
-
-    #[test]
-    fn artifact_key_from_str_no_right_paren() {
-        let err = ArtifactKey::from_str("foo bar").unwrap_err();
-        assert_eq!(err.to_string(), MISSING_RIGHT_PAREN);
-    }
-
-    #[test]
-    fn artifact_key_from_str_no_left_paren() {
-        let err = ArtifactKey::from_str("bar)").unwrap_err();
-        assert_eq!(err.to_string(), MISSING_LEFT_PAREN);
-    }
-
-    #[test]
-    fn artifact_key_from_str_bad_kind() {
-        let err = ArtifactKey::from_str("foo(not-a-valid-kind)").unwrap_err();
-        assert_eq!(err.to_string(), "Matching variant not found");
-    }
-
-    #[test]
-    fn artifact_key_from_str_good() {
-        let key = ArtifactKey::from_str("foo(library)").unwrap();
-        assert_eq!(key, ArtifactKey::new("foo", ArtifactKind::Library));
-    }
-
-    #[test]
     fn update_artifact_cases() {
-        let mut listing = TestListing::from_iter([(
+        let mut listing = TestListing::<StringArtifactKey>::from_iter([(
             "package-1",
             Package::from_iter([(
-                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                StringArtifactKey::from("artifact-1.library"),
                 Artifact::from_iter([
                     ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
                     ("case-1-1L-2", vec![millis!(20), millis!(21)]),
@@ -489,16 +432,16 @@ mod tests {
         // package.
         listing.update_artifact_cases(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+            StringArtifactKey::from("artifact-1.binary"),
             ["case-1-1B-1", "case-1-1B-2", "case-1-1B-3"],
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-1-1L-1", vec![millis!(10), millis!(11), millis!(12)]),
                             ("case-1-1L-2", vec![millis!(20), millis!(21)]),
@@ -506,7 +449,7 @@ mod tests {
                         ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        StringArtifactKey::from("artifact-1.binary"),
                         Artifact::from_iter([
                             ("case-1-1B-1", []),
                             ("case-1-1B-2", []),
@@ -521,21 +464,21 @@ mod tests {
         // timings, but remove cases that no longer exist.
         listing.update_artifact_cases(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             ["case-1-1L-2", "case-1-1L-3", "case-1-1L-4"],
         );
         listing.update_artifact_cases(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+            StringArtifactKey::from("artifact-1.binary"),
             ["case-1-1B-2", "case-1-1B-3", "case-1-1B-4"],
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-1-1L-2", vec![millis!(20), millis!(21)]),
                             ("case-1-1L-3", vec![millis!(30)]),
@@ -543,7 +486,7 @@ mod tests {
                         ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        StringArtifactKey::from("artifact-1.binary"),
                         Artifact::from_iter([
                             ("case-1-1B-2", []),
                             ("case-1-1B-3", []),
@@ -557,17 +500,17 @@ mod tests {
         // Add some more cases for a different package. They should be independent.
         listing.update_artifact_cases(
             "package-2",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             ["case-2-1L-1", "case-2-1L-2", "case-2-1L-3"],
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([
+            TestListing::<StringArtifactKey>::from_iter([
                 (
                     "package-1",
                     Package::from_iter([
                         (
-                            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                            StringArtifactKey::from("artifact-1.library"),
                             Artifact::from_iter([
                                 ("case-1-1L-2", vec![millis!(20), millis!(21)]),
                                 ("case-1-1L-3", vec![millis!(30)]),
@@ -575,7 +518,7 @@ mod tests {
                             ]),
                         ),
                         (
-                            ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                            StringArtifactKey::from("artifact-1.binary"),
                             Artifact::from_iter([
                                 ("case-1-1B-2", []),
                                 ("case-1-1B-3", []),
@@ -587,7 +530,7 @@ mod tests {
                 (
                     "package-2",
                     Package::from_iter([(
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-2-1L-1", []),
                             ("case-2-1L-2", []),
@@ -601,19 +544,19 @@ mod tests {
 
     #[test]
     fn retain_packages_and_artifacts() {
-        let mut listing = TestListing::from_iter([
+        let mut listing = TestListing::<StringArtifactKey>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-1-1L-1", [millis!(10), millis!(11)]),
                             ("case-1-1L-2", [millis!(20), millis!(21)]),
                         ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        StringArtifactKey::from("artifact-1.binary"),
                         Artifact::from_iter([
                             ("case-1-1B-1", [millis!(15), millis!(16)]),
                             ("case-1-1B-2", [millis!(25), millis!(26)]),
@@ -624,7 +567,7 @@ mod tests {
             (
                 "package-2",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([
                         ("case-2-1L-1", [millis!(10), millis!(12)]),
                         ("case-2-1L-2", [millis!(20), millis!(22)]),
@@ -637,22 +580,22 @@ mod tests {
             (
                 "package-1",
                 vec![
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
-                    ArtifactKey::new("artifact-2", ArtifactKind::Binary),
+                    StringArtifactKey::from("artifact-1.library"),
+                    StringArtifactKey::from("artifact-2.binary"),
                 ],
             ),
             (
                 "package-3",
-                vec![ArtifactKey::new("artifact-1", ArtifactKind::Library)],
+                vec![StringArtifactKey::from("artifact-1.library")],
             ),
         ]);
 
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([
                         ("case-1-1L-1", [millis!(10), millis!(11)]),
                         ("case-1-1L-2", [millis!(20), millis!(21)]),
@@ -664,12 +607,12 @@ mod tests {
 
     #[test]
     fn expected_job_count() {
-        let listing = TestListing::from_iter([
+        let listing = TestListing::<StringArtifactKey>::from_iter([
             (
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-1-1L-1", vec![millis!(10), millis!(11)]),
                             ("case-1-1L-2", vec![millis!(20)]),
@@ -677,7 +620,7 @@ mod tests {
                         ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        StringArtifactKey::from("artifact-1.binary"),
                         Artifact::from_iter([
                             ("case-1-1B-1", vec![millis!(15), millis!(16)]),
                             ("case-1-1B-2", vec![]),
@@ -688,19 +631,22 @@ mod tests {
             (
                 "package-2",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-2-1L-1", [millis!(10), millis!(12)])]),
                 )]),
             ),
         ]);
 
-        assert_eq!(listing.expected_job_count(&"all".parse().unwrap()), 6);
-        assert_eq!(listing.expected_job_count(&"none".parse().unwrap()), 0);
+        assert_eq!(listing.expected_job_count(&SimpleFilter::All), 6);
+        assert_eq!(listing.expected_job_count(&SimpleFilter::None), 0);
         assert_eq!(
-            listing.expected_job_count(&"package.eq(package-1)".parse().unwrap()),
+            listing.expected_job_count(&SimpleFilter::Package("package-1".into())),
             5
         );
-        assert_eq!(listing.expected_job_count(&"library".parse().unwrap()), 4);
+        assert_eq!(
+            listing.expected_job_count(&SimpleFilter::ArtifactEndsWith(".library".into())),
+            4
+        );
     }
 
     #[test]
@@ -709,16 +655,16 @@ mod tests {
 
         listing.add_timing(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             millis!(10),
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-1-1L-1", [millis!(10)])]),
                 )]),
             )]),
@@ -726,16 +672,16 @@ mod tests {
 
         listing.add_timing(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             millis!(11),
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-1-1L-1", [millis!(10), millis!(11)])]),
                 )]),
             )]),
@@ -743,16 +689,16 @@ mod tests {
 
         listing.add_timing(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             millis!(12),
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-1-1L-1", [millis!(10), millis!(11), millis!(12)])]),
                 )]),
             )]),
@@ -760,16 +706,16 @@ mod tests {
 
         listing.add_timing(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             millis!(13),
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-1-1L-1", [millis!(11), millis!(12), millis!(13)])]),
                 )]),
             )]),
@@ -778,10 +724,10 @@ mod tests {
 
     #[test]
     fn add_timing_already_too_many() {
-        let mut listing = TestListing::from_iter([(
+        let mut listing = TestListing::<StringArtifactKey>::from_iter([(
             "package-1",
             Package::from_iter([(
-                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                StringArtifactKey::from("artifact-1.library"),
                 Artifact::from_iter([(
                     "case-1-1L-1",
                     [
@@ -797,16 +743,16 @@ mod tests {
 
         listing.add_timing(
             "package-1",
-            ArtifactKey::new("artifact-1", ArtifactKind::Library),
+            StringArtifactKey::from("artifact-1.library"),
             "case-1-1L-1",
             millis!(15),
         );
         assert_eq!(
             listing,
-            TestListing::from_iter([(
+            TestListing::<StringArtifactKey>::from_iter([(
                 "package-1",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-1-1L-1", [millis!(13), millis!(14), millis!(15)])]),
                 )]),
             )]),
@@ -815,8 +761,8 @@ mod tests {
 
     #[test]
     fn get_timing() {
-        let artifact_1 = ArtifactKey::new("artifact-1", ArtifactKind::Library);
-        let listing = TestListing::from_iter([(
+        let artifact_1 = StringArtifactKey::from("artifact-1.library");
+        let listing = TestListing::<StringArtifactKey>::from_iter([(
             "package-1",
             Package::from_iter([(
                 artifact_1.clone(),
@@ -846,7 +792,7 @@ mod tests {
             Some(millis!(13))
         );
         assert_eq!(listing.get_timing("package-1", &artifact_1, "case-5"), None);
-        let artifact_1_bin = ArtifactKey::new("artifact-1", ArtifactKind::Binary);
+        let artifact_1_bin = StringArtifactKey::from("artifact-1.binary");
         assert_eq!(
             listing.get_timing("package-1", &artifact_1_bin, "case-1"),
             None
@@ -866,7 +812,10 @@ mod tests {
                 Ok(None)
             }
         }
-        let _ = TestListingStore::new(Deps, RootBuf::new("path/to/state".into()));
+        let _ = TestListingStore::<StringArtifactKey, _>::new(
+            Deps,
+            RootBuf::new("path/to/state".into()),
+        );
     }
 
     #[test]
@@ -877,7 +826,7 @@ mod tests {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), "error!");
     }
 
@@ -889,7 +838,7 @@ mod tests {
                 Ok(None)
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap(), TestListing::default());
     }
 
@@ -901,7 +850,7 @@ mod tests {
                 Ok(Some(r#""garbage": { "foo", "bar" }"#.into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         let error = store.load().unwrap_err().to_string();
         assert!(error.starts_with("TOML parse error"));
     }
@@ -914,7 +863,7 @@ mod tests {
                 Ok(Some("foo = 3\n".into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), MISSING_VERSION);
     }
 
@@ -926,7 +875,7 @@ mod tests {
                 Ok(Some("foo = 3\n".into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap_err().to_string(), MISSING_VERSION);
     }
 
@@ -938,7 +887,7 @@ mod tests {
                 Ok(Some("version = \"v1\"\n".into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(
             store.load().unwrap_err().to_string(),
             VERSION_NOT_AN_INTEGER
@@ -953,7 +902,7 @@ mod tests {
                 Ok(Some("version = 0\nfoo = \"bar\"\n".into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap(), TestListing::default());
     }
 
@@ -965,7 +914,7 @@ mod tests {
                 Ok(Some("version = 1000000\nfoo = \"bar\"\n".into()))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         assert_eq!(store.load().unwrap(), TestListing::default());
     }
 
@@ -978,7 +927,7 @@ mod tests {
                     indoc! {r#"
                         version = 2
 
-                        [package-1."artifact-1(library)"]
+                        [package-1."artifact-1.library"]
                         case-1-1L-1 = [0.01, 0.011]
                         case-1-1L-2 = [0.02]
                         case-1-1L-3 = []
@@ -987,11 +936,11 @@ mod tests {
                 ))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
-        let expected = TestListing::from_iter([(
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
+        let expected = TestListing::<StringArtifactKey>::from_iter([(
             "package-1",
             Package::from_iter([(
-                ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                StringArtifactKey::from("artifact-1.library"),
                 Artifact::from_iter([
                     ("case-1-1L-1", vec![millis!(10), millis!(11)]),
                     ("case-1-1L-2", vec![millis!(20)]),
@@ -1023,7 +972,7 @@ mod tests {
                 ))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("".into()));
         let error = store.load().unwrap_err().to_string();
         assert!(error.starts_with("TOML parse error"));
     }
@@ -1036,7 +985,8 @@ mod tests {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("state".into()));
+        let store =
+            TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("state".into()));
         assert_eq!(
             store.save(TestListing::default()).unwrap_err().to_string(),
             "error!"
@@ -1054,7 +1004,8 @@ mod tests {
                 Err(anyhow!("error!"))
             }
         }
-        let store = TestListingStore::new(Deps, RootBuf::new("state".into()));
+        let store =
+            TestListingStore::<StringArtifactKey, _>::new(Deps, RootBuf::new("state".into()));
         assert_eq!(
             store.save(TestListing::default()).unwrap_err().to_string(),
             "error!"
@@ -1090,7 +1041,10 @@ mod tests {
     #[test]
     fn save_creates_parent_directory() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::new(deps.clone(), RootBuf::new("maelstrom/state/".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(
+            deps.clone(),
+            RootBuf::new("maelstrom/state/".into()),
+        );
         store.save(TestListing::default()).unwrap();
         assert_eq!(deps.borrow().create_dir_all, Some("maelstrom/state".into()));
     }
@@ -1098,7 +1052,10 @@ mod tests {
     #[test]
     fn save_of_default() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::new(deps.clone(), RootBuf::new("maelstrom/state/".into()));
+        let store = TestListingStore::<StringArtifactKey, _>::new(
+            deps.clone(),
+            RootBuf::new("maelstrom/state/".into()),
+        );
         store.save(TestListing::default()).unwrap();
         assert_eq!(
             deps.borrow().write,
@@ -1112,12 +1069,15 @@ mod tests {
     #[test]
     fn save_of_listing() {
         let deps = Rc::new(RefCell::new(LoggingDeps::default()));
-        let store = TestListingStore::new(deps.clone(), RootBuf::new("maelstrom/state/".into()));
-        let listing = TestListing::from_iter([
+        let store = TestListingStore::<StringArtifactKey, _>::new(
+            deps.clone(),
+            RootBuf::new("maelstrom/state/".into()),
+        );
+        let listing = TestListing::<StringArtifactKey>::from_iter([
             (
                 "package-2",
                 Package::from_iter([(
-                    ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                    StringArtifactKey::from("artifact-1.library"),
                     Artifact::from_iter([("case-2-1L-1", [millis!(10), millis!(12)])]),
                 )]),
             ),
@@ -1125,14 +1085,14 @@ mod tests {
                 "package-1",
                 Package::from_iter([
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Binary),
+                        StringArtifactKey::from("artifact-1.binary"),
                         Artifact::from_iter([
                             ("case-1-1B-1", vec![millis!(15), millis!(16)]),
                             ("case-1-1B-2", vec![]),
                         ]),
                     ),
                     (
-                        ArtifactKey::new("artifact-1", ArtifactKind::Library),
+                        StringArtifactKey::from("artifact-1.library"),
                         Artifact::from_iter([
                             ("case-1-1L-1", vec![millis!(10), millis!(11)]),
                             ("case-1-1L-2", vec![millis!(20)]),
@@ -1150,16 +1110,16 @@ mod tests {
             indoc! {r#"
                 version = 2
 
-                [package-1."artifact-1(library)"]
+                [package-1."artifact-1.binary"]
+                case-1-1B-1 = [0.015, 0.016]
+                case-1-1B-2 = []
+
+                [package-1."artifact-1.library"]
                 case-1-1L-1 = [0.01, 0.011]
                 case-1-1L-2 = [0.02]
                 case-1-1L-3 = []
 
-                [package-1."artifact-1(binary)"]
-                case-1-1B-1 = [0.015, 0.016]
-                case-1-1B-2 = []
-
-                [package-2."artifact-1(library)"]
+                [package-2."artifact-1.library"]
                 case-2-1L-1 = [0.01, 0.012]
             "#},
         );

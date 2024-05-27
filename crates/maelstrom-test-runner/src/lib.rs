@@ -1,7 +1,7 @@
 pub mod artifacts;
 pub mod config;
+mod deps;
 pub mod metadata;
-pub mod pattern;
 pub mod progress;
 pub mod test_listing;
 pub mod visitor;
@@ -11,17 +11,12 @@ mod tests;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage, PackageId};
 use config::Quiet;
+pub use deps::*;
 use indicatif::TermLike;
-use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Timeout};
-use maelstrom_client::{
-    spec::{JobSpec, Layer},
-    IntrospectResponse, StateDir,
-};
-use maelstrom_util::{
-    config::common::LogLevel, fs::Fs, process::ExitCode, root::Root, template::TemplateVars,
-};
+use maelstrom_base::{ArtifactType, Sha256Digest, Timeout};
+use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
+use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
 use metadata::{AllMetadata, TestMetadata};
 use progress::{
     MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, ProgressPrinter as _,
@@ -30,7 +25,7 @@ use progress::{
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
-    fmt, io,
+    io,
     panic::{RefUnwindSafe, UnwindSafe},
     path::Path,
     str,
@@ -39,7 +34,7 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{ArtifactKey, TestListing, TestListingStore};
+use test_listing::{TestListing, TestListingStore};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -47,59 +42,34 @@ pub enum ListAction {
     ListTests,
 }
 
-/// Returns `true` if the given `CargoPackage` matches the given pattern
-pub fn filter_package(package: &CargoPackage, p: &pattern::Pattern) -> bool {
-    let c = pattern::Context {
-        package: package.name.clone(),
-        artifact: None,
-        case: None,
-    };
-    pattern::interpret_pattern(p, &c).unwrap_or(true)
-}
-
-/// Returns `true` if the given `CargoArtifact` and case matches the given pattern
-fn filter_case(
-    package_name: &str,
-    artifact: &CargoArtifact,
-    case: &str,
-    p: &pattern::Pattern,
-) -> bool {
-    let c = pattern::Context {
-        package: package_name.into(),
-        artifact: Some(pattern::Artifact::from_target(&artifact.target)),
-        case: Some(pattern::Case { name: case.into() }),
-    };
-    pattern::interpret_pattern(p, &c).expect("case is provided")
-}
-
 /// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
 ///
 /// This object is separate from `MainAppState` because it is lent to `JobQueuing`
-struct JobQueuingState<CollectorOptionsT> {
-    packages: BTreeMap<PackageId, CargoPackage>,
-    filter: pattern::Pattern,
+struct JobQueuingState<TestCollectorT: CollectTests> {
+    packages: BTreeMap<TestCollectorT::PackageId, TestCollectorT::Package>,
+    filter: TestCollectorT::TestFilter,
     stderr_color: bool,
     tracker: Arc<JobStatusTracker>,
     jobs_queued: AtomicU64,
-    test_metadata: AllMetadata,
+    test_metadata: AllMetadata<TestCollectorT::TestFilter>,
     expected_job_count: u64,
-    test_listing: Arc<Mutex<Option<TestListing>>>,
+    test_listing: Arc<Mutex<Option<TestListing<TestCollectorT::ArtifactKey>>>>,
     list_action: Option<ListAction>,
-    collector_options: CollectorOptionsT,
+    collector_options: TestCollectorT::Options,
 }
 
-impl<CollectorOptionsT> JobQueuingState<CollectorOptionsT> {
+impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
     #[allow(clippy::too_many_arguments)]
     fn new(
-        packages: BTreeMap<PackageId, CargoPackage>,
-        filter: pattern::Pattern,
+        packages: BTreeMap<TestCollectorT::PackageId, TestCollectorT::Package>,
+        filter: TestCollectorT::TestFilter,
         stderr_color: bool,
-        test_metadata: AllMetadata,
-        test_listing: TestListing,
+        test_metadata: AllMetadata<TestCollectorT::TestFilter>,
+        test_listing: TestListing<TestCollectorT::ArtifactKey>,
         list_action: Option<ListAction>,
-        collector_options: CollectorOptionsT,
+        collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
         let expected_job_count = test_listing.expected_job_count(&filter);
 
@@ -120,7 +90,7 @@ impl<CollectorOptionsT> JobQueuingState<CollectorOptionsT> {
 
 type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 
-/// Enqueues test cases as jobs in the given client from the given `CargoArtifact`
+/// Enqueues test cases as jobs in the given client from the given artifact
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
@@ -129,7 +99,7 @@ type StringIter = <Vec<String> as IntoIterator>::IntoIter;
 /// currently enqueuing from.
 struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
@@ -147,11 +117,11 @@ struct TestListingResult {
     ignored_cases: HashSet<String>,
 }
 
-fn list_test_cases<CollectorOptionsT>(
+fn list_test_cases<TestCollectorT: CollectTests>(
     log: slog::Logger,
-    queuing_state: &JobQueuingState<CollectorOptionsT>,
+    queuing_state: &JobQueuingState<TestCollectorT>,
     ind: &impl ProgressIndicator,
-    artifact: &impl TestArtifact,
+    artifact: &TestCollectorT::Artifact,
     package_name: &str,
 ) -> Result<TestListingResult> {
     ind.update_enqueue_status(format!("getting test list for {package_name}"));
@@ -162,14 +132,19 @@ fn list_test_cases<CollectorOptionsT>(
     slog::debug!(log, "listing tests"; "artifact" => ?artifact);
     let mut cases = artifact.list_tests()?;
 
-    let cargo_artifact = artifact.cargo_artifact();
+    let artifact_key = artifact.to_key();
     let mut listing = queuing_state.test_listing.lock().unwrap();
     listing
         .as_mut()
         .unwrap()
-        .update_artifact_cases(package_name, &cargo_artifact.target, &cases);
+        .update_artifact_cases(package_name, artifact_key.clone(), &cases);
 
-    cases.retain(|c| filter_case(package_name, cargo_artifact, c, &queuing_state.filter));
+    cases.retain(|c| {
+        queuing_state
+            .filter
+            .filter(package_name, Some(&artifact_key), Some(c.as_str()))
+            .expect("should have case")
+    });
     Ok(TestListingResult {
         cases,
         ignored_cases,
@@ -192,7 +167,7 @@ where
     #[allow(clippy::too_many_arguments)]
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
@@ -274,17 +249,10 @@ where
             return Ok(EnqueueResult::Listed);
         }
 
-        let cargo_artifact = self.artifact.cargo_artifact();
-        let filter_context = pattern::Context {
-            package: self.package_name.clone(),
-            artifact: Some(pattern::Artifact::from_target(&cargo_artifact.target)),
-            case: Some(pattern::Case { name: case.into() }),
-        };
-
         let test_metadata = self
             .queuing_state
             .test_metadata
-            .get_metadata_for_test_with_env(&filter_context)?;
+            .get_metadata_for_test_with_env(&self.package_name, &self.artifact.to_key(), case)?;
         self.ind
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
@@ -301,12 +269,11 @@ where
         ));
         self.queuing_state.tracker.add_outstanding();
 
-        let cargo_artifact = self.artifact.cargo_artifact();
         let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
             self.package_name.clone(),
-            ArtifactKey::from(&cargo_artifact.target),
+            self.artifact.to_key(),
             case.to_owned(),
             case_str.clone(),
             self.width,
@@ -325,11 +292,7 @@ where
             .unwrap()
             .as_ref()
             .unwrap()
-            .get_timing(
-                &self.package_name,
-                &ArtifactKey::from(&cargo_artifact.target),
-                case,
-            );
+            .get_timing(&self.package_name, &self.artifact.to_key(), case);
 
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
@@ -379,7 +342,7 @@ where
 /// next thing when asked.
 struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
-    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
+    queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
@@ -398,7 +361,7 @@ where
 {
     fn new(
         log: slog::Logger,
-        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollectorOptions>,
+        queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
@@ -407,7 +370,7 @@ where
         let package_names: Vec<_> = queuing_state
             .packages
             .values()
-            .map(|p| format!("{}@{}", &p.name, &p.version))
+            .map(|p| format!("{}@{}", p.name(), p.version()))
             .collect();
 
         let building_tests = !package_names.is_empty()
@@ -444,7 +407,7 @@ where
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
         self.ind.update_enqueue_status("building artifacts...");
 
-        slog::debug!(self.log, "getting artifact from cargo");
+        slog::debug!(self.log, "getting artifacts");
         let Some(ref mut artifacts) = self.artifacts else {
             return Ok(false);
         };
@@ -454,12 +417,12 @@ where
         let artifact = artifact?;
 
         slog::debug!(self.log, "got artifact"; "artifact" => ?artifact);
-        let package_name = &self
+        let package_name = self
             .queuing_state
             .packages
-            .get(&artifact.cargo_artifact().package_id)
+            .get(&artifact.package())
             .expect("artifact for unknown package")
-            .name;
+            .name();
 
         self.artifact_queuing = Some(ArtifactQueuing::new(
             self.log.clone(),
@@ -476,9 +439,9 @@ where
     }
 
     /// Meant to be called when the user has enqueued all the jobs they want. Checks for deferred
-    /// errors from cargo or otherwise
+    /// errors from collecting tests or otherwise
     fn finish(&mut self) -> Result<()> {
-        slog::debug!(self.log, "checking for cargo errors");
+        slog::debug!(self.log, "checking for collection errors");
         if let Some(wh) = self.wait_handle.take() {
             wh.wait()?;
         }
@@ -508,90 +471,16 @@ where
     }
 }
 
-pub trait Wait {
-    fn wait(self) -> Result<()>;
-}
-
-pub trait ClientTrait: Sync {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)>;
-    fn introspect(&self) -> Result<IntrospectResponse>;
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
-    ) -> Result<()>;
-}
-
-impl ClientTrait for maelstrom_client::Client {
-    fn add_layer(&self, layer: Layer) -> Result<(Sha256Digest, ArtifactType)> {
-        maelstrom_client::Client::add_layer(self, layer)
-    }
-
-    fn introspect(&self) -> Result<IntrospectResponse> {
-        maelstrom_client::Client::introspect(self)
-    }
-
-    fn add_job(
-        &self,
-        spec: JobSpec,
-        handler: impl FnOnce(Result<(ClientJobId, JobOutcomeResult)>) + Send + Sync + 'static,
-    ) -> Result<()> {
-        maelstrom_client::Client::add_job(self, spec, handler)
-    }
-}
-
-pub trait TestArtifact: fmt::Debug {
-    fn path(&self) -> &Path;
-    fn list_tests(&self) -> Result<Vec<String>>;
-    fn list_ignored_tests(&self) -> Result<Vec<String>>;
-    fn cargo_artifact(&self) -> &CargoArtifact;
-    fn name(&self) -> &str;
-}
-
-pub trait CollectTests {
-    type BuildHandle: Wait;
-    type Artifact: TestArtifact;
-    type ArtifactStream: Iterator<Item = Result<Self::Artifact>>;
-
-    type Options;
-
-    fn start(
-        &self,
-        color: bool,
-        options: &Self::Options,
-        packages: Vec<String>,
-    ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
-}
-
-pub trait MainAppDeps: Sync {
-    type Client: ClientTrait;
-    fn client(&self) -> &Self::Client;
-
-    type TestCollectorOptions;
-    type TestCollector: CollectTests<Options = Self::TestCollectorOptions>;
-
-    fn test_collector(&self) -> &Self::TestCollector;
-
-    fn get_template_vars(
-        &self,
-        options: &Self::TestCollectorOptions,
-        target_dir: &Root<TargetDir>,
-    ) -> Result<TemplateVars>;
-}
-
-/// The workspace directory is the top-level Cargo workspace directory. If workspaces aren't
-/// explicilty being used, it's the top-level directory for the package.
-pub struct WorkspaceDir;
-
-/// The target directory is usually <workspace-dir>/target, but Cargo lets "target" be overridden.
-pub struct TargetDir;
+/// This is where cached data goes. If there is build output it is also here.
+pub struct BuildDir;
 
 /// A collection of objects that are used to run the MainApp. This is useful as a separate object
 /// since it can contain things which live longer than scoped threads and thus shared among them.
 pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
-    queuing_state: JobQueuingState<MainAppDepsT::TestCollectorOptions>,
-    test_listing_store: TestListingStore,
+    queuing_state: JobQueuingState<MainAppDepsT::TestCollector>,
+    test_listing_store:
+        TestListingStore<<MainAppDepsT::TestCollector as CollectTests>::ArtifactKey>,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
@@ -600,13 +489,12 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
     /// Creates a new `MainAppState`
     ///
     /// `bg_proc`: handle to background client process
-    /// `cargo`: the command to run when invoking cargo
     /// `include_filter`: tests which match any of the patterns in this filter are run
     /// `exclude_filter`: tests which match any of the patterns in this filter are not run
     /// `list_action`: if some, tests aren't run, instead tests or other things are listed
     /// `stderr_color`: should terminal color codes be written to `stderr` or not
-    /// `workspace_root`: the path to the root of the workspace
-    /// `workspace_packages`: a listing of the packages in the workspace
+    /// `project_dir`: the path to the root of the project
+    /// `packages`: a listing of all the packages
     /// `broker_addr`: the network address of the broker which we connect to
     /// `client_driver`: an object which drives the background work of the `Client`
     #[allow(clippy::too_many_arguments)]
@@ -616,11 +504,11 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         exclude_filter: Vec<String>,
         list_action: Option<ListAction>,
         stderr_color: bool,
-        workspace_root: impl AsRef<Root<WorkspaceDir>>,
-        workspace_packages: &[&CargoPackage],
+        project_dir: impl AsRef<Root<ProjectDir>>,
+        packages: &[<MainAppDepsT::TestCollector as CollectTests>::Package],
         state_dir: impl AsRef<Root<StateDir>>,
-        target_directory: impl AsRef<Root<TargetDir>>,
-        collector_options: MainAppDepsT::TestCollectorOptions,
+        build_dir: impl AsRef<Root<BuildDir>>,
+        collector_options: <MainAppDepsT::TestCollector as CollectTests>::Options,
         logging_output: LoggingOutput,
         log: slog::Logger,
     ) -> Result<Self> {
@@ -631,18 +519,20 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "list_action" => ?list_action,
         );
 
-        let mut test_metadata = AllMetadata::load(log.clone(), workspace_root)?;
+        let mut test_metadata = AllMetadata::load(log.clone(), project_dir)?;
         let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
         let mut test_listing = test_listing_store.load()?;
-        test_listing.retain_packages_and_artifacts(
-            workspace_packages.iter().map(|p| (&*p.name, &p.targets)),
-        );
+        test_listing
+            .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
 
-        let filter = pattern::compile_filter(&include_filter, &exclude_filter)?;
-        let selected_packages: BTreeMap<_, _> = workspace_packages
+        let filter = <MainAppDepsT::TestCollector as CollectTests>::TestFilter::compile(
+            &include_filter,
+            &exclude_filter,
+        )?;
+        let selected_packages: BTreeMap<_, _> = packages
             .iter()
-            .filter(|p| filter_package(p, &filter))
-            .map(|&p| (p.id.clone(), p.clone()))
+            .filter(|p| filter.filter(p.name(), None, None).unwrap_or(true))
+            .map(|p| (p.id(), p.clone()))
             .collect();
 
         slog::debug!(
@@ -650,7 +540,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
         );
 
-        let vars = deps.get_template_vars(&collector_options, target_directory.as_ref())?;
+        let vars = deps.get_template_vars(&collector_options, build_dir.as_ref())?;
         test_metadata.replace_template_vars(&vars)?;
 
         Ok(Self {

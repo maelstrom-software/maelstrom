@@ -12,7 +12,6 @@ version.workspace = true
 [dependencies]
 anyhow.workspace = true
 byteorder.workspace = true
-cargo_metadata.workspace = true
 clap.workspace = true
 colored.workspace = true
 combine.workspace = true

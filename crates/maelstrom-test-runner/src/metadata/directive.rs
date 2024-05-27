@@ -1,4 +1,3 @@
-use crate::pattern;
 use anyhow::Result;
 use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMountForTomlAndJson, JobNetwork,
@@ -6,11 +5,11 @@ use maelstrom_base::{
 };
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::BTreeMap, str};
+use std::{collections::BTreeMap, fmt::Display, marker::PhantomData, str, str::FromStr};
 
 #[derive(Debug, Default, PartialEq)]
-pub struct TestDirective {
-    pub filter: Option<pattern::Pattern>,
+pub struct TestDirective<TestFilterT> {
+    pub filter: Option<TestFilterT>,
     // This will be Some if any of the other fields are Some(AllMetadata::Image).
     pub image: Option<String>,
     pub include_shared_libraries: Option<bool>,
@@ -52,10 +51,13 @@ enum DirectiveField {
     AddedEnvironment,
 }
 
-struct DirectiveVisitor;
+struct DirectiveVisitor<TestFilterT>(PhantomData<TestFilterT>);
 
-impl<'de> de::Visitor<'de> for DirectiveVisitor {
-    type Value = TestDirective;
+impl<'de, TestFilterT: FromStr> de::Visitor<'de> for DirectiveVisitor<TestFilterT>
+where
+    TestFilterT::Err: Display,
+{
+    type Value = TestDirective<TestFilterT>;
 
     fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(formatter, "TestDirective")
@@ -227,12 +229,15 @@ impl<'de> de::Visitor<'de> for DirectiveVisitor {
     }
 }
 
-impl<'de> de::Deserialize<'de> for TestDirective {
+impl<'de, TestFilterT: FromStr> de::Deserialize<'de> for TestDirective<TestFilterT>
+where
+    TestFilterT::Err: Display,
+{
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_any(DirectiveVisitor)
+        deserializer.deserialize_any(DirectiveVisitor::<TestFilterT>(PhantomData))
     }
 }
 
@@ -246,7 +251,7 @@ mod tests {
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;
 
-    fn parse_test_directive(file: &str) -> Result<TestDirective> {
+    fn parse_test_directive(file: &str) -> Result<TestDirective<String>> {
         toml::from_str(file).map_err(Error::new)
     }
 

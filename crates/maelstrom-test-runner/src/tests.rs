@@ -2,12 +2,11 @@ use crate::{
     config::Quiet,
     main_app_new,
     progress::{ProgressDriver, ProgressIndicator},
-    test_listing::{ArtifactKey, ArtifactKind, TestListing, TestListingStore},
-    ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps, MainAppState,
-    TargetDir, TestArtifact, Wait, WorkspaceDir,
+    test_listing::{TestListing, TestListingStore},
+    BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
+    MainAppState, SimpleFilter, StringArtifactKey, TestArtifact, TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
-use cargo_metadata::{Artifact as CargoArtifact, Package as CargoPackage};
 use indicatif::InMemoryTerm;
 use indoc::indoc;
 use maelstrom_base::{
@@ -17,7 +16,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{JobSpec, Layer},
-    IntrospectResponse, StateDir,
+    IntrospectResponse, ProjectDir, StateDir,
 };
 use maelstrom_test::digest;
 use maelstrom_util::{
@@ -30,7 +29,8 @@ use pretty_assertions::assert_eq;
 use std::{
     cell::RefCell,
     collections::HashSet,
-    path::Path,
+    fmt,
+    path::{Path, PathBuf},
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
     time::Duration,
@@ -76,26 +76,15 @@ impl Default for FakeTestCase {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct FakeTestBinary {
     name: String,
-    kind: ArtifactKind,
     tests: Vec<FakeTestCase>,
 }
 
 impl FakeTestBinary {
-    fn artifact_key(&self) -> ArtifactKey {
-        ArtifactKey::new(&self.name, self.kind)
-    }
-}
-
-impl Default for FakeTestBinary {
-    fn default() -> Self {
-        Self {
-            name: Default::default(),
-            kind: ArtifactKind::Library,
-            tests: Default::default(),
-        }
+    fn artifact_key(&self) -> StringArtifactKey {
+        self.name.as_str().into()
     }
 }
 
@@ -114,7 +103,7 @@ impl FakeTests {
         }
     }
 
-    fn update_listing(&self, listing: &mut TestListing) {
+    fn update_listing(&self, listing: &mut TestListing<StringArtifactKey>) {
         listing.retain_packages_and_artifacts(
             self.test_binaries
                 .iter()
@@ -137,43 +126,25 @@ impl FakeTests {
         }
     }
 
-    fn listing(&self) -> TestListing {
+    fn listing(&self) -> TestListing<StringArtifactKey> {
         let mut listing = TestListing::default();
         self.update_listing(&mut listing);
         listing
     }
 
-    fn packages(&self) -> Vec<CargoPackage> {
+    fn packages(&self) -> Vec<FakeTestPackage> {
         self.test_binaries
             .iter()
-            .map(|b| {
-                serde_json::from_value(serde_json::json! {{
-                    "name": &b.name,
-                    "version": "1.0.0",
-                    "id": &format!("{} 1.0.0", &b.name),
-                    "dependencies": [],
-                    "targets": [
-                        {
-                          "kind": [
-                            b.kind.short_name(),
-                          ],
-                          "crate_types": [
-                            b.kind.short_name(),
-                          ],
-                          "name": &b.name,
-                          "src_path": "foo.rs",
-                          "test": true
-                        }
-                    ],
-                    "features": {},
-                    "manifest_path": "Cargo.toml"
-                }})
-                .unwrap()
+            .map(|b| FakeTestPackage {
+                name: b.name.clone(),
+                version: "1.0.0".into(),
+                artifacts: vec![StringArtifactKey::from(b.name.as_ref())],
+                id: FakePackageId(format!("{} 1.0.0", b.name)),
             })
             .collect()
     }
 
-    fn artifacts(&self, bin_path: &Path, packages: &[String]) -> Vec<Result<CargoArtifact>> {
+    fn artifacts(&self, bin_path: &Path, packages: &[String]) -> Vec<Result<FakeTestArtifact>> {
         let packages: HashSet<_> = packages
             .iter()
             .map(|p| p.split('@').next().unwrap())
@@ -186,26 +157,13 @@ impl FakeTests {
                 }
 
                 let exe = bin_path.join(&b.name);
-                Some(Ok(serde_json::from_value(serde_json::json! {{
-                    "package_id": &format!("{} 1.0.0", &b.name),
-                    "executable": exe.to_str().unwrap(),
-                    "target": {
-                        "name": &b.name,
-                        "kind": [b.kind.short_name()],
-                        "src_path": "foo.rs"
-                    },
-                    "profile": {
-                        "opt_level": "",
-                        "debug_assertions": true,
-                        "overflow_checks": true,
-                        "test": true
-                    },
-                    "features": [],
-                    "filenames": [],
-                    "fresh": true
-
-                }})
-                .unwrap()))
+                Some(Ok(FakeTestArtifact {
+                    name: b.name.clone(),
+                    tests: self.cases(&exe),
+                    ignored_tests: self.ignored_cases(&exe),
+                    path: exe,
+                    package: FakePackageId(format!("{} 1.0.0", b.name)),
+                }))
             })
             .collect()
     }
@@ -295,7 +253,7 @@ struct TestMainAppDeps {
 }
 
 impl TestMainAppDeps {
-    fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<TargetDir>) -> Self {
+    fn new(tests: FakeTests, bin_path: RootBuf<BinDir>, target_dir: RootBuf<BuildDir>) -> Self {
         Self {
             client: TestClient {
                 next_job_id: AtomicU32::new(1),
@@ -342,19 +300,37 @@ impl ClientTrait for TestClient {
 struct TestCollector {
     tests: FakeTests,
     bin_path: RootBuf<BinDir>,
-    target_dir: RootBuf<TargetDir>,
+    target_dir: RootBuf<BuildDir>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct FakeTestArtifact {
-    cargo_artifact: CargoArtifact,
+    name: String,
     tests: Vec<String>,
     ignored_tests: Vec<String>,
+    path: PathBuf,
+    package: FakePackageId,
 }
 
+#[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
+struct FakePackageId(String);
+
+impl TestPackageId for FakePackageId {}
+
 impl TestArtifact for FakeTestArtifact {
+    type ArtifactKey = StringArtifactKey;
+    type PackageId = FakePackageId;
+
+    fn package(&self) -> FakePackageId {
+        self.package.clone()
+    }
+
+    fn to_key(&self) -> StringArtifactKey {
+        StringArtifactKey::from(self.name.as_ref())
+    }
+
     fn path(&self) -> &Path {
-        self.cargo_artifact.executable.as_ref().unwrap().as_ref()
+        &self.path
     }
 
     fn list_tests(&self) -> Result<Vec<String>> {
@@ -365,12 +341,37 @@ impl TestArtifact for FakeTestArtifact {
         Ok(self.ignored_tests.clone())
     }
 
-    fn cargo_artifact(&self) -> &CargoArtifact {
-        &self.cargo_artifact
+    fn name(&self) -> &str {
+        &self.name
     }
+}
+
+#[derive(Clone, Debug)]
+struct FakeTestPackage {
+    name: String,
+    version: String,
+    artifacts: Vec<StringArtifactKey>,
+    id: FakePackageId,
+}
+
+impl TestPackage for FakeTestPackage {
+    type PackageId = FakePackageId;
+    type ArtifactKey = StringArtifactKey;
 
     fn name(&self) -> &str {
-        &self.cargo_artifact.target.name
+        &self.name
+    }
+
+    fn version(&self) -> &impl fmt::Display {
+        &self.version
+    }
+
+    fn artifacts(&self) -> Vec<Self::ArtifactKey> {
+        self.artifacts.clone()
+    }
+
+    fn id(&self) -> Self::PackageId {
+        self.id.clone()
     }
 }
 
@@ -379,32 +380,22 @@ impl CollectTests for TestCollector {
     type Artifact = FakeTestArtifact;
     type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
     type Options = TestOptions;
+    type TestFilter = SimpleFilter;
+    type ArtifactKey = StringArtifactKey;
+    type PackageId = FakePackageId;
+    type Package = FakeTestPackage;
 
     fn start(
         &self,
         _color: bool,
-        _cargo_options: &TestOptions,
+        _options: &TestOptions,
         packages: Vec<String>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {
         let fs = Fs::new();
         fs.create_dir_all(&self.target_dir).unwrap();
-        fs.write((**self.target_dir).join("cargo_test_run"), "")
-            .unwrap();
+        fs.write((**self.target_dir).join("test_run"), "").unwrap();
 
-        let artifacts: Vec<_> = self
-            .tests
-            .artifacts(&self.bin_path, &packages)
-            .into_iter()
-            .map(|a| {
-                a.map(|a| FakeTestArtifact {
-                    tests: self.tests.cases(a.executable.as_ref().unwrap().as_ref()),
-                    ignored_tests: self
-                        .tests
-                        .ignored_cases(a.executable.as_ref().unwrap().as_ref()),
-                    cargo_artifact: a,
-                })
-            })
-            .collect();
+        let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, &packages);
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 }
@@ -416,7 +407,6 @@ impl MainAppDeps for TestMainAppDeps {
         &self.client
     }
 
-    type TestCollectorOptions = TestOptions;
     type TestCollector = TestCollector;
     fn test_collector(&self) -> &TestCollector {
         &self.test_collector
@@ -425,7 +415,7 @@ impl MainAppDeps for TestMainAppDeps {
     fn get_template_vars(
         &self,
         _options: &TestOptions,
-        _target_dir: &Root<TargetDir>,
+        _target_dir: &Root<BuildDir>,
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
@@ -444,7 +434,7 @@ fn run_app(
     bin_dir: &Root<BinDir>,
     term: InMemoryTerm,
     fake_tests: FakeTests,
-    workspace_root: &Root<WorkspaceDir>,
+    project_dir: &Root<ProjectDir>,
     stdout_tty: bool,
     quiet: Quiet,
     include_filter: Vec<String>,
@@ -454,19 +444,20 @@ fn run_app(
 ) -> String {
     let fs = Fs::new();
     let log = test_logger();
+    let packages = fake_tests.packages();
     slog::info!(
         log, "doing test";
         "quiet" => ?quiet,
         "include_filter" => ?include_filter,
         "exclude_filter" => ?exclude_filter,
-        "list" => ?list
+        "list" => ?list,
+        "packages" => ?packages
     );
-    let packages = fake_tests.packages();
 
     fs.create_dir_all(bin_dir).unwrap();
     fake_tests.create_binaries(&fs, bin_dir);
 
-    let target_directory = workspace_root.join::<TargetDir>("target");
+    let target_directory = project_dir.join::<BuildDir>("target");
     let deps = TestMainAppDeps::new(
         fake_tests.clone(),
         bin_dir.to_owned(),
@@ -479,8 +470,8 @@ fn run_app(
         exclude_filter,
         list,
         false, // stderr_color
-        workspace_root,
-        &Vec::from_iter(packages.iter()),
+        project_dir,
+        &packages,
         target_directory.join::<StateDir>("maelstrom/state"),
         &target_directory,
         TestOptions,
@@ -533,14 +524,14 @@ fn run_or_list_all_tests_sync(
     list: Option<ListAction>,
 ) -> String {
     let bin_dir = tmp_dir.join::<BinDir>("bin");
-    let workspace_dir = tmp_dir.join::<WorkspaceDir>("workspace");
+    let project_dir = tmp_dir.join::<ProjectDir>("project");
 
     let term = InMemoryTerm::new(50, 50);
     run_app(
         &bin_dir,
         term.clone(),
         fake_tests,
-        &workspace_dir,
+        &project_dir,
         false, // stdout_tty
         quiet,
         include_filter,
@@ -593,7 +584,6 @@ fn no_tests_all_tests_sync() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
-            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -620,7 +610,6 @@ fn no_tests_all_tests_sync_listing() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
-            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -641,7 +630,6 @@ fn two_tests_all_tests_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -649,7 +637,6 @@ fn two_tests_all_tests_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -683,7 +670,6 @@ fn two_tests_all_tests_sync_listing() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -691,7 +677,6 @@ fn two_tests_all_tests_sync_listing() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -719,7 +704,6 @@ fn four_tests_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it2".into(),
                     ..Default::default()
@@ -727,7 +711,6 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
-                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "testy".into(),
                     ..Default::default()
@@ -735,7 +718,6 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "bin".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -743,7 +725,6 @@ fn four_tests_filtered_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -756,11 +737,8 @@ fn four_tests_filtered_sync() {
             Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
-            vec![
-                "name.equals(test_it)".into(),
-                "name.equals(test_it2)".into()
-            ],
-            vec!["package.equals(bin) || bin".into()]
+            vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
+            vec!["package = \"bin\"".into()]
         ),
         "\
         bar test_it2...........................OK   1.000s\n\
@@ -780,7 +758,6 @@ fn four_tests_filtered_sync_listing() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it2".into(),
                     ..Default::default()
@@ -788,7 +765,6 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "baz".into(),
-                kind: ArtifactKind::Binary,
                 tests: vec![FakeTestCase {
                     name: "testy".into(),
                     ..Default::default()
@@ -796,7 +772,6 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "bin".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -804,7 +779,6 @@ fn four_tests_filtered_sync_listing() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -816,11 +790,8 @@ fn four_tests_filtered_sync_listing() {
         Root::new(tmp_dir.path()),
         fake_tests,
         false.into(),
-        vec![
-            "name.equals(test_it)".into(),
-            "name.equals(test_it2)".into(),
-        ],
-        vec!["package.equals(bin) || bin".into()],
+        vec!["name = \"test_it\"".into(), "name = \"test_it2\"".into()],
+        vec!["package = \"bin\"".into()],
         indoc! {"
             bar test_it2
             foo test_it\
@@ -835,7 +806,6 @@ fn three_tests_single_package_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -843,7 +813,6 @@ fn three_tests_single_package_sync() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -851,7 +820,6 @@ fn three_tests_single_package_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -864,7 +832,7 @@ fn three_tests_single_package_sync() {
             Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
-            vec!["package.equals(foo)".into()],
+            vec!["package = \"foo\"".into()],
             vec![]
         ),
         "\
@@ -884,7 +852,6 @@ fn three_tests_single_package_filtered_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![
                     FakeTestCase {
                         name: "test_it".into(),
@@ -898,7 +865,6 @@ fn three_tests_single_package_filtered_sync() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -906,7 +872,6 @@ fn three_tests_single_package_filtered_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -919,7 +884,7 @@ fn three_tests_single_package_filtered_sync() {
             Root::new(tmp_dir.path()),
             fake_tests,
             false.into(),
-            vec!["package.equals(foo) && name.equals(test_it)".into()],
+            vec!["and = [{ package = \"foo\" }, { name = \"test_it\" }]".into()],
             vec![]
         ),
         "\
@@ -939,7 +904,6 @@ fn ignored_test_sync() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -947,7 +911,6 @@ fn ignored_test_sync() {
             },
             FakeTestBinary {
                 name: "baz".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -955,7 +918,6 @@ fn ignored_test_sync() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ignored: true,
@@ -993,7 +955,6 @@ fn two_tests_all_tests_sync_quiet() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -1001,7 +962,6 @@ fn two_tests_all_tests_sync_quiet() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -1028,14 +988,14 @@ fn two_tests_all_tests_sync_quiet() {
 
 fn run_failed_tests(fake_tests: FakeTests) -> String {
     let tmp_dir = tempdir().unwrap();
-    let workspace_dir = RootBuf::<WorkspaceDir>::new(tmp_dir.path().join("workspace"));
+    let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
 
     let term = InMemoryTerm::new(50, 50);
     run_app(
         Root::new(tmp_dir.path()),
         term.clone(),
         fake_tests,
-        &workspace_dir,
+        &project_dir,
         false, // stdout_tty
         Quiet::from(false),
         vec!["all".into()],
@@ -1077,7 +1037,6 @@ fn failed_tests() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: failed_outcome.clone(),
@@ -1086,7 +1045,6 @@ fn failed_tests() {
             },
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: failed_outcome.clone(),
@@ -1118,7 +1076,7 @@ fn failed_tests() {
 
 fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &str) {
     let tmp_dir = tempdir().unwrap();
-    let workspace_dir = RootBuf::<WorkspaceDir>::new(tmp_dir.path().join("workspace"));
+    let project_dir = RootBuf::<ProjectDir>::new(tmp_dir.path().join("project"));
 
     let term = InMemoryTerm::new(50, 50);
     let term_clone = term.clone();
@@ -1126,7 +1084,7 @@ fn run_in_progress_test(fake_tests: FakeTests, quiet: Quiet, expected_output: &s
         Root::new(tmp_dir.path()),
         term_clone,
         fake_tests,
-        &workspace_dir,
+        &project_dir,
         true, // stdout_tty
         quiet,
         vec!["all".into()],
@@ -1143,7 +1101,6 @@ fn waiting_for_artifacts() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::WaitingForArtifacts,
@@ -1152,7 +1109,6 @@ fn waiting_for_artifacts() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::WaitingForArtifacts,
@@ -1179,7 +1135,6 @@ fn pending() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Pending,
@@ -1188,7 +1143,6 @@ fn pending() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Pending,
@@ -1215,7 +1169,6 @@ fn running() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1224,7 +1177,6 @@ fn running() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1251,7 +1203,6 @@ fn complete() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Complete,
@@ -1260,7 +1211,6 @@ fn complete() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1288,7 +1238,6 @@ fn complete_quiet() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Complete,
@@ -1297,7 +1246,6 @@ fn complete_quiet() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     desired_state: JobState::Running,
@@ -1321,7 +1269,6 @@ fn expected_count_updates_packages() {
         test_binaries: vec![
             FakeTestBinary {
                 name: "foo".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     ..Default::default()
@@ -1329,7 +1276,6 @@ fn expected_count_updates_packages() {
             },
             FakeTestBinary {
                 name: "bar".into(),
-                kind: ArtifactKind::Library,
                 tests: vec![FakeTestCase {
                     name: "test_it".into(),
                     outcome: JobOutcome::TimedOut(JobEffects {
@@ -1352,7 +1298,7 @@ fn expected_count_updates_packages() {
 
     let test_listing_store = TestListingStore::new(
         Fs::new(),
-        tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+        tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
     let mut expected_listing = fake_tests.listing();
@@ -1362,7 +1308,6 @@ fn expected_count_updates_packages() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
-            kind: ArtifactKind::Library,
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
                 expected_estimated_duration: Some(Duration::from_secs(1)),
@@ -1391,7 +1336,6 @@ fn expected_count_updates_cases() {
     let tmp_dir = Root::new(tmp_dir.path());
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
-            kind: ArtifactKind::Library,
             name: "foo".into(),
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
@@ -1409,7 +1353,7 @@ fn expected_count_updates_cases() {
 
     let test_listing_store = TestListingStore::new(
         Fs::new(),
-        tmp_dir.join::<StateDir>("workspace/target/maelstrom/state"),
+        tmp_dir.join::<StateDir>("project/target/maelstrom/state"),
     );
     let listing = test_listing_store.load().unwrap();
     let mut expected_listing = fake_tests.listing();
@@ -1419,7 +1363,6 @@ fn expected_count_updates_cases() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
-            kind: ArtifactKind::Library,
             tests: vec![],
         }],
     };
@@ -1445,7 +1388,6 @@ fn filtering_none_does_not_build() {
     let fake_tests = FakeTests {
         test_binaries: vec![FakeTestBinary {
             name: "foo".into(),
-            kind: ArtifactKind::Library,
             tests: vec![FakeTestCase {
                 name: "test_it".into(),
                 ..Default::default()
@@ -1461,7 +1403,7 @@ fn filtering_none_does_not_build() {
     );
 
     let entries: Vec<_> = Fs::new()
-        .read_dir((**tmp_dir).join("workspace/target"))
+        .read_dir((**tmp_dir).join("project/target"))
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
         .collect();

@@ -1,5 +1,6 @@
 use crate::pattern::parser::*;
 use cargo_metadata::Target as CargoTarget;
+use maelstrom_test_runner::{maybe_and, maybe_not, maybe_or};
 use serde::{Deserialize, Serialize};
 use strum::{Display, EnumString};
 
@@ -89,32 +90,6 @@ impl Context {
 
     fn artifact(&self) -> Option<&Artifact> {
         self.artifact.as_ref()
-    }
-}
-
-pub fn maybe_not(a: Option<bool>) -> Option<bool> {
-    a.map(|v| !v)
-}
-
-pub fn maybe_and(a: Option<bool>, b: Option<bool>) -> Option<bool> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a && b),
-        (None, Some(true)) => None,
-        (None, Some(false)) => Some(false),
-        (Some(true), None) => None,
-        (Some(false), None) => Some(false),
-        (None, None) => None,
-    }
-}
-
-pub fn maybe_or(a: Option<bool>, b: Option<bool>) -> Option<bool> {
-    match (a, b) {
-        (Some(a), Some(b)) => Some(a || b),
-        (None, Some(true)) => Some(true),
-        (None, Some(false)) => None,
-        (Some(true), None) => Some(true),
-        (Some(false), None) => None,
-        (None, None) => None,
     }
 }
 

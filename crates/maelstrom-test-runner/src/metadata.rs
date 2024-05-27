@@ -1,6 +1,6 @@
 mod directive;
 
-use crate::{pattern, WorkspaceDir};
+use crate::TestFilter;
 use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
@@ -8,10 +8,16 @@ use maelstrom_base::{
     EnumSet, GroupId, JobDevice, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId,
     Utf8PathBuf,
 };
-use maelstrom_client::spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage};
+use maelstrom_client::{
+    spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage},
+    ProjectDir,
+};
 use maelstrom_util::{fs::Fs, root::Root, template::TemplateVars};
 use serde::Deserialize;
-use std::str;
+use std::{
+    fmt::Display,
+    str::{self, FromStr},
+};
 
 /// This file is what we write out for the user when `--init` is provided. It should contain the
 /// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
@@ -21,11 +27,12 @@ pub const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
-pub struct AllMetadata {
-    directives: Vec<TestDirective>,
+pub struct AllMetadata<TestFilterT> {
+    #[serde(bound(deserialize = "TestFilterT: FromStr, TestFilterT::Err: Display"))]
+    directives: Vec<TestDirective<TestFilterT>>,
 }
 
-impl Default for AllMetadata {
+impl<TestFilterT> Default for AllMetadata<TestFilterT> {
     /// The default test metadata is used when there is no `maelstrom-test.toml` file.
     /// It provides some commonly used functionality by test processes in an attempt to give a good
     /// default.
@@ -87,7 +94,8 @@ impl Default for AllMetadata {
 #[test]
 fn all_metadata_default_matches_default_file() {
     // Verifies that it actually parses as valid TOML
-    let parsed_default_file = AllMetadata::from_str(DEFAULT_TEST_METADATA).unwrap();
+    let parsed_default_file =
+        AllMetadata::<crate::SimpleFilter>::from_str(DEFAULT_TEST_METADATA).unwrap();
 
     // Matches what do when there is no file.
     assert_eq!(parsed_default_file, AllMetadata::default());
@@ -141,7 +149,7 @@ impl TestMetadata {
         }
     }
 
-    fn try_fold(
+    fn try_fold<TestFilterT>(
         mut self,
         &TestDirective {
             filter: _,
@@ -161,7 +169,7 @@ impl TestMetadata {
             ref environment,
             ref added_environment,
             ref working_directory,
-        }: &TestDirective,
+        }: &TestDirective<TestFilterT>,
     ) -> Result<Self> {
         let mut image = image.as_ref().map(|image| {
             let (name, tag) = image.split_once(':').unwrap_or((&image, "latest"));
@@ -243,11 +251,10 @@ impl TestMetadata {
     }
 }
 
-fn pattern_match(filter: &pattern::Pattern, context: &pattern::Context) -> bool {
-    pattern::interpret_pattern(filter, context).expect("context should have case")
-}
-
-impl AllMetadata {
+impl<TestFilterT: TestFilter> AllMetadata<TestFilterT>
+where
+    TestFilterT::Err: Display,
+{
     pub fn replace_template_vars(&mut self, vars: &TemplateVars) -> Result<()> {
         for directive in &mut self.directives {
             if let Some(PossiblyImage::Explicit(layers)) = &mut directive.layers {
@@ -262,14 +269,21 @@ impl AllMetadata {
         Ok(())
     }
 
-    fn get_metadata_for_test(&self, context: &pattern::Context) -> Result<TestMetadata> {
+    fn get_metadata_for_test(
+        &self,
+        package: &str,
+        artifact: &TestFilterT::ArtifactKey,
+        case: &str,
+    ) -> Result<TestMetadata> {
         self.directives
             .iter()
             .filter(|directive| match directive {
                 TestDirective {
                     filter: Some(filter),
                     ..
-                } => pattern_match(filter, context),
+                } => filter
+                    .filter(package, Some(artifact), Some(case))
+                    .expect("should have case"),
                 TestDirective { filter: None, .. } => true,
             })
             .try_fold(TestMetadata::default(), |m, d| m.try_fold(d))
@@ -277,18 +291,20 @@ impl AllMetadata {
 
     pub fn get_metadata_for_test_with_env(
         &self,
-        context: &pattern::Context,
+        package: &str,
+        artifact: &TestFilterT::ArtifactKey,
+        case: &str,
     ) -> Result<TestMetadata> {
-        self.get_metadata_for_test(context)
+        self.get_metadata_for_test(package, artifact, case)
     }
 
     fn from_str(contents: &str) -> Result<Self> {
         Ok(toml::from_str(contents)?)
     }
 
-    pub fn load(log: slog::Logger, workspace_root: impl AsRef<Root<WorkspaceDir>>) -> Result<Self> {
+    pub fn load(log: slog::Logger, project_dir: impl AsRef<Root<ProjectDir>>) -> Result<Self> {
         struct MaelstromTestTomlFile;
-        let path = workspace_root
+        let path = project_dir
             .as_ref()
             .join::<MaelstromTestTomlFile>(MAELSTROM_TEST_TOML);
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
@@ -305,28 +321,18 @@ impl AllMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SimpleFilter;
     use anyhow::Error;
     use maelstrom_base::enum_set;
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
 
-    fn test_ctx(package: &str, test: &str) -> pattern::Context {
-        pattern::Context {
-            package: package.into(),
-            artifact: Some(pattern::Artifact {
-                name: package.into(),
-                kind: pattern::ArtifactKind::Library,
-            }),
-            case: Some(pattern::Case { name: test.into() }),
-        }
-    }
-
     #[test]
     fn default() {
         assert_eq!(
-            AllMetadata { directives: vec![] }
-                .get_metadata_for_test(&test_ctx("mod", "foo"))
+            AllMetadata::<SimpleFilter> { directives: vec![] }
+                .get_metadata_for_test("mod", &"mod".into(), "foo")
                 .unwrap(),
             TestMetadata::default(),
         );
@@ -334,102 +340,102 @@ mod tests {
 
     #[test]
     fn include_shared_libraries_defaults() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             layers = [{ tar = "layer1" }]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [ { package = \"package1\" }, { name = \"test1\" } ]"
             layers = []
             "#,
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test1"))
+            .get_metadata_for_test("package1", &"package1".into(), "test1")
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test(&test_ctx("package1", "test2"))
+            .get_metadata_for_test("package1", &"package1".into(), "test2")
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test(&test_ctx("package2", "test1"))
+            .get_metadata_for_test("package2", &"package2".into(), "test1")
             .unwrap()
             .include_shared_libraries());
     }
 
     #[test]
     fn include_shared_libraries() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             include_shared_libraries = false
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             include_shared_libraries = true
             layers = [{ tar = "layer1" }]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             layers = []
             "#,
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test1"))
+            .get_metadata_for_test("package1", &"package1".into(), "test1")
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test(&test_ctx("package1", "test2"))
+            .get_metadata_for_test("package1", &"package1".into(), "test2")
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test(&test_ctx("package2", "test1"))
+            .get_metadata_for_test("package2", &"package2".into(), "test1")
             .unwrap()
             .include_shared_libraries());
     }
 
     #[test]
     fn network() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             network = "disabled"
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             network = "loopback"
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test2)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             network = "local"
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .network,
             JobNetwork::Loopback,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .network,
             JobNetwork::Local,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .network,
             JobNetwork::Disabled,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .network,
             JobNetwork::Disabled,
@@ -438,30 +444,30 @@ mod tests {
 
     #[test]
     fn enable_writable_file_system() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             enable_writable_file_system = true
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             enable_writable_file_system = false
             "#,
         )
         .unwrap();
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            !all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            !all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            !all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .enable_writable_file_system
         );
@@ -469,35 +475,35 @@ mod tests {
 
     #[test]
     fn working_directory() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             include_shared_libraries = false
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             image.name = "rust"
             image.use = ["working_directory"]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             working_directory = "/bar"
 
             [[directives]]
-            filter = "package.equals(package3)"
+            filter = "package = \"package3\""
             image.name = "no-working-directory"
             image.use = ["working_directory"]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .working_directory,
             Some(utf8_path_buf!("/bar"))
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -509,13 +515,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .working_directory,
             None,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .working_directory,
             Some(utf8_path_buf!("/"))
@@ -524,32 +530,32 @@ mod tests {
 
     #[test]
     fn user() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             user = 101
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             user = 202
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .user,
             UserId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .user,
             UserId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .user,
             UserId::from(0)
@@ -558,32 +564,32 @@ mod tests {
 
     #[test]
     fn group() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             group = 101
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             group = 202
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .group,
             GroupId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .group,
             GroupId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .group,
             GroupId::from(0)
@@ -592,32 +598,32 @@ mod tests {
 
     #[test]
     fn timeout() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             timeout = 100
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             timeout = 0
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .timeout,
             None,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .timeout,
             Timeout::new(100),
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .timeout,
             None,
@@ -626,40 +632,40 @@ mod tests {
 
     #[test]
     fn layers() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             layers = [{ tar = "layer1" }, { tar = "layer2" }]
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             image.name = "image2"
             image.use = [ "layers" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             image.name = "image1"
             image.use = [ "layers" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test2)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             layers = [{ tar = "layer3" }, { tar = "layer4" }]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test3)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test3\" }]"
             image.name = "image3"
             image.use = [ "layers" ]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .layers,
             vec![]
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -671,13 +677,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .layers,
             vec![tar_layer!("layer3"), tar_layer!("layer4")],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -689,13 +695,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .layers,
             vec![],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -707,13 +713,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test4"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test4")
                 .unwrap()
                 .layers,
             vec![],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test4"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test4")
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -725,13 +731,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .layers,
             vec![tar_layer!("layer1"), tar_layer!("layer2")],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .image,
             None,
@@ -740,24 +746,24 @@ mod tests {
 
     #[test]
     fn added_layers() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_layers = [{ tar = "added-layer1" }, { tar = "added-layer2" }]
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             layers = [{tar = "layer1" }, { tar = "layer2" }]
             added_layers = [{ tar = "added-layer3" }, { tar = "added-layer4" }]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             added_layers = [{tar = "added-layer5" }, { tar = "added-layer6" }]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .layers,
             vec![
@@ -770,7 +776,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .layers,
             vec![
@@ -781,7 +787,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .layers,
             vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
@@ -806,60 +812,60 @@ mod tests {
             },
             extend: false,
         };
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             environment = { FOO = "$env{FOO}", BAR = "bar", BAZ = "$prev{FOO:-no-prev-foo}" }
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             image.name = "image1"
             image.use = ["environment"]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             environment = { FOO = "$prev{FOO}", BAR = "$env{BAR}", BAZ = "$prev{BAZ:-no-prev-baz}" }
 
             [[directives]]
-            filter = "package.equals(package3)"
+            filter = "package = \"package3\""
             image.name = "no-environment"
             image.use = ["environment"]
 
             [[directives]]
-            filter = "package.equals(package4)"
+            filter = "package = \"package4\""
             image.name = "bad-environment"
             image.use = ["environment"]
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .environment,
             vec![dir1_env.clone(), dir3_env.clone()]
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .environment,
             vec![dir1_env.clone()]
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .environment,
             vec![dir1_env.clone()]
@@ -909,31 +915,31 @@ mod tests {
             },
             extend: true,
         };
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             environment = { FOO = "foo", BAR = "bar" }
             added_environment = { FOO = "prev-$prev{FOO}", BAZ = "$prev{BAZ:-no-prev-baz}" }
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             image.name = "image1"
             image.use = ["environment"]
             added_environment = { FOO = "$prev{FOO}", BAZ = "$prev{BAZ:-no-prev-baz}" }
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             added_environment = { FOO = "prev-$prev{FOO}", BAR = "bar" }
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test2)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             environment = { FOO = "prev-$prev{FOO}" }
             added_environment = { FOO = "prev-$prev{FOO}", BAR = "$env{BAR}" }
             "#,
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .environment,
             vec![
@@ -944,14 +950,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .environment,
             vec![
@@ -963,14 +969,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .environment,
             vec![
@@ -980,14 +986,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .environment,
             vec![dir1_env.clone(), dir1_added_env.clone(),]
@@ -996,14 +1002,14 @@ mod tests {
 
     #[test]
     fn mounts() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             mounts = [ { type = "proc", mount_point = "/proc" } ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             mounts = [
                 { type = "tmp", mount_point = "/tmp" },
                 { type = "sys", mount_point = "/sys" },
@@ -1014,7 +1020,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .mounts,
             vec![
@@ -1032,7 +1038,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .mounts,
             vec![JobMount::Proc {
@@ -1040,7 +1046,7 @@ mod tests {
             }],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .mounts,
             vec![],
@@ -1049,13 +1055,13 @@ mod tests {
 
     #[test]
     fn added_mounts() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_mounts = [ { type = "tmp", mount_point = "/tmp" } ]
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             mounts = [
                 { type = "proc", mount_point = "/proc" },
             ]
@@ -1064,20 +1070,20 @@ mod tests {
             ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             added_mounts = [
                 { type = "tmp", mount_point = "/tmp" },
             ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test2)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             added_mounts = [
                 { type = "tmp", mount_point = "/tmp" },
                 { type = "bind", mount_point = "/foo", local_path = "/local" },
             ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test3)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test3\" }]"
             mounts = []
             added_mounts = [
                 { type = "tmp", mount_point = "/tmp" },
@@ -1087,7 +1093,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .mounts,
             vec![
@@ -1103,7 +1109,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .mounts,
             vec![
@@ -1124,7 +1130,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .mounts,
             vec![JobMount::Tmp {
@@ -1132,7 +1138,7 @@ mod tests {
             }],
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .mounts,
             vec![JobMount::Tmp {
@@ -1143,33 +1149,33 @@ mod tests {
 
     #[test]
     fn devices() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             devices = [ "null" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             devices = [ "zero", "tty" ]
             "#,
         )
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Tty},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Null},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .devices,
             EnumSet::EMPTY,
@@ -1178,26 +1184,26 @@ mod tests {
 
     #[test]
     fn added_devices() {
-        let all = AllMetadata::from_str(
+        let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
             added_devices = [ "tty" ]
 
             [[directives]]
-            filter = "package.equals(package1)"
+            filter = "package = \"package1\""
             devices = [ "zero", "null" ]
             added_devices = [ "full" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test1)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
             added_devices = [ "random" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test2)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
             added_devices = [ "urandom" ]
 
             [[directives]]
-            filter = "package.equals(package1) && name.equals(test3)"
+            filter = "and = [{ package = \"package1\" }, { name = \"test3\" }]"
             devices = []
             added_devices = [ "zero" ]
             "#,
@@ -1205,25 +1211,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test1"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test1")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Random},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test2"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test2")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Urandom},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package1", "test3"))
+            all.get_metadata_for_test("package1", &"package1".into(), "test3")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero},
         );
         assert_eq!(
-            all.get_metadata_for_test(&test_ctx("package2", "test1"))
+            all.get_metadata_for_test("package2", &"package2".into(), "test1")
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Tty},
@@ -1239,7 +1245,7 @@ mod tests {
     #[test]
     fn bad_field_in_all_metadata() {
         assert_toml_error(
-            AllMetadata::from_str(
+            AllMetadata::<SimpleFilter>::from_str(
                 r#"
                 [not_a_field]
                 foo = "three"
