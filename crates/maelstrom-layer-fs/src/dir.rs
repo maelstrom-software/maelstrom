@@ -216,7 +216,7 @@ impl DirectoryDataWriter {
         let entry = self
             .look_up_entry(entry_name)
             .await?
-            .ok_or(anyhow!("set_opaque_dir on nonexistent entry"))?;
+            .ok_or_else(|| anyhow!("set_opaque_dir on nonexistent entry"))?;
         let DirectoryEntryData::FileData(mut data) = entry else {
             bail!("set_opaque_dir on whiteout entry");
         };

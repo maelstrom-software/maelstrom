@@ -308,7 +308,7 @@ impl<V: TryFromProtoBuf> TryFromProtoBuf for maelstrom_base::NonEmpty<V> {
                 .map(|v| TryFromProtoBuf::try_from_proto_buf(v))
                 .collect::<Result<Vec<_>>>()?,
         )
-        .ok_or(anyhow!("malformed NonEmpty"))
+        .ok_or_else(|| anyhow!("malformed NonEmpty"))
     }
 }
 
@@ -394,7 +394,7 @@ impl TryFromProtoBuf for maelstrom_base::Timeout {
     type ProtoBufType = u32;
 
     fn try_from_proto_buf(v: u32) -> Result<Self> {
-        Self::new(v).ok_or(anyhow!("malformed Timeout"))
+        Self::new(v).ok_or_else(|| anyhow!("malformed Timeout"))
     }
 }
 
@@ -475,7 +475,9 @@ impl TryFromProtoBuf for maelstrom_base::JobMount {
     type ProtoBufType = proto::JobMount;
 
     fn try_from_proto_buf(protobuf: Self::ProtoBufType) -> Result<Self> {
-        let mount = protobuf.mount.ok_or(anyhow!("malformed JobMount"))?;
+        let mount = protobuf
+            .mount
+            .ok_or_else(|| anyhow!("malformed JobMount"))?;
         Ok(match mount {
             proto::job_mount::Mount::Bind(bind_mount) => maelstrom_base::JobMount::Bind {
                 mount_point: TryFromProtoBuf::try_from_proto_buf(bind_mount.mount_point)?,
@@ -556,7 +558,10 @@ impl TryFromProtoBuf for maelstrom_base::JobOutputResult {
 
     fn try_from_proto_buf(v: proto::JobOutputResult) -> Result<Self> {
         use proto::job_output_result::Result as ProtoJobOutputResult;
-        match v.result.ok_or(anyhow!("malformed JobOutputResult"))? {
+        match v
+            .result
+            .ok_or_else(|| anyhow!("malformed JobOutputResult"))?
+        {
             ProtoJobOutputResult::None(_) => Ok(Self::None),
             ProtoJobOutputResult::Inline(bytes) => Ok(Self::Inline(bytes.into())),
             ProtoJobOutputResult::Truncated(proto::JobOutputResultTruncated {
@@ -594,14 +599,14 @@ impl TryFromProtoBuf for maelstrom_base::JobOutcome {
 
     fn try_from_proto_buf(v: proto::JobOutcome) -> Result<Self> {
         use proto::job_outcome::Outcome;
-        match v.outcome.ok_or(anyhow!("malformed JobOutcome"))? {
+        match v.outcome.ok_or_else(|| anyhow!("malformed JobOutcome"))? {
             Outcome::Completed(proto::JobCompleted { status, effects }) => {
                 Ok(Self::Completed(maelstrom_base::JobCompleted {
                     status: TryFromProtoBuf::try_from_proto_buf(
-                        status.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
+                        status.ok_or_else(|| anyhow!("malformed JobOutcome::Completed"))?,
                     )?,
                     effects: TryFromProtoBuf::try_from_proto_buf(
-                        effects.ok_or(anyhow!("malformed JobOutcome::Completed"))?,
+                        effects.ok_or_else(|| anyhow!("malformed JobOutcome::Completed"))?,
                     )?,
                 }))
             }
@@ -631,7 +636,7 @@ impl TryFromProtoBuf for maelstrom_base::JobError<String> {
 
     fn try_from_proto_buf(t: proto::JobError) -> Result<Self> {
         use proto::job_error::Kind;
-        match t.kind.ok_or(anyhow!("malformed JobError"))? {
+        match t.kind.ok_or_else(|| anyhow!("malformed JobError"))? {
             Kind::Execution(msg) => Ok(Self::Execution(msg)),
             Kind::System(msg) => Ok(Self::System(msg)),
         }
@@ -657,7 +662,10 @@ impl TryFromProtoBuf for maelstrom_base::JobOutcomeResult {
 
     fn try_from_proto_buf(t: proto::JobOutcomeResult) -> Result<Self> {
         use proto::job_outcome_result::Result as JobOutcomeResult;
-        match t.result.ok_or(anyhow!("malformed JobOutcomeResult"))? {
+        match t
+            .result
+            .ok_or_else(|| anyhow!("malformed JobOutcomeResult"))?
+        {
             JobOutcomeResult::Error(e) => Ok(Self::Err(TryFromProtoBuf::try_from_proto_buf(e)?)),
             JobOutcomeResult::Outcome(v) => Ok(Self::Ok(TryFromProtoBuf::try_from_proto_buf(v)?)),
         }

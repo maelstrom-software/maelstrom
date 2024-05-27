@@ -7,10 +7,12 @@ use std::env;
 async fn main() -> Result<()> {
     let mut args = env::args();
     args.next();
-    let path = args.next().ok_or(anyhow!("expected path to fs layer"))?;
+    let path = args
+        .next()
+        .ok_or_else(|| anyhow!("expected path to fs layer"))?;
     let offset: u32 = args
         .next()
-        .ok_or(anyhow!("expected file offset"))?
+        .ok_or_else(|| anyhow!("expected file offset"))?
         .parse()?;
 
     let layer_fs = LayerFs::from_path(path.as_ref(), Root::new("/dev/null".as_ref()))?;

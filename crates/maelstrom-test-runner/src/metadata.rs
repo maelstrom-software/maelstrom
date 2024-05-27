@@ -195,7 +195,7 @@ impl TestMetadata {
                 self.layers = layers.to_vec();
             }
             Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
                 image.use_layers = true;
                 self.layers = vec![];
             }
@@ -219,7 +219,7 @@ impl TestMetadata {
                 });
             }
             Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
                 image.use_environment = true;
             }
             None => {}
@@ -236,7 +236,7 @@ impl TestMetadata {
                 self.working_directory = Some(working_directory.clone());
             }
             Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
                 image.use_working_directory = true;
                 self.working_directory = None;
             }

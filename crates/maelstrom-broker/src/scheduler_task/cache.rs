@@ -208,7 +208,9 @@ impl HeapDeps for CacheMap {
 
 fn try_read_cache_file(fs: &mut impl CacheFs, path: &Path) -> Result<(Sha256Digest, u64)> {
     let path_str = path.file_name().unwrap().to_string_lossy();
-    let (left, right) = path_str.split_once('.').ok_or(anyhow!("bad filename"))?;
+    let (left, right) = path_str
+        .split_once('.')
+        .ok_or_else(|| anyhow!("bad filename"))?;
     if right != "bin" {
         bail!("bad extension")
     }

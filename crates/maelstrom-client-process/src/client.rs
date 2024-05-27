@@ -486,7 +486,7 @@ impl Client {
 
         let working_directory = image_working_directory
             .or(spec.working_directory)
-            .ok_or(anyhow!("no working_directory provided"))?;
+            .ok_or_else(|| anyhow!("no working_directory provided"))?;
 
         let spec = maelstrom_base::JobSpec {
             program: spec.program,

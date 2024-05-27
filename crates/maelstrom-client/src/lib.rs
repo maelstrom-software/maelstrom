@@ -296,7 +296,7 @@ impl Client {
                         let res = client.run_job(msg).await?.into_inner();
                         let result: proto::JobOutcomeResult = res
                             .result
-                            .ok_or(anyhow!("malformed RunJobResponse"))
+                            .ok_or_else(|| anyhow!("malformed RunJobResponse"))
                             .with_context(|| format!("adding job {spec:#?}"))?;
                         Result::<_, anyhow::Error>::Ok((
                             TryFromProtoBuf::try_from_proto_buf(res.client_job_id)?,

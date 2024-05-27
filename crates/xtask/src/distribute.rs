@@ -47,12 +47,13 @@ fn decode_version_entries(mut data: &[u8]) -> Result<Vec<VerneedEntry>> {
 
     loop {
         let entry_data = &data[..mem::size_of::<Verneed>()];
-        let verneed = Verneed::ref_from(entry_data).ok_or(anyhow!("malformed verneed"))?;
+        let verneed = Verneed::ref_from(entry_data).ok_or_else(|| anyhow!("malformed verneed"))?;
         let mut aux_data = &data[verneed.aux as usize..];
         let mut aux = vec![];
         loop {
             let entry_data = &aux_data[..mem::size_of::<Vernaux>()];
-            let vernaux = Vernaux::ref_from(entry_data).ok_or(anyhow!("malformed vernaux"))?;
+            let vernaux =
+                Vernaux::ref_from(entry_data).ok_or_else(|| anyhow!("malformed vernaux"))?;
             aux.push(vernaux.clone());
             if vernaux.next == 0 {
                 break;
@@ -199,13 +200,13 @@ fn remove_glibc_version_from_version_r(path: &Path, version: &str) -> Result<()>
 
     let dynstr = file
         .section_header_by_name(".dynstr")?
-        .ok_or(anyhow!(".dynstr section not found"))?;
+        .ok_or_else(|| anyhow!(".dynstr section not found"))?;
     let strtab = file.section_data_as_strtab(&dynstr)?;
 
     // decode the .gnu.version_r section
     let gnu_version_header = file
         .section_header_by_name(".gnu.version_r")?
-        .ok_or(anyhow!(".gnu.version_r section not found"))?;
+        .ok_or_else(|| anyhow!(".gnu.version_r section not found"))?;
     let (data, _) = file.section_data(&gnu_version_header)?;
     let mut entries = decode_version_entries(data)?;
 

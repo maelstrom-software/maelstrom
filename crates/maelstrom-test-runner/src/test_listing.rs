@@ -372,7 +372,9 @@ impl<ArtifactKeyT: TestArtifactKey, DepsT: TestListingStoreDeps>
             return Ok(Default::default());
         };
         let mut table: toml::Table = toml::from_str(&contents)?;
-        let version = table.remove("version").ok_or(anyhow!(MISSING_VERSION))?;
+        let version = table
+            .remove("version")
+            .ok_or_else(|| anyhow!(MISSING_VERSION))?;
         let Some(version) = version.as_integer() else {
             bail!(VERSION_NOT_AN_INTEGER);
         };

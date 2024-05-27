@@ -245,7 +245,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
         let inserted = self
             .add_link(parent_id, name, file_id, FileType::RegularFile)
             .await?;
@@ -264,7 +266,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
         let inserted = self.add_whiteout(parent_id, name).await?;
         if !inserted {
             return Err(anyhow!("file already exists at {path}"));
@@ -309,7 +313,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
 
         if self.look_up(parent_id, name).await?.is_none() {
             let attrs = FileAttributes {
@@ -347,7 +353,9 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
         let inserted = self
             .add_link(parent_id, name, file_id, FileType::RegularFile)
             .await?;
@@ -366,19 +374,23 @@ impl<'fs> BottomLayerBuilder<'fs> {
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let name = path.file_name().ok_or(anyhow!("missing file name"))?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
 
         let target_parent_id = if let Some(parent) = target.parent() {
             self.ensure_path(parent).await?
         } else {
             FileId::root(LayerId::BOTTOM)
         };
-        let target_name = target.file_name().ok_or(anyhow!("missing file name"))?;
+        let target_name = target
+            .file_name()
+            .ok_or_else(|| anyhow!("missing file name"))?;
 
         let existing = self
             .look_up_entry(target_parent_id, target_name)
             .await?
-            .ok_or(anyhow!("link target not found {target:?}"))?;
+            .ok_or_else(|| anyhow!("link target not found {target:?}"))?;
         let Some(existing) = existing.into_file_data() else {
             bail!("hardlink to whiteout entry not allowed {target:?}")
         };
@@ -408,7 +420,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
             let entry_path = entry.path()?;
             let utf8_path: &Utf8Path = entry_path
                 .to_str()
-                .ok_or(anyhow!("non-UTF8 path in tar"))?
+                .ok_or_else(|| anyhow!("non-UTF8 path in tar"))?
                 .as_ref();
             let path = Utf8Path::new("/").join(utf8_path);
             match header.entry_type() {

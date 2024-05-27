@@ -99,13 +99,13 @@ impl Job {
             }
         });
         if self.use_image_environment {
-            let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+            let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
             image.use_environment = true;
         }
         let mut layers = match self.layers {
             PossiblyImage::Explicit(layers) => layers.into(),
             PossiblyImage::Image => {
-                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
                 image.use_layers = true;
                 vec![]
             }
@@ -119,7 +119,7 @@ impl Job {
             None => Some(Utf8PathBuf::from("/")),
             Some(PossiblyImage::Explicit(working_directory)) => Some(working_directory),
             Some(PossiblyImage::Image) => {
-                let image = image.as_mut().ok_or(anyhow!("no image provided"))?;
+                let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
                 image.use_working_directory = true;
                 None
             }

@@ -241,7 +241,7 @@ impl LayerFs {
                 .await?
                 .lower_layers
                 .get(&layer_id)
-                .ok_or(anyhow!("unknown layer {layer_id:?}"))
+                .ok_or_else(|| anyhow!("unknown layer {layer_id:?}"))
                 .cloned()
         }
     }
