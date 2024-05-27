@@ -30,6 +30,8 @@ use std::{fmt, io};
 
 pub use maelstrom_test_runner::Logger;
 
+pub const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
+
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
 
@@ -339,6 +341,8 @@ impl MainAppDeps for DefaultMainAppDeps {
             .with_var("build-dir", build_dir)
             .unwrap())
     }
+
+    const MAELSTROM_TEST_TOML: &'static str = MAELSTROM_TEST_TOML;
 }
 
 impl Wait for cargo::WaitHandle {

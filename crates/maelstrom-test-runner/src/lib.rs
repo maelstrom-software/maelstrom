@@ -519,7 +519,8 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "list_action" => ?list_action,
         );
 
-        let mut test_metadata = AllMetadata::load(log.clone(), project_dir)?;
+        let mut test_metadata =
+            AllMetadata::load(log.clone(), project_dir, MainAppDepsT::MAELSTROM_TEST_TOML)?;
         let test_listing_store = TestListingStore::new(Fs::new(), &state_dir);
         let mut test_listing = test_listing_store.load()?;
         test_listing

@@ -244,4 +244,6 @@ pub trait MainAppDeps: Sync {
         options: &<Self::TestCollector as CollectTests>::Options,
         target_dir: &Root<BuildDir>,
     ) -> Result<TemplateVars>;
+
+    const MAELSTROM_TEST_TOML: &'static str;
 }

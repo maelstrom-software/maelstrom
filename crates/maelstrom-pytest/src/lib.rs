@@ -246,6 +246,8 @@ impl MainAppDeps for DefaultMainAppDeps {
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
+
+    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-pytest.toml";
 }
 
 impl Wait for pytest::WaitHandle {

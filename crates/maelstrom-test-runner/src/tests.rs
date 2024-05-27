@@ -419,6 +419,8 @@ impl MainAppDeps for TestMainAppDeps {
     ) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
+
+    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-test.toml";
 }
 
 fn counts_from_states(states: &[JobState]) -> JobStateCounts {

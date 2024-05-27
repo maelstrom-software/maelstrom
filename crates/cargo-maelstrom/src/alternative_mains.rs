@@ -1,8 +1,9 @@
+use super::MAELSTROM_TEST_TOML;
 use crate::{pattern, CargoArtifactKey};
 use anyhow::Result;
 use cargo_metadata::Package as CargoPackage;
 use maelstrom_base::Utf8Path;
-use maelstrom_test_runner::metadata::{DEFAULT_TEST_METADATA, MAELSTROM_TEST_TOML};
+use maelstrom_test_runner::metadata::DEFAULT_TEST_METADATA;
 use maelstrom_util::{fs::Fs, process::ExitCode};
 use std::io::Write;
 

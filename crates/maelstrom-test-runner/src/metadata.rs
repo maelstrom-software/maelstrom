@@ -23,8 +23,6 @@ use std::{
 /// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
 pub const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
 
-pub const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
-
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct AllMetadata<TestFilterT> {
@@ -302,11 +300,15 @@ where
         Ok(toml::from_str(contents)?)
     }
 
-    pub fn load(log: slog::Logger, project_dir: impl AsRef<Root<ProjectDir>>) -> Result<Self> {
+    pub fn load(
+        log: slog::Logger,
+        project_dir: impl AsRef<Root<ProjectDir>>,
+        maelstrom_test_toml: &str,
+    ) -> Result<Self> {
         struct MaelstromTestTomlFile;
         let path = project_dir
             .as_ref()
-            .join::<MaelstromTestTomlFile>(MAELSTROM_TEST_TOML);
+            .join::<MaelstromTestTomlFile>(maelstrom_test_toml);
         if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
             Ok(Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
         } else {
