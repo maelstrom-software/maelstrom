@@ -83,6 +83,7 @@ message JobMount {
     oneof Mount {
         BindMount bind = 4;
         DevptsMount devpts = 5;
+        DevicesMount devices = 7;
         MqueueMount mqueue = 6;
         ProcMount proc = 1;
         SysMount sys = 3;
@@ -98,6 +99,10 @@ message BindMount {
 
 message DevptsMount {
     string mount_point = 1;
+}
+
+message DevicesMount {
+    repeated JobDevice devices = 1;
 }
 
 message MqueueMount {

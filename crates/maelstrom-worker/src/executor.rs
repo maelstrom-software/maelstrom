@@ -635,46 +635,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             );
         }
 
-        let mut local_path_fds = BumpVec::new_in(&bump);
-
-        // Resolve all of the source paths for bind mounts before we chdir or pivot_root. Each path
-        // gets opened as a fsfd and pushed on the `local_path_fds` vec.
-        for mount in &spec.mounts {
-            let JobMount::Bind { local_path, .. } = mount else {
-                continue;
-            };
-            let dirfd = new_fd_slot(&bump);
-            local_path_fds.push(dirfd);
-            builder.push(
-                Syscall::OpenTree {
-                    dirfd: Fd::AT_FDCWD,
-                    path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
-                    // We always pass recursive here because non-recursive bind mounts don't make a
-                    // lot of sense in this context. The reason is that, when a new mount namespace
-                    // is created in Linux, all pre-existing mounts become locked. These locked
-                    // mounts can't be unmounted or have their mount flags adjusted. In this
-                    // context, we're always in a new mount namespace, hence all mounts on the
-                    // system are locked.
-                    //
-                    // When you try to call open_tree without AT_RECURSIVE on a tree that has
-                    // mounts under it, you get an error. The reason is that allowing the binding
-                    // of this subtree would have the effect of revealing what was underneath those
-                    // locked mounts -- in effect, unmounting them.
-                    //
-                    // If we allowed the user to specify the recursive flag, it would just mean
-                    // that their mount would fail if there happened to be any mount at that point
-                    // or lower in the tree. That's probably not what they want.
-                    flags: OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
-                    out: dirfd,
-                },
-                bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
-                        "error opening local path {local_path} for bind mount: {err}",
-                    ))
-                }),
-            );
-        }
-
         struct Device {
             cstr: &'static CStr,
             str: &'static str,
@@ -694,6 +654,74 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     JobDevice::Zero => (c"/dev/zero", "/dev/zero"),
                 };
                 Self { cstr, str }
+            }
+        }
+
+        let mut local_path_fds = BumpVec::new_in(&bump);
+
+        // Resolve all of the source paths for bind mounts before we chdir or pivot_root. Each path
+        // gets opened as a fsfd and pushed on the `local_path_fds` vec.
+        for mount in &spec.mounts {
+            match mount {
+                JobMount::Bind { local_path, .. } => {
+                    let dirfd = new_fd_slot(&bump);
+                    local_path_fds.push(dirfd);
+                    builder.push(
+                        Syscall::OpenTree {
+                            dirfd: Fd::AT_FDCWD,
+                            path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
+                            // We always pass recursive here because non-recursive bind mounts don't make a
+                            // lot of sense in this context. The reason is that, when a new mount namespace
+                            // is created in Linux, all pre-existing mounts become locked. These locked
+                            // mounts can't be unmounted or have their mount flags adjusted. In this
+                            // context, we're always in a new mount namespace, hence all mounts on the
+                            // system are locked.
+                            //
+                            // When you try to call open_tree without AT_RECURSIVE on a tree that has
+                            // mounts under it, you get an error. The reason is that allowing the binding
+                            // of this subtree would have the effect of revealing what was underneath those
+                            // locked mounts -- in effect, unmounting them.
+                            //
+                            // If we allowed the user to specify the recursive flag, it would just mean
+                            // that their mount would fail if there happened to be any mount at that point
+                            // or lower in the tree. That's probably not what they want.
+                            flags: OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
+                            out: dirfd,
+                        },
+                        bump.alloc(move |err| {
+                            JobError::Execution(anyhow!(
+                                "error opening local path {local_path} for bind mount: {err}",
+                            ))
+                        }),
+                    );
+                }
+                JobMount::Devices { devices, .. } => {
+                    // Open all of the source paths for devices before we chdir or pivot_root. We
+                    // create devices in the container my bind mounting them from the host instead
+                    // of creating devices. We do this because we don't assume we're running as
+                    // root, and as such, we can't create device files.
+                    for device in devices.iter() {
+                        let Device { cstr, str } = Device::new(device);
+                        let dirfd = new_fd_slot(&bump);
+                        local_path_fds.push(dirfd);
+                        builder.push(
+                            Syscall::OpenTree {
+                                dirfd: Fd::AT_FDCWD,
+                                path: cstr,
+                                // We don't pass recursive because we assume we're just cloning a
+                                // file.
+                                flags: OpenTreeFlags::CLONE,
+                                out: dirfd,
+                            },
+                            bump.alloc(move |err| {
+                                JobError::Execution(anyhow!(
+                                    "error opening local path for bind mount of device {str}: {err}",
+                                ))
+                            }),
+                        );
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -812,6 +840,26 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 JobMount::Devpts { mount_point } => {
                     normal_mount(&bump, &mut builder, mount_point, c"devpts", "devpts")?;
                 }
+                JobMount::Devices { devices } => {
+                    for device in devices.iter() {
+                        let Device { cstr, str } = Device::new(device);
+                        let mount_local_path_fd = local_path_fds.next().unwrap();
+                        builder.push(
+                            Syscall::MoveMount {
+                                from_dirfd: mount_local_path_fd,
+                                from_path: c"",
+                                to_dirfd: Fd::AT_FDCWD,
+                                to_path: cstr,
+                                flags: MoveMountFlags::F_EMPTY_PATH,
+                            },
+                            bump.alloc(move |err| {
+                                JobError::Execution(anyhow!(
+                                    "error doing move_mount for bind mount of device {str}: {err}",
+                                ))
+                            }),
+                        );
+                    }
+                }
                 JobMount::Mqueue { mount_point } => {
                     normal_mount(&bump, &mut builder, mount_point, c"mqueue", "mqueue")?;
                 }
@@ -841,7 +889,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 },
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!(
-                        "error doing move_mount for bind mount of device {str} ({cstr:?}): {err}",
+                        "error doing move_mount for bind mount of device {str}: {err}",
                     ))
                 }),
             );
@@ -1550,6 +1598,168 @@ mod tests {
             .expected_status(JobStatus::Exited(1))
             .run()
             .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_full() {
+        Test::new(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_full() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Full)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_fuse() {
+        Test::new(bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_fuse() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Fuse)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"10, 229\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_null() {
+        Test::new(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_null() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Null)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_null_write() {
+        Test::new(
+            bash_spec("echo foo > /dev/null && cat /dev/null")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Null)}]),
+        )
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_ptmx() {
+        Test::new(bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_ptmx() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Ptmx)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 2\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_random() {
+        Test::new(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_random() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Random)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_tty() {
+        Test::new(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_tty() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Tty)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_urandom() {
+        Test::new(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_urandom() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Urandom)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn no_mount_dev_zero() {
+        Test::new(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
+            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
+            .run()
+            .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn mount_dev_zero() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
+                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Zero)}]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
+        .run()
+        .await;
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -125,6 +125,9 @@ pub enum JobMountForTomlAndJson {
     Devpts {
         mount_point: Utf8PathBuf,
     },
+    Devices {
+        devices: EnumSet<JobDeviceForTomlAndJson>,
+    },
     Mqueue {
         mount_point: Utf8PathBuf,
     },
@@ -149,6 +152,9 @@ pub enum JobMount {
     Devpts {
         mount_point: Utf8PathBuf,
     },
+    Devices {
+        devices: EnumSet<JobDevice>,
+    },
     Mqueue {
         mount_point: Utf8PathBuf,
     },
@@ -161,19 +167,6 @@ pub enum JobMount {
     Tmp {
         mount_point: Utf8PathBuf,
     },
-}
-
-impl JobMount {
-    pub fn mount_point(&self) -> &Utf8Path {
-        match self {
-            JobMount::Bind { mount_point, .. } => mount_point.as_path(),
-            JobMount::Devpts { mount_point } => mount_point.as_path(),
-            JobMount::Mqueue { mount_point } => mount_point.as_path(),
-            JobMount::Proc { mount_point } => mount_point.as_path(),
-            JobMount::Sys { mount_point } => mount_point.as_path(),
-            JobMount::Tmp { mount_point } => mount_point.as_path(),
-        }
-    }
 }
 
 impl From<JobMountForTomlAndJson> for JobMount {
@@ -189,6 +182,9 @@ impl From<JobMountForTomlAndJson> for JobMount {
                 read_only,
             },
             JobMountForTomlAndJson::Devpts { mount_point } => JobMount::Devpts { mount_point },
+            JobMountForTomlAndJson::Devices { devices } => JobMount::Devices {
+                devices: devices.into_iter().map(JobDevice::from).collect(),
+            },
             JobMountForTomlAndJson::Mqueue { mount_point } => JobMount::Mqueue { mount_point },
             JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc { mount_point },
             JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys { mount_point },
