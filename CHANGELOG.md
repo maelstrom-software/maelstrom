@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### General
 #### Added
 - `devpts` and `mqueue` mount types.
+- `ptmx` device type.
 
 ### `cargo-maelstrom`
 The test configuration language now supports a single template argument in
