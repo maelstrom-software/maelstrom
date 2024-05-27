@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMountForTomlAndJson,
-    JobNetwork, NonEmpty, Sha256Digest, Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Sha256Digest,
+    Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
@@ -52,7 +52,6 @@ struct Job {
     use_image_environment: bool,
     layers: PossiblyImage<NonEmpty<Layer>>,
     added_layers: Vec<Layer>,
-    devices: Option<EnumSet<JobDeviceForTomlAndJson>>,
     mounts: Option<Vec<JobMountForTomlAndJson>>,
     network: Option<JobNetwork>,
     enable_writable_file_system: Option<bool>,
@@ -73,7 +72,6 @@ impl Job {
             arguments: None,
             environment: None,
             use_image_environment: false,
-            devices: None,
             mounts: None,
             network: None,
             enable_writable_file_system: None,
@@ -132,12 +130,7 @@ impl Job {
             image,
             environment,
             layers,
-            devices: self
-                .devices
-                .unwrap_or(EnumSet::EMPTY)
-                .into_iter()
-                .map(JobDevice::from)
-                .collect(),
+            devices: EnumSet::empty(),
             mounts: self
                 .mounts
                 .unwrap_or_default()
@@ -163,7 +156,6 @@ enum JobField {
     Environment,
     Layers,
     AddedLayers,
-    Devices,
     Mounts,
     Network,
     EnableWritableFileSystem,
@@ -224,7 +216,6 @@ impl<'de> de::Visitor<'de> for JobVisitor {
         let mut use_image_environment = false;
         let mut layers = None;
         let mut added_layers = None;
-        let mut devices = None;
         let mut mounts = None;
         let mut network = None;
         let mut enable_writable_file_system = None;
@@ -273,9 +264,6 @@ impl<'de> de::Visitor<'de> for JobVisitor {
                         "field `added_layers` cannot be set with `layer` field",
                     )?;
                     added_layers = Some(map.next_value()?);
-                }
-                JobField::Devices => {
-                    devices = Some(map.next_value()?);
                 }
                 JobField::Mounts => {
                     mounts = Some(map.next_value()?);
@@ -351,7 +339,6 @@ impl<'de> de::Visitor<'de> for JobVisitor {
             use_image_environment,
             layers: layers.ok_or_else(|| de::Error::missing_field("layers"))?,
             added_layers: added_layers.unwrap_or_default(),
-            devices,
             mounts,
             network,
             enable_writable_file_system,
@@ -377,7 +364,7 @@ impl<'de> de::Deserialize<'de> for Job {
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
-    use maelstrom_base::{enum_set, nonempty, JobMount};
+    use maelstrom_base::{enum_set, nonempty, JobDevice, JobDeviceForTomlAndJson, JobMount};
     use maelstrom_test::{digest, string, string_vec, tar_layer, utf8_path_buf};
     use maplit::btreemap;
 
@@ -406,10 +393,14 @@ mod tests {
             Job {
                 arguments: Some(string_vec!["arg1", "arg2"]),
                 environment: Some([("FOO", "foo"), ("BAR", "bar")].into_environment()),
-                devices: Some(enum_set! {JobDeviceForTomlAndJson::Null}),
-                mounts: Some(vec![JobMountForTomlAndJson::Tmp {
-                    mount_point: utf8_path_buf!("/tmp"),
-                }]),
+                mounts: Some(vec![
+                    JobMountForTomlAndJson::Tmp {
+                        mount_point: utf8_path_buf!("/tmp"),
+                    },
+                    JobMountForTomlAndJson::Devices {
+                        devices: enum_set! {JobDeviceForTomlAndJson::Null},
+                    },
+                ]),
                 working_directory: Some(PossiblyImage::Explicit("/working-directory".into())),
                 user: Some(UserId::from(101)),
                 group: Some(GroupId::from(202)),
@@ -420,10 +411,14 @@ mod tests {
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .arguments(["arg1", "arg2"])
                 .environment([("BAR", "bar"), ("FOO", "foo")])
-                .devices(enum_set! {JobDevice::Null})
-                .mounts([JobMount::Tmp {
-                    mount_point: utf8_path_buf!("/tmp"),
-                }])
+                .mounts([
+                    JobMount::Tmp {
+                        mount_point: utf8_path_buf!("/tmp"),
+                    },
+                    JobMount::Devices {
+                        devices: enum_set! {JobDevice::Null},
+                    },
+                ])
                 .working_directory("/working-directory")
                 .user(101)
                 .group(202),
@@ -937,7 +932,9 @@ mod tests {
                 r#"{
                     "program": "/bin/sh",
                     "layers": [ { "tar": "1" } ],
-                    "devices": [ "null", "zero" ]
+                    "mounts": [
+                        { "type": "devices", "devices": [ "null", "zero" ] }
+                    ]
                 }"#,
             )
             .unwrap()
@@ -945,7 +942,9 @@ mod tests {
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .devices(enum_set! {JobDevice::Null | JobDevice::Zero}),
+                .mounts([JobMount::Devices {
+                    devices: enum_set! {JobDevice::Null | JobDevice::Zero},
+                }])
         )
     }
 

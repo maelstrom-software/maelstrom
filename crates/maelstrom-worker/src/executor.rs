@@ -1611,8 +1611,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_full() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Full)}]),
+            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Full),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
         .run()
@@ -1630,8 +1631,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_fuse() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Fuse)}]),
+            bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Fuse),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"10, 229\n")))
         .run()
@@ -1649,8 +1651,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_null() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Null)}]),
+            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Null),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
         .run()
@@ -1660,8 +1663,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_null_write() {
         Test::new(
-            bash_spec("echo foo > /dev/null && cat /dev/null")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Null)}]),
+            bash_spec("echo foo > /dev/null && cat /dev/null").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Null),
+            }]),
         )
         .run()
         .await;
@@ -1678,8 +1682,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_ptmx() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Ptmx)}]),
+            bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Ptmx),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 2\n")))
         .run()
@@ -1697,8 +1702,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_random() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Random)}]),
+            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'").mounts([
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Random),
+                },
+            ]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
         .run()
@@ -1716,8 +1724,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_tty() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Tty)}]),
+            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Tty),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
         .run()
@@ -1735,8 +1744,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_urandom() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Urandom)}]),
+            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'").mounts([
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Urandom),
+                },
+            ]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
         .run()
@@ -1754,8 +1766,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn mount_dev_zero() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
-                .mounts([JobMount::Devices{devices: EnumSet::only(JobDevice::Zero)}]),
+            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: EnumSet::only(JobDevice::Zero),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
         .run()
