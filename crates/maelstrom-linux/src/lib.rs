@@ -297,6 +297,13 @@ impl FsconfigCommand {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
+pub struct FsmountFlags(c_ulong);
+
+impl FsmountFlags {
+    pub const CLOEXEC: Self = Self(1);
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
 pub struct FsopenFlags(c_uint);
 
 impl FsopenFlags {
@@ -314,6 +321,23 @@ impl Gid {
     pub fn from_u32(v: u32) -> Self {
         Self(v)
     }
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct MountAttrs(c_uint);
+
+impl MountAttrs {
+    pub const RDONLY: Self = Self(0x00000001);
+    pub const NOSUID: Self = Self(0x00000002);
+    pub const NODEV: Self = Self(0x00000004);
+    pub const NOEXEC: Self = Self(0x00000008);
+    pub const _ATIME: Self = Self(0x00000070);
+    pub const RELATIME: Self = Self(0x00000000);
+    pub const NOATIME: Self = Self(0x00000010);
+    pub const STRICTATIME: Self = Self(0x00000020);
+    pub const NODIRATIME: Self = Self(0x00000080);
+    pub const IDMAP: Self = Self(0x00100000);
+    pub const NOSYMFOLLOW: Self = Self(0x00200000);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -663,6 +687,12 @@ pub fn fsconfig(
         libc::syscall(libc::SYS_fsconfig, fd.0, command.0, key_ptr, value_ptr, aux)
     })
     .map(drop)
+}
+
+pub fn fsmount(fsfd: Fd, flags: FsmountFlags, mount_attrs: MountAttrs) -> Result<OwnedFd, Errno> {
+    Errno::result(unsafe { libc::syscall(libc::SYS_fsmount, fsfd.0, flags.0, mount_attrs.0) })
+        .map(Fd::from_c_long)
+        .map(OwnedFd)
 }
 
 pub fn fsopen(fsname: &CStr, flags: FsopenFlags) -> Result<OwnedFd, Errno> {

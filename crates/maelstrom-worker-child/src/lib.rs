@@ -9,8 +9,9 @@
 use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
     self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
-    FsconfigCommand, FsopenFlags, Gid, MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags,
-    OpenTreeFlags, OwnedFd, SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags,
+    FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags, MoveMountFlags,
+    NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, SocketDomain, SocketProtocol, SocketType,
+    Uid, UmountFlags,
 };
 
 struct SliceFmt<'a> {
@@ -87,6 +88,12 @@ pub enum Syscall<'a> {
         key: Option<&'a CStr>,
         value: Option<&'a u8>,
         aux: Option<i32>,
+    },
+    Fsmount {
+        fd: FdSlot<'a>,
+        flags: FsmountFlags,
+        mount_attrs: MountAttrs,
+        out: FdSlot<'a>,
     },
     Fsopen {
         fsname: &'a CStr,
@@ -169,6 +176,15 @@ impl<'a> Syscall<'a> {
             Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
             Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
             Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
+            Syscall::Fsmount {
+                fd,
+                flags,
+                mount_attrs,
+                out,
+            } => {
+                out.set(linux::fsmount(fd.get(), *flags, *mount_attrs).map(OwnedFd::into_fd)?);
+                Ok(())
+            }
             Syscall::Fsopen { fsname, flags, out } => {
                 out.set(linux::fsopen(fsname, *flags).map(OwnedFd::into_fd)?);
                 Ok(())
