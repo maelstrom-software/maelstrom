@@ -12,8 +12,9 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, Gid, MountFlags, MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags,
-    OwnedFd, Signal, SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
+    Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags,
+    MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, Signal, SocketDomain,
+    SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
 };
 use maelstrom_util::{
     config::common::InlineLimit,
@@ -114,7 +115,6 @@ pub struct Executor<'clock, ClockT> {
     upper_dir: CString,
     work_dir: CString,
     root_mode: u32,
-    comma_upperdir_comma_workdir: String,
     netlink_socket_addr: NetlinkSocketAddr,
     netlink_message: Box<[u8]>,
     clock: &'clock ClockT,
@@ -156,17 +156,6 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
         let upper_dir = tmpfs_dir.join::<OverlayFsUpperDir>("upper");
         let work_dir = tmpfs_dir.join::<OverlayFsWorkDir>("work");
         let tmpfs_dir = CString::new(tmpfs_dir.as_os_str().as_bytes())?;
-        let comma_upperdir_comma_workdir = format!(
-            ",upperdir={},workdir={}",
-            upper_dir
-                .as_os_str()
-                .to_str()
-                .ok_or_else(|| anyhow!("could not convert upper_dir path to string"))?,
-            work_dir
-                .as_os_str()
-                .to_str()
-                .ok_or_else(|| anyhow!("could not convert work_dir path to string"))?
-        );
         let upper_dir = CString::new(upper_dir.as_os_str().as_bytes())?;
         let work_dir = CString::new(work_dir.as_os_str().as_bytes())?;
         let netlink_socket_addr = NetlinkSocketAddr::default();
@@ -189,7 +178,6 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
             upper_dir,
             work_dir,
             root_mode,
-            comma_upperdir_comma_workdir,
             netlink_socket_addr,
             netlink_message: buffer,
             clock,
@@ -583,14 +571,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         );
 
         if spec.enable_writable_file_system {
-            // Use overlayfs.
-            let mut options = BumpString::with_capacity_in(1000, &bump);
-            options.push_str("lowerdir=");
-            options.push_str(
-                new_root_path
-                    .to_str()
-                    .map_err(|_| syserr(anyhow!("could not convert path to string")))?,
-            );
             // We need to create an upperdir and workdir. Create a temporary file system to contain
             // both of them.
             builder.push(
@@ -621,17 +601,75 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 },
                 &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
             );
-            options.push_str(self.comma_upperdir_comma_workdir.as_str());
-            options.push('\0');
+
+            // Use overlayfs.
+            let fsfd = new_fd_slot(&bump);
             builder.push(
-                Syscall::Mount {
-                    source: None,
-                    target: new_root_path,
-                    fstype: Some(c"overlay"),
-                    flags: MountFlags::default(),
-                    data: Some(options.into_bytes().into_bump_slice()),
+                Syscall::Fsopen {
+                    fsname: c"overlay",
+                    flags: FsopenFlags::default(),
+                    out: fsfd,
                 },
-                &|err| syserr(anyhow!("mounting overlayfs: {err}")),
+                &|err| syserr(anyhow!("fsopen of overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::Fsconfig {
+                    fd: fsfd,
+                    command: FsconfigCommand::SET_STRING,
+                    key: Some(c"lowerdir"),
+                    value: Some(&new_root_path.to_bytes_with_nul()[0]),
+                    aux: None,
+                },
+                &|err| syserr(anyhow!("fsconfig of lowerdir for overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::Fsconfig {
+                    fd: fsfd,
+                    command: FsconfigCommand::SET_STRING,
+                    key: Some(c"upperdir"),
+                    value: Some(&self.upper_dir.to_bytes_with_nul()[0]),
+                    aux: None,
+                },
+                &|err| syserr(anyhow!("fsconfig of upperdir for overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::Fsconfig {
+                    fd: fsfd,
+                    command: FsconfigCommand::SET_STRING,
+                    key: Some(c"workdir"),
+                    value: Some(&self.work_dir.to_bytes_with_nul()[0]),
+                    aux: None,
+                },
+                &|err| syserr(anyhow!("fsconfig of workdir for overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::Fsconfig {
+                    fd: fsfd,
+                    command: FsconfigCommand::CMD_CREATE,
+                    key: None,
+                    value: None,
+                    aux: None,
+                },
+                &|err| syserr(anyhow!("fsconfig of CMD_CREATE for overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::Fsmount {
+                    fd: fsfd,
+                    flags: FsmountFlags::default(),
+                    mount_attrs: MountAttrs::default(),
+                    out: fsfd,
+                },
+                &|err| syserr(anyhow!("fsmount for overlayfs: {err}")),
+            );
+            builder.push(
+                Syscall::MoveMount {
+                    from_dirfd: fsfd,
+                    from_path: c"",
+                    to_dirfd: Fd::AT_FDCWD,
+                    to_path: new_root_path,
+                    flags: MoveMountFlags::F_EMPTY_PATH,
+                },
+                &|err| syserr(anyhow!("move_mount for overlayfs: {err}")),
             );
         }
 
