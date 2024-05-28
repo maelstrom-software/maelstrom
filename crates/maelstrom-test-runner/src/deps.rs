@@ -1,6 +1,6 @@
 use crate::BuildDir;
 use anyhow::Result;
-use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest};
+use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Utf8PathBuf};
 use maelstrom_client::{
     spec::{JobSpec, Layer},
     IntrospectResponse,
@@ -82,6 +82,11 @@ impl TestArtifactKey for StringArtifactKey {}
 
 pub trait TestPackageId: Clone + Ord + fmt::Debug {}
 
+pub enum TestLayers {
+    GenerateForBinary,
+    Provided(Vec<Layer>),
+}
+
 pub trait TestArtifact: fmt::Debug {
     type ArtifactKey: TestArtifactKey;
     type PackageId: TestPackageId;
@@ -91,6 +96,8 @@ pub trait TestArtifact: fmt::Debug {
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
     fn name(&self) -> &str;
     fn package(&self) -> Self::PackageId;
+    fn test_layers(&self) -> TestLayers;
+    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>);
 }
 
 pub trait TestPackage: Clone + fmt::Debug {

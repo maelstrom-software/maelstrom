@@ -4,14 +4,14 @@ mod pytest;
 
 use anyhow::Result;
 use indicatif::TermLike;
-use maelstrom_base::Timeout;
+use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
     main_app_new, progress, BuildDir, CollectTests, LoggingOutput, MainAppDeps, MainAppState,
-    TestArtifact, TestArtifactKey, TestFilter, TestPackage, TestPackageId, Wait,
+    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -174,6 +174,23 @@ impl TestArtifact for PytestTestArtifact {
     fn name(&self) -> &str {
         &self.name
     }
+
+    fn test_layers(&self) -> TestLayers {
+        TestLayers::Provided(vec![])
+    }
+
+    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
+        let path = self.path().display();
+        (
+            "/usr/local/bin/python".into(),
+            vec![
+                "-m".into(),
+                "pytest".into(),
+                "--verbose".into(),
+                format!("{path}::{case}"),
+            ],
+        )
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -265,6 +282,15 @@ fn maybe_print_collect_error(res: Result<ExitCode>) -> Result<ExitCode> {
     res
 }
 
+fn find_python() -> Result<Vec<PytestArtifactKey>> {
+    let mut glob_builder = globset::GlobSet::builder();
+    glob_builder.add(globset::Glob::new("*.py")?);
+    Ok(Fs
+        .glob_walk(".", &glob_builder.build()?)
+        .filter_map(|path| path.ok().map(|path| PytestArtifactKey { path }))
+        .collect())
+}
+
 pub fn main<TermT>(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
@@ -282,7 +308,7 @@ where
     let log = logger.build(logging_output.clone());
 
     let target_dir = Root::<BuildDir>::new(Path::new("target"));
-    let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
+    let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom_pytest");
     let state_dir = maelstrom_target_dir.join::<StateDir>("state");
     let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
 
@@ -302,7 +328,13 @@ where
         log.clone(),
     )?;
 
-    let packages = vec![];
+    let packages = vec![PytestPackage {
+        name: "default".into(),
+        version: "0".into(),
+        id: PytestPackageId("default".into()),
+        artifacts: find_python()?,
+    }];
+
     let state = MainAppState::new(
         deps,
         extra_options.include,

@@ -104,7 +104,8 @@ struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     width: usize,
     ind: ProgressIndicatorT,
     artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
-    generated_artifacts: Option<GeneratedArtifacts>,
+    layers: Vec<(Sha256Digest, ArtifactType)>,
+    shared_library_layers: Vec<(Sha256Digest, ArtifactType)>,
     ignored_cases: HashSet<String>,
     package_name: String,
     cases: StringIter,
@@ -185,9 +186,23 @@ where
             "generating artifacts";
             "package_name" => &package_name,
             "artifact" => ?artifact);
-        let generated_artifacts = running_tests
-            .then(|| generate_artifacts(deps, artifact.path(), log.clone()))
-            .transpose()?;
+        let mut layers = vec![];
+        let mut shared_library_layers = vec![];
+
+        if running_tests {
+            match artifact.test_layers() {
+                TestLayers::GenerateForBinary => {
+                    let dep = generate_artifacts(deps, artifact.path(), log.clone())?;
+                    layers.push((dep.binary, ArtifactType::Manifest));
+                    shared_library_layers.push((dep.deps, ArtifactType::Manifest));
+                }
+                TestLayers::Provided(layer_specs) => {
+                    for layer_spec in layer_specs {
+                        layers.push(deps.client().add_layer(layer_spec)?);
+                    }
+                }
+            }
+        }
 
         Ok(Self {
             log,
@@ -196,7 +211,8 @@ where
             width,
             ind,
             artifact,
-            generated_artifacts,
+            layers,
+            shared_library_layers,
             ignored_cases: listing.ignored_cases,
             package_name,
             cases: listing.cases.into_iter(),
@@ -216,11 +232,10 @@ where
                 self.deps.client().add_layer(layer.clone())
             })
             .collect::<Result<Vec<_>>>()?;
-        let artifacts = self.generated_artifacts.as_ref().unwrap();
+        layers.extend(self.layers.clone());
         if test_metadata.include_shared_libraries() {
-            layers.push((artifacts.deps.clone(), ArtifactType::Manifest));
+            layers.extend(self.shared_library_layers.clone())
         }
-        layers.push((artifacts.binary.clone(), ArtifactType::Manifest));
 
         Ok(layers)
     }
@@ -297,11 +312,11 @@ where
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
-        let binary_name = self.artifact.path().file_name().unwrap().to_str().unwrap();
+        let (program, arguments) = self.artifact.build_command(case);
         self.deps.client().add_job(
             JobSpec {
-                program: format!("/{binary_name}").into(),
-                arguments: vec!["--exact".into(), "--nocapture".into(), case.into()],
+                program,
+                arguments,
                 image: test_metadata.image,
                 environment: test_metadata.environment,
                 layers,

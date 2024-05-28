@@ -1,0 +1,13 @@
+[[directives]]
+image.name = "python:3.12-slim"
+image.use = ["layers", "environment"]
+added_layers = [
+    { glob = "**.py" },
+    { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,null,urandom,random,zero}"] }
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "null", "urandom", "random", "zero"] },
+]

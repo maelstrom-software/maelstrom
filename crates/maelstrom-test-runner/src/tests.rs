@@ -4,7 +4,8 @@ use crate::{
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{TestListing, TestListingStore},
     BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, SimpleFilter, StringArtifactKey, TestArtifact, TestPackage, TestPackageId, Wait,
+    MainAppState, SimpleFilter, StringArtifactKey, TestArtifact, TestLayers, TestPackage,
+    TestPackageId, Wait,
 };
 use anyhow::Result;
 use indicatif::InMemoryTerm;
@@ -12,7 +13,7 @@ use indoc::indoc;
 use maelstrom_base::{
     stats::{JobState, JobStateCounts},
     ArtifactType, ClientJobId, JobCompleted, JobEffects, JobOutcome, JobOutcomeResult,
-    JobOutputResult, JobStatus, Sha256Digest,
+    JobOutputResult, JobStatus, Sha256Digest, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{JobSpec, Layer},
@@ -343,6 +344,15 @@ impl TestArtifact for FakeTestArtifact {
 
     fn name(&self) -> &str {
         &self.name
+    }
+
+    fn test_layers(&self) -> TestLayers {
+        TestLayers::GenerateForBinary
+    }
+
+    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
+        let binary_name = self.path().file_name().unwrap().to_str().unwrap();
+        (format!("/{binary_name}").into(), vec![case.into()])
     }
 }
 
