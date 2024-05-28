@@ -284,7 +284,7 @@ where
         ));
         self.queuing_state.tracker.add_outstanding();
 
-        let visitor = JobStatusVisitor::new(
+        let visitor = JobStatusVisitor::<_, MainAppDepsT::TestCollector>::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
             self.package_name.clone(),

@@ -1,6 +1,6 @@
 use crate::progress::{ProgressIndicator, ProgressPrinter};
 use crate::test_listing::TestListing;
-use crate::TestArtifactKey;
+use crate::CollectTests;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -128,26 +128,26 @@ impl JobStatusTracker {
     }
 }
 
-pub struct JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey> {
+pub struct JobStatusVisitor<ProgressIndicatorT, CollectTestsT: CollectTests> {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
+    test_listing: Arc<Mutex<Option<TestListing<CollectTestsT::ArtifactKey>>>>,
     package: String,
-    artifact: ArtifactKeyT,
+    artifact: CollectTestsT::ArtifactKey,
     case: String,
     case_str: String,
     width: usize,
     ind: ProgressIndicatorT,
 }
 
-impl<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT>
+impl<ProgressIndicatorT, CollectTestsT: CollectTests>
+    JobStatusVisitor<ProgressIndicatorT, CollectTestsT>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
+        test_listing: Arc<Mutex<Option<TestListing<CollectTestsT::ArtifactKey>>>>,
         package: String,
-        artifact: ArtifactKeyT,
+        artifact: CollectTestsT::ArtifactKey,
         case: String,
         case_str: String,
         width: usize,
@@ -166,84 +166,7 @@ impl<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey>
     }
 }
 
-/// The Rust std test fixture prints out some output like "running 1 test" etc. This isn't very
-/// useful, so we want to strip it out.
-fn remove_fixture_output(case_str: &str, mut lines: Vec<String>) -> Vec<String> {
-    if let Some(pos) = lines.iter().position(|s| s.as_str() == "running 1 test") {
-        lines = lines[(pos + 1)..].to_vec();
-    }
-    if let Some(pos) = lines
-        .iter()
-        .rposition(|s| s.as_str().starts_with(&format!("test {case_str} ... ")))
-    {
-        lines = lines[..pos].to_vec();
-    }
-    lines
-}
-
-#[test]
-fn remove_fixture_output_basic_case() {
-    let example = "\n\
-    running 1 test\n\
-    this is some output from the test\n\
-    this is too\n\
-    test tests::i_be_failing ... FAILED\n\
-    \n\
-    failures:\n\
-    \n\
-    failures:\n\
-        tests::i_be_failing\n\
-        \n\
-    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
-    finished in 0.01s\n\
-    \n\
-    ";
-    let cleansed = remove_fixture_output(
-        "tests::i_be_failing",
-        example.split('\n').map(ToOwned::to_owned).collect(),
-    );
-    assert_eq!(
-        cleansed.join("\n") + "\n",
-        "\
-        this is some output from the test\n\
-        this is too\n\
-        "
-    );
-}
-
-#[test]
-fn remove_fixture_output_confusing_trailer() {
-    let example = "\n\
-    running 1 test\n\
-    this is some output from the test\n\
-    test tests::i_be_failing ... this is the test's own weird output\n\
-    this is too\n\
-    test tests::i_be_failing ... FAILED\n\
-    \n\
-    failures:\n\
-    \n\
-    failures:\n\
-        tests::i_be_failing\n\
-        \n\
-    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
-    finished in 0.01s\n\
-    \n\
-    ";
-    let cleansed = remove_fixture_output(
-        "tests::i_be_failing",
-        example.split('\n').map(ToOwned::to_owned).collect(),
-    );
-    assert_eq!(
-        cleansed.join("\n") + "\n",
-        "\
-        this is some output from the test\n\
-        test tests::i_be_failing ... this is the test's own weird output\n\
-        this is too\n\
-        "
-    );
-}
-
-fn format_test_output(
+fn format_test_output<CollectTestsT: CollectTests>(
     res: &JobOutputResult,
     name: &str,
     cjid: ClientJobId,
@@ -260,7 +183,8 @@ fn format_test_output(
                     .map(ToOwned::to_owned),
             );
             if name == "stdout" {
-                test_output_lines = remove_fixture_output(case_str, test_output_lines);
+                test_output_lines =
+                    CollectTestsT::remove_fixture_output(case_str, test_output_lines);
             }
         }
         JobOutputResult::Truncated { first, truncated } => {
@@ -270,7 +194,8 @@ fn format_test_output(
                     .map(ToOwned::to_owned),
             );
             if name == "stdout" {
-                test_output_lines = remove_fixture_output(case_str, test_output_lines);
+                test_output_lines =
+                    CollectTestsT::remove_fixture_output(case_str, test_output_lines);
             }
             test_output_lines.push(format!(
                 "job {cjid}: {name} truncated, {truncated} bytes lost"
@@ -280,8 +205,8 @@ fn format_test_output(
     test_output_lines
 }
 
-impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT: TestArtifactKey>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT>
+impl<ProgressIndicatorT: ProgressIndicator, CollectTestsT: CollectTests>
+    JobStatusVisitor<ProgressIndicatorT, CollectTestsT>
 {
     fn print_job_result(
         &self,
@@ -355,13 +280,13 @@ impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT: TestArtifactKey>
                     }
                 };
                 if job_failed {
-                    test_output_stdout.extend(format_test_output(
+                    test_output_stdout.extend(format_test_output::<CollectTestsT>(
                         &stdout,
                         "stdout",
                         cjid,
                         &self.case_str,
                     ));
-                    test_output_stderr.extend(format_test_output(
+                    test_output_stderr.extend(format_test_output::<CollectTestsT>(
                         &stderr,
                         "stderr",
                         cjid,
@@ -391,13 +316,13 @@ impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT: TestArtifactKey>
             )) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
-                test_output_stdout.extend(format_test_output(
+                test_output_stdout.extend(format_test_output::<CollectTestsT>(
                     &stdout,
                     "stdout",
                     cjid,
                     &self.case_str,
                 ));
-                test_output_stderr.extend(format_test_output(
+                test_output_stderr.extend(format_test_output::<CollectTestsT>(
                     &stderr,
                     "stderr",
                     cjid,

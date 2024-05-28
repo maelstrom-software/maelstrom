@@ -408,6 +408,15 @@ impl CollectTests for TestCollector {
         let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, &packages);
         Ok((WaitForNothing, artifacts.into_iter()))
     }
+
+    fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {
+        lines
+            .into_iter()
+            .filter(|line| {
+                !(line.starts_with("fixture") || line.starts_with(&format!("{case_str} FAILED")))
+            })
+            .collect()
+    }
 }
 
 impl MainAppDeps for TestMainAppDeps {
@@ -1025,20 +1034,11 @@ fn failed_tests() {
         status: JobStatus::Exited(1),
         effects: JobEffects {
             stdout: JobOutputResult::Inline(Box::new(
-                *b"\n\
-                running 1 test\n\
+                *b"\
                 this is some output from the test\n\
                 this is too\n\
-                test test_it ... FAILED\n\
-                \n\
-                failures:\n\
-                \n\
-                failures:\n\
-                    tests::i_be_failing\n\
-                    \n\
-                test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 155 filtered out; \
-                finished in 0.01s\n\
-                \n\
+                test_it FAILED\n\
+                fixture summary\
                 ",
             )),
             stderr: JobOutputResult::Inline(Box::new(*b"error output")),

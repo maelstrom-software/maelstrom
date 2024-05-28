@@ -126,6 +126,10 @@ pub trait CollectTests {
         options: &Self::Options,
         packages: Vec<String>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
+
+    fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
+        lines
+    }
 }
 
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {
@@ -243,7 +247,7 @@ pub trait MainAppDeps: Sync {
     type Client: ClientTrait;
     fn client(&self) -> &Self::Client;
 
-    type TestCollector: CollectTests;
+    type TestCollector: CollectTests + 'static;
     fn test_collector(&self) -> &Self::TestCollector;
 
     fn get_template_vars(
