@@ -281,6 +281,28 @@ impl FileMode {
     pub const XOTH: Self = Self(libc::S_IXOTH);
 }
 
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct FsconfigCommand(c_uint);
+
+impl FsconfigCommand {
+    pub const SET_FLAG: Self = Self(0);
+    pub const SET_STRING: Self = Self(1);
+    pub const SET_BINARY: Self = Self(2);
+    pub const SET_PATH: Self = Self(3);
+    pub const SET_PATH_EMPTY: Self = Self(4);
+    pub const SET_FD: Self = Self(5);
+    pub const CMD_CREATE: Self = Self(6);
+    pub const CMD_RECONFIGURE: Self = Self(7);
+    pub const CMD_CREATE_EXCL: Self = Self(8);
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct FsopenFlags(c_uint);
+
+impl FsopenFlags {
+    pub const CLOEXEC: Self = Self(1);
+}
+
 #[derive(Clone, Copy, Display)]
 pub struct Gid(gid_t);
 
@@ -625,6 +647,29 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
 
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
+}
+
+pub fn fsconfig(
+    fd: Fd,
+    command: FsconfigCommand,
+    key: Option<&CStr>,
+    value: Option<&u8>,
+    aux: Option<i32>,
+) -> Result<(), Errno> {
+    let key_ptr = key.map(|key| key.as_ptr()).unwrap_or(ptr::null());
+    let value_ptr = value.map(|value| value as *const u8).unwrap_or(ptr::null());
+    let aux = aux.unwrap_or(0);
+    Errno::result(unsafe {
+        libc::syscall(libc::SYS_fsconfig, fd.0, command.0, key_ptr, value_ptr, aux)
+    })
+    .map(drop)
+}
+
+pub fn fsopen(fsname: &CStr, flags: FsopenFlags) -> Result<OwnedFd, Errno> {
+    let fsname_ptr = fsname.as_ptr();
+    Errno::result(unsafe { libc::syscall(libc::SYS_fsopen, fsname_ptr, flags.0) })
+        .map(Fd::from_c_long)
+        .map(OwnedFd)
 }
 
 pub fn getgid() -> Gid {
