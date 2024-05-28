@@ -60,66 +60,38 @@ impl<'a> FdSlot<'a> {
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
-    Open {
-        path: &'a CStr,
-        flags: OpenFlags,
-        mode: FileMode,
-        out: FdSlot<'a>,
-    },
-    Socket {
-        domain: SocketDomain,
-        type_: SocketType,
-        protocol: SocketProtocol,
-        out: FdSlot<'a>,
-    },
     BindNetlink {
         fd: FdSlot<'a>,
         addr: &'a NetlinkSocketAddr,
     },
-    Read {
-        fd: FdSlot<'a>,
-        buf: &'a mut [u8],
-    },
-    Write {
-        fd: FdSlot<'a>,
-        buf: &'a [u8],
-    },
-    SetSid,
-    Dup2 {
-        from: Fd,
-        to: Fd,
+    Chdir {
+        path: &'a CStr,
     },
     CloseRange {
         first: CloseRangeFirst,
         last: CloseRangeLast,
         flags: CloseRangeFlags,
     },
-    Mount {
-        source: Option<&'a CStr>,
-        target: &'a CStr,
-        fstype: Option<&'a CStr>,
-        flags: MountFlags,
-        data: Option<&'a [u8]>,
-    },
-    Chdir {
-        path: &'a CStr,
-    },
-    Mkdir {
-        path: &'a CStr,
-        mode: FileMode,
-    },
-    PivotRoot {
-        new_root: &'a CStr,
-        put_old: &'a CStr,
-    },
-    Umount2 {
-        path: &'a CStr,
-        flags: UmountFlags,
+    Dup2 {
+        from: Fd,
+        to: Fd,
     },
     Execve {
         path: &'a CStr,
         argv: &'a [Option<&'a u8>],
         envp: &'a [Option<&'a u8>],
+    },
+    Fsconfig {
+        fd: FdSlot<'a>,
+        command: FsconfigCommand,
+        key: Option<&'a CStr>,
+        value: Option<&'a u8>,
+        aux: Option<i32>,
+    },
+    Fsopen {
+        fsname: &'a CStr,
+        flags: FsopenFlags,
+        out: FdSlot<'a>,
     },
     FuseMount {
         source: &'a CStr,
@@ -130,15 +102,16 @@ pub enum Syscall<'a> {
         gid: Gid,
         fuse_fd: FdSlot<'a>,
     },
-    SendMsg {
-        buf: &'a [u8],
-        fd_to_send: FdSlot<'a>,
-    },
-    OpenTree {
-        dirfd: Fd,
+    Mkdir {
         path: &'a CStr,
-        flags: OpenTreeFlags,
-        out: FdSlot<'a>,
+        mode: FileMode,
+    },
+    Mount {
+        source: Option<&'a CStr>,
+        target: &'a CStr,
+        fstype: Option<&'a CStr>,
+        flags: MountFlags,
+        data: Option<&'a [u8]>,
     },
     MoveMount {
         from_dirfd: FdSlot<'a>,
@@ -147,59 +120,66 @@ pub enum Syscall<'a> {
         to_path: &'a CStr,
         flags: MoveMountFlags,
     },
-    Fsopen {
-        fsname: &'a CStr,
-        flags: FsopenFlags,
+    Open {
+        path: &'a CStr,
+        flags: OpenFlags,
+        mode: FileMode,
         out: FdSlot<'a>,
     },
-    Fsconfig {
+    OpenTree {
+        dirfd: Fd,
+        path: &'a CStr,
+        flags: OpenTreeFlags,
+        out: FdSlot<'a>,
+    },
+    PivotRoot {
+        new_root: &'a CStr,
+        put_old: &'a CStr,
+    },
+    Read {
         fd: FdSlot<'a>,
-        command: FsconfigCommand,
-        key: Option<&'a CStr>,
-        value: Option<&'a u8>,
-        aux: Option<i32>,
+        buf: &'a mut [u8],
+    },
+    SendMsg {
+        buf: &'a [u8],
+        fd_to_send: FdSlot<'a>,
+    },
+    SetSid,
+    Socket {
+        domain: SocketDomain,
+        type_: SocketType,
+        protocol: SocketProtocol,
+        out: FdSlot<'a>,
+    },
+    Umount2 {
+        path: &'a CStr,
+        flags: UmountFlags,
+    },
+    Write {
+        fd: FdSlot<'a>,
+        buf: &'a [u8],
     },
 }
 
 impl<'a> Syscall<'a> {
     fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
         match self {
-            Syscall::Socket {
-                domain,
-                type_,
-                protocol,
-                out,
-            } => {
-                out.set(linux::socket(*domain, *type_, *protocol).map(OwnedFd::into_fd)?);
-                Ok(())
-            }
             Syscall::BindNetlink { fd, addr } => linux::bind_netlink(fd.get(), addr),
-            Syscall::Read { fd, buf } => linux::read(fd.get(), buf).map(drop),
-            Syscall::Open {
-                path,
-                flags,
-                mode,
-                out,
-            } => {
-                out.set(linux::open(path, *flags, *mode).map(OwnedFd::into_fd)?);
+            Syscall::Chdir { path } => linux::chdir(path),
+            Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
+            Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
+            Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
+            Syscall::Fsopen { fsname, flags, out } => {
+                out.set(linux::fsopen(fsname, *flags).map(OwnedFd::into_fd)?);
                 Ok(())
             }
-            Syscall::Write { fd, buf } => linux::write(fd.get(), buf).map(drop),
-            Syscall::SetSid => linux::setsid(),
-            Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
-            Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
-            Syscall::Mount {
-                source,
-                target,
-                fstype,
-                flags,
-                data,
-            } => linux::mount(*source, target, *fstype, *flags, *data),
-            Syscall::Chdir { path } => linux::chdir(path),
-            Syscall::Mkdir { path, mode } => linux::mkdir(path, *mode),
-            Syscall::PivotRoot { new_root, put_old } => linux::pivot_root(new_root, put_old),
-            Syscall::Umount2 { path, flags } => linux::umount2(path, *flags),
-            Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
+            Syscall::Fsconfig {
+                fd,
+                command,
+                key,
+                value,
+                aux,
+            } => linux::fsconfig(fd.get(), *command, *key, *value, *aux),
             Syscall::FuseMount {
                 source,
                 target,
@@ -223,9 +203,28 @@ impl<'a> Syscall<'a> {
                 let fstype = Some(c"fuse");
                 linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
             }
-            Syscall::SendMsg { buf, fd_to_send } => {
-                let count = write_sock.send_with_fd(buf, fd_to_send.get())?;
-                assert_eq!(count, buf.len());
+            Syscall::Mkdir { path, mode } => linux::mkdir(path, *mode),
+            Syscall::Mount {
+                source,
+                target,
+                fstype,
+                flags,
+                data,
+            } => linux::mount(*source, target, *fstype, *flags, *data),
+            Syscall::MoveMount {
+                from_dirfd,
+                from_path,
+                to_dirfd,
+                to_path,
+                flags,
+            } => linux::move_mount(from_dirfd.get(), from_path, *to_dirfd, to_path, *flags),
+            Syscall::Open {
+                path,
+                flags,
+                mode,
+                out,
+            } => {
+                out.set(linux::open(path, *flags, *mode).map(OwnedFd::into_fd)?);
                 Ok(())
             }
             Syscall::OpenTree {
@@ -237,24 +236,25 @@ impl<'a> Syscall<'a> {
                 out.set(linux::open_tree(*dirfd, path, *flags).map(OwnedFd::into_fd)?);
                 Ok(())
             }
-            Syscall::MoveMount {
-                from_dirfd,
-                from_path,
-                to_dirfd,
-                to_path,
-                flags,
-            } => linux::move_mount(from_dirfd.get(), from_path, *to_dirfd, to_path, *flags),
-            Syscall::Fsconfig {
-                fd,
-                command,
-                key,
-                value,
-                aux,
-            } => linux::fsconfig(fd.get(), *command, *key, *value, *aux),
-            Syscall::Fsopen { fsname, flags, out } => {
-                out.set(linux::fsopen(fsname, *flags).map(OwnedFd::into_fd)?);
+            Syscall::PivotRoot { new_root, put_old } => linux::pivot_root(new_root, put_old),
+            Syscall::Read { fd, buf } => linux::read(fd.get(), buf).map(drop),
+            Syscall::SendMsg { buf, fd_to_send } => {
+                let count = write_sock.send_with_fd(buf, fd_to_send.get())?;
+                assert_eq!(count, buf.len());
                 Ok(())
             }
+            Syscall::SetSid => linux::setsid(),
+            Syscall::Socket {
+                domain,
+                type_,
+                protocol,
+                out,
+            } => {
+                out.set(linux::socket(*domain, *type_, *protocol).map(OwnedFd::into_fd)?);
+                Ok(())
+            }
+            Syscall::Umount2 { path, flags } => linux::umount2(path, *flags),
+            Syscall::Write { fd, buf } => linux::write(fd.get(), buf).map(drop),
         }
     }
 }
