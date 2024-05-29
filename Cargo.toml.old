@@ -143,7 +143,3 @@ zerocopy = { version = "0.7", features = ["derive"] }
 wasm-logger = "0.2"
 walkdir = "2.4"
 xdg = "2.5.2"
-[profile.wasm_dev]
-inherits = "dev"
-[profile.wasm_release]
-inherits = "release"

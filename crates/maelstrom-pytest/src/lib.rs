@@ -118,11 +118,14 @@ impl TestFilter for pattern::Pattern {
     ) -> Option<bool> {
         let c = pattern::Context {
             package: package.into(),
-            artifact: artifact.map(|a| pattern::Artifact {
-                name: a.path.display().to_string(),
-                kind: pattern::ArtifactKind::Library,
+            file: artifact.map(|a| a.path.display().to_string()),
+            case: case.map(|node_id| pattern::Case {
+                // XXX: This information needs to be filled in
+                class: "".into(),
+                name: "".into(),
+                node_id: node_id.into(),
+                markers: vec![],
             }),
-            case: case.map(|case| pattern::Case { name: case.into() }),
         };
         pattern::interpret_pattern(self, &c)
     }

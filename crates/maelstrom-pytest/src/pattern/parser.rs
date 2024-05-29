@@ -203,30 +203,23 @@ impl Matcher {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
+    Class,
+    File,
+    Marker,
     Name,
-    Binary,
-    Benchmark,
-    Example,
-    Test,
+    NodeId,
     Package,
 }
 
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(prefix("name", 1)).map(|_| Self::Name),
+            attempt(prefix("class", 1)).map(|_| Self::Class),
+            attempt(prefix("file", 1)).map(|_| Self::File),
+            attempt(prefix("marker", 1)).map(|_| Self::Marker),
+            attempt(prefix("name", 2)).map(|_| Self::Name),
+            attempt(prefix("node_id", 2)).map(|_| Self::NodeId),
             attempt(prefix("package", 1)).map(|_| Self::Package),
-            Self::parser_for_simple_selector(),
-        ))
-    }
-
-    pub fn parser_for_simple_selector<InputT: Stream<Token = char>>(
-    ) -> impl Parser<InputT, Output = Self> {
-        choice((
-            attempt(prefix("binary", 2)).map(|_| Self::Binary),
-            attempt(prefix("benchmark", 2)).map(|_| Self::Benchmark),
-            attempt(prefix("example", 1)).map(|_| Self::Example),
-            prefix("test", 2).map(|_| Self::Test),
         ))
     }
 }
@@ -254,9 +247,6 @@ pub enum SimpleSelectorName {
     True,
     None,
     False,
-    Library,
-    #[from]
-    Compound(CompoundSelectorName),
 }
 
 impl SimpleSelectorName {
@@ -267,14 +257,11 @@ impl SimpleSelectorName {
             attempt(prefix("true", 2)).map(|_| Self::True),
             attempt(prefix("none", 1)).map(|_| Self::None),
             attempt(prefix("false", 1)).map(|_| Self::False),
-            attempt(prefix("library", 1)).map(|_| Self::Library),
-            CompoundSelectorName::parser_for_simple_selector().map(Self::Compound),
         ))
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
-#[from(types(CompoundSelectorName))]
 pub struct SimpleSelector {
     pub name: SimpleSelectorName,
 }
@@ -291,7 +278,7 @@ impl SimpleSelector {
 pub enum SimpleExpression {
     #[from(types(OrExpression))]
     Or(Box<OrExpression>),
-    #[from(types(SimpleSelectorName, CompoundSelectorName))]
+    #[from(types(SimpleSelectorName))]
     SimpleSelector(SimpleSelector),
     #[from]
     CompoundSelector(CompoundSelector),
@@ -469,7 +456,6 @@ pub fn compile_filter(include_filter: &[String], exclude_filter: &[String]) -> R
 
 #[test]
 fn simple_expr() {
-    use CompoundSelectorName::*;
     use SimpleSelectorName::*;
 
     fn test_it(a: &str, s: impl Into<SimpleExpression>) {
@@ -485,30 +471,18 @@ fn simple_expr() {
     test_it("none()", None);
     test_it("false", False);
     test_it("false()", False);
-    test_it("library", Library);
-    test_it("library()", Library);
-
-    test_it("binary", Binary);
-    test_it("binary()", Binary);
-    test_it("benchmark", Benchmark);
-    test_it("benchmark()", Benchmark);
-    test_it("example", Example);
-    test_it("example()", Example);
-    test_it("test", Test);
-    test_it("test()", Test);
 
     fn test_it_err(a: &str) {
         assert!(parse_str!(SimpleExpression, a).is_err());
     }
-    test_it_err("name");
-    test_it_err("name()");
-    test_it_err("package");
-    test_it_err("package()");
+    for n in ["class", "file", "marker", "name", "node_id", "package"] {
+        test_it_err(&format!("{n}"));
+        test_it_err(&format!("{n}()"));
+    }
 }
 
 #[test]
 fn simple_expr_prefix() {
-    use CompoundSelectorName::*;
     use SimpleSelectorName::*;
 
     fn test_it(a: &str, min: usize, s: impl Into<SimpleExpression>) {
@@ -523,12 +497,6 @@ fn simple_expr_prefix() {
     test_it("true", 2, True);
     test_it("none", 1, None);
     test_it("false", 1, False);
-    test_it("library", 1, Library);
-
-    test_it("binary", 2, Binary);
-    test_it("benchmark", 2, Benchmark);
-    test_it("example", 1, Example);
-    test_it("test", 2, Test);
 }
 
 #[test]
@@ -543,20 +511,16 @@ fn simple_expr_compound() {
         );
     }
     test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it("test.equals([a-z].*)", Test, Equals("[a-z].*".into()));
+    test_it("class.equals([a-z].*)", Class, Equals("[a-z].*".into()));
     test_it(
-        "binary.starts_with<(hi)>",
-        Binary,
+        "marker.starts_with<(hi)>",
+        Marker,
         StartsWith("(hi)".into()),
     );
+    test_it("file.ends_with[hey?]", File, EndsWith("hey?".into()));
     test_it(
-        "benchmark.ends_with[hey?]",
-        Benchmark,
-        EndsWith("hey?".into()),
-    );
-    test_it(
-        "example.contains{s(oi)l}",
-        Example,
+        "node_id.contains{s(oi)l}",
+        NodeId,
         Contains("s(oi)l".into()),
     );
 }
@@ -658,7 +622,7 @@ fn pattern_complicated_boolean_expr() {
         assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
     }
     test_it(
-        "( all || any ) && none - library",
+        "( all || any ) && none - false",
         AndExpression::And(
             OrExpression::Or(
                 SimpleSelectorName::All.into(),
@@ -667,7 +631,7 @@ fn pattern_complicated_boolean_expr() {
             .into(),
             Box::new(AndExpression::Diff(
                 SimpleSelectorName::None.into(),
-                Box::new(SimpleSelectorName::Library.into()),
+                Box::new(SimpleSelectorName::False.into()),
             )),
         ),
     );
@@ -686,7 +650,7 @@ fn pattern_complicated_boolean_expr() {
     );
 
     test_it(
-        "not ( all or any ) and none minus library",
+        "not ( all or any ) and none minus false",
         AndExpression::And(
             NotExpression::Not(Box::new(
                 OrExpression::Or(
@@ -697,7 +661,7 @@ fn pattern_complicated_boolean_expr() {
             )),
             Box::new(AndExpression::Diff(
                 SimpleSelectorName::None.into(),
-                Box::new(SimpleSelectorName::Library.into()),
+                Box::new(SimpleSelectorName::False.into()),
             )),
         ),
     );
@@ -710,10 +674,10 @@ fn pattern_complicated_boolean_expr_compound() {
     }
 
     test_it(
-        "binary.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
+        "file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/",
         AndExpression::And(
             CompoundSelector {
-                name: CompoundSelectorName::Binary,
+                name: CompoundSelectorName::File,
                 matcher: Matcher::StartsWith("hi".into()),
             }
             .into(),
@@ -728,12 +692,12 @@ fn pattern_complicated_boolean_expr_compound() {
     );
 
     test_it(
-        "( binary.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || benchmark.ends_with(jo)",
+        "( file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || class.ends_with(jo)",
         OrExpression::Or(
             NotExpression::Simple(
                 AndExpression::And(
                     CompoundSelector {
-                        name: CompoundSelectorName::Binary,
+                        name: CompoundSelectorName::File,
                         matcher: Matcher::StartsWith("hi".into()),
                     }
                     .into(),
@@ -750,7 +714,7 @@ fn pattern_complicated_boolean_expr_compound() {
             .into(),
             Box::new(
                 CompoundSelector {
-                    name: CompoundSelectorName::Benchmark,
+                    name: CompoundSelectorName::Class,
                     matcher: Matcher::EndsWith("jo".into()),
                 }
                 .into(),

@@ -1,87 +1,39 @@
 use crate::pattern::parser::*;
 use maelstrom_test_runner::{maybe_and, maybe_not, maybe_or};
-use serde::{Deserialize, Serialize};
-use strum::{Display, EnumString};
 
 #[cfg(test)]
 use crate::parse_str;
 
-#[derive(
-    Copy,
-    Clone,
-    Hash,
-    PartialOrd,
-    Ord,
-    PartialEq,
-    Eq,
-    Debug,
-    Serialize,
-    Deserialize,
-    EnumString,
-    Display,
-)]
-#[strum(serialize_all = "snake_case")]
-pub enum ArtifactKind {
-    Library,
-    Binary,
-    Test,
-    Benchmark,
-    Example,
-}
-
-impl ArtifactKind {
-    pub fn short_name(&self) -> &'static str {
-        match self {
-            ArtifactKind::Library => "lib",
-            ArtifactKind::Binary => "bin",
-            ArtifactKind::Test => "test",
-            ArtifactKind::Benchmark => "bench",
-            ArtifactKind::Example => "example",
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Debug)]
-pub struct Artifact {
-    pub kind: ArtifactKind,
-    pub name: String,
-}
-
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Case {
+    pub class: String,
     pub name: String,
+    pub node_id: String,
+    pub markers: Vec<String>,
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Context {
     pub package: String,
-    pub artifact: Option<Artifact>,
+    pub file: Option<String>,
     pub case: Option<Case>,
 }
 
 impl Context {
+    fn file(&self) -> Option<&String> {
+        self.file.as_ref()
+    }
+
     fn case(&self) -> Option<&Case> {
         self.case.as_ref()
     }
-
-    fn artifact(&self) -> Option<&Artifact> {
-        self.artifact.as_ref()
-    }
 }
 
-pub fn interpret_simple_selector(s: &SimpleSelector, c: &Context) -> Option<bool> {
-    use CompoundSelectorName::*;
+pub fn interpret_simple_selector(s: &SimpleSelector) -> Option<bool> {
     use SimpleSelectorName::*;
     Some(match s.name {
         All | Any | True => true,
         None | False => false,
-        Library => matches!(c.artifact()?.kind, ArtifactKind::Library),
-        Compound(Binary) => matches!(c.artifact()?.kind, ArtifactKind::Binary),
-        Compound(Benchmark) => matches!(c.artifact()?.kind, ArtifactKind::Benchmark),
-        Compound(Test) => matches!(c.artifact()?.kind, ArtifactKind::Test),
-        Compound(Example) => matches!(c.artifact()?.kind, ArtifactKind::Example),
-        Compound(Name) => unreachable!("should be parser error"),
-        Compound(Package) => unreachable!("should be parser error"),
     })
 }
 
@@ -100,24 +52,16 @@ fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
 pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     Some(match s.name {
+        Class => interpret_matcher(&c.case()?.class, &s.matcher),
+        File => interpret_matcher(c.file()?, &s.matcher),
+        Marker => c
+            .case()?
+            .markers
+            .iter()
+            .any(|m| interpret_matcher(m, &s.matcher)),
         Name => interpret_matcher(&c.case()?.name, &s.matcher),
+        NodeId => interpret_matcher(&c.case()?.node_id, &s.matcher),
         Package => interpret_matcher(&c.package, &s.matcher),
-        Binary => {
-            matches!(&c.artifact()?.kind, ArtifactKind::Binary)
-                && interpret_matcher(&c.artifact()?.name, &s.matcher)
-        }
-        Benchmark => {
-            matches!(&c.artifact()?.kind, ArtifactKind::Benchmark)
-                && interpret_matcher(&c.artifact()?.name, &s.matcher)
-        }
-        Example => {
-            matches!(&c.artifact()?.kind, ArtifactKind::Example)
-                && interpret_matcher(&c.artifact()?.name, &s.matcher)
-        }
-        Test => {
-            matches!(&c.artifact()?.kind, ArtifactKind::Test)
-                && interpret_matcher(&c.artifact()?.name, &s.matcher)
-        }
     })
 }
 
@@ -159,7 +103,7 @@ pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<
     use SimpleExpression::*;
     match s {
         Or(o) => interpret_or_expression(o, c),
-        SimpleSelector(s) => interpret_simple_selector(s, c),
+        SimpleSelector(s) => interpret_simple_selector(s),
         CompoundSelector(s) => interpret_compound_selector(s, c),
     }
 }
@@ -170,15 +114,10 @@ pub fn interpret_pattern(s: &Pattern, c: &Context) -> Option<bool> {
 
 #[test]
 fn simple_expression_simple_selector() {
-    use ArtifactKind::*;
-
-    fn test_it(s: &str, artifact: Option<ArtifactKind>, expected: Option<bool>) {
+    fn test_it(s: &str, file: Option<&str>, expected: Option<bool>) {
         let c = Context {
             package: "foo".into(),
-            artifact: artifact.map(|kind| Artifact {
-                kind,
-                name: "foo.bin".into(),
-            }),
+            file: file.map(|f| f.into()),
             case: None,
         };
         let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -187,54 +126,22 @@ fn simple_expression_simple_selector() {
 
     // for all inputs, these expression evaluate as true
     for w in ["all", "any", "true"] {
-        for a in [Library, Binary, Test, Benchmark, Example] {
-            test_it(w, Some(a), Some(true));
-        }
+        test_it(w, Some("foo.py"), Some(true));
         test_it(w, None, Some(true));
     }
 
     // for all inputs, these expression evaluate as false
     for w in ["none", "false"] {
-        for a in [Library, Binary, Test, Benchmark, Example] {
-            test_it(w, Some(a), Some(false));
-        }
+        test_it(w, Some("foo.py"), Some(false));
         test_it(w, None, Some(false));
     }
-
-    test_it("library", Some(Library), Some(true));
-    test_it("library", Some(Binary), Some(false));
-    test_it("library", None, None);
-
-    test_it("binary", Some(Library), Some(false));
-    test_it("binary", Some(Binary), Some(true));
-    test_it("binary", None, None);
-
-    test_it("benchmark", Some(Library), Some(false));
-    test_it("benchmark", Some(Benchmark), Some(true));
-    test_it("benchmark", None, None);
-
-    test_it("test", Some(Library), Some(false));
-    test_it("test", Some(Test), Some(true));
-    test_it("test", None, None);
-
-    test_it("example", Some(Library), Some(false));
-    test_it("example", Some(Example), Some(true));
-    test_it("example", None, None);
 }
 
 #[cfg(test)]
-fn test_compound_sel(
-    s: &str,
-    artifact: Option<ArtifactKind>,
-    name: impl Into<String>,
-    expected: Option<bool>,
-) {
+fn test_compound_sel(s: &str, file: Option<&str>, expected: Option<bool>) {
     let c = Context {
         package: "foo".into(),
-        artifact: artifact.map(|kind| Artifact {
-            kind,
-            name: name.into(),
-        }),
+        file: file.map(|f| f.into()),
         case: None,
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -243,81 +150,70 @@ fn test_compound_sel(
 
 #[test]
 fn simple_expression_compound_selector_starts_with() {
-    use ArtifactKind::*;
-
-    let p = "binary.starts_with(bar)";
-    test_compound_sel(p, Some(Binary), "barbaz", Some(true));
-    test_compound_sel(p, Some(Binary), "bazbar", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.starts_with(bar)";
+    test_compound_sel(p, Some("barbaz"), Some(true));
+    test_compound_sel(p, Some("bazbar"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[test]
 fn simple_expression_compound_selector_ends_with() {
-    use ArtifactKind::*;
-
-    let p = "binary.ends_with(bar)";
-    test_compound_sel(p, Some(Binary), "bazbar", Some(true));
-    test_compound_sel(p, Some(Binary), "barbaz", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.ends_with(bar)";
+    test_compound_sel(p, Some("bazbar"), Some(true));
+    test_compound_sel(p, Some("barbaz"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[test]
 fn simple_expression_compound_selector_equals() {
-    use ArtifactKind::*;
-
-    let p = "binary.equals(bar)";
-    test_compound_sel(p, Some(Binary), "bar", Some(true));
-    test_compound_sel(p, Some(Binary), "baz", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.equals(bar)";
+    test_compound_sel(p, Some("bar"), Some(true));
+    test_compound_sel(p, Some("baz"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[test]
 fn simple_expression_compound_selector_contains() {
-    use ArtifactKind::*;
-
-    let p = "binary.contains(bar)";
-    test_compound_sel(p, Some(Binary), "bazbarbin", Some(true));
-    test_compound_sel(p, Some(Binary), "bazbin", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.contains(bar)";
+    test_compound_sel(p, Some("bazbarbin"), Some(true));
+    test_compound_sel(p, Some("bazbin"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[test]
 fn simple_expression_compound_selector_matches() {
-    use ArtifactKind::*;
-
-    let p = "binary.matches(^[a-z]*$)";
-    test_compound_sel(p, Some(Binary), "bazbarbin", Some(true));
-    test_compound_sel(p, Some(Binary), "baz-bin", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.matches(^[a-z]*$)";
+    test_compound_sel(p, Some("bazbarbin"), Some(true));
+    test_compound_sel(p, Some("baz-bin"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[test]
 fn simple_expression_compound_selector_globs() {
-    use ArtifactKind::*;
-
-    let p = "binary.globs(baz*)";
-    test_compound_sel(p, Some(Binary), "bazbarbin", Some(true));
-    test_compound_sel(p, Some(Binary), "binbaz", Some(false));
-    test_compound_sel(p, None, "bazbar", None);
+    let p = "file.globs(baz*)";
+    test_compound_sel(p, Some("bazbarbin"), Some(true));
+    test_compound_sel(p, Some("binbaz"), Some(false));
+    test_compound_sel(p, None, None);
 }
 
 #[cfg(test)]
 fn test_compound_sel_case(
     s: &str,
-    kind: Option<ArtifactKind>,
+    file: Option<&str>,
     package: impl Into<String>,
-    artifact_name: impl Into<String>,
-    case_name: impl Into<String>,
+    case: impl Into<String>,
+    class: impl Into<String>,
+    node_id: impl Into<String>,
     expected: Option<bool>,
 ) {
     let c = Context {
         package: package.into(),
-        artifact: kind.map(|kind| Artifact {
-            kind,
-            name: artifact_name.into(),
-        }),
+        file: file.map(|f| f.into()),
         case: Some(Case {
-            name: case_name.into(),
+            name: case.into(),
+            class: class.into(),
+            node_id: node_id.into(),
+            markers: vec![],
         }),
     };
     let actual = interpret_simple_expression(&parse_str!(SimpleExpression, s).unwrap(), &c);
@@ -326,65 +222,57 @@ fn test_compound_sel_case(
 
 #[test]
 fn simple_expression_compound_selector_packge() {
-    use ArtifactKind::*;
-
     let p = "package.matches(^[a-z]*$)";
-    for k in [Library, Binary, Test, Benchmark, Example] {
-        test_compound_sel_case(p, Some(k), "bazbarbin", "", "", Some(true));
-        test_compound_sel_case(p, Some(k), "baz-bin", "", "", Some(false));
-    }
-    test_compound_sel_case(p, None, "baz-bin", "", "", Some(false));
+    test_compound_sel_case(
+        p,
+        Some("foo.py"),
+        "bazbarbin",
+        "test",
+        "Test",
+        "foo.py::Test::test",
+        Some(true),
+    );
+    test_compound_sel_case(
+        p,
+        Some("foo.py"),
+        "baz-bin",
+        "test",
+        "Test",
+        "foo.py::Test::test",
+        Some(false),
+    );
+    test_compound_sel_case(
+        p,
+        None,
+        "baz-bin",
+        "test",
+        "Test",
+        "foo.py::Test::test",
+        Some(false),
+    );
 }
 
 #[test]
 fn simple_expression_compound_selector_name() {
-    use ArtifactKind::*;
-
     let p = "name.matches(^[a-z]*$)";
-    for k in [Library, Binary, Test, Benchmark, Example] {
-        test_compound_sel_case(p, Some(k), "", "", "bazbarbin", Some(true));
-        test_compound_sel_case(p, Some(k), "", "", "baz-bin", Some(false));
-    }
-}
-
-#[test]
-fn simple_expression_compound_selector_binary() {
-    use ArtifactKind::*;
-
-    let p = "binary.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Some(Binary), "", "bazbarbin", "", Some(true));
-    test_compound_sel_case(p, Some(Binary), "", "baz-bin", "", Some(false));
-    test_compound_sel_case(p, Some(Test), "", "bazbarbin", "", Some(false));
-}
-
-#[test]
-fn simple_expression_compound_selector_benchmark() {
-    use ArtifactKind::*;
-
-    let p = "benchmark.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Some(Benchmark), "", "bazbarbin", "", Some(true));
-    test_compound_sel_case(p, Some(Benchmark), "", "baz-bin", "", Some(false));
-    test_compound_sel_case(p, Some(Test), "", "bazbarbin", "", Some(false));
-}
-
-#[test]
-fn simple_expression_compound_selector_example() {
-    use ArtifactKind::*;
-
-    let p = "example.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Some(Example), "", "bazbarbin", "", Some(true));
-    test_compound_sel_case(p, Some(Example), "", "baz-bin", "", Some(false));
-    test_compound_sel_case(p, Some(Test), "", "bazbarbin", "", Some(false));
-}
-
-#[test]
-fn simple_expression_compound_selector_test() {
-    use ArtifactKind::*;
-
-    let p = "test.matches(^[a-z]*$)";
-    test_compound_sel_case(p, Some(Test), "", "bazbarbin", "", Some(true));
-    test_compound_sel_case(p, Some(Test), "", "baz-bin", "", Some(false));
-    test_compound_sel_case(p, Some(Binary), "", "bazbarbin", "", Some(false));
+    test_compound_sel_case(
+        p,
+        Some("foo.py"),
+        "pkg",
+        "bazbarbin",
+        "Test",
+        "foo.py::Test::bazbarbin",
+        Some(true),
+    );
+    test_compound_sel_case(
+        p,
+        Some("foo.py"),
+        "pkg",
+        "baz-bin",
+        "Test",
+        "foo.py::Test::baz-bin",
+        Some(false),
+    );
 }
 
 #[test]
@@ -392,12 +280,12 @@ fn and_or_not_diff_expressions() {
     fn test_it(s: &str, expected: bool) {
         let c = Context {
             package: "foo".into(),
-            artifact: Some(Artifact {
-                kind: ArtifactKind::Library,
-                name: "foo_bin".into(),
-            }),
+            file: Some("foo_test.py".into()),
             case: Some(Case {
+                class: "Test".into(),
                 name: "foo_test".into(),
+                node_id: "foo_test.py::Test::foo_test".into(),
+                markers: vec![],
             }),
         };
         let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);
@@ -425,10 +313,7 @@ fn and_or_not_diff_maybe_expressions() {
     fn test_it(s: &str, expected: Option<bool>) {
         let c = Context {
             package: "foo".into(),
-            artifact: Some(Artifact {
-                kind: ArtifactKind::Library,
-                name: "foo_bin".into(),
-            }),
+            file: Some("foo_test.py".into()),
             case: None,
         };
         let actual = interpret_pattern(&parse_str!(Pattern, s).unwrap(), &c);
