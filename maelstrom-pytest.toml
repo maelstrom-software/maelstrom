@@ -1,12 +1,15 @@
 [[directives]]
-image.name = "python:3.12-slim"
+image.name = "python:3.11-slim"
 image.use = ["layers", "environment"]
 added_layers = [
     { glob = "**.py" },
-    { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,null,urandom,random,zero}"] }
+    { glob = "target/maelstrom_venv/lib/python3.11/site-packages/**", strip_prefix = "target/maelstrom_venv", prepend_prefix = "/usr/local/" },
+    { paths = ["py/maelstrom_client/maelstrom-client"], follow_symlinks = true },
+    { stubs = ["/tmp/", "/proc/", "/sys/", "/dev/{full,null,urandom,random,zero}", "/.pytest_cache/"] }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
+    { type = "tmp", mount_point = "/.pytest_cache" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
     { type = "devices", devices = ["full", "null", "urandom", "random", "zero"] },
