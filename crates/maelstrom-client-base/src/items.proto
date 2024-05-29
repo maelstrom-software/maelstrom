@@ -85,7 +85,6 @@ message JobMount {
         DevptsMount devpts = 5;
         DevicesMount devices = 7;
         MqueueMount mqueue = 6;
-        OverlayMount overlay = 8;
         ProcMount proc = 1;
         SysMount sys = 3;
         TmpMount tmp = 2;
@@ -108,23 +107,6 @@ message DevicesMount {
 
 message MqueueMount {
     string mount_point = 1;
-}
-
-message OverlayMount {
-    string mount_point = 1;
-    OverlayMountUpper upper = 2;
-}
-
-message OverlayMountUpper {
-    oneof Upper {
-        Void tmp = 1;
-        OverlayMountLocalUpper local = 2;
-    }
-}
-
-message OverlayMountLocalUpper {
-    string upper = 1;
-    string work = 2;
 }
 
 message ProcMount {

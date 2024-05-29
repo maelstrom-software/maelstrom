@@ -111,15 +111,6 @@ impl From<JobDeviceForTomlAndJson> for JobDevice {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-pub enum JobOverlayMountUpper {
-    Tmp,
-    Local {
-        upper: Utf8PathBuf,
-        work: Utf8PathBuf,
-    },
-}
-
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "type")]
 #[serde(rename_all = "kebab-case")]
@@ -138,9 +129,6 @@ pub enum JobMountForTomlAndJson {
         devices: EnumSet<JobDeviceForTomlAndJson>,
     },
     Mqueue {
-        mount_point: Utf8PathBuf,
-    },
-    Overlay {
         mount_point: Utf8PathBuf,
     },
     Proc {
@@ -170,10 +158,6 @@ pub enum JobMount {
     Mqueue {
         mount_point: Utf8PathBuf,
     },
-    Overlay {
-        mount_point: Utf8PathBuf,
-        upper: JobOverlayMountUpper,
-    },
     Proc {
         mount_point: Utf8PathBuf,
     },
@@ -202,10 +186,6 @@ impl From<JobMountForTomlAndJson> for JobMount {
                 devices: devices.into_iter().map(JobDevice::from).collect(),
             },
             JobMountForTomlAndJson::Mqueue { mount_point } => JobMount::Mqueue { mount_point },
-            JobMountForTomlAndJson::Overlay { mount_point } => JobMount::Overlay {
-                mount_point,
-                upper: JobOverlayMountUpper::Tmp,
-            },
             JobMountForTomlAndJson::Proc { mount_point } => JobMount::Proc { mount_point },
             JobMountForTomlAndJson::Sys { mount_point } => JobMount::Sys { mount_point },
             JobMountForTomlAndJson::Tmp { mount_point } => JobMount::Tmp { mount_point },

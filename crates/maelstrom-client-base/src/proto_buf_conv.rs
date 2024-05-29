@@ -437,26 +437,6 @@ impl IntoProtoBuf for maelstrom_base::JobMount {
             Self::Mqueue { mount_point } => proto::job_mount::Mount::Mqueue(proto::MqueueMount {
                 mount_point: mount_point.into_proto_buf(),
             }),
-            Self::Overlay { mount_point, upper } => {
-                proto::job_mount::Mount::Overlay(proto::OverlayMount {
-                    mount_point: mount_point.into_proto_buf(),
-                    upper: Some(proto::OverlayMountUpper {
-                        upper: Some(match upper {
-                            maelstrom_base::JobOverlayMountUpper::Tmp => {
-                                proto::overlay_mount_upper::Upper::Tmp(proto::Void {})
-                            }
-                            maelstrom_base::JobOverlayMountUpper::Local { upper, work } => {
-                                proto::overlay_mount_upper::Upper::Local(
-                                    proto::OverlayMountLocalUpper {
-                                        upper: upper.into_proto_buf(),
-                                        work: work.into_proto_buf(),
-                                    },
-                                )
-                            }
-                        }),
-                    }),
-                })
-            }
             Self::Proc { mount_point } => proto::job_mount::Mount::Proc(proto::ProcMount {
                 mount_point: mount_point.into_proto_buf(),
             }),
@@ -492,26 +472,6 @@ impl TryFromProtoBuf for maelstrom_base::JobMount {
             },
             proto::job_mount::Mount::Mqueue(mqueue_mount) => maelstrom_base::JobMount::Mqueue {
                 mount_point: TryFromProtoBuf::try_from_proto_buf(mqueue_mount.mount_point)?,
-            },
-            proto::job_mount::Mount::Overlay(overlay_mount) => maelstrom_base::JobMount::Overlay {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(overlay_mount.mount_point)?,
-                upper: {
-                    let upper = overlay_mount
-                        .upper
-                        .ok_or_else(|| anyhow!("malformed OverlayMount"))?;
-                    let upper = upper.upper.ok_or_else(|| anyhow!("malformed Upper"))?;
-                    match upper {
-                        proto::overlay_mount_upper::Upper::Tmp(proto::Void {}) => {
-                            maelstrom_base::JobOverlayMountUpper::Tmp
-                        }
-                        proto::overlay_mount_upper::Upper::Local(
-                            proto::OverlayMountLocalUpper { upper, work },
-                        ) => maelstrom_base::JobOverlayMountUpper::Local {
-                            upper: TryFromProtoBuf::try_from_proto_buf(upper)?,
-                            work: TryFromProtoBuf::try_from_proto_buf(work)?,
-                        },
-                    }
-                },
             },
             proto::job_mount::Mount::Proc(proc_mount) => maelstrom_base::JobMount::Proc {
                 mount_point: TryFromProtoBuf::try_from_proto_buf(proc_mount.mount_point)?,

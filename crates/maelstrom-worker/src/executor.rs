@@ -922,9 +922,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 JobMount::Mqueue { mount_point } => {
                     normal_mount(&bump, &mut builder, mount_point, c"mqueue", "mqueue")?;
                 }
-                JobMount::Overlay { .. } => {
-                    unimplemented!();
-                }
                 JobMount::Proc { mount_point } => {
                     normal_mount(&bump, &mut builder, mount_point, c"proc", "proc")?;
                 }
