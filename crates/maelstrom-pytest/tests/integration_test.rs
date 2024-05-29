@@ -35,6 +35,7 @@ fn do_cargo_maelstrom_test(_source_contents: &str) -> String {
     let extra_options = ExtraCommandLineOptions {
         include: vec!["all".into()],
         exclude: vec![],
+        list: false,
     };
     let term = InMemoryTerm::new(50, 50);
 

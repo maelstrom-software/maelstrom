@@ -19,4 +19,10 @@ pub struct ExtraCommandLineOptions {
         help = "Only include tests which don't match the given filter. Can be specified multiple times."
     )]
     pub exclude: Vec<String>,
+
+    #[arg(
+        long = "list",
+        help = "Instead of running tests, print the tests that would have been run."
+    )]
+    pub list: bool,
 }

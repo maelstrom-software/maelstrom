@@ -10,8 +10,9 @@ use maelstrom_client::{
 };
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
-    main_app_new, progress, BuildDir, CollectTests, LoggingOutput, MainAppDeps, MainAppState,
-    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    main_app_new, progress, BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps,
+    MainAppState, TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage,
+    TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -313,6 +314,7 @@ where
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
+    let list_action = extra_options.list.then_some(ListAction::ListTests);
     let target_dir = Root::<BuildDir>::new(Path::new("target"));
     let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom_pytest");
     let state_dir = maelstrom_target_dir.join::<StateDir>("state");
@@ -345,7 +347,7 @@ where
         deps,
         extra_options.include,
         extra_options.exclude,
-        None,
+        list_action,
         stderr_is_tty,
         workspace_dir,
         &packages,

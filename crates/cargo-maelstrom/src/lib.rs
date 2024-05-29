@@ -504,11 +504,7 @@ where
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
 
-        let list_action = match (extra_options.list.tests, extra_options.list.binaries) {
-            (true, _) => Some(ListAction::ListTests),
-            (_, _) => None,
-        };
-
+        let list_action = extra_options.list.tests.then_some(ListAction::ListTests);
         let target_dir = Root::<BuildDir>::new(cargo_metadata.target_directory.as_std_path());
         let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom");
         let state_dir = maelstrom_target_dir.join::<StateDir>("state");
