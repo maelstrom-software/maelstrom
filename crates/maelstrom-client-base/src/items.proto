@@ -127,6 +127,19 @@ enum JobNetwork {
     Local = 2;
 }
 
+message JobRootOverlay {
+    oneof overlay {
+        Void none = 1;
+        Void tmp = 2;
+        LocalJobRootOverlay local = 3;
+    }
+}
+
+message LocalJobRootOverlay {
+    string upper = 1;
+    string work = 2;
+}
+
 message EnvironmentSpec {
     map<string, string> vars = 1;
     bool extend = 2;
@@ -145,7 +158,7 @@ message JobSpec {
     repeated string arguments = 2;
     optional ImageSpec image = 3;
     repeated LayerSpec layers = 4;
-    bool enable_writable_file_system = 5;
+    optional JobRootOverlay root_overlay = 15;
     repeated EnvironmentSpec environment = 6;
     optional string working_directory = 7;
     repeated JobDevice devices = 8;

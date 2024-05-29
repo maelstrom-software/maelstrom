@@ -8,7 +8,7 @@ use bumpalo::{
 use futures::ready;
 use maelstrom_base::{
     EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
-    JobOutputResult, JobResult, JobStatus, Timeout, UserId, Utf8PathBuf,
+    JobOutputResult, JobResult, JobRootOverlay, JobStatus, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -64,7 +64,7 @@ pub struct JobSpec {
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
-    pub enable_writable_file_system: bool,
+    pub root_overlay: JobRootOverlay,
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
@@ -81,7 +81,7 @@ impl JobSpec {
             devices,
             mounts,
             network,
-            enable_writable_file_system,
+            root_overlay,
             working_directory,
             user,
             group,
@@ -95,7 +95,7 @@ impl JobSpec {
             devices,
             mounts,
             network,
-            enable_writable_file_system,
+            root_overlay,
             working_directory,
             user,
             group,
@@ -570,107 +570,113 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| JobError::System(anyhow!("sendmsg: {err}")),
         );
 
-        if spec.enable_writable_file_system {
-            // We need to create an upperdir and workdir. Create a temporary file system to contain
-            // both of them.
-            builder.push(
-                Syscall::Mount {
-                    source: None,
-                    target: self.tmpfs_dir.as_c_str(),
-                    fstype: Some(c"tmpfs"),
-                    flags: MountFlags::default(),
-                    data: None,
-                },
-                &|err| {
-                    syserr(anyhow!(
-                        "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"
-                    ))
-                },
-            );
-            builder.push(
-                Syscall::Mkdir {
-                    path: self.upper_dir.as_c_str(),
-                    mode: FileMode::RWXU,
-                },
-                &|err| syserr(anyhow!("making uppderdir for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Mkdir {
-                    path: self.work_dir.as_c_str(),
-                    mode: FileMode::RWXU,
-                },
-                &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
-            );
+        match spec.root_overlay {
+            JobRootOverlay::None => {}
+            JobRootOverlay::Tmp => {
+                // We need to create an upperdir and workdir. Create a temporary file system to contain
+                // both of them.
+                builder.push(
+                    Syscall::Mount {
+                        source: None,
+                        target: self.tmpfs_dir.as_c_str(),
+                        fstype: Some(c"tmpfs"),
+                        flags: MountFlags::default(),
+                        data: None,
+                    },
+                    &|err| {
+                        syserr(anyhow!(
+                            "mounting tmpfs file system for overlayfs's upperdir and workdir: {err}"
+                        ))
+                    },
+                );
+                builder.push(
+                    Syscall::Mkdir {
+                        path: self.upper_dir.as_c_str(),
+                        mode: FileMode::RWXU,
+                    },
+                    &|err| syserr(anyhow!("making uppderdir for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Mkdir {
+                        path: self.work_dir.as_c_str(),
+                        mode: FileMode::RWXU,
+                    },
+                    &|err| syserr(anyhow!("making workdir for overlayfs: {err}")),
+                );
 
-            // Use overlayfs.
-            let fsfd = new_fd_slot(&bump);
-            builder.push(
-                Syscall::Fsopen {
-                    fsname: c"overlay",
-                    flags: FsopenFlags::default(),
-                    out: fsfd,
-                },
-                &|err| syserr(anyhow!("fsopen of overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Fsconfig {
-                    fd: fsfd,
-                    command: FsconfigCommand::SET_STRING,
-                    key: Some(c"lowerdir"),
-                    value: Some(&new_root_path.to_bytes_with_nul()[0]),
-                    aux: None,
-                },
-                &|err| syserr(anyhow!("fsconfig of lowerdir for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Fsconfig {
-                    fd: fsfd,
-                    command: FsconfigCommand::SET_STRING,
-                    key: Some(c"upperdir"),
-                    value: Some(&self.upper_dir.to_bytes_with_nul()[0]),
-                    aux: None,
-                },
-                &|err| syserr(anyhow!("fsconfig of upperdir for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Fsconfig {
-                    fd: fsfd,
-                    command: FsconfigCommand::SET_STRING,
-                    key: Some(c"workdir"),
-                    value: Some(&self.work_dir.to_bytes_with_nul()[0]),
-                    aux: None,
-                },
-                &|err| syserr(anyhow!("fsconfig of workdir for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Fsconfig {
-                    fd: fsfd,
-                    command: FsconfigCommand::CMD_CREATE,
-                    key: None,
-                    value: None,
-                    aux: None,
-                },
-                &|err| syserr(anyhow!("fsconfig of CMD_CREATE for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::Fsmount {
-                    fd: fsfd,
-                    flags: FsmountFlags::default(),
-                    mount_attrs: MountAttrs::default(),
-                    out: fsfd,
-                },
-                &|err| syserr(anyhow!("fsmount for overlayfs: {err}")),
-            );
-            builder.push(
-                Syscall::MoveMount {
-                    from_dirfd: fsfd,
-                    from_path: c"",
-                    to_dirfd: Fd::AT_FDCWD,
-                    to_path: new_root_path,
-                    flags: MoveMountFlags::F_EMPTY_PATH,
-                },
-                &|err| syserr(anyhow!("move_mount for overlayfs: {err}")),
-            );
+                // Use overlayfs.
+                let fsfd = new_fd_slot(&bump);
+                builder.push(
+                    Syscall::Fsopen {
+                        fsname: c"overlay",
+                        flags: FsopenFlags::default(),
+                        out: fsfd,
+                    },
+                    &|err| syserr(anyhow!("fsopen of overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Fsconfig {
+                        fd: fsfd,
+                        command: FsconfigCommand::SET_STRING,
+                        key: Some(c"lowerdir"),
+                        value: Some(&new_root_path.to_bytes_with_nul()[0]),
+                        aux: None,
+                    },
+                    &|err| syserr(anyhow!("fsconfig of lowerdir for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Fsconfig {
+                        fd: fsfd,
+                        command: FsconfigCommand::SET_STRING,
+                        key: Some(c"upperdir"),
+                        value: Some(&self.upper_dir.to_bytes_with_nul()[0]),
+                        aux: None,
+                    },
+                    &|err| syserr(anyhow!("fsconfig of upperdir for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Fsconfig {
+                        fd: fsfd,
+                        command: FsconfigCommand::SET_STRING,
+                        key: Some(c"workdir"),
+                        value: Some(&self.work_dir.to_bytes_with_nul()[0]),
+                        aux: None,
+                    },
+                    &|err| syserr(anyhow!("fsconfig of workdir for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Fsconfig {
+                        fd: fsfd,
+                        command: FsconfigCommand::CMD_CREATE,
+                        key: None,
+                        value: None,
+                        aux: None,
+                    },
+                    &|err| syserr(anyhow!("fsconfig of CMD_CREATE for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::Fsmount {
+                        fd: fsfd,
+                        flags: FsmountFlags::default(),
+                        mount_attrs: MountAttrs::default(),
+                        out: fsfd,
+                    },
+                    &|err| syserr(anyhow!("fsmount for overlayfs: {err}")),
+                );
+                builder.push(
+                    Syscall::MoveMount {
+                        from_dirfd: fsfd,
+                        from_path: c"",
+                        to_dirfd: Fd::AT_FDCWD,
+                        to_path: new_root_path,
+                        flags: MoveMountFlags::F_EMPTY_PATH,
+                    },
+                    &|err| syserr(anyhow!("move_mount for overlayfs: {err}")),
+                );
+            }
+            JobRootOverlay::Local { .. } => {
+                unimplemented!()
+            }
         }
 
         struct Device {
@@ -1609,7 +1615,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn one_layer_with_writable_file_system_is_writable() {
-        Test::new(bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true))
+        Test::new(bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp))
             .expected_status(JobStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
             .run()
@@ -1624,7 +1630,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn multiple_layers_with_writable_file_system_is_writable() {
-        let spec = bash_spec("echo bar > /foo && cat /foo").enable_writable_file_system(true);
+        let spec = bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp);
         Test::new(spec)
             .expected_status(JobStatus::Exited(0))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"bar\n")))
@@ -1632,7 +1638,7 @@ mod tests {
             .await;
 
         // Run another job to ensure that the file doesn't persist.
-        let spec = bash_spec("test -e /foo").enable_writable_file_system(true);
+        let spec = bash_spec("test -e /foo").root_overlay(JobRootOverlay::Tmp);
         Test::new(spec)
             .expected_status(JobStatus::Exited(1))
             .run()

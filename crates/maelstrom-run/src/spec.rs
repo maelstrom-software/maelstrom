@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, NonEmpty, Sha256Digest,
-    Timeout, UserId, Utf8PathBuf,
+    ArtifactType, EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty,
+    Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
     incompatible, EnvironmentSpec, Image, ImageSpec, ImageUse, IntoEnvironment, JobSpec, Layer,
@@ -138,7 +138,11 @@ impl Job {
                 .map(Into::into)
                 .collect(),
             network: self.network.unwrap_or_default(),
-            enable_writable_file_system: self.enable_writable_file_system.unwrap_or_default(),
+            root_overlay: if self.enable_writable_file_system.unwrap_or_default() {
+                JobRootOverlay::Tmp
+            } else {
+                JobRootOverlay::None
+            },
             working_directory,
             user: self.user.unwrap_or(UserId::from(0)),
             group: self.group.unwrap_or(GroupId::from(0)),
@@ -493,7 +497,7 @@ mod tests {
             .unwrap(),
             JobSpec::new("program", vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .enable_writable_file_system(true),
+                .root_overlay(JobRootOverlay::Tmp),
         );
     }
 
@@ -1023,7 +1027,7 @@ mod tests {
             .unwrap(),
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .working_directory("/")
-                .enable_writable_file_system(true),
+                .root_overlay(JobRootOverlay::Tmp),
         )
     }
 

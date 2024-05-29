@@ -10,8 +10,8 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobDevice, JobMount, JobNetwork, Sha256Digest, Timeout, UserId,
-    Utf8PathBuf,
+    ArtifactType, GroupId, JobDevice, JobMount, JobNetwork, JobRootOverlay, Sha256Digest, Timeout,
+    UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -180,7 +180,7 @@ pub struct JobSpec {
     pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
-    pub enable_writable_file_system: bool,
+    pub root_overlay: JobRootOverlay,
     pub working_directory: Option<Utf8PathBuf>,
     pub user: UserId,
     pub group: GroupId,
@@ -202,7 +202,7 @@ impl JobSpec {
             devices: Default::default(),
             mounts: Default::default(),
             network: Default::default(),
-            enable_writable_file_system: Default::default(),
+            root_overlay: Default::default(),
             working_directory: None,
             user: UserId::from(0),
             group: GroupId::from(0),
@@ -245,8 +245,8 @@ impl JobSpec {
         self
     }
 
-    pub fn enable_writable_file_system(mut self, enable_writable_file_system: bool) -> Self {
-        self.enable_writable_file_system = enable_writable_file_system;
+    pub fn root_overlay(mut self, root_overlay: JobRootOverlay) -> Self {
+        self.root_overlay = root_overlay;
         self
     }
 

@@ -496,7 +496,7 @@ impl Client {
             devices: spec.devices,
             mounts: spec.mounts,
             network: spec.network,
-            enable_writable_file_system: spec.enable_writable_file_system,
+            root_overlay: spec.root_overlay,
             working_directory,
             user: spec.user,
             group: spec.group,

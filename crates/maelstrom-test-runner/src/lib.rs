@@ -14,7 +14,7 @@ use artifacts::GeneratedArtifacts;
 use config::Quiet;
 pub use deps::*;
 use indicatif::TermLike;
-use maelstrom_base::{ArtifactType, Sha256Digest, Timeout};
+use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
 use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
 use metadata::{AllMetadata, TestMetadata};
@@ -323,7 +323,11 @@ where
                 devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 network: test_metadata.network,
-                enable_writable_file_system: test_metadata.enable_writable_file_system,
+                root_overlay: if test_metadata.enable_writable_file_system {
+                    JobRootOverlay::Tmp
+                } else {
+                    JobRootOverlay::None
+                },
                 working_directory: test_metadata.working_directory,
                 user: test_metadata.user,
                 group: test_metadata.group,

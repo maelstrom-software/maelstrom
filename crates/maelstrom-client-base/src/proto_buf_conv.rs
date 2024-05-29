@@ -414,6 +414,13 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
+//      _       _
+//     | | ___ | |__ __/\__
+//  _  | |/ _ \| '_ \\    /
+// | |_| | (_) | |_) /_  _\
+//  \___/ \___/|_.__/  \/
+//
+
 impl IntoProtoBuf for maelstrom_base::JobMount {
     type ProtoBufType = proto::JobMount;
 
@@ -486,12 +493,52 @@ impl TryFromProtoBuf for maelstrom_base::JobMount {
     }
 }
 
-//      _       _
-//     | | ___ | |__ __/\__
-//  _  | |/ _ \| '_ \\    /
-// | |_| | (_) | |_) /_  _\
-//  \___/ \___/|_.__/  \/
-//
+impl IntoProtoBuf for maelstrom_base::JobRootOverlay {
+    type ProtoBufType = Option<proto::JobRootOverlay>;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        let overlay = match self {
+            Self::None => proto::job_root_overlay::Overlay::None(proto::Void {}),
+            Self::Tmp => proto::job_root_overlay::Overlay::Tmp(proto::Void {}),
+            Self::Local { upper, work } => {
+                proto::job_root_overlay::Overlay::Local(proto::LocalJobRootOverlay {
+                    upper: upper.into_proto_buf(),
+                    work: work.into_proto_buf(),
+                })
+            }
+        };
+        Some(proto::JobRootOverlay {
+            overlay: Some(overlay),
+        })
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobRootOverlay {
+    type ProtoBufType = Option<proto::JobRootOverlay>;
+
+    fn try_from_proto_buf(protobuf: Self::ProtoBufType) -> Result<Self> {
+        let Some(overlay) = protobuf else {
+            return Ok(Default::default());
+        };
+        let overlay = overlay
+            .overlay
+            .ok_or_else(|| anyhow!("malformed JobRootOverlay"))?;
+        Ok(match overlay {
+            proto::job_root_overlay::Overlay::None(proto::Void {}) => {
+                maelstrom_base::JobRootOverlay::None
+            }
+            proto::job_root_overlay::Overlay::Tmp(proto::Void {}) => {
+                maelstrom_base::JobRootOverlay::Tmp
+            }
+            proto::job_root_overlay::Overlay::Local(local) => {
+                maelstrom_base::JobRootOverlay::Local {
+                    upper: TryFromProtoBuf::try_from_proto_buf(local.upper)?,
+                    work: TryFromProtoBuf::try_from_proto_buf(local.work)?,
+                }
+            }
+        })
+    }
+}
 
 impl IntoProtoBuf for maelstrom_base::JobOutputResult {
     type ProtoBufType = proto::JobOutputResult;
