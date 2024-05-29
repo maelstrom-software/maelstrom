@@ -375,6 +375,7 @@ impl JobSpec {
                 .mounts
                 .iter()
                 .any(|mount| matches!(mount, JobMount::Bind { .. }))
+            || matches!(&self.root_overlay, JobRootOverlay::Local { .. })
     }
 }
 
@@ -842,6 +843,18 @@ mod tests {
 
         let spec = spec.mounts([]);
         assert_eq!(spec.must_be_run_locally(), false);
+
+        let spec = spec.root_overlay(JobRootOverlay::None);
+        assert_eq!(spec.must_be_run_locally(), false);
+
+        let spec = spec.root_overlay(JobRootOverlay::Tmp);
+        assert_eq!(spec.must_be_run_locally(), false);
+
+        let spec = spec.root_overlay(JobRootOverlay::Local {
+            upper: "upper".into(),
+            work: "work".into(),
+        });
+        assert_eq!(spec.must_be_run_locally(), true);
     }
 
     trait AssertError {
