@@ -275,8 +275,9 @@ impl Wait for pytest::WaitHandle {
 
 fn maybe_print_collect_error(res: Result<ExitCode>) -> Result<ExitCode> {
     if let Err(e) = &res {
-        if let Some(_e) = e.downcast_ref::<pytest::PytestCollectError>() {
-            unimplemented!()
+        if let Some(e) = e.downcast_ref::<pytest::PytestCollectError>() {
+            eprintln!("{}", &e.stderr);
+            return Ok(e.exit_code);
         }
     }
     res

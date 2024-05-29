@@ -1,6 +1,8 @@
 use crate::{PytestPackageId, PytestTestArtifact};
 use anyhow::Result;
+use maelstrom_util::process::ExitCode;
 use std::collections::HashMap;
+use std::os::unix::process::ExitStatusExt as _;
 use std::process::{Command, Stdio};
 use std::{fmt, io::Read as _, thread};
 
@@ -14,7 +16,8 @@ impl WaitHandle {
 
 #[derive(Debug)]
 pub struct PytestCollectError {
-    stderr: String,
+    pub stderr: String,
+    pub exit_code: ExitCode,
 }
 
 impl std::error::Error for PytestCollectError {}
@@ -65,7 +68,14 @@ fn run_python(script: &str) -> Result<String> {
     if exit_status.success() {
         Ok(stdout)
     } else {
-        Err(PytestCollectError { stderr }.into())
+        let exit_code = exit_status
+            .code()
+            .unwrap_or_else(|| 128 + exit_status.signal().unwrap());
+        Err(PytestCollectError {
+            stderr,
+            exit_code: ExitCode::from(exit_code as u8),
+        }
+        .into())
     }
 }
 
