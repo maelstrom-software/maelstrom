@@ -284,11 +284,16 @@ fn maybe_print_collect_error(res: Result<ExitCode>) -> Result<ExitCode> {
 }
 
 fn find_python() -> Result<Vec<PytestArtifactKey>> {
+    let cwd = Path::new(".").canonicalize()?;
     let mut glob_builder = globset::GlobSet::builder();
     glob_builder.add(globset::Glob::new("*.py")?);
     Ok(Fs
-        .glob_walk(".", &glob_builder.build()?)
-        .filter_map(|path| path.ok().map(|path| PytestArtifactKey { path }))
+        .glob_walk(&cwd, &glob_builder.build()?)
+        .filter_map(|path| {
+            path.ok().map(|path| PytestArtifactKey {
+                path: path.strip_prefix(&cwd).unwrap().into(),
+            })
+        })
         .collect())
 }
 
