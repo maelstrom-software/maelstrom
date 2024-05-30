@@ -1192,11 +1192,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| syserr(anyhow!("pivot_root: {err}")),
         );
 
-        let mut mount_fds = mount_fds.into_iter();
-
-        self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
-        self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
-
         // Unmount the old root. See man 2 pivot_root.
         builder.push(
             Syscall::Umount2 {
@@ -1205,6 +1200,11 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             },
             &|err| syserr(anyhow!("umount of old root: {err}")),
         );
+
+        let mut mount_fds = mount_fds.into_iter();
+
+        self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
+        self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
 
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
