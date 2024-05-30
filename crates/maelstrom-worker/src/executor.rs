@@ -434,6 +434,32 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         })
     }
 
+    fn set_up_stdout_and_stderr<'bump>(
+        &'bump self,
+        stdout: &OwnedFd,
+        stderr: &OwnedFd,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<(), Error> {
+        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
+        // and stderr. We don't have to worry about closing the old fds because they will be marked
+        // close-on-exec below.
+        builder.push(
+            Syscall::Dup2 {
+                from: stdout.as_fd(),
+                to: Fd::STDOUT,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Dup2 {
+                from: stderr.as_fd(),
+                to: Fd::STDERR,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
+        );
+        Ok(())
+    }
+
     fn set_up_user_namespace<'bump>(
         &'bump self,
         spec: &JobSpec,
@@ -1003,23 +1029,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // process outside of the pid namespace, which would be confusing.
         builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
 
-        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
-        // and stderr. We don't have to worry about closing the old fds because they will be marked
-        // close-on-exec below.
-        builder.push(
-            Syscall::Dup2 {
-                from: stdout_write_fd.as_fd(),
-                to: Fd::STDOUT,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
-        );
-        builder.push(
-            Syscall::Dup2 {
-                from: stderr_write_fd.as_fd(),
-                to: Fd::STDERR,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
-        );
+        self.set_up_stdout_and_stderr(&stdout_write_fd, &stderr_write_fd, &mut builder)?;
 
         let new_root_path = self.mount_dir.as_c_str();
 
