@@ -500,6 +500,53 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         Ok(())
     }
 
+    fn set_up_fuse_root<'bump>(
+        &'bump self,
+        spec: &JobSpec,
+        new_root_path: &'bump CStr,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<(), Error> {
+        let fd = new_fd_slot(&bump);
+
+        // Create the fuse mount. We need to do this in the child's namespace, then pass the file
+        // descriptor back to the parent.
+        builder.push(
+            Syscall::Open {
+                path: c"/dev/fuse",
+                flags: OpenFlags::RDWR | OpenFlags::NONBLOCK,
+                mode: FileMode::default(),
+                out: fd,
+            },
+            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
+        );
+
+        // Mount the fuse file system.
+        builder.push(
+            Syscall::FuseMount {
+                source: c"Maelstrom LayerFS",
+                target: new_root_path,
+                flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
+                root_mode: self.root_mode,
+                uid: Uid::from_u32(spec.user.as_u32()),
+                gid: Gid::from_u32(spec.group.as_u32()),
+                fuse_fd: fd,
+            },
+            &|err| JobError::System(anyhow!("fuse mount: {err}")),
+        );
+
+        // Send the fuse mount file descriptor from the child to the parent.
+        builder.push(
+            Syscall::SendMsg {
+                buf: &[0xFF; 8],
+                fd_to_send: fd,
+            },
+            &|err| JobError::System(anyhow!("sendmsg: {err}")),
+        );
+
+        Ok(())
+    }
+
     /// Set up the root overlay file system. This needs to happen after the root file system has
     /// been mounted, but before the `pivot_root` has occurred, since we need to be able to access
     /// local paths. Also, we need to do this before we mount other file systems, so we don't hide
@@ -948,11 +995,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
 
-        let fd = new_fd_slot(&bump);
-
-        // First we set up the network namespace. It's possible that we won't even create a new
-        // network namespace, if JobNetwork::Local is specified.
-
         let newnet = self.set_up_network(spec, &bump, &mut builder)?;
         self.set_up_user_namespace(spec, &bump, &mut builder)?;
 
@@ -981,39 +1023,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
         let new_root_path = self.mount_dir.as_c_str();
 
-        // Create the fuse mount. We need to do this in the child's namespace, then pass the file
-        // descriptor back to the parent.
-        builder.push(
-            Syscall::Open {
-                path: c"/dev/fuse",
-                flags: OpenFlags::RDWR | OpenFlags::NONBLOCK,
-                mode: FileMode::default(),
-                out: fd,
-            },
-            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
-        );
-        builder.push(
-            Syscall::FuseMount {
-                source: c"Maelstrom LayerFS",
-                target: new_root_path,
-                flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
-                root_mode: self.root_mode,
-                uid: Uid::from_u32(spec.user.as_u32()),
-                gid: Gid::from_u32(spec.group.as_u32()),
-                fuse_fd: fd,
-            },
-            &|err| JobError::System(anyhow!("fuse mount: {err}")),
-        );
-
-        // Send the fuse mount file descriptor from the child to the parent.
-        builder.push(
-            Syscall::SendMsg {
-                buf: &[0xFF; 8],
-                fd_to_send: fd,
-            },
-            &|err| JobError::System(anyhow!("sendmsg: {err}")),
-        );
-
+        self.set_up_fuse_root(spec, new_root_path, &bump, &mut builder)?;
         self.set_up_root_overlay(spec, new_root_path, &bump, &mut builder)?;
 
         let mut mount_fds = BumpVec::new_in(&bump);
