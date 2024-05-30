@@ -264,7 +264,6 @@ mod tests {
     use maelstrom_base::enum_set;
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
-    use std::io::{Read as _, Seek as _};
     use toml::de::Error as TomlError;
 
     fn parse_test_directive(file: &str) -> Result<TestDirective<String>> {
@@ -526,109 +525,11 @@ mod tests {
     }
 
     #[test]
-    fn devices() {
-        // We lump all of the tests of devices into this one test because we might be run in cargo
-        // test, which means that multiple threads could be running tests simultaneously, which
-        // means that one of them may generate a warning for the other, or steal another's warning.
-        // However, if we just have one test that generates warnings, we're fine.
-        let mut file = tempfile::tempfile().unwrap();
-        let redirect = gag::Redirect::stderr(file.try_clone().unwrap()).unwrap();
-        assert_eq!(
-            parse_test_directive(indoc! {r#"
-                devices = [ "null", "zero" ]
-            "#})
-            .unwrap(),
-            TestDirective {
-                devices: Some(enum_set!(JobDevice::Null | JobDevice::Zero)),
-                ..Default::default()
-            }
-        );
-        parse_test_directive(indoc! {r#"
-            devices = [ "full", "random" ]
-        "#})
-        .unwrap();
-        drop(redirect);
-        file.rewind().unwrap();
-        let mut output = String::new();
-        file.read_to_string(&mut output).unwrap();
-        assert_eq!(
-            &output[..],
-            "WARNING: field `devices` is deprecated, use a `mounts` of type `devices` instead\n"
-        );
-    }
-
-    #[test]
-    fn added_devices() {
-        // We lump all of the tests of added_devices into this one test because we might be run in
-        // cargo test, which means that multiple threads could be running tests simultaneously,
-        // which means that one of them may generate a warning for the other, or steal another's
-        // warning. However, if we just have one test that generates warnings, we're fine.
-        let mut file = tempfile::tempfile().unwrap();
-        let redirect = gag::Redirect::stderr(file.try_clone().unwrap()).unwrap();
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                added_devices = [ "null", "zero" ]
-                "#
-            )
-            .unwrap(),
-            TestDirective {
-                added_devices: enum_set!(JobDevice::Null | JobDevice::Zero),
-                ..Default::default()
-            }
-        );
-        parse_test_directive(indoc! {r#"
-            added_devices = [ "full", "random" ]
-        "#})
-        .unwrap();
-        drop(redirect);
-        file.rewind().unwrap();
-        let mut output = String::new();
-        file.read_to_string(&mut output).unwrap();
-        assert_eq!(
-            &output[..],
-            "WARNING: field `added_devices` is deprecated, use an `added_mounts` of type `devices` instead\n"
-        );
-    }
-
-    #[test]
-    fn devices_before_added_devices() {
-        assert_eq!(
-            parse_test_directive(
-                r#"
-                devices = [ "null", "zero" ]
-                added_devices = [ "full", "tty" ]
-                "#
-            )
-            .unwrap(),
-            TestDirective {
-                devices: Some(enum_set!(JobDevice::Null | JobDevice::Zero)),
-                added_devices: enum_set!(JobDevice::Full | JobDevice::Tty),
-                ..Default::default()
-            }
-        );
-    }
-
-    #[test]
-    fn devices_after_added_devices() {
-        assert_toml_error(
-            parse_test_directive(
-                r#"
-                added_devices = [ "full", "tty" ]
-                devices = [ "null", "zero" ]
-                "#,
-            )
-            .unwrap_err(),
-            "field `devices` cannot be set after `added_devices`",
-        );
-    }
-
-    #[test]
     fn unknown_devices_type() {
         assert_toml_error(
             parse_test_directive(
                 r#"
-                devices = ["unknown"]
+                mounts = [{ type = "devices",  devices = ["unknown"] }]
                 "#,
             )
             .unwrap_err(),
