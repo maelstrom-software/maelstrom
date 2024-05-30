@@ -435,11 +435,11 @@ impl IntoProtoBuf for maelstrom_base::JobMount {
                 local_path: local_path.into_proto_buf(),
                 read_only: read_only.into_proto_buf(),
             }),
-            Self::Devpts { mount_point } => proto::job_mount::Mount::Devpts(proto::DevptsMount {
-                mount_point: mount_point.into_proto_buf(),
-            }),
             Self::Devices { devices } => proto::job_mount::Mount::Devices(proto::DevicesMount {
                 devices: devices.into_proto_buf(),
+            }),
+            Self::Devpts { mount_point } => proto::job_mount::Mount::Devpts(proto::DevptsMount {
+                mount_point: mount_point.into_proto_buf(),
             }),
             Self::Mqueue { mount_point } => proto::job_mount::Mount::Mqueue(proto::MqueueMount {
                 mount_point: mount_point.into_proto_buf(),
@@ -471,11 +471,11 @@ impl TryFromProtoBuf for maelstrom_base::JobMount {
                 local_path: TryFromProtoBuf::try_from_proto_buf(bind_mount.local_path)?,
                 read_only: TryFromProtoBuf::try_from_proto_buf(bind_mount.read_only)?,
             },
-            proto::job_mount::Mount::Devpts(devpts_mount) => maelstrom_base::JobMount::Devpts {
-                mount_point: TryFromProtoBuf::try_from_proto_buf(devpts_mount.mount_point)?,
-            },
             proto::job_mount::Mount::Devices(devices_mount) => maelstrom_base::JobMount::Devices {
                 devices: TryFromProtoBuf::try_from_proto_buf(devices_mount.devices)?,
+            },
+            proto::job_mount::Mount::Devpts(devpts_mount) => maelstrom_base::JobMount::Devpts {
+                mount_point: TryFromProtoBuf::try_from_proto_buf(devpts_mount.mount_point)?,
             },
             proto::job_mount::Mount::Mqueue(mqueue_mount) => maelstrom_base::JobMount::Mqueue {
                 mount_point: TryFromProtoBuf::try_from_proto_buf(mqueue_mount.mount_point)?,

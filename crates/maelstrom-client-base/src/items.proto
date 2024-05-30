@@ -82,8 +82,8 @@ enum JobDevice {
 message JobMount {
     oneof Mount {
         BindMount bind = 4;
-        DevptsMount devpts = 5;
         DevicesMount devices = 7;
+        DevptsMount devpts = 5;
         MqueueMount mqueue = 6;
         ProcMount proc = 1;
         SysMount sys = 3;
@@ -97,12 +97,12 @@ message BindMount {
     bool read_only = 3;
 }
 
-message DevptsMount {
-    string mount_point = 1;
-}
-
 message DevicesMount {
     repeated JobDevice devices = 1;
+}
+
+message DevptsMount {
+    string mount_point = 1;
 }
 
 message MqueueMount {
