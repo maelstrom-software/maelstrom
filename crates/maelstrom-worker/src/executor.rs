@@ -335,82 +335,58 @@ fn bump_c_str_from_bytes<'bump>(bump: &'bump Bump, bytes: &[u8]) -> Result<&'bum
     CStr::from_bytes_with_nul(vec.into_bump_slice()).map_err(Error::new)
 }
 
+fn syserr<E>(err: E) -> JobError<Error>
+where
+    Error: From<E>,
+{
+    JobError::System(Error::from(err))
+}
+
+fn new_fd_slot(bump: &Bump) -> FdSlot<'_> {
+    FdSlot::new(bump.alloc(UnsafeCell::new(Fd::from_raw(-1))))
+}
+
+struct Device {
+    cstr: &'static CStr,
+    str: &'static str,
+}
+
+impl Device {
+    fn new(device: JobDevice) -> Self {
+        let (cstr, str) = match device {
+            JobDevice::Full => (c"/dev/full", "/dev/full"),
+            JobDevice::Fuse => (c"/dev/fuse", "/dev/fuse"),
+            JobDevice::Null => (c"/dev/null", "/dev/null"),
+            JobDevice::Ptmx => (c"/dev/ptmx", "/dev/ptmx"),
+            JobDevice::Random => (c"/dev/random", "/dev/random"),
+            JobDevice::Shm => (c"/dev/shm", "/dev/shm"),
+            JobDevice::Tty => (c"/dev/tty", "/dev/tty"),
+            JobDevice::Urandom => (c"/dev/urandom", "/dev/urandom"),
+            JobDevice::Zero => (c"/dev/zero", "/dev/zero"),
+        };
+        Self { cstr, str }
+    }
+}
+
 impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
-    fn run_job_inner(
-        &self,
+    // Set up the network namespace. It's possible that we won't even create a new network
+    // namespace, if JobNetwork::Local is specified.
+    //
+    // Return true if we should create a new network namespace, false otherwise.
+    fn set_up_network<'bump>(
+        &'bump self,
         spec: &JobSpec,
-        inline_limit: InlineLimit,
-        kill_event_receiver: EventReceiver,
-        fuse_spawn: impl FnOnce(OwnedFd),
-        runtime: runtime::Handle,
-    ) -> JobResult<JobCompleted, Error> {
-        let mut fuse_spawn = Some(fuse_spawn);
-
-        fn syserr<E>(err: E) -> JobError<Error>
-        where
-            Error: From<E>,
-        {
-            JobError::System(Error::from(err))
-        }
-
-        // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
-        // error that occurs in the child before it execs. It's easiest to create the pipes in the
-        // parent before cloning and then closing the unnecessary ends in the parent and child.
-        let (stdout_read_fd, stdout_write_fd) = linux::pipe().map_err(syserr)?;
-        let (stderr_read_fd, stderr_write_fd) = linux::pipe().map_err(syserr)?;
-        let (read_sock, write_sock) = linux::UnixStream::pair().map_err(syserr)?;
-
-        // Set up the script. This will be run in the child where we have to follow some very
-        // stringent rules to avoid deadlocking. This comes about because we're going to clone in a
-        // multi-threaded program. The child program will only have one thread: this one. The other
-        // threads will just not exist in the child process. If any of those threads held a lock at
-        // the time of the clone, those locks will be locked forever in the child. Any attempt to
-        // acquire those locks in the child would deadlock.
-        //
-        // The most burdensome result of this is that we can't allocate memory using the global
-        // allocator in the child.
-        //
-        // Instead, we create a script of things we're going to execute in the child, but we do
-        // that before the clone. After the clone, the child will just run through the script
-        // directly. If it encounters an error, it will write the script index back to the parent
-        // via the exec_result pipe. The parent will then map that to a closure for generating the
-        // error.
-        //
-        // A few things to keep in mind in the code below:
-        //
-        // We don't have to worry about closing file descriptors in the child,
-        // or even explicitly marking them close-on-exec, because one of the last things we do is
-        // mark all file descriptors -- except for stdin, stdout, and stderr -- as close-on-exec.
-        //
-        // We have to be careful about the move closures and bump.alloc. The drop method won't be
-        // run on the closure, which means drop won't be run on any captured-and-moved variables.
-        // As long as we only pass references in those variables, we're okay.
-
-        let bump = Bump::new();
-        let mut builder = ScriptBuilder::new(&bump);
-
-        fn new_fd_slot(bump: &Bump) -> FdSlot<'_> {
-            FdSlot::new(bump.alloc(UnsafeCell::new(Fd::from_raw(-1))))
-        }
-
-        let fd = new_fd_slot(&bump);
-
-        // First we set up the network namespace. It's possible that we won't even create a new
-        // network namespace, if JobNetwork::Local is specified.
-
-        let newnet;
-        match spec.network {
-            JobNetwork::Disabled => {
-                newnet = true;
-            }
-            JobNetwork::Local => {
-                newnet = false;
-            }
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<bool, Error> {
+        Ok(match spec.network {
+            JobNetwork::Disabled => true,
+            JobNetwork::Local => false,
             JobNetwork::Loopback => {
-                newnet = true;
-
                 // In order to have a loopback network interface, we need to create a netlink
                 // socket and configure things with the kernel.
+
+                let fd = new_fd_slot(bump);
 
                 // Create the socket.
                 builder.push(
@@ -452,13 +428,22 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     },
                     &|err| syserr(anyhow!("receiving rtnetlink message: {err}")),
                 );
-            }
-        }
 
-        // Set up the user namespace.
+                true
+            }
+        })
+    }
+
+    fn set_up_user_namespace<'bump>(
+        &'bump self,
+        spec: &JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<(), Error> {
+        let fd = new_fd_slot(bump);
 
         // This first set of syscalls sets up the uid mapping.
-        let mut uid_map_contents = BumpString::with_capacity_in(24, &bump);
+        let mut uid_map_contents = BumpString::with_capacity_in(24, bump);
         writeln!(uid_map_contents, "{} {} 1", spec.user, self.user).map_err(syserr)?;
         builder.push(
             Syscall::Open {
@@ -493,7 +478,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         });
 
         // Finally, we set up the gid mapping.
-        let mut gid_map_contents = BumpString::with_capacity_in(24, &bump);
+        let mut gid_map_contents = BumpString::with_capacity_in(24, bump);
         writeln!(gid_map_contents, "{} {} 1", spec.group, self.group).map_err(syserr)?;
         builder.push(
             Syscall::Open {
@@ -512,64 +497,16 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             &|err| syserr(anyhow!("writing to /proc/self/gid_map: {err}")),
         );
 
-        // Make the child process the leader of a new session and process group. If we didn't do
-        // this, then the process would be a member of a process group and session headed by a
-        // process outside of the pid namespace, which would be confusing.
-        builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
+        Ok(())
+    }
 
-        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
-        // and stderr. We don't have to worry about closing the old fds because they will be marked
-        // close-on-exec below.
-        builder.push(
-            Syscall::Dup2 {
-                from: stdout_write_fd.as_fd(),
-                to: Fd::STDOUT,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
-        );
-        builder.push(
-            Syscall::Dup2 {
-                from: stderr_write_fd.as_fd(),
-                to: Fd::STDERR,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
-        );
-
-        let new_root_path = self.mount_dir.as_c_str();
-
-        // Create the fuse mount. We need to do this in the child's namespace, then pass the file
-        // descriptor back to the parent.
-        builder.push(
-            Syscall::Open {
-                path: c"/dev/fuse",
-                flags: OpenFlags::RDWR | OpenFlags::NONBLOCK,
-                mode: FileMode::default(),
-                out: fd,
-            },
-            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
-        );
-        builder.push(
-            Syscall::FuseMount {
-                source: c"Maelstrom LayerFS",
-                target: new_root_path,
-                flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
-                root_mode: self.root_mode,
-                uid: Uid::from_u32(spec.user.as_u32()),
-                gid: Gid::from_u32(spec.group.as_u32()),
-                fuse_fd: fd,
-            },
-            &|err| JobError::System(anyhow!("fuse mount: {err}")),
-        );
-
-        // Send the fuse mount file descriptor from the child to the parent.
-        builder.push(
-            Syscall::SendMsg {
-                buf: &[0xFF; 8],
-                fd_to_send: fd,
-            },
-            &|err| JobError::System(anyhow!("sendmsg: {err}")),
-        );
-
+    fn set_up_root_overlay<'bump>(
+        &'bump self,
+        spec: &JobSpec,
+        new_root_path: &'bump CStr,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<(), Error> {
         match spec.root_overlay {
             JobRootOverlay::None => {}
             JobRootOverlay::Tmp => {
@@ -605,7 +542,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 );
 
                 // Use overlayfs.
-                let fsfd = new_fd_slot(&bump);
+                let fsfd = new_fd_slot(bump);
                 builder.push(
                     Syscall::Fsopen {
                         fsname: c"overlay",
@@ -679,45 +616,31 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             }
         }
 
-        struct Device {
-            cstr: &'static CStr,
-            str: &'static str,
-        }
+        Ok(())
+    }
 
-        impl Device {
-            fn new(device: JobDevice) -> Self {
-                let (cstr, str) = match device {
-                    JobDevice::Full => (c"/dev/full", "/dev/full"),
-                    JobDevice::Fuse => (c"/dev/fuse", "/dev/fuse"),
-                    JobDevice::Null => (c"/dev/null", "/dev/null"),
-                    JobDevice::Ptmx => (c"/dev/ptmx", "/dev/ptmx"),
-                    JobDevice::Random => (c"/dev/random", "/dev/random"),
-                    JobDevice::Shm => (c"/dev/shm", "/dev/shm"),
-                    JobDevice::Tty => (c"/dev/tty", "/dev/tty"),
-                    JobDevice::Urandom => (c"/dev/urandom", "/dev/urandom"),
-                    JobDevice::Zero => (c"/dev/zero", "/dev/zero"),
-                };
-                Self { cstr, str }
-            }
-        }
-
-        let mut local_path_fds = BumpVec::new_in(&bump);
-
+    fn open_mount_fds_for_devices_pre_pivot_root<'bump>(
+        &'bump self,
+        spec: &JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+        mount_fds: &mut BumpVec<'bump, FdSlot<'bump>>,
+    ) -> JobResult<(), Error> {
         // Open all of the source paths for devices before we chdir or pivot_root. We create
-        // devices in the container my bind mounting them from the host instead of creating
+        // devices in the container by bind mounting them from the host instead of creating
         // devices. We do this because we don't assume we're running as root, and as such, we can't
         // create device files.
         for device in spec.devices.iter() {
             let Device { cstr, str } = Device::new(device);
-            let dirfd = new_fd_slot(&bump);
-            local_path_fds.push(dirfd);
+            let mount_fd = new_fd_slot(bump);
+            mount_fds.push(mount_fd);
             builder.push(
                 Syscall::OpenTree {
                     dirfd: Fd::AT_FDCWD,
                     path: cstr,
                     // We don't pass recursive because we assume we're just cloning a file.
                     flags: OpenTreeFlags::CLONE,
-                    out: dirfd,
+                    out: mount_fd,
                 },
                 bump.alloc(move |err| {
                     JobError::Execution(anyhow!(
@@ -726,18 +649,25 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 }),
             );
         }
+        Ok(())
+    }
 
-        // Resolve all of the source paths for bind mounts before we chdir or pivot_root. Each path
-        // gets opened as a fsfd and pushed on the `local_path_fds` vec.
+    fn open_mount_fds_for_mounts_pre_pivot_root<'bump>(
+        &'bump self,
+        spec: &'bump JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+        mount_fds: &mut BumpVec<'bump, FdSlot<'bump>>,
+    ) -> JobResult<(), Error> {
         for mount in &spec.mounts {
             match mount {
                 JobMount::Bind { local_path, .. } => {
-                    let dirfd = new_fd_slot(&bump);
-                    local_path_fds.push(dirfd);
+                    let mount_fd = new_fd_slot(bump);
+                    mount_fds.push(mount_fd);
                     builder.push(
                         Syscall::OpenTree {
                             dirfd: Fd::AT_FDCWD,
-                            path: bump_c_str(&bump, local_path.as_str()).map_err(syserr)?,
+                            path: bump_c_str(bump, local_path.as_str()).map_err(syserr)?,
                             // We always pass recursive here because non-recursive bind mounts don't make a
                             // lot of sense in this context. The reason is that, when a new mount namespace
                             // is created in Linux, all pre-existing mounts become locked. These locked
@@ -754,7 +684,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                             // that their mount would fail if there happened to be any mount at that point
                             // or lower in the tree. That's probably not what they want.
                             flags: OpenTreeFlags::CLONE | OpenTreeFlags::RECURSIVE,
-                            out: dirfd,
+                            out: mount_fd,
                         },
                         bump.alloc(move |err| {
                             JobError::Execution(anyhow!(
@@ -770,8 +700,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     // root, and as such, we can't create device files.
                     for device in devices.iter() {
                         let Device { cstr, str } = Device::new(device);
-                        let dirfd = new_fd_slot(&bump);
-                        local_path_fds.push(dirfd);
+                        let mount_fd = new_fd_slot(bump);
+                        mount_fds.push(mount_fd);
                         builder.push(
                             Syscall::OpenTree {
                                 dirfd: Fd::AT_FDCWD,
@@ -779,7 +709,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                                 // We don't pass recursive because we assume we're just cloning a
                                 // file.
                                 flags: OpenTreeFlags::CLONE,
-                                out: dirfd,
+                                out: mount_fd,
                             },
                             bump.alloc(move |err| {
                                 JobError::Execution(anyhow!(
@@ -792,30 +722,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 _ => {}
             }
         }
+        Ok(())
+    }
 
-        // Chdir to what will be the new root.
-        builder.push(
-            Syscall::Chdir {
-                path: new_root_path,
-            },
-            &|err| syserr(anyhow!("chdir to target root directory: {err}")),
-        );
-
-        // Pivot root to be the new root. See man 2 pivot_root.
-        builder.push(
-            Syscall::PivotRoot {
-                new_root: c".",
-                put_old: c".",
-            },
-            &|err| syserr(anyhow!("pivot_root: {err}")),
-        );
-
-        let mut local_path_fds = local_path_fds.into_iter();
-
-        // Complete the bind mounting of devices.
+    fn complete_device_mounts_post_pivot_root<'bump>(
+        &'bump self,
+        spec: &'bump JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+        mount_fds: &mut impl Iterator<Item = FdSlot<'bump>>,
+    ) -> JobResult<(), Error> {
         for device in spec.devices.iter() {
             let Device { cstr, str } = Device::new(device);
-            let mount_local_path_fd = local_path_fds.next().unwrap();
+            let mount_local_path_fd = mount_fds.next().unwrap();
             builder.push(
                 Syscall::MoveMount {
                     from_dirfd: mount_local_path_fd,
@@ -831,13 +750,16 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 }),
             );
         }
+        Ok(())
+    }
 
-        // Set up the mounts after we've called pivot_root so the absolute paths specified stay
-        // within the container.
-        //
-        // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
-        // unless they are already mounted. So we have to do this before we unmount the old root.
-        // If we do the unmount first, then we'll get permission errors mounting those fs types.
+    fn complete_mounts_post_pivot_root<'bump>(
+        &'bump self,
+        spec: &'bump JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+        mount_fds: &mut impl Iterator<Item = FdSlot<'bump>>,
+    ) -> JobResult<(), Error> {
         for mount in &spec.mounts {
             fn normal_mount<'a>(
                 bump: &'a Bump,
@@ -868,9 +790,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     local_path,
                     read_only,
                 } => {
-                    let mount_local_path_fd = local_path_fds.next().unwrap();
+                    let mount_local_path_fd = mount_fds.next().unwrap();
                     let mount_point_cstr =
-                        bump_c_str(&bump, mount_point.as_str()).map_err(syserr)?;
+                        bump_c_str(bump, mount_point.as_str()).map_err(syserr)?;
                     builder.push(
                         Syscall::MoveMount {
                             from_dirfd: mount_local_path_fd,
@@ -903,12 +825,12 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     }
                 }
                 JobMount::Devpts { mount_point } => {
-                    normal_mount(&bump, &mut builder, mount_point, c"devpts", "devpts")?;
+                    normal_mount(bump, builder, mount_point, c"devpts", "devpts")?;
                 }
                 JobMount::Devices { devices } => {
                     for device in devices.iter() {
                         let Device { cstr, str } = Device::new(device);
-                        let mount_local_path_fd = local_path_fds.next().unwrap();
+                        let mount_local_path_fd = mount_fds.next().unwrap();
                         builder.push(
                             Syscall::MoveMount {
                                 from_dirfd: mount_local_path_fd,
@@ -926,19 +848,169 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     }
                 }
                 JobMount::Mqueue { mount_point } => {
-                    normal_mount(&bump, &mut builder, mount_point, c"mqueue", "mqueue")?;
+                    normal_mount(bump, builder, mount_point, c"mqueue", "mqueue")?;
                 }
                 JobMount::Proc { mount_point } => {
-                    normal_mount(&bump, &mut builder, mount_point, c"proc", "proc")?;
+                    normal_mount(bump, builder, mount_point, c"proc", "proc")?;
                 }
                 JobMount::Sys { mount_point } => {
-                    normal_mount(&bump, &mut builder, mount_point, c"sysfs", "sysfs")?;
+                    normal_mount(bump, builder, mount_point, c"sysfs", "sysfs")?;
                 }
                 JobMount::Tmp { mount_point } => {
-                    normal_mount(&bump, &mut builder, mount_point, c"tmpfs", "tmpfs")?;
+                    normal_mount(bump, builder, mount_point, c"tmpfs", "tmpfs")?;
                 }
             };
         }
+        Ok(())
+    }
+
+    fn run_job_inner(
+        &self,
+        spec: &JobSpec,
+        inline_limit: InlineLimit,
+        kill_event_receiver: EventReceiver,
+        fuse_spawn: impl FnOnce(OwnedFd),
+        runtime: runtime::Handle,
+    ) -> JobResult<JobCompleted, Error> {
+        let mut fuse_spawn = Some(fuse_spawn);
+
+        // We're going to need three pipes: one for stdout, one for stderr, and one to convey back any
+        // error that occurs in the child before it execs. It's easiest to create the pipes in the
+        // parent before cloning and then closing the unnecessary ends in the parent and child.
+        let (stdout_read_fd, stdout_write_fd) = linux::pipe().map_err(syserr)?;
+        let (stderr_read_fd, stderr_write_fd) = linux::pipe().map_err(syserr)?;
+        let (read_sock, write_sock) = linux::UnixStream::pair().map_err(syserr)?;
+
+        // Set up the script. This will be run in the child where we have to follow some very
+        // stringent rules to avoid deadlocking. This comes about because we're going to clone in a
+        // multi-threaded program. The child program will only have one thread: this one. The other
+        // threads will just not exist in the child process. If any of those threads held a lock at
+        // the time of the clone, those locks will be locked forever in the child. Any attempt to
+        // acquire those locks in the child would deadlock.
+        //
+        // The most burdensome result of this is that we can't allocate memory using the global
+        // allocator in the child.
+        //
+        // Instead, we create a script of things we're going to execute in the child, but we do
+        // that before the clone. After the clone, the child will just run through the script
+        // directly. If it encounters an error, it will write the script index back to the parent
+        // via the exec_result pipe. The parent will then map that to a closure for generating the
+        // error.
+        //
+        // A few things to keep in mind in the code below:
+        //
+        // We don't have to worry about closing file descriptors in the child,
+        // or even explicitly marking them close-on-exec, because one of the last things we do is
+        // mark all file descriptors -- except for stdin, stdout, and stderr -- as close-on-exec.
+        //
+        // We have to be careful about the move closures and bump.alloc. The drop method won't be
+        // run on the closure, which means drop won't be run on any captured-and-moved variables.
+        // As long as we only pass references in those variables, we're okay.
+
+        let bump = Bump::new();
+        let mut builder = ScriptBuilder::new(&bump);
+
+        let fd = new_fd_slot(&bump);
+
+        // First we set up the network namespace. It's possible that we won't even create a new
+        // network namespace, if JobNetwork::Local is specified.
+
+        let newnet = self.set_up_network(spec, &bump, &mut builder)?;
+        self.set_up_user_namespace(spec, &bump, &mut builder)?;
+
+        // Make the child process the leader of a new session and process group. If we didn't do
+        // this, then the process would be a member of a process group and session headed by a
+        // process outside of the pid namespace, which would be confusing.
+        builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
+
+        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
+        // and stderr. We don't have to worry about closing the old fds because they will be marked
+        // close-on-exec below.
+        builder.push(
+            Syscall::Dup2 {
+                from: stdout_write_fd.as_fd(),
+                to: Fd::STDOUT,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
+        );
+        builder.push(
+            Syscall::Dup2 {
+                from: stderr_write_fd.as_fd(),
+                to: Fd::STDERR,
+            },
+            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
+        );
+
+        let new_root_path = self.mount_dir.as_c_str();
+
+        // Create the fuse mount. We need to do this in the child's namespace, then pass the file
+        // descriptor back to the parent.
+        builder.push(
+            Syscall::Open {
+                path: c"/dev/fuse",
+                flags: OpenFlags::RDWR | OpenFlags::NONBLOCK,
+                mode: FileMode::default(),
+                out: fd,
+            },
+            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
+        );
+        builder.push(
+            Syscall::FuseMount {
+                source: c"Maelstrom LayerFS",
+                target: new_root_path,
+                flags: MountFlags::NODEV | MountFlags::NOSUID | MountFlags::RDONLY,
+                root_mode: self.root_mode,
+                uid: Uid::from_u32(spec.user.as_u32()),
+                gid: Gid::from_u32(spec.group.as_u32()),
+                fuse_fd: fd,
+            },
+            &|err| JobError::System(anyhow!("fuse mount: {err}")),
+        );
+
+        // Send the fuse mount file descriptor from the child to the parent.
+        builder.push(
+            Syscall::SendMsg {
+                buf: &[0xFF; 8],
+                fd_to_send: fd,
+            },
+            &|err| JobError::System(anyhow!("sendmsg: {err}")),
+        );
+
+        self.set_up_root_overlay(spec, new_root_path, &bump, &mut builder)?;
+
+        let mut mount_fds = BumpVec::new_in(&bump);
+
+        self.open_mount_fds_for_devices_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
+        self.open_mount_fds_for_mounts_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
+
+        // Chdir to what will be the new root.
+        builder.push(
+            Syscall::Chdir {
+                path: new_root_path,
+            },
+            &|err| syserr(anyhow!("chdir to target root directory: {err}")),
+        );
+
+        // Pivot root to be the new root. See man 2 pivot_root.
+        builder.push(
+            Syscall::PivotRoot {
+                new_root: c".",
+                put_old: c".",
+            },
+            &|err| syserr(anyhow!("pivot_root: {err}")),
+        );
+
+        let mut mount_fds = mount_fds.into_iter();
+
+        self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
+        self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
+
+        // Set up the mounts after we've called pivot_root so the absolute paths specified stay
+        // within the container.
+        //
+        // N.B. It seems like it's a security feature of Linux that sysfs and proc can't be mounted
+        // unless they are already mounted. So we have to do this before we unmount the old root.
+        // If we do the unmount first, then we'll get permission errors mounting those fs types.
 
         // Unmount the old root. See man 2 pivot_root.
         builder.push(
