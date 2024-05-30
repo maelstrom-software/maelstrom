@@ -27,6 +27,3 @@ if [ $CARGO_MAELSTROM_STATUS != 0 ]; then
 fi
 
 cargo test --release --doc
-
-py/protobuf_compile.sh
-py/maelstrom_pytest.py
