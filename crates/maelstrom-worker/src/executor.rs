@@ -342,6 +342,13 @@ where
     JobError::System(Error::from(err))
 }
 
+fn execerr<E>(err: E) -> JobError<Error>
+where
+    Error: From<E>,
+{
+    JobError::Execution(Error::from(err))
+}
+
 fn new_fd_slot(bump: &Bump) -> FdSlot<'_> {
     FdSlot::new(bump.alloc(UnsafeCell::new(Fd::from_raw(-1))))
 }
@@ -550,7 +557,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 mode: FileMode::default(),
                 out: fd,
             },
-            &|err| JobError::System(anyhow!("open /dev/fuse: {err}")),
+            &|err| syserr(anyhow!("open /dev/fuse: {err}")),
         );
 
         // Mount the fuse file system.
@@ -564,7 +571,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 gid: Gid::from_u32(spec.group.as_u32()),
                 fuse_fd: fd,
             },
-            &|err| JobError::System(anyhow!("fuse mount: {err}")),
+            &|err| syserr(anyhow!("fuse mount: {err}")),
         );
 
         // Send the fuse mount file descriptor from the child to the parent.
@@ -573,7 +580,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 buf: &[0xFF; 8],
                 fd_to_send: fd,
             },
-            &|err| JobError::System(anyhow!("sendmsg: {err}")),
+            &|err| syserr(anyhow!("sendmsg: {err}")),
         );
     }
 
@@ -758,7 +765,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     out: mount_fd,
                 },
                 bump.alloc(move |err| {
-                    JobError::Execution(anyhow!(
+                    execerr(anyhow!(
                         "opening local path for bind mount of device {str}: {err}",
                     ))
                 }),
@@ -790,9 +797,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         flags: FsopenFlags::default(),
                         out: fd,
                     },
-                    bump.alloc(move |err| {
-                        JobError::System(anyhow!("fsopen for mount of {fstype}: {err}"))
-                    }),
+                    bump.alloc(move |err| syserr(anyhow!("fsopen for mount of {fstype}: {err}"))),
                 );
 
                 // Effect the configuration. This preps the file descriptor for the fsmount next.
@@ -805,9 +810,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         aux: None,
                     },
                     bump.alloc(move |err| {
-                        JobError::System(anyhow!(
-                            "fsconfig(CMD_CREATE) for mount of {fstype}: {err}"
-                        ))
+                        syserr(anyhow!("fsconfig(CMD_CREATE) for mount of {fstype}: {err}"))
                     }),
                 );
 
@@ -821,9 +824,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         mount_attrs: MountAttrs::default(),
                         out: fd,
                     },
-                    bump.alloc(move |err| {
-                        JobError::System(anyhow!("fsmount for mount of {fstype}: {err}"))
-                    }),
+                    bump.alloc(move |err| syserr(anyhow!("fsmount for mount of {fstype}: {err}"))),
                 );
 
                 mount_fds.push(fd);
@@ -857,7 +858,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                             out: mount_fd,
                         },
                         bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
+                            execerr(anyhow!(
                                 "opening local path {local_path} for bind mount: {err}",
                             ))
                         }),
@@ -882,7 +883,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                                 out: mount_fd,
                             },
                             bump.alloc(move |err| {
-                                JobError::System(anyhow!(
+                                syserr(anyhow!(
                                     "opening local path for bind mount of device {str}: {err}",
                                 ))
                             }),
@@ -928,9 +929,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     flags: MoveMountFlags::F_EMPTY_PATH,
                 },
                 bump.alloc(move |err| {
-                    JobError::Execution(
-                        anyhow!("move_mount for bind mount of device {str}: {err}",),
-                    )
+                    execerr(anyhow!("move_mount for bind mount of device {str}: {err}",))
                 }),
             );
         }
@@ -966,7 +965,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         flags: MoveMountFlags::F_EMPTY_PATH,
                     },
                     bump.alloc(move |err| {
-                        JobError::System(anyhow!(
+                        syserr(anyhow!(
                             "move_mount for mount of {fstype} to {mount_point}: {err}"
                         ))
                     }),
@@ -992,7 +991,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                             flags: MoveMountFlags::F_EMPTY_PATH,
                         },
                         bump.alloc(move |err| {
-                            JobError::Execution(anyhow!(
+                            execerr(anyhow!(
                                 "move_mount for bind mount of {local_path} to {mount_point}: {err}",
                             ))
                         }),
@@ -1007,7 +1006,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                                 data: None,
                             },
                             bump.alloc(move |err| {
-                                JobError::System(anyhow!(
+                                syserr(anyhow!(
                                     "remounting bind mount of {mount_point} as read-only: {err}",
                                 ))
                             }),
@@ -1027,9 +1026,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                                 flags: MoveMountFlags::F_EMPTY_PATH,
                             },
                             bump.alloc(move |err| {
-                                JobError::Execution(anyhow!(
-                                    "move_mount for bind mount of device {str}: {err}",
-                                ))
+                                execerr(
+                                    anyhow!("move_mount for bind mount of device {str}: {err}",),
+                                )
                             }),
                         );
                     }
@@ -1074,6 +1073,38 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         Ok(())
     }
 
+    fn do_pivot_root<'bump>(
+        &'bump self,
+        new_root_path: &'bump CStr,
+        builder: &mut ScriptBuilder<'bump>,
+    ) {
+        // Chdir to what will be the new root.
+        builder.push(
+            Syscall::Chdir {
+                path: new_root_path,
+            },
+            &|err| syserr(anyhow!("chdir to target root directory: {err}")),
+        );
+
+        // Pivot root to be the new root. See man 2 pivot_root.
+        builder.push(
+            Syscall::PivotRoot {
+                new_root: c".",
+                put_old: c".",
+            },
+            &|err| syserr(anyhow!("pivot_root: {err}")),
+        );
+
+        // Unmount the old root. See man 2 pivot_root.
+        builder.push(
+            Syscall::Umount2 {
+                path: c".",
+                flags: UmountFlags::DETACH,
+            },
+            &|err| syserr(anyhow!("umount of old root: {err}")),
+        );
+    }
+
     fn do_exec<'bump>(
         &'bump self,
         spec: &'bump JobSpec,
@@ -1102,7 +1133,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 argv: arguments.into_bump_slice(),
                 envp: environment.into_bump_slice(),
             },
-            &|err| JobError::Execution(anyhow!("execvc: {err}")),
+            &|err| execerr(anyhow!("execvc: {err}")),
         );
         Ok(())
     }
@@ -1174,35 +1205,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let mut mount_fds = BumpVec::new_in(&bump);
         self.open_mount_fds_for_devices_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.open_mount_fds_for_mounts_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
-
-        // Chdir to what will be the new root.
-        builder.push(
-            Syscall::Chdir {
-                path: new_root_path,
-            },
-            &|err| syserr(anyhow!("chdir to target root directory: {err}")),
-        );
-
-        // Pivot root to be the new root. See man 2 pivot_root.
-        builder.push(
-            Syscall::PivotRoot {
-                new_root: c".",
-                put_old: c".",
-            },
-            &|err| syserr(anyhow!("pivot_root: {err}")),
-        );
-
-        // Unmount the old root. See man 2 pivot_root.
-        builder.push(
-            Syscall::Umount2 {
-                path: c".",
-                flags: UmountFlags::DETACH,
-            },
-            &|err| syserr(anyhow!("umount of old root: {err}")),
-        );
-
+        self.do_pivot_root(new_root_path, &mut builder);
         let mut mount_fds = mount_fds.into_iter();
-
         self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
 
@@ -1215,7 +1219,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 Syscall::Chdir {
                     path: working_directory,
                 },
-                &|err| JobError::Execution(anyhow!("chdir: {err}")),
+                &|err| execerr(anyhow!("chdir: {err}")),
             );
         }
 
