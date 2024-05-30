@@ -1105,6 +1105,47 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         );
     }
 
+    fn do_chdir<'bump>(
+        &'bump self,
+        spec: &'bump JobSpec,
+        bump: &'bump Bump,
+        builder: &mut ScriptBuilder<'bump>,
+    ) -> JobResult<(), Error> {
+        // Change to the working directory, if it's not "/".
+        if spec.working_directory != Path::new("/") {
+            let working_directory =
+                bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
+                    .map_err(syserr)?;
+            builder.push(
+                Syscall::Chdir {
+                    path: working_directory,
+                },
+                &|err| execerr(anyhow!("chdir: {err}")),
+            );
+        }
+        Ok(())
+    }
+
+    fn do_close_range<'bump>(
+        &'bump self,
+        builder: &mut ScriptBuilder<'bump>,
+    ) {
+        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr. We do this
+        // last thing, right before the exec, so that we catch any file descriptors opened above.
+        builder.push(
+            Syscall::CloseRange {
+                first: CloseRangeFirst::AfterStderr,
+                last: CloseRangeLast::Max,
+                flags: CloseRangeFlags::CLOEXEC,
+            },
+            &|err| {
+                syserr(anyhow!(
+                    "setting CLOEXEC on range of open file descriptors: {err}"
+                ))
+            },
+        );
+    }
+
     fn do_exec<'bump>(
         &'bump self,
         spec: &'bump JobSpec,
@@ -1195,50 +1236,54 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         let bump = Bump::new();
         let mut builder = ScriptBuilder::new(&bump);
 
+        // Put the child in its own session (and process group). This will make it the session and
+        // group leader, and detach it from the parent's controlling terminal.
+        self.set_up_session(&mut builder);
+
+        // Dup stdout and stderr.
+        self.set_up_stdout_and_stderr(&stdout_write_fd, &stderr_write_fd, &mut builder);
+
+        // Set up the network namespace, returning true iff we should actually create a new network
+        // namespace. If `newnet` is false, we should share the parent's network namespace.
         let newnet = self.set_up_network(spec, &bump, &mut builder);
         self.set_up_user_namespace(spec, &bump, &mut builder)?;
-        self.set_up_session(&mut builder);
-        self.set_up_stdout_and_stderr(&stdout_write_fd, &stderr_write_fd, &mut builder);
+
+        // Set up the fuse mount and send back the open fuse fd.
         let new_root_path = self.mount_dir.as_c_str();
         self.set_up_fuse_root(spec, new_root_path, &bump, &mut builder);
+
+        // We need to resolve any local paths before we pivot_root, and we want to do the
+        // move_mount before we complete the move_mounts below. We could split this up into two
+        // functions like we do before, but there's no need to do so, since we don't need to
+        // evaluate a client-provided mount point path. So, we do the whole thing, move_mount
+        // included, here before the pivot_root.
         self.set_up_root_overlay(spec, new_root_path, &bump, &mut builder)?;
+
+        // Prepare all of the mounts before we pivot_root. This way we can evaluate local
+        // paths for bind  mounts before we go into the container's root. Also, Linux won't let us
+        // mount (or sysfs?) if we don't already have one open in our namespace. By doing this
+        // here, we don't have to worry about the existing proc going away when we pivot_root.
         let mut mount_fds = BumpVec::new_in(&bump);
         self.open_mount_fds_for_devices_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.open_mount_fds_for_mounts_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
+
+        // Pivot root and unmount the old root. This places us in the new /.
         self.do_pivot_root(new_root_path, &mut builder);
+
+        // At this point, we've pivoted root and are in /. Do all of the move_mounts to complete
+        // the mounting of file systems.
         let mut mount_fds = mount_fds.into_iter();
         self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
 
-        // Change to the working directory, if it's not "/".
-        if spec.working_directory != Path::new("/") {
-            let working_directory =
-                bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
-                    .map_err(syserr)?;
-            builder.push(
-                Syscall::Chdir {
-                    path: working_directory,
-                },
-                &|err| execerr(anyhow!("chdir: {err}")),
-            );
-        }
+        // We don't want to chdir until we've completed mounting, since we want clients to be able
+        // to specify relative paths, and have them be relative to /.
+        self.do_chdir(spec, &bump, &mut builder)?;
 
-        // Set close-on-exec for all file descriptors except stdin, stdout, and stderr. We do this
-        // last thing, right before the exec, so that we catch any file descriptors opened above.
-        builder.push(
-            Syscall::CloseRange {
-                first: CloseRangeFirst::AfterStderr,
-                last: CloseRangeLast::Max,
-                flags: CloseRangeFlags::CLOEXEC,
-            },
-            &|err| {
-                syserr(anyhow!(
-                    "setting CLOEXEC on range of open file descriptors: {err}"
-                ))
-            },
-        );
+        // This needs to happen last, right before the exec, so we don't leak any file descriptors.
+        self.do_close_range(&mut builder);
 
-        // Finally, do the exec.
+        // This has to come last.
         self.do_exec(spec, &bump, &mut builder)?;
 
         // We're finally ready to actually clone the child.
