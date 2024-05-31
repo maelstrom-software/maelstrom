@@ -271,12 +271,14 @@ impl From<Timeout> for Duration {
 pub struct AbstractUnixDomainAddress([u8; 6]);
 
 impl AbstractUnixDomainAddress {
-    pub fn new(address: [u8; 6]) -> Self {
-        Self(address)
-    }
-
     pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
+    }
+}
+
+impl From<&[u8; 6]> for AbstractUnixDomainAddress {
+    fn from(address: &[u8; 6]) -> Self {
+        Self(*address)
     }
 }
 
@@ -385,6 +387,14 @@ impl JobSpec {
         self
     }
 
+    pub fn allocate_tty(
+        mut self,
+        allocate_tty: impl Into<Option<AbstractUnixDomainAddress>>,
+    ) -> Self {
+        self.allocate_tty = allocate_tty.into();
+        self
+    }
+
     pub fn must_be_run_locally(&self) -> bool {
         self.network == JobNetwork::Local
             || self
@@ -392,6 +402,7 @@ impl JobSpec {
                 .iter()
                 .any(|mount| matches!(mount, JobMount::Bind { .. }))
             || matches!(&self.root_overlay, JobRootOverlay::Local { .. })
+            || self.allocate_tty.is_some()
     }
 }
 
@@ -842,7 +853,7 @@ mod tests {
     }
 
     #[test]
-    fn job_spec_must_be_run_locally() {
+    fn job_spec_must_be_run_locally_network() {
         let spec = JobSpec::new(
             "foo",
             nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
@@ -854,6 +865,18 @@ mod tests {
 
         let spec = spec.network(JobNetwork::Local);
         assert_eq!(spec.must_be_run_locally(), true);
+
+        let spec = spec.network(JobNetwork::Disabled);
+        assert_eq!(spec.must_be_run_locally(), false);
+    }
+
+    #[test]
+    fn job_spec_must_be_run_locally_mounts() {
+        let spec = JobSpec::new(
+            "foo",
+            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
+        );
+        assert_eq!(spec.must_be_run_locally(), false);
 
         let spec = spec.mounts([
             JobMount::Sys {
@@ -867,10 +890,16 @@ mod tests {
         ]);
         assert_eq!(spec.must_be_run_locally(), true);
 
-        let spec = spec.network(JobNetwork::Disabled);
-        assert_eq!(spec.must_be_run_locally(), true);
-
         let spec = spec.mounts([]);
+        assert_eq!(spec.must_be_run_locally(), false);
+    }
+
+    #[test]
+    fn job_spec_must_be_run_locally_root_overlay() {
+        let spec = JobSpec::new(
+            "foo",
+            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
+        );
         assert_eq!(spec.must_be_run_locally(), false);
 
         let spec = spec.root_overlay(JobRootOverlay::None);
@@ -884,6 +913,21 @@ mod tests {
             work: "work".into(),
         });
         assert_eq!(spec.must_be_run_locally(), true);
+    }
+
+    #[test]
+    fn job_spec_must_be_run_locally_allocate_tty() {
+        let spec = JobSpec::new(
+            "foo",
+            nonempty![(Sha256Digest::from(0u32), ArtifactType::Tar)],
+        );
+        assert_eq!(spec.must_be_run_locally(), false);
+
+        let spec = spec.allocate_tty(Some((b"\0abcde").into()));
+        assert_eq!(spec.must_be_run_locally(), true);
+
+        let spec = spec.allocate_tty(None);
+        assert_eq!(spec.must_be_run_locally(), false);
     }
 
     trait AssertError {

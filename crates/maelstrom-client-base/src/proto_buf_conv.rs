@@ -431,9 +431,7 @@ impl TryFromProtoBuf for Option<maelstrom_base::AbstractUnixDomainAddress> {
     fn try_from_proto_buf(v: Vec<u8>) -> Result<Self> {
         match v.len() {
             0 => Ok(None),
-            6 => Ok(Some(maelstrom_base::AbstractUnixDomainAddress::new(
-                v.try_into().unwrap(),
-            ))),
+            6 => Ok(Some(<&[u8; 6]>::try_from(v.as_slice()).unwrap().into())),
             _ => Err(anyhow!("malformed AbstractUnixDomainAddress")),
         }
     }
