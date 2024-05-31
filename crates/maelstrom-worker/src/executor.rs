@@ -379,6 +379,57 @@ impl Device {
     }
 }
 
+struct ChildProcess<'bump> {
+    child_pidfd: Option<OwnedFd>,
+    _stack: &'bump mut [u8],
+}
+
+impl<'bump> ChildProcess<'bump> {
+    fn new(
+        bump: &'bump Bump,
+        clone_flags: CloneFlags,
+        func: extern "C" fn(*mut core::ffi::c_void) -> i32,
+        arg: *mut core::ffi::c_void,
+    ) -> Result<Self> {
+        let mut clone_args = CloneArgs::default()
+            .flags(clone_flags)
+            .exit_signal(Signal::CHLD);
+        const CHILD_STACK_SIZE: usize = 1024;
+        let stack = bump.alloc_slice_fill_default(CHILD_STACK_SIZE);
+        let stack_ptr: *mut u8 = stack.as_mut_ptr();
+        let (_, child_pidfd) = unsafe {
+            linux::clone_with_child_pidfd(
+                func,
+                stack_ptr.wrapping_add(CHILD_STACK_SIZE) as *mut _,
+                arg,
+                &mut clone_args,
+            )
+        }?;
+        Ok(Self {
+            child_pidfd: Some(child_pidfd),
+            _stack: stack,
+        })
+    }
+
+    fn into_child_pidfd(mut self) -> OwnedFd {
+        self.child_pidfd.take().unwrap()
+    }
+}
+
+impl<'bump> Drop for ChildProcess<'bump> {
+    fn drop(&mut self) {
+        if let Some(child_pidfd) = &self.child_pidfd {
+            // The pidfd_send_signal really shouldn't ever give us an error. But even if it does
+            // for some reason, we're need to wait for the child.
+            let _ = linux::pidfd_send_signal(child_pidfd.as_fd(), Signal::KILL);
+
+            // This should never fail, but if it does, it means that the process doesn't exist so
+            // we're free to continue and drop the stack.
+            let _ = linux::waitid(child_pidfd.as_fd());
+        }
+    }
+}
+
 impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
     // Set up the network namespace. It's possible that we won't even create a new network
     // namespace, if JobNetwork::Local is specified.
@@ -1287,6 +1338,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // This has to come last.
         self.do_exec(spec, &bump, &mut builder)?;
 
+        // Start timing the job now.
+        let start = self.clock.now();
+
         // We're finally ready to actually clone the child.
         let mut clone_flags = CloneFlags::NEWCGROUP
             | CloneFlags::NEWIPC
@@ -1297,53 +1351,28 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         if newnet {
             clone_flags |= CloneFlags::NEWNET;
         }
-        let mut clone_args = CloneArgs::default()
-            .flags(clone_flags)
-            .exit_signal(Signal::CHLD);
         let mut args = maelstrom_worker_child::ChildArgs {
             write_sock: write_sock.as_fd(),
             syscalls: builder.syscalls.as_mut_slice(),
         };
-        const CHILD_STACK_SIZE: usize = 1024;
-        let mut stack = bumpalo::vec![in &bump; 0; CHILD_STACK_SIZE];
-        let clone_res = unsafe {
-            linux::clone_with_child_pidfd(
-                maelstrom_worker_child::start_and_exec_in_child_trampoline,
-                stack.as_mut_ptr().wrapping_add(CHILD_STACK_SIZE) as *mut _,
-                &mut args as *mut _ as *mut _,
-                &mut clone_args,
-            )
-        };
-        let child_pidfd = match clone_res {
-            Ok((_, child_pidfd)) => child_pidfd,
-            Err(err) => {
-                return Err(syserr(err));
-            }
-        };
+        let child_process = ChildProcess::new(
+            &bump,
+            clone_flags,
+            maelstrom_worker_child::start_and_exec_in_child_trampoline,
+            &mut args as *mut _ as *mut _,
+        )
+        .map_err(syserr)?;
 
-        let (stdout_sender, stdout_receiver) = oneshot::channel();
-        let (stderr_sender, stderr_receiver) = oneshot::channel();
-
-        // Spawn a waiter task to wait on child to terminate. We do this immediately after the
-        // clone so that even if this functions returns early, we will make sure that we wait on
-        // the child.
+        // Read (in a blocking manner) from the exec result socket. The child will write to the
+        // socket if it has an error exec-ing. The child will mark the write side of the socket
+        // exec-on-close, so we'll read an immediate EOF if the exec is successful.
         //
-        // It's not clear what to do if we get an error waiting, which, in theory, should never
-        // happen. What we do is return the error so that the client can get back a system error.
-        // An alternative would be to panic and send a plain JobStatus back.
-        let (status_sender, status_receiver) = oneshot::channel();
-        runtime.spawn(async move {
-            let _ = status_sender.send(wait_for_child(child_pidfd, kill_event_receiver).await);
-        });
-
-        // Read (in a blocking manner) from the exec result pipe. The child will write to the pipe if
-        // it has an error exec-ing. The child will mark the write side of the pipe exec-on-close, so
-        // we'll read an immediate EOF if the exec is successful.
-        //
-        // It's important to drop our copy of the write side of the pipe first. Otherwise, we'd
+        // It's important to drop our copy of the write side of the socket first. Otherwise, we'd
         // deadlock on ourselves!
+        //
+        // If we encounter an error here, we will run Drop on the ChildProcess. This will guarantee
+        // that our child is dead before we return from this function and destroy bump.
         drop(write_sock);
-
         let mut fuse_spawn = Some(fuse_spawn);
         let mut exec_result_buf = [0; mem::size_of::<u64>()];
         loop {
@@ -1351,19 +1380,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 .recv_with_fd(&mut exec_result_buf)
                 .map_err(syserr)?;
             if count == 0 {
-                // If we get EOF, the child successfully exec'd
+                // If we get EOF, the child successfully exec-ed.
                 break;
             }
 
-            // We don't expect to get a truncated message in this case
+            // We don't expect to get a truncated message in this case.
             if count != exec_result_buf.len() {
                 return Err(syserr(anyhow!(
-                    "couldn't parse exec result pipe's contents: {:?}",
+                    "couldn't parse exec result socket's contents: {:?}",
                     &exec_result_buf[..count]
                 )));
             }
 
-            // If we get an file-descriptor, we pass it to the FUSE callback
+            // If we get a file descriptor, we pass it to the FUSE callback.
             if let Some(fd) = fd {
                 let fuse_spawn = fuse_spawn
                     .take()
@@ -1372,7 +1401,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 continue;
             }
 
-            // Otherwise it should be an error we got back from exec
+            // Otherwise it should be an error we got back from the child.
             let result = u64::from_ne_bytes(exec_result_buf);
             let index = (result >> 32) as usize;
             let errno = result & 0xffffffff;
@@ -1381,7 +1410,21 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             ));
         }
 
-        let start = self.clock.now();
+        // At this point it's safe to destructure the ChildProcess, since we know it has exec-ed,
+        // and therefore isn't sharing our virtual memory anymore (so we can safely return without
+        // waiting for the process).
+        //
+        // However, we want to make sure that we always wait on the child somehow, even if there is
+        // an error, so that we don't end up accumlating zombie children. That's why we don't put
+        // the following task into the JoinSet: we want it to run eve if we ignore its results.
+        let child_pidfd = child_process.into_child_pidfd();
+        let (status_sender, status_receiver) = oneshot::channel();
+        runtime.spawn(async move {
+            // It's not clear what to do if we get an error waiting, which, in theory, should never
+            // happen. What we do is return the error so that the client can get back a system
+            // error. An alternative would be to panic and send a plain JobStatus back.
+            let _ = status_sender.send(wait_for_child(child_pidfd, kill_event_receiver).await);
+        });
 
         // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
         // that we don't cause a deadlock on one while we're reading the other one.
@@ -1390,6 +1433,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         //
         // We have to drop our own copies of the write side of the pipe. If we didn't, these tasks
         // would never complete.
+        drop(stdout_write_fd);
+        drop(stderr_write_fd);
+        let (stdout_sender, stdout_receiver) = oneshot::channel();
+        let (stderr_sender, stderr_receiver) = oneshot::channel();
         let mut joinset = JoinSet::new();
         joinset.spawn_on(
             output_reader_task_main(stdout_read_fd, inline_limit, stdout_sender),
@@ -1399,8 +1446,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             output_reader_task_main(stderr_read_fd, inline_limit, stderr_sender),
             &runtime,
         );
-        drop(stdout_write_fd);
-        drop(stderr_write_fd);
 
         // Wait for everything and return the result.
         fn read_from_receiver<T>(receiver: oneshot::Receiver<Result<T>>) -> JobResult<T, Error> {
@@ -1413,12 +1458,19 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 })
                 .map_err(syserr)
         }
+
+        // Wait for the job to terminate.
+        let status = read_from_receiver(status_receiver)?;
+
+        // Stop timing the job now.
+        let duration = start.elapsed();
+
         Ok(JobCompleted {
-            status: read_from_receiver(status_receiver)?,
+            status,
             effects: JobEffects {
                 stdout: read_from_receiver(stdout_receiver)?,
                 stderr: read_from_receiver(stderr_receiver)?,
-                duration: start.elapsed(),
+                duration,
             },
         })
     }
