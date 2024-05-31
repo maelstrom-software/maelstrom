@@ -126,7 +126,7 @@ pub trait CollectTests {
         packages: Vec<String>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
-    fn get_test_layers(&self, metadata: &TestMetadata) -> TestLayers;
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Result<TestLayers>;
 
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines

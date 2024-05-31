@@ -406,8 +406,8 @@ impl CollectTests for TestCollector {
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
-        TestLayers::GenerateForBinary
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> Result<TestLayers> {
+        Ok(TestLayers::GenerateForBinary)
     }
 
     fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {

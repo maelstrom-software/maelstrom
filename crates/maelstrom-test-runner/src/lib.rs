@@ -250,7 +250,7 @@ where
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
         let mut layers = self.calculate_job_layers(&test_metadata)?;
 
-        match self.deps.test_collector().get_test_layers(&test_metadata) {
+        match self.deps.test_collector().get_test_layers(&test_metadata)? {
             TestLayers::GenerateForBinary => {
                 let dep = self.generate_artifacts()?;
                 layers.push((dep.binary, ArtifactType::Manifest));

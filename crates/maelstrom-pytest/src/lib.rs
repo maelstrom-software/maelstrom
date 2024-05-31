@@ -2,11 +2,13 @@ pub mod cli;
 pub mod pattern;
 mod pytest;
 
-use anyhow::Result;
+use anyhow::{anyhow, bail, Result};
 use indicatif::TermLike;
-use maelstrom_base::{Timeout, Utf8PathBuf};
+use maelstrom_base::{JobNetwork, JobOutcome, JobRootOverlay, JobStatus, Timeout, Utf8PathBuf};
 use maelstrom_client::{
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    spec::{Layer, PrefixOptions},
+    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir,
+    StateDir,
 };
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
@@ -22,6 +24,7 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use std::fmt;
+use std::os::unix::fs::PermissionsExt as _;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -31,56 +34,65 @@ pub use maelstrom_test_runner::Logger;
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
 
-struct DefaultMainAppDeps {
-    client: Client,
-    test_collector: PytestTestCollector,
+#[allow(clippy::too_many_arguments)]
+fn create_client(
+    bg_proc: ClientBgProcess,
+    broker_addr: Option<BrokerAddr>,
+    project_dir: impl AsRef<Root<ProjectDir>>,
+    state_dir: impl AsRef<Root<StateDir>>,
+    container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
+    cache_dir: impl AsRef<Root<CacheDir>>,
+    cache_size: CacheSize,
+    inline_limit: InlineLimit,
+    slots: Slots,
+    log: slog::Logger,
+) -> Result<Client> {
+    let project_dir = project_dir.as_ref();
+    let state_dir = state_dir.as_ref();
+    let container_image_depot_dir = container_image_depot_dir.as_ref();
+    let cache_dir = cache_dir.as_ref();
+    slog::debug!(
+        log, "creating app dependencies";
+        "broker_addr" => ?broker_addr,
+        "project_dir" => ?project_dir,
+        "state_dir" => ?state_dir,
+        "container_image_depot_dir" => ?container_image_depot_dir,
+        "cache_dir" => ?cache_dir,
+        "cache_size" => ?cache_size,
+        "inline_limit" => ?inline_limit,
+        "slots" => ?slots,
+    );
+    Client::new(
+        bg_proc,
+        broker_addr,
+        project_dir,
+        state_dir,
+        container_image_depot_dir,
+        cache_dir,
+        cache_size,
+        inline_limit,
+        slots,
+        log,
+    )
 }
 
-impl DefaultMainAppDeps {
-    #[allow(clippy::too_many_arguments)]
+struct DefaultMainAppDeps<'client> {
+    client: &'client Client,
+    test_collector: PytestTestCollector<'client>,
+}
+
+impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
-        bg_proc: ClientBgProcess,
-        broker_addr: Option<BrokerAddr>,
-        project_dir: impl AsRef<Root<ProjectDir>>,
-        state_dir: impl AsRef<Root<StateDir>>,
-        container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
-        cache_dir: impl AsRef<Root<CacheDir>>,
-        cache_size: CacheSize,
-        inline_limit: InlineLimit,
-        slots: Slots,
-        log: slog::Logger,
+        project_dir: &Root<ProjectDir>,
+        cache_dir: &Root<CacheDir>,
+        client: &'client Client,
     ) -> Result<Self> {
-        let project_dir = project_dir.as_ref();
-        let state_dir = state_dir.as_ref();
-        let container_image_depot_dir = container_image_depot_dir.as_ref();
-        let cache_dir = cache_dir.as_ref();
-        slog::debug!(
-            log, "creating app dependencies";
-            "broker_addr" => ?broker_addr,
-            "project_dir" => ?project_dir,
-            "state_dir" => ?state_dir,
-            "container_image_depot_dir" => ?container_image_depot_dir,
-            "cache_dir" => ?cache_dir,
-            "cache_size" => ?cache_size,
-            "inline_limit" => ?inline_limit,
-            "slots" => ?slots,
-        );
-        let client = Client::new(
-            bg_proc,
-            broker_addr,
-            project_dir,
-            state_dir,
-            container_image_depot_dir,
-            cache_dir,
-            cache_size,
-            inline_limit,
-            slots,
-            log,
-        )?;
         Ok(Self {
             client,
             test_collector: PytestTestCollector {
+                client,
                 project_dir: project_dir.to_owned(),
+                cache_dir: cache_dir.to_owned(),
             },
         })
     }
@@ -135,8 +147,109 @@ impl TestFilter for pattern::Pattern {
 
 struct PytestOptions;
 
-struct PytestTestCollector {
+struct PytestTestCollector<'client> {
     project_dir: RootBuf<ProjectDir>,
+    cache_dir: RootBuf<CacheDir>,
+    client: &'client Client,
+}
+
+impl<'client> PytestTestCollector<'client> {
+    fn get_pip_packages(&self, image: ImageSpec) -> Result<Utf8PathBuf> {
+        let fs = Fs::new();
+
+        // Build some paths
+        let cache_dir: &Path = self.cache_dir.as_ref();
+        let project_dir: &Path = self.project_dir.as_ref();
+        let packages_path: PathBuf =
+            cache_dir.join(format!("pip_packages/{}:{}", image.name, image.tag));
+        if !fs.exists(&packages_path) {
+            fs.create_dir_all(&packages_path)?;
+        }
+        let source_req_path = project_dir.join("test-requirements.txt");
+        let saved_req_path = packages_path.join("requirements.txt");
+        let upper = packages_path.join("root");
+
+        // Are the existing packages up-to-date
+        let source_req = fs.read_to_string(&source_req_path)?;
+        let saved_req = fs.read_to_string_if_exists(&saved_req_path)?;
+        if Some(source_req) == saved_req {
+            return Ok(upper.try_into()?);
+        }
+
+        // Delete the work dir in case we have leaked it
+        let work = packages_path.join("work");
+        if fs.exists(&work) {
+            let inner_work = work.join("work");
+            if fs.exists(&inner_work) {
+                let mut work_perm = fs.metadata(&inner_work)?.permissions();
+                work_perm.set_mode(0o777);
+                fs.set_permissions(work.join("work"), work_perm)?;
+            }
+            fs.remove_dir_all(&work)?;
+        }
+
+        // Ensure the work and upper exist now
+        fs.create_dir_all(&work)?;
+        if !fs.exists(&upper) {
+            fs.create_dir_all(&upper)?;
+        }
+
+        // Run a local job to install the packages
+        let layer = self.client.add_layer(Layer::Paths {
+            paths: vec![source_req_path.clone().try_into()?],
+            prefix_options: Default::default(),
+        })?;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        self.client.add_job(
+            JobSpec::new("/usr/local/bin/pip", vec![layer])
+                .arguments([
+                    "install".to_owned(),
+                    "-r".to_owned(),
+                    source_req_path
+                        .to_str()
+                        .ok_or_else(|| anyhow!("non-UTF8 path"))?
+                        .into(),
+                ])
+                .working_directory("/")
+                .image(image)
+                .network(JobNetwork::Local)
+                .root_overlay(JobRootOverlay::Local {
+                    upper: upper.clone().try_into()?,
+                    work: work.clone().try_into()?,
+                }),
+            move |res| drop(sender.send(res)),
+        )?;
+        let (_, outcome) = receiver.recv()??;
+        let outcome = outcome.map_err(|err| anyhow!("error installing pip packages: {err:?}"))?;
+        match outcome {
+            JobOutcome::Completed(completed) => {
+                if completed.status != JobStatus::Exited(0) {
+                    bail!("pip install failed: {:?}", completed.effects.stderr)
+                }
+            }
+            JobOutcome::TimedOut(_) => bail!("pip install timed out"),
+        }
+
+        // Delete any special character files
+        for path in fs.walk(&upper) {
+            let path = path?;
+            let meta = fs.symlink_metadata(&path)?;
+            if !(meta.is_file() || meta.is_dir() || meta.is_symlink()) {
+                fs.remove_file(path)?;
+            }
+        }
+
+        // Remove work
+        let mut work_perm = fs.metadata(work.join("work"))?.permissions();
+        work_perm.set_mode(0o777);
+        fs.set_permissions(work.join("work"), work_perm)?;
+        fs.remove_dir_all(work)?;
+
+        // Save requirements
+        fs.copy(source_req_path, saved_req_path)?;
+
+        Ok(upper.try_into()?)
+    }
 }
 
 #[derive(Debug)]
@@ -184,14 +297,13 @@ impl TestArtifact for PytestTestArtifact {
     }
 
     fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
-        let path = self.path().display();
         (
             "/usr/local/bin/python".into(),
             vec![
                 "-m".into(),
                 "pytest".into(),
                 "--verbose".into(),
-                format!("{path}::{case}"),
+                format!("{case}"),
             ],
         )
     }
@@ -226,7 +338,7 @@ impl TestPackage for PytestPackage {
     }
 }
 
-impl CollectTests for PytestTestCollector {
+impl<'client> CollectTests for PytestTestCollector<'client> {
     type BuildHandle = pytest::WaitHandle;
     type Artifact = PytestTestArtifact;
     type ArtifactStream = pytest::TestArtifactStream;
@@ -246,21 +358,33 @@ impl CollectTests for PytestTestCollector {
         Ok((handle, stream))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
-        TestLayers::Provided(vec![])
+    fn get_test_layers(&self, metadata: &TestMetadata) -> Result<TestLayers> {
+        match &metadata.image {
+            Some(image) if image.name == "python" => {
+                let packages_path = self.get_pip_packages(image.clone())?;
+                Ok(TestLayers::Provided(vec![Layer::Glob {
+                    glob: format!("{packages_path}/**"),
+                    prefix_options: PrefixOptions {
+                        strip_prefix: Some(packages_path),
+                        ..Default::default()
+                    },
+                }]))
+            }
+            _ => Ok(TestLayers::Provided(vec![])),
+        }
     }
 }
 
-impl MainAppDeps for DefaultMainAppDeps {
+impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
     type Client = Client;
 
     fn client(&self) -> &Client {
-        &self.client
+        self.client
     }
 
-    type TestCollector = PytestTestCollector;
+    type TestCollector = PytestTestCollector<'client>;
 
-    fn test_collector(&self) -> &PytestTestCollector {
+    fn test_collector(&self) -> &PytestTestCollector<'client> {
         &self.test_collector
     }
 
@@ -323,26 +447,27 @@ where
     let log = logger.build(logging_output.clone());
 
     let list_action = extra_options.list.then_some(ListAction::ListTests);
-    let target_dir = Root::<BuildDir>::new(Path::new("target"));
-    let maelstrom_target_dir = target_dir.join::<MaelstromTargetDir>("maelstrom_pytest");
-    let state_dir = maelstrom_target_dir.join::<StateDir>("state");
-    let cache_dir = maelstrom_target_dir.join::<CacheDir>("cache");
+    let build_dir = Root::<BuildDir>::new(Path::new("target"));
+    let maelstrom_build_dir = build_dir.join::<MaelstromTargetDir>("maelstrom_pytest");
+    let state_dir = maelstrom_build_dir.join::<StateDir>("state");
+    let cache_dir = maelstrom_build_dir.join::<CacheDir>("cache");
 
     Fs.create_dir_all(&state_dir)?;
     Fs.create_dir_all(&cache_dir)?;
 
-    let deps = DefaultMainAppDeps::new(
+    let client = create_client(
         bg_proc,
         config.broker,
-        project_dir.transmute::<ProjectDir>(),
+        project_dir,
         &state_dir,
         config.container_image_depot_root,
-        cache_dir,
+        &cache_dir,
         config.cache_size,
         config.inline_limit,
         config.slots,
         log.clone(),
     )?;
+    let deps = DefaultMainAppDeps::new(project_dir, &cache_dir, &client)?;
 
     let packages = vec![PytestPackage {
         name: "default".into(),
@@ -360,7 +485,7 @@ where
         project_dir,
         &packages,
         &state_dir,
-        target_dir,
+        build_dir,
         PytestOptions,
         logging_output,
         log,

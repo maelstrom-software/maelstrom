@@ -314,8 +314,8 @@ impl CollectTests for CargoTestCollector {
         Ok((handle, CargoTestArtifactStream(stream)))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
-        TestLayers::GenerateForBinary
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> Result<TestLayers> {
+        Ok(TestLayers::GenerateForBinary)
     }
 
     /// The Rust std test fixture prints out some output like "running 1 test" etc. This isn't very

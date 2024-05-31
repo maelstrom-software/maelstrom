@@ -1,5 +1,7 @@
 pub use maelstrom_client_base::{
-    spec, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress, StateDir, MANIFEST_DIR,
+    spec,
+    spec::{ImageSpec, JobSpec},
+    CacheDir, IntrospectResponse, ProjectDir, RemoteProgress, StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -7,7 +9,6 @@ use anyhow::{anyhow, bail, Context as _, Result};
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
-    spec::JobSpec,
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
 use maelstrom_util::{

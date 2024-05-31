@@ -260,6 +260,16 @@ impl Fs {
         })
     }
 
+    pub fn set_permissions<P: AsRef<Path>>(
+        &self,
+        path: P,
+        perm: std::fs::Permissions,
+    ) -> Result<()> {
+        let path = path.as_ref();
+        std::fs::set_permissions(path, perm)
+            .with_context(|| format!("std::fs::set_permissions(\"{}\")", path.display()))
+    }
+
     pub fn symlink_metadata<P: AsRef<Path>>(&self, path: P) -> Result<Metadata> {
         fs_trampoline!(std::fs::symlink_metadata, path).map(|inner| Metadata {
             inner,
