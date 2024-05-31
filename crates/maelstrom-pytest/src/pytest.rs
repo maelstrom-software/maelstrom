@@ -1,8 +1,11 @@
 use crate::{PytestPackageId, PytestTestArtifact};
 use anyhow::Result;
-use maelstrom_util::process::ExitCode;
+use maelstrom_client::ProjectDir;
+use maelstrom_util::{process::ExitCode, root::Root};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::os::unix::process::ExitStatusExt as _;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::{fmt, io::Read as _, thread};
 
@@ -79,22 +82,35 @@ fn run_python(script: &str) -> Result<String> {
     }
 }
 
+#[derive(Deserialize)]
+struct PytestCase {
+    file: String,
+    #[allow(dead_code)]
+    name: String,
+    node_id: String,
+    #[allow(dead_code)]
+    markers: Vec<String>,
+}
+
 pub fn pytest_collect_tests(
     _color: bool,
     _packages: Vec<String>,
+    project_dir: &Root<ProjectDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let output = run_python(include_str!("py/collect_tests.py"))?;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
-        let (file, case) = line.split_once("::").unwrap();
-        let test = tests.entry(file.to_owned()).or_insert(PytestTestArtifact {
-            name: file.into(),
-            path: file.into(),
+        let case: PytestCase = serde_json::from_str(line)?;
+        let path = Path::new(&case.file).strip_prefix(project_dir).unwrap();
+        let path_str = path.to_str().unwrap().to_owned();
+        let test = tests.entry(path_str.clone()).or_insert(PytestTestArtifact {
+            name: path_str,
+            path: path.to_path_buf(),
             tests: vec![],
             ignored_tests: vec![],
             package: PytestPackageId("default".into()),
         });
-        test.tests.push(case.into());
+        test.tests.push(case.node_id);
     }
 
     Ok((WaitHandle, TestArtifactStream(tests.into_values())))

@@ -18,7 +18,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     fs::Fs,
     process::ExitCode,
-    root::Root,
+    root::{Root, RootBuf},
     template::TemplateVars,
 };
 use std::fmt;
@@ -79,7 +79,9 @@ impl DefaultMainAppDeps {
         )?;
         Ok(Self {
             client,
-            test_collector: PytestTestCollector,
+            test_collector: PytestTestCollector {
+                project_dir: project_dir.to_owned(),
+            },
         })
     }
 }
@@ -133,7 +135,9 @@ impl TestFilter for pattern::Pattern {
 
 struct PytestOptions;
 
-struct PytestTestCollector;
+struct PytestTestCollector {
+    project_dir: RootBuf<ProjectDir>,
+}
 
 #[derive(Debug)]
 pub(crate) struct PytestTestArtifact {
@@ -242,7 +246,7 @@ impl CollectTests for PytestTestCollector {
         _options: &PytestOptions,
         packages: Vec<String>,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
-        let (handle, stream) = pytest::pytest_collect_tests(color, packages)?;
+        let (handle, stream) = pytest::pytest_collect_tests(color, packages, &self.project_dir)?;
         Ok((handle, stream))
     }
 }
@@ -313,7 +317,8 @@ pub fn main<TermT>(
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
-    let workspace_dir = Root::<ProjectDir>::new(Path::new("."));
+    let cwd = Path::new(".").canonicalize()?;
+    let project_dir = Root::<ProjectDir>::new(&cwd);
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
@@ -329,7 +334,7 @@ where
     let deps = DefaultMainAppDeps::new(
         bg_proc,
         config.broker,
-        workspace_dir.transmute::<ProjectDir>(),
+        project_dir.transmute::<ProjectDir>(),
         &state_dir,
         config.container_image_depot_root,
         cache_dir,
@@ -352,7 +357,7 @@ where
         extra_options.exclude,
         list_action,
         stderr_is_tty,
-        workspace_dir,
+        project_dir,
         &packages,
         &state_dir,
         target_dir,
