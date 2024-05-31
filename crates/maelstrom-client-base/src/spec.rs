@@ -10,8 +10,8 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobDevice, JobMount, JobNetwork, JobRootOverlay, Sha256Digest, Timeout,
-    UserId, Utf8PathBuf,
+    AbstractUnixDomainAddress, ArtifactType, GroupId, JobDevice, JobMount, JobNetwork,
+    JobRootOverlay, Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -186,6 +186,7 @@ pub struct JobSpec {
     pub group: GroupId,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
+    pub allocate_tty: Option<AbstractUnixDomainAddress>,
 }
 
 impl JobSpec {
@@ -208,6 +209,7 @@ impl JobSpec {
             group: GroupId::from(0),
             timeout: None,
             estimated_duration: None,
+            allocate_tty: None,
         }
     }
 

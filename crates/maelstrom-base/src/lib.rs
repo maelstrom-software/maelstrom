@@ -266,6 +266,20 @@ impl From<Timeout> for Duration {
     }
 }
 
+/// A count of seconds.
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct AbstractUnixDomainAddress([u8; 6]);
+
+impl AbstractUnixDomainAddress {
+    pub fn new(address: [u8; 6]) -> Self {
+        Self(address)
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+
 /// All necessary information for the worker to execute a job.
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct JobSpec {
@@ -282,6 +296,7 @@ pub struct JobSpec {
     pub group: GroupId,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
+    pub allocate_tty: Option<AbstractUnixDomainAddress>,
 }
 
 impl JobSpec {
@@ -303,6 +318,7 @@ impl JobSpec {
             group: GroupId::from(0),
             timeout: None,
             estimated_duration: None,
+            allocate_tty: None,
         }
     }
 

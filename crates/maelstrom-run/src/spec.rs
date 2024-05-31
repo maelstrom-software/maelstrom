@@ -148,6 +148,7 @@ impl Job {
             group: self.group.unwrap_or(GroupId::from(0)),
             timeout: self.timeout.and_then(Timeout::new),
             estimated_duration: None,
+            allocate_tty: None,
         })
     }
 }

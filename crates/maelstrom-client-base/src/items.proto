@@ -168,6 +168,7 @@ message JobSpec {
     uint32 group = 12;
     optional uint32 timeout = 13;
     optional Duration estimated_duration = 14;
+    bytes allocate_tty = 16;
 }
 
 message RunJobRequest {

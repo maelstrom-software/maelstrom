@@ -414,6 +414,31 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
+impl IntoProtoBuf for Option<maelstrom_base::AbstractUnixDomainAddress> {
+    type ProtoBufType = Vec<u8>;
+
+    fn into_proto_buf(self) -> Vec<u8> {
+        match self {
+            None => vec![],
+            Some(addr) => Vec::from(addr.as_slice()),
+        }
+    }
+}
+
+impl TryFromProtoBuf for Option<maelstrom_base::AbstractUnixDomainAddress> {
+    type ProtoBufType = Vec<u8>;
+
+    fn try_from_proto_buf(v: Vec<u8>) -> Result<Self> {
+        match v.len() {
+            0 => Ok(None),
+            6 => Ok(Some(maelstrom_base::AbstractUnixDomainAddress::new(
+                v.try_into().unwrap(),
+            ))),
+            _ => Err(anyhow!("malformed AbstractUnixDomainAddress")),
+        }
+    }
+}
+
 //      _       _
 //     | | ___ | |__ __/\__
 //  _  | |/ _ \| '_ \\    /
