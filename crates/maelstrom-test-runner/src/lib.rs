@@ -276,7 +276,7 @@ where
         ));
         self.queuing_state.tracker.add_outstanding();
 
-        let visitor = JobStatusVisitor::<_, MainAppDepsT::TestCollector>::new(
+        let visitor = JobStatusVisitor::new(
             self.queuing_state.tracker.clone(),
             self.queuing_state.test_listing.clone(),
             self.package_name.clone(),
@@ -285,6 +285,8 @@ where
             case_str.clone(),
             self.width,
             self.ind.clone(),
+            MainAppDepsT::TestCollector::remove_fixture_output
+                as fn(&str, Vec<String>) -> Vec<String>,
         );
 
         if self.ignored_cases.contains(case) {

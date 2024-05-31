@@ -1,6 +1,6 @@
 use crate::progress::{ProgressIndicator, ProgressPrinter};
 use crate::test_listing::TestListing;
-use crate::CollectTests;
+use crate::TestArtifactKey;
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -128,30 +128,36 @@ impl JobStatusTracker {
     }
 }
 
-pub struct JobStatusVisitor<ProgressIndicatorT, CollectTestsT: CollectTests> {
+pub struct JobStatusVisitor<
+    ProgressIndicatorT,
+    ArtifactKeyT: TestArtifactKey,
+    RemoveFixtureOutputFn,
+> {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestListing<CollectTestsT::ArtifactKey>>>>,
+    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
     package: String,
-    artifact: CollectTestsT::ArtifactKey,
+    artifact: ArtifactKeyT,
     case: String,
     case_str: String,
     width: usize,
     ind: ProgressIndicatorT,
+    remove_fixture_output: RemoveFixtureOutputFn,
 }
 
-impl<ProgressIndicatorT, CollectTestsT: CollectTests>
-    JobStatusVisitor<ProgressIndicatorT, CollectTestsT>
+impl<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey, RemoveFixtureOutputFn>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, RemoveFixtureOutputFn>
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestListing<CollectTestsT::ArtifactKey>>>>,
+        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
         package: String,
-        artifact: CollectTestsT::ArtifactKey,
+        artifact: ArtifactKeyT,
         case: String,
         case_str: String,
         width: usize,
         ind: ProgressIndicatorT,
+        remove_fixture_output: RemoveFixtureOutputFn,
     ) -> Self {
         Self {
             tracker,
@@ -162,15 +168,17 @@ impl<ProgressIndicatorT, CollectTestsT: CollectTests>
             case_str,
             width,
             ind,
+            remove_fixture_output,
         }
     }
 }
 
-fn format_test_output<CollectTestsT: CollectTests>(
+fn format_test_output(
     res: &JobOutputResult,
     name: &str,
     cjid: ClientJobId,
     case_str: &str,
+    remove_fixture_output: impl Fn(&str, Vec<String>) -> Vec<String>,
 ) -> Vec<String> {
     let (_, case_str) = case_str.rsplit_once(' ').unwrap_or(("", case_str));
     let mut test_output_lines = vec![];
@@ -183,8 +191,7 @@ fn format_test_output<CollectTestsT: CollectTests>(
                     .map(ToOwned::to_owned),
             );
             if name == "stdout" {
-                test_output_lines =
-                    CollectTestsT::remove_fixture_output(case_str, test_output_lines);
+                test_output_lines = remove_fixture_output(case_str, test_output_lines);
             }
         }
         JobOutputResult::Truncated { first, truncated } => {
@@ -194,8 +201,7 @@ fn format_test_output<CollectTestsT: CollectTests>(
                     .map(ToOwned::to_owned),
             );
             if name == "stdout" {
-                test_output_lines =
-                    CollectTestsT::remove_fixture_output(case_str, test_output_lines);
+                test_output_lines = remove_fixture_output(case_str, test_output_lines);
             }
             test_output_lines.push(format!(
                 "job {cjid}: {name} truncated, {truncated} bytes lost"
@@ -205,8 +211,11 @@ fn format_test_output<CollectTestsT: CollectTests>(
     test_output_lines
 }
 
-impl<ProgressIndicatorT: ProgressIndicator, CollectTestsT: CollectTests>
-    JobStatusVisitor<ProgressIndicatorT, CollectTestsT>
+impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT, RemoveFixtureOutputFn>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, RemoveFixtureOutputFn>
+where
+    ArtifactKeyT: TestArtifactKey,
+    RemoveFixtureOutputFn: Fn(&str, Vec<String>) -> Vec<String>,
 {
     fn print_job_result(
         &self,
@@ -280,17 +289,19 @@ impl<ProgressIndicatorT: ProgressIndicator, CollectTestsT: CollectTests>
                     }
                 };
                 if job_failed {
-                    test_output_stdout.extend(format_test_output::<CollectTestsT>(
+                    test_output_stdout.extend(format_test_output(
                         &stdout,
                         "stdout",
                         cjid,
                         &self.case_str,
+                        &self.remove_fixture_output,
                     ));
-                    test_output_stderr.extend(format_test_output::<CollectTestsT>(
+                    test_output_stderr.extend(format_test_output(
                         &stderr,
                         "stderr",
                         cjid,
                         &self.case_str,
+                        &self.remove_fixture_output,
                     ));
                 }
                 self.test_listing
@@ -316,17 +327,19 @@ impl<ProgressIndicatorT: ProgressIndicator, CollectTestsT: CollectTests>
             )) => {
                 result_str = "TIMEOUT".red();
                 result_details = Some("timed out".into());
-                test_output_stdout.extend(format_test_output::<CollectTestsT>(
+                test_output_stdout.extend(format_test_output(
                     &stdout,
                     "stdout",
                     cjid,
                     &self.case_str,
+                    &self.remove_fixture_output,
                 ));
-                test_output_stderr.extend(format_test_output::<CollectTestsT>(
+                test_output_stderr.extend(format_test_output(
                     &stderr,
                     "stderr",
                     cjid,
                     &self.case_str,
+                    &self.remove_fixture_output,
                 ));
                 self.test_listing
                     .lock()

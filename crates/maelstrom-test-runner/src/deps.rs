@@ -248,7 +248,7 @@ pub trait MainAppDeps: Sync {
     type Client: ClientTrait;
     fn client(&self) -> &Self::Client;
 
-    type TestCollector: CollectTests + 'static;
+    type TestCollector: CollectTests;
     fn test_collector(&self) -> &Self::TestCollector;
 
     fn get_template_vars(
