@@ -1114,7 +1114,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // Change to the working directory, if it's not "/".
         if spec.working_directory != Path::new("/") {
             let working_directory =
-                bump_c_str_from_bytes(&bump, spec.working_directory.as_os_str().as_bytes())
+                bump_c_str_from_bytes(bump, spec.working_directory.as_os_str().as_bytes())
                     .map_err(syserr)?;
             builder.push(
                 Syscall::Chdir {
@@ -1126,10 +1126,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         Ok(())
     }
 
-    fn do_close_range<'bump>(
-        &'bump self,
-        builder: &mut ScriptBuilder<'bump>,
-    ) {
+    fn do_close_range<'bump>(&'bump self, builder: &mut ScriptBuilder<'bump>) {
         // Set close-on-exec for all file descriptors except stdin, stdout, and stderr. We do this
         // last thing, right before the exec, so that we catch any file descriptors opened above.
         builder.push(
