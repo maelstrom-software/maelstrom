@@ -10,9 +10,9 @@ use maelstrom_client::{
 };
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
-    main_app_new, progress, BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage,
-    TestPackageId, Wait,
+    main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
+    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestFilter,
+    TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -183,10 +183,6 @@ impl TestArtifact for PytestTestArtifact {
         &self.name
     }
 
-    fn test_layers(&self) -> TestLayers {
-        TestLayers::Provided(vec![])
-    }
-
     fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
         let path = self.path().display();
         (
@@ -248,6 +244,10 @@ impl CollectTests for PytestTestCollector {
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let (handle, stream) = pytest::pytest_collect_tests(color, packages, &self.project_dir)?;
         Ok((handle, stream))
+    }
+
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
+        TestLayers::Provided(vec![])
     }
 }
 

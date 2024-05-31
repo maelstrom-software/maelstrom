@@ -1,6 +1,7 @@
 use crate::{
     config::Quiet,
     main_app_new,
+    metadata::TestMetadata,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{TestListing, TestListingStore},
     BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
@@ -346,10 +347,6 @@ impl TestArtifact for FakeTestArtifact {
         &self.name
     }
 
-    fn test_layers(&self) -> TestLayers {
-        TestLayers::GenerateForBinary
-    }
-
     fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (format!("/{binary_name}").into(), vec![case.into()])
@@ -407,6 +404,10 @@ impl CollectTests for TestCollector {
 
         let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, &packages);
         Ok((WaitForNothing, artifacts.into_iter()))
+    }
+
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
+        TestLayers::GenerateForBinary
     }
 
     fn remove_fixture_output(case_str: &str, lines: Vec<String>) -> Vec<String> {

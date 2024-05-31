@@ -12,9 +12,9 @@ use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    main_app_new, progress, BuildDir, CollectTests, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage,
-    TestPackageId, Wait,
+    main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
+    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestFilter,
+    TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -241,10 +241,6 @@ impl TestArtifact for CargoTestArtifact {
         &self.0.target.name
     }
 
-    fn test_layers(&self) -> TestLayers {
-        TestLayers::GenerateForBinary
-    }
-
     fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (
@@ -316,6 +312,10 @@ impl CollectTests for CargoTestCollector {
             packages,
         )?;
         Ok((handle, CargoTestArtifactStream(stream)))
+    }
+
+    fn get_test_layers(&self, _metadata: &TestMetadata) -> TestLayers {
+        TestLayers::GenerateForBinary
     }
 
     /// The Rust std test fixture prints out some output like "running 1 test" etc. This isn't very

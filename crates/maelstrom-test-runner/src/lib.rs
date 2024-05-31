@@ -27,7 +27,6 @@ use std::{
     collections::{BTreeMap, HashSet},
     io,
     panic::{RefUnwindSafe, UnwindSafe},
-    path::Path,
     str,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -104,12 +103,11 @@ struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     width: usize,
     ind: ProgressIndicatorT,
     artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
-    layers: Vec<(Sha256Digest, ArtifactType)>,
-    shared_library_layers: Vec<(Sha256Digest, ArtifactType)>,
     ignored_cases: HashSet<String>,
     package_name: String,
     cases: StringIter,
     timeout_override: Option<Option<Timeout>>,
+    generated_artifacts: Option<GeneratedArtifacts>,
 }
 
 #[derive(Default)]
@@ -152,14 +150,6 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     })
 }
 
-fn generate_artifacts(
-    deps: &impl MainAppDeps,
-    artifact_path: &Path,
-    log: slog::Logger,
-) -> Result<GeneratedArtifacts> {
-    artifacts::add_generated_artifacts(deps.client(), artifact_path, log)
-}
-
 impl<'a, ProgressIndicatorT, MainAppDepsT> ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
@@ -176,8 +166,6 @@ where
         package_name: String,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let running_tests = queuing_state.list_action.is_none();
-
         let listing = list_test_cases(log.clone(), queuing_state, &ind, &artifact, &package_name)?;
 
         ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
@@ -186,23 +174,6 @@ where
             "generating artifacts";
             "package_name" => &package_name,
             "artifact" => ?artifact);
-        let mut layers = vec![];
-        let mut shared_library_layers = vec![];
-
-        if running_tests {
-            match artifact.test_layers() {
-                TestLayers::GenerateForBinary => {
-                    let dep = generate_artifacts(deps, artifact.path(), log.clone())?;
-                    layers.push((dep.binary, ArtifactType::Manifest));
-                    shared_library_layers.push((dep.deps, ArtifactType::Manifest));
-                }
-                TestLayers::Provided(layer_specs) => {
-                    for layer_spec in layer_specs {
-                        layers.push(deps.client().add_layer(layer_spec)?);
-                    }
-                }
-            }
-        }
 
         Ok(Self {
             log,
@@ -211,12 +182,11 @@ where
             width,
             ind,
             artifact,
-            layers,
-            shared_library_layers,
             ignored_cases: listing.ignored_cases,
             package_name,
             cases: listing.cases.into_iter(),
             timeout_override,
+            generated_artifacts: None,
         })
     }
 
@@ -224,20 +194,14 @@ where
         &mut self,
         test_metadata: &TestMetadata,
     ) -> Result<Vec<(Sha256Digest, ArtifactType)>> {
-        let mut layers = test_metadata
+        test_metadata
             .layers
             .iter()
             .map(|layer| {
                 slog::debug!(self.log, "adding layer"; "layer" => ?layer);
                 self.deps.client().add_layer(layer.clone())
             })
-            .collect::<Result<Vec<_>>>()?;
-        layers.extend(self.layers.clone());
-        if test_metadata.include_shared_libraries() {
-            layers.extend(self.shared_library_layers.clone())
-        }
-
-        Ok(layers)
+            .collect::<Result<Vec<_>>>()
     }
 
     fn format_case_str(&self, case: &str) -> String {
@@ -251,6 +215,19 @@ where
         }
         s += case;
         s
+    }
+
+    fn generate_artifacts(&mut self) -> Result<GeneratedArtifacts> {
+        if let Some(generated_artifacts) = &self.generated_artifacts {
+            return Ok(generated_artifacts.clone());
+        }
+        let generated_artifacts = artifacts::add_generated_artifacts(
+            self.deps.client(),
+            self.artifact.path(),
+            self.log.clone(),
+        )?;
+        self.generated_artifacts = Some(generated_artifacts.clone());
+        Ok(generated_artifacts)
     }
 
     fn queue_job_from_case(&mut self, case: &str) -> Result<EnqueueResult> {
@@ -271,7 +248,22 @@ where
         self.ind
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
-        let layers = self.calculate_job_layers(&test_metadata)?;
+        let mut layers = self.calculate_job_layers(&test_metadata)?;
+
+        match self.deps.test_collector().get_test_layers(&test_metadata) {
+            TestLayers::GenerateForBinary => {
+                let dep = self.generate_artifacts()?;
+                layers.push((dep.binary, ArtifactType::Manifest));
+                if test_metadata.include_shared_libraries() {
+                    layers.push((dep.deps, ArtifactType::Manifest));
+                }
+            }
+            TestLayers::Provided(layer_specs) => {
+                for layer_spec in layer_specs {
+                    layers.push(self.deps.client().add_layer(layer_spec)?);
+                }
+            }
+        }
 
         // N.B. Must do this before we enqueue the job, but after we know we can't fail
         let count = self

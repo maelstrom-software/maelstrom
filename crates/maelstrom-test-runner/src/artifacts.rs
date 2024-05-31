@@ -102,6 +102,7 @@ fn create_artifact_for_binary_deps(binary_path: &Path, log: slog::Logger) -> Res
     })
 }
 
+#[derive(Clone)]
 pub struct GeneratedArtifacts {
     pub binary: Sha256Digest,
     pub deps: Sha256Digest,

@@ -1,4 +1,4 @@
-use crate::BuildDir;
+use crate::{metadata::TestMetadata, BuildDir};
 use anyhow::Result;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Utf8PathBuf};
 use maelstrom_client::{
@@ -96,7 +96,6 @@ pub trait TestArtifact: fmt::Debug {
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
     fn name(&self) -> &str;
     fn package(&self) -> Self::PackageId;
-    fn test_layers(&self) -> TestLayers;
     fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>);
 }
 
@@ -126,6 +125,8 @@ pub trait CollectTests {
         options: &Self::Options,
         packages: Vec<String>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
+
+    fn get_test_layers(&self, metadata: &TestMetadata) -> TestLayers;
 
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines
