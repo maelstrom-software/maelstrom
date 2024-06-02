@@ -203,7 +203,6 @@ impl Matcher {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
-    Class,
     File,
     Marker,
     Name,
@@ -214,7 +213,6 @@ pub enum CompoundSelectorName {
 impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
-            attempt(prefix("class", 1)).map(|_| Self::Class),
             attempt(prefix("file", 1)).map(|_| Self::File),
             attempt(prefix("marker", 1)).map(|_| Self::Marker),
             attempt(prefix("name", 2)).map(|_| Self::Name),
@@ -475,7 +473,7 @@ fn simple_expr() {
     fn test_it_err(a: &str) {
         assert!(parse_str!(SimpleExpression, a).is_err());
     }
-    for n in ["class", "file", "marker", "name", "node_id", "package"] {
+    for n in ["file", "marker", "name", "node_id", "package"] {
         test_it_err(&format!("{n}"));
         test_it_err(&format!("{n}()"));
     }
@@ -511,7 +509,7 @@ fn simple_expr_compound() {
         );
     }
     test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
-    test_it("class.equals([a-z].*)", Class, Equals("[a-z].*".into()));
+    test_it("node_id.equals([a-z].*)", NodeId, Equals("[a-z].*".into()));
     test_it(
         "marker.starts_with<(hi)>",
         Marker,
@@ -692,7 +690,7 @@ fn pattern_complicated_boolean_expr_compound() {
     );
 
     test_it(
-        "( file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || class.ends_with(jo)",
+        "( file.starts_with(hi) && name.matches/([a-z]+::)*[a-z]+/ ) || node_id.ends_with(jo)",
         OrExpression::Or(
             NotExpression::Simple(
                 AndExpression::And(
@@ -714,7 +712,7 @@ fn pattern_complicated_boolean_expr_compound() {
             .into(),
             Box::new(
                 CompoundSelector {
-                    name: CompoundSelectorName::Class,
+                    name: CompoundSelectorName::NodeId,
                     matcher: Matcher::EndsWith("jo".into()),
                 }
                 .into(),

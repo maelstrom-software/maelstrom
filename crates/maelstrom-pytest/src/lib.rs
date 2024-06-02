@@ -135,7 +135,6 @@ impl TestFilter for pattern::Pattern {
             file: artifact.map(|a| a.path.display().to_string()),
             case: case.map(|node_id| pattern::Case {
                 // XXX: This information needs to be filled in
-                class: "".into(),
                 name: "".into(),
                 node_id: node_id.into(),
                 markers: vec![],

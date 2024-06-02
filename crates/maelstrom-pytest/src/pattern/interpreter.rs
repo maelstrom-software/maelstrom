@@ -6,7 +6,6 @@ use crate::parse_str;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Case {
-    pub class: String,
     pub name: String,
     pub node_id: String,
     pub markers: Vec<String>,
@@ -52,7 +51,6 @@ fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
 pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     Some(match s.name {
-        Class => interpret_matcher(&c.case()?.class, &s.matcher),
         File => interpret_matcher(c.file()?, &s.matcher),
         Marker => c
             .case()?
@@ -202,7 +200,6 @@ fn test_compound_sel_case(
     file: Option<&str>,
     package: impl Into<String>,
     case: impl Into<String>,
-    class: impl Into<String>,
     node_id: impl Into<String>,
     expected: Option<bool>,
 ) {
@@ -211,7 +208,6 @@ fn test_compound_sel_case(
         file: file.map(|f| f.into()),
         case: Some(Case {
             name: case.into(),
-            class: class.into(),
             node_id: node_id.into(),
             markers: vec![],
         }),
@@ -228,7 +224,6 @@ fn simple_expression_compound_selector_packge() {
         Some("foo.py"),
         "bazbarbin",
         "test",
-        "Test",
         "foo.py::Test::test",
         Some(true),
     );
@@ -237,7 +232,6 @@ fn simple_expression_compound_selector_packge() {
         Some("foo.py"),
         "baz-bin",
         "test",
-        "Test",
         "foo.py::Test::test",
         Some(false),
     );
@@ -246,7 +240,6 @@ fn simple_expression_compound_selector_packge() {
         None,
         "baz-bin",
         "test",
-        "Test",
         "foo.py::Test::test",
         Some(false),
     );
@@ -260,7 +253,6 @@ fn simple_expression_compound_selector_name() {
         Some("foo.py"),
         "pkg",
         "bazbarbin",
-        "Test",
         "foo.py::Test::bazbarbin",
         Some(true),
     );
@@ -269,7 +261,6 @@ fn simple_expression_compound_selector_name() {
         Some("foo.py"),
         "pkg",
         "baz-bin",
-        "Test",
         "foo.py::Test::baz-bin",
         Some(false),
     );
@@ -282,7 +273,6 @@ fn and_or_not_diff_expressions() {
             package: "foo".into(),
             file: Some("foo_test.py".into()),
             case: Some(Case {
-                class: "Test".into(),
                 name: "foo_test".into(),
                 node_id: "foo_test.py::Test::foo_test".into(),
                 markers: vec![],
