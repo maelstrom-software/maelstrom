@@ -33,13 +33,18 @@ use std::{
         Arc, Mutex,
     },
 };
-use test_listing::{TestListing, TestListingStore};
+use test_listing::TestListingStore;
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
 pub enum ListAction {
     ListTests,
 }
+
+type TestListing<TestCollectorT> = test_listing::TestListing<
+    <TestCollectorT as CollectTests>::ArtifactKey,
+    <TestCollectorT as CollectTests>::CaseMetadata,
+>;
 
 /// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
 /// since it can contain things which live longer than the scoped threads and thus can be shared
@@ -54,7 +59,7 @@ struct JobQueuingState<TestCollectorT: CollectTests> {
     jobs_queued: AtomicU64,
     test_metadata: AllMetadata<TestCollectorT::TestFilter>,
     expected_job_count: u64,
-    test_listing: Arc<Mutex<Option<TestListing<TestCollectorT::ArtifactKey>>>>,
+    test_listing: Arc<Mutex<Option<TestListing<TestCollectorT>>>>,
     list_action: Option<ListAction>,
     collector_options: TestCollectorT::Options,
 }
@@ -66,7 +71,7 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
         filter: TestCollectorT::TestFilter,
         stderr_color: bool,
         test_metadata: AllMetadata<TestCollectorT::TestFilter>,
-        test_listing: TestListing<TestCollectorT::ArtifactKey>,
+        test_listing: TestListing<TestCollectorT>,
         list_action: Option<ListAction>,
         collector_options: TestCollectorT::Options,
     ) -> Result<Self> {
@@ -87,7 +92,7 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
     }
 }
 
-type StringIter = <Vec<String> as IntoIterator>::IntoIter;
+type CaseIter<CaseMetadataT> = <Vec<(String, CaseMetadataT)> as IntoIterator>::IntoIter;
 
 /// Enqueues test cases as jobs in the given client from the given artifact
 ///
@@ -105,14 +110,14 @@ struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
     ignored_cases: HashSet<String>,
     package_name: String,
-    cases: StringIter,
+    cases: CaseIter<<MainAppDepsT::TestCollector as CollectTests>::CaseMetadata>,
     timeout_override: Option<Option<Timeout>>,
     generated_artifacts: Option<GeneratedArtifacts>,
 }
 
 #[derive(Default)]
-struct TestListingResult {
-    cases: Vec<String>,
+struct TestListingResult<CaseMetadataT> {
+    cases: Vec<(String, CaseMetadataT)>,
     ignored_cases: HashSet<String>,
 }
 
@@ -122,7 +127,7 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     ind: &impl ProgressIndicator,
     artifact: &TestCollectorT::Artifact,
     package_name: &str,
-) -> Result<TestListingResult> {
+) -> Result<TestListingResult<TestCollectorT::CaseMetadata>> {
     ind.update_enqueue_status(format!("getting test list for {package_name}"));
 
     slog::debug!(log, "listing ignored tests"; "artifact" => ?artifact);
@@ -133,15 +138,16 @@ fn list_test_cases<TestCollectorT: CollectTests>(
 
     let artifact_key = artifact.to_key();
     let mut listing = queuing_state.test_listing.lock().unwrap();
-    listing
-        .as_mut()
-        .unwrap()
-        .update_artifact_cases(package_name, artifact_key.clone(), &cases);
+    listing.as_mut().unwrap().update_artifact_cases(
+        package_name,
+        artifact_key.clone(),
+        cases.clone(),
+    );
 
-    cases.retain(|c| {
+    cases.retain(|(c, cd)| {
         queuing_state
             .filter
-            .filter(package_name, Some(&artifact_key), Some(c.as_str()))
+            .filter(package_name, Some(&artifact_key), Some((c.as_str(), cd)))
             .expect("should have case")
     });
     Ok(TestListingResult {
@@ -230,8 +236,12 @@ where
         Ok(generated_artifacts)
     }
 
-    fn queue_job_from_case(&mut self, case: &str) -> Result<EnqueueResult> {
-        let case_str = self.format_case_str(case);
+    fn queue_job_from_case(
+        &mut self,
+        case_name: &str,
+        case_metadata: &<MainAppDepsT::TestCollector as CollectTests>::CaseMetadata,
+    ) -> Result<EnqueueResult> {
+        let case_str = self.format_case_str(case_name);
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
@@ -244,7 +254,11 @@ where
         let test_metadata = self
             .queuing_state
             .test_metadata
-            .get_metadata_for_test_with_env(&self.package_name, &self.artifact.to_key(), case)?;
+            .get_metadata_for_test_with_env(
+                &self.package_name,
+                &self.artifact.to_key(),
+                (case_name, case_metadata),
+            )?;
         self.ind
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
@@ -281,7 +295,7 @@ where
             self.queuing_state.test_listing.clone(),
             self.package_name.clone(),
             self.artifact.to_key(),
-            case.to_owned(),
+            case_name.to_owned(),
             case_str.clone(),
             self.width,
             self.ind.clone(),
@@ -289,7 +303,7 @@ where
                 as fn(&str, Vec<String>) -> Vec<String>,
         );
 
-        if self.ignored_cases.contains(case) {
+        if self.ignored_cases.contains(case_name) {
             visitor.job_ignored();
             return Ok(EnqueueResult::Ignored);
         }
@@ -301,12 +315,12 @@ where
             .unwrap()
             .as_ref()
             .unwrap()
-            .get_timing(&self.package_name, &self.artifact.to_key(), case);
+            .get_timing(&self.package_name, &self.artifact.to_key(), case_name);
 
         self.ind
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
-        let (program, arguments) = self.artifact.build_command(case);
+        let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
         self.deps.client().add_job(
             JobSpec {
                 program,
@@ -333,7 +347,7 @@ where
 
         Ok(EnqueueResult::Enqueued {
             package_name: self.package_name.clone(),
-            case: case.into(),
+            case: case_name.into(),
         })
     }
 
@@ -342,10 +356,10 @@ where
     /// Returns an `EnqueueResult` describing what happened. Meant to be called until it returns
     /// `EnqueueResult::Done`
     fn enqueue_one(&mut self) -> Result<EnqueueResult> {
-        let Some(case) = self.cases.next() else {
+        let Some((case_name, case_metadata)) = self.cases.next() else {
             return Ok(EnqueueResult::Done);
         };
-        self.queue_job_from_case(&case)
+        self.queue_job_from_case(&case_name, &case_metadata)
     }
 }
 
@@ -492,8 +506,10 @@ pub struct BuildDir;
 pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState<MainAppDepsT::TestCollector>,
-    test_listing_store:
-        TestListingStore<<MainAppDepsT::TestCollector as CollectTests>::ArtifactKey>,
+    test_listing_store: TestListingStore<
+        <MainAppDepsT::TestCollector as CollectTests>::ArtifactKey,
+        <MainAppDepsT::TestCollector as CollectTests>::CaseMetadata,
+    >,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }

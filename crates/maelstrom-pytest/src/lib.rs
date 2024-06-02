@@ -13,8 +13,8 @@ use maelstrom_client::{
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
     main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
-    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestFilter,
-    TestLayers, TestPackage, TestPackageId, Wait,
+    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestCaseMetadata,
+    TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -23,6 +23,7 @@ use maelstrom_util::{
     root::{Root, RootBuf},
     template::TemplateVars,
 };
+use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::os::unix::fs::PermissionsExt as _;
 use std::panic::{RefUnwindSafe, UnwindSafe};
@@ -119,6 +120,7 @@ impl FromStr for PytestArtifactKey {
 
 impl TestFilter for pattern::Pattern {
     type ArtifactKey = PytestArtifactKey;
+    type CaseMetadata = PytestCaseMetadata;
 
     fn compile(include: &[String], exclude: &[String]) -> Result<Self> {
         pattern::compile_filter(include, exclude)
@@ -128,16 +130,15 @@ impl TestFilter for pattern::Pattern {
         &self,
         package: &str,
         artifact: Option<&PytestArtifactKey>,
-        case: Option<&str>,
+        case: Option<(&str, &PytestCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
             package: package.into(),
             file: artifact.map(|a| a.path.display().to_string()),
-            case: case.map(|node_id| pattern::Case {
-                // XXX: This information needs to be filled in
-                name: "".into(),
-                node_id: node_id.into(),
-                markers: vec![],
+            case: case.map(|(name, metadata)| pattern::Case {
+                name: name.into(),
+                node_id: metadata.node_id.clone(),
+                markers: metadata.markers.clone(),
             }),
         };
         pattern::interpret_pattern(self, &c)
@@ -255,7 +256,7 @@ impl<'client> PytestTestCollector<'client> {
 pub(crate) struct PytestTestArtifact {
     name: String,
     path: PathBuf,
-    tests: Vec<String>,
+    tests: Vec<(String, PytestCaseMetadata)>,
     ignored_tests: Vec<String>,
     package: PytestPackageId,
 }
@@ -265,9 +266,18 @@ struct PytestPackageId(String);
 
 impl TestPackageId for PytestPackageId {}
 
+#[derive(Clone, Debug, Hash, PartialOrd, Ord, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PytestCaseMetadata {
+    node_id: String,
+    markers: Vec<String>,
+}
+
+impl TestCaseMetadata for PytestCaseMetadata {}
+
 impl TestArtifact for PytestTestArtifact {
     type ArtifactKey = PytestArtifactKey;
     type PackageId = PytestPackageId;
+    type CaseMetadata = PytestCaseMetadata;
 
     fn package(&self) -> PytestPackageId {
         self.package.clone()
@@ -283,7 +293,7 @@ impl TestArtifact for PytestTestArtifact {
         &self.path
     }
 
-    fn list_tests(&self) -> Result<Vec<String>> {
+    fn list_tests(&self) -> Result<Vec<(String, PytestCaseMetadata)>> {
         Ok(self.tests.clone())
     }
 
@@ -295,14 +305,18 @@ impl TestArtifact for PytestTestArtifact {
         &self.name
     }
 
-    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
+    fn build_command(
+        &self,
+        _case_name: &str,
+        case_metadata: &PytestCaseMetadata,
+    ) -> (Utf8PathBuf, Vec<String>) {
         (
             "/usr/local/bin/python".into(),
             vec![
                 "-m".into(),
                 "pytest".into(),
                 "--verbose".into(),
-                format!("{case}"),
+                format!("{}", case_metadata.node_id),
             ],
         )
     }
@@ -346,6 +360,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
     type Package = PytestPackage;
     type ArtifactKey = PytestArtifactKey;
     type Options = PytestOptions;
+    type CaseMetadata = PytestCaseMetadata;
 
     fn start(
         &self,

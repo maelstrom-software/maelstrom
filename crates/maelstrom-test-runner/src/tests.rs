@@ -5,8 +5,8 @@ use crate::{
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{TestListing, TestListingStore},
     BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, SimpleFilter, StringArtifactKey, TestArtifact, TestLayers, TestPackage,
-    TestPackageId, Wait,
+    MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact, TestLayers,
+    TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
 use indicatif::InMemoryTerm;
@@ -105,7 +105,7 @@ impl FakeTests {
         }
     }
 
-    fn update_listing(&self, listing: &mut TestListing<StringArtifactKey>) {
+    fn update_listing(&self, listing: &mut TestListing<StringArtifactKey, NoCaseMetadata>) {
         listing.retain_packages_and_artifacts(
             self.test_binaries
                 .iter()
@@ -115,7 +115,10 @@ impl FakeTests {
             listing.update_artifact_cases(
                 &binary.name,
                 binary.artifact_key(),
-                binary.tests.iter().map(|case| &case.name),
+                binary
+                    .tests
+                    .iter()
+                    .map(|case| (case.name.clone(), NoCaseMetadata)),
             );
             for case in &binary.tests {
                 listing.add_timing(
@@ -128,7 +131,7 @@ impl FakeTests {
         }
     }
 
-    fn listing(&self) -> TestListing<StringArtifactKey> {
+    fn listing(&self) -> TestListing<StringArtifactKey, NoCaseMetadata> {
         let mut listing = TestListing::default();
         self.update_listing(&mut listing);
         listing
@@ -322,6 +325,7 @@ impl TestPackageId for FakePackageId {}
 impl TestArtifact for FakeTestArtifact {
     type ArtifactKey = StringArtifactKey;
     type PackageId = FakePackageId;
+    type CaseMetadata = NoCaseMetadata;
 
     fn package(&self) -> FakePackageId {
         self.package.clone()
@@ -335,8 +339,12 @@ impl TestArtifact for FakeTestArtifact {
         &self.path
     }
 
-    fn list_tests(&self) -> Result<Vec<String>> {
-        Ok(self.tests.clone())
+    fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
+        Ok(self
+            .tests
+            .iter()
+            .map(|name| (name.clone(), NoCaseMetadata))
+            .collect())
     }
 
     fn list_ignored_tests(&self) -> Result<Vec<String>> {
@@ -347,9 +355,13 @@ impl TestArtifact for FakeTestArtifact {
         &self.name
     }
 
-    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
+    fn build_command(
+        &self,
+        case_name: &str,
+        _case_metadata: &NoCaseMetadata,
+    ) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
-        (format!("/{binary_name}").into(), vec![case.into()])
+        (format!("/{binary_name}").into(), vec![case_name.into()])
     }
 }
 
@@ -391,6 +403,7 @@ impl CollectTests for TestCollector {
     type ArtifactKey = StringArtifactKey;
     type PackageId = FakePackageId;
     type Package = FakeTestPackage;
+    type CaseMetadata = NoCaseMetadata;
 
     fn start(
         &self,

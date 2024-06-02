@@ -13,8 +13,8 @@ use maelstrom_client::{
 };
 use maelstrom_test_runner::{
     main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
-    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestFilter,
-    TestLayers, TestPackage, TestPackageId, Wait,
+    LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, TestArtifact, TestArtifactKey,
+    TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -174,6 +174,7 @@ fn cargo_artifact_key_from_str_good() {
 
 impl TestFilter for pattern::Pattern {
     type ArtifactKey = CargoArtifactKey;
+    type CaseMetadata = NoCaseMetadata;
 
     fn compile(include: &[String], exclude: &[String]) -> Result<Self> {
         pattern::compile_filter(include, exclude)
@@ -183,7 +184,7 @@ impl TestFilter for pattern::Pattern {
         &self,
         package: &str,
         artifact: Option<&CargoArtifactKey>,
-        case: Option<&str>,
+        case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         let c = pattern::Context {
             package: package.into(),
@@ -191,7 +192,7 @@ impl TestFilter for pattern::Pattern {
                 name: a.name.clone(),
                 kind: a.kind,
             }),
-            case: case.map(|case| pattern::Case { name: case.into() }),
+            case: case.map(|(case, _)| pattern::Case { name: case.into() }),
         };
         pattern::interpret_pattern(self, &c)
     }
@@ -216,6 +217,7 @@ impl TestPackageId for CargoPackageId {}
 impl TestArtifact for CargoTestArtifact {
     type ArtifactKey = CargoArtifactKey;
     type PackageId = CargoPackageId;
+    type CaseMetadata = NoCaseMetadata;
 
     fn package(&self) -> CargoPackageId {
         CargoPackageId(self.0.package_id.clone())
@@ -229,8 +231,11 @@ impl TestArtifact for CargoTestArtifact {
         self.0.executable.as_ref().unwrap().as_ref()
     }
 
-    fn list_tests(&self) -> Result<Vec<String>> {
-        cargo::get_cases_from_binary(self.path(), &None)
+    fn list_tests(&self) -> Result<Vec<(String, NoCaseMetadata)>> {
+        Ok(cargo::get_cases_from_binary(self.path(), &None)?
+            .into_iter()
+            .map(|case| (case, NoCaseMetadata))
+            .collect())
     }
 
     fn list_ignored_tests(&self) -> Result<Vec<String>> {
@@ -241,11 +246,15 @@ impl TestArtifact for CargoTestArtifact {
         &self.0.target.name
     }
 
-    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>) {
+    fn build_command(
+        &self,
+        case_name: &str,
+        _case_metadata: &NoCaseMetadata,
+    ) -> (Utf8PathBuf, Vec<String>) {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (
             format!("/{binary_name}").into(),
-            vec!["--exact".into(), "--nocapture".into(), case.into()],
+            vec!["--exact".into(), "--nocapture".into(), case_name.into()],
         )
     }
 }
@@ -297,6 +306,7 @@ impl CollectTests for CargoTestCollector {
     type Package = CargoPackage;
     type ArtifactKey = CargoArtifactKey;
     type Options = CargoOptions;
+    type CaseMetadata = NoCaseMetadata;
 
     fn start(
         &self,

@@ -6,6 +6,7 @@ use maelstrom_client::{
     IntrospectResponse,
 };
 use maelstrom_util::{root::Root, template::TemplateVars};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt,
     hash::Hash,
@@ -50,6 +51,34 @@ pub trait TestArtifactKey:
 {
 }
 
+pub trait TestCaseMetadata:
+    Hash + Ord + Eq + Clone + Send + Sync + Serialize + DeserializeOwned + 'static
+{
+}
+
+#[derive(Clone, Debug, Hash, PartialOrd, Ord, PartialEq, Eq)]
+pub struct NoCaseMetadata;
+
+impl TestCaseMetadata for NoCaseMetadata {}
+
+impl Serialize for NoCaseMetadata {
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        serializer.serialize_none()
+    }
+}
+
+impl<'de> Deserialize<'de> for NoCaseMetadata {
+    fn deserialize<D>(_deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::de::Deserializer<'de>,
+    {
+        Ok(Self)
+    }
+}
+
 #[cfg(test)]
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StringArtifactKey(String);
@@ -90,13 +119,18 @@ pub enum TestLayers {
 pub trait TestArtifact: fmt::Debug {
     type ArtifactKey: TestArtifactKey;
     type PackageId: TestPackageId;
+    type CaseMetadata: TestCaseMetadata;
     fn to_key(&self) -> Self::ArtifactKey;
     fn path(&self) -> &Path;
-    fn list_tests(&self) -> Result<Vec<String>>;
+    fn list_tests(&self) -> Result<Vec<(String, Self::CaseMetadata)>>;
     fn list_ignored_tests(&self) -> Result<Vec<String>>;
     fn name(&self) -> &str;
     fn package(&self) -> Self::PackageId;
-    fn build_command(&self, case: &str) -> (Utf8PathBuf, Vec<String>);
+    fn build_command(
+        &self,
+        case_name: &str,
+        case_metadata: &Self::CaseMetadata,
+    ) -> (Utf8PathBuf, Vec<String>);
 }
 
 pub trait TestPackage: Clone + fmt::Debug {
@@ -109,14 +143,19 @@ pub trait TestPackage: Clone + fmt::Debug {
 }
 
 pub trait CollectTests {
-    type TestFilter: TestFilter<ArtifactKey = Self::ArtifactKey>;
+    type TestFilter: TestFilter<ArtifactKey = Self::ArtifactKey, CaseMetadata = Self::CaseMetadata>;
 
     type BuildHandle: Wait;
     type PackageId: TestPackageId;
     type Package: TestPackage<PackageId = Self::PackageId, ArtifactKey = Self::ArtifactKey>;
     type ArtifactKey: TestArtifactKey;
-    type Artifact: TestArtifact<ArtifactKey = Self::ArtifactKey, PackageId = Self::PackageId>;
+    type Artifact: TestArtifact<
+        ArtifactKey = Self::ArtifactKey,
+        PackageId = Self::PackageId,
+        CaseMetadata = Self::CaseMetadata,
+    >;
     type ArtifactStream: Iterator<Item = Result<Self::Artifact>>;
+    type CaseMetadata: TestCaseMetadata;
 
     type Options;
     fn start(
@@ -135,12 +174,14 @@ pub trait CollectTests {
 
 pub trait TestFilter: Sized + FromStr<Err = anyhow::Error> {
     type ArtifactKey: TestArtifactKey;
+    type CaseMetadata: TestCaseMetadata;
+
     fn compile(include: &[String], exclude: &[String]) -> Result<Self>;
     fn filter(
         &self,
         package: &str,
         artifact: Option<&Self::ArtifactKey>,
-        case: Option<&str>,
+        case: Option<(&str, &Self::CaseMetadata)>,
     ) -> Option<bool>;
 }
 
@@ -202,6 +243,7 @@ impl FromStr for SimpleFilter {
 #[cfg(test)]
 impl TestFilter for SimpleFilter {
     type ArtifactKey = StringArtifactKey;
+    type CaseMetadata = NoCaseMetadata;
 
     fn compile(include: &[String], exclude: &[String]) -> Result<Self> {
         let include = include
@@ -225,12 +267,12 @@ impl TestFilter for SimpleFilter {
         &self,
         package: &str,
         artifact: Option<&Self::ArtifactKey>,
-        case: Option<&str>,
+        case: Option<(&str, &NoCaseMetadata)>,
     ) -> Option<bool> {
         match self {
             Self::All => Some(true),
             Self::None => Some(false),
-            Self::Name(m) => case.map(|c| c == m),
+            Self::Name(m) => case.map(|(c, _)| c == m),
             Self::Package(m) => Some(package == m),
             Self::ArtifactEndsWith(m) => artifact.map(|a| a.0.ends_with(m)),
             Self::Not(f) => f.filter(package, artifact, case).map(|v| !v),

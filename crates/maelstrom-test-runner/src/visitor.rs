@@ -1,6 +1,6 @@
 use crate::progress::{ProgressIndicator, ProgressPrinter};
 use crate::test_listing::TestListing;
-use crate::TestArtifactKey;
+use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
 use indicatif::TermLike;
@@ -131,10 +131,11 @@ impl JobStatusTracker {
 pub struct JobStatusVisitor<
     ProgressIndicatorT,
     ArtifactKeyT: TestArtifactKey,
+    CaseMetadataT: TestCaseMetadata,
     RemoveFixtureOutputFn,
 > {
     tracker: Arc<JobStatusTracker>,
-    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
+    test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT, CaseMetadataT>>>>,
     package: String,
     artifact: ArtifactKeyT,
     case: String,
@@ -144,13 +145,16 @@ pub struct JobStatusVisitor<
     remove_fixture_output: RemoveFixtureOutputFn,
 }
 
-impl<ProgressIndicatorT, ArtifactKeyT: TestArtifactKey, RemoveFixtureOutputFn>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, RemoveFixtureOutputFn>
+impl<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+where
+    ArtifactKeyT: TestArtifactKey,
+    CaseMetadataT: TestCaseMetadata,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         tracker: Arc<JobStatusTracker>,
-        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT>>>>,
+        test_listing: Arc<Mutex<Option<TestListing<ArtifactKeyT, CaseMetadataT>>>>,
         package: String,
         artifact: ArtifactKeyT,
         case: String,
@@ -211,10 +215,11 @@ fn format_test_output(
     test_output_lines
 }
 
-impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT, RemoveFixtureOutputFn>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, RemoveFixtureOutputFn>
+impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
 where
     ArtifactKeyT: TestArtifactKey,
+    CaseMetadataT: TestCaseMetadata,
     RemoveFixtureOutputFn: Fn(&str, Vec<String>) -> Vec<String>,
 {
     fn print_job_result(

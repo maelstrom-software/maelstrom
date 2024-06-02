@@ -1,4 +1,4 @@
-use crate::{PytestPackageId, PytestTestArtifact};
+use crate::{PytestCaseMetadata, PytestPackageId, PytestTestArtifact};
 use anyhow::Result;
 use maelstrom_client::ProjectDir;
 use maelstrom_util::{process::ExitCode, root::Root};
@@ -110,7 +110,13 @@ pub fn pytest_collect_tests(
             ignored_tests: vec![],
             package: PytestPackageId("default".into()),
         });
-        test.tests.push(case.node_id);
+        test.tests.push((
+            case.name,
+            PytestCaseMetadata {
+                node_id: case.node_id,
+                markers: case.markers,
+            },
+        ));
     }
 
     Ok((WaitHandle, TestArtifactStream(tests.into_values())))

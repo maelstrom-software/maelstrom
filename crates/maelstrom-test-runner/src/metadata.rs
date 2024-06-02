@@ -271,7 +271,7 @@ where
         &self,
         package: &str,
         artifact: &TestFilterT::ArtifactKey,
-        case: &str,
+        case: (&str, &TestFilterT::CaseMetadata),
     ) -> Result<TestMetadata> {
         self.directives
             .iter()
@@ -291,7 +291,7 @@ where
         &self,
         package: &str,
         artifact: &TestFilterT::ArtifactKey,
-        case: &str,
+        case: (&str, &TestFilterT::CaseMetadata),
     ) -> Result<TestMetadata> {
         self.get_metadata_for_test(package, artifact, case)
     }
@@ -323,7 +323,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SimpleFilter;
+    use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
     use maelstrom_base::enum_set;
     use maelstrom_test::{tar_layer, utf8_path_buf};
@@ -334,7 +334,7 @@ mod tests {
     fn default() {
         assert_eq!(
             AllMetadata::<SimpleFilter> { directives: vec![] }
-                .get_metadata_for_test("mod", &"mod".into(), "foo")
+                .get_metadata_for_test("mod", &"mod".into(), ("foo", &NoCaseMetadata))
                 .unwrap(),
             TestMetadata::default(),
         );
@@ -355,15 +355,15 @@ mod tests {
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test("package1", &"package1".into(), "test1")
+            .get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test("package1", &"package1".into(), "test2")
+            .get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test("package2", &"package2".into(), "test1")
+            .get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
     }
@@ -387,15 +387,15 @@ mod tests {
         )
         .unwrap();
         assert!(all
-            .get_metadata_for_test("package1", &"package1".into(), "test1")
+            .get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
         assert!(all
-            .get_metadata_for_test("package1", &"package1".into(), "test2")
+            .get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
         assert!(!all
-            .get_metadata_for_test("package2", &"package2".into(), "test1")
+            .get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
             .unwrap()
             .include_shared_libraries());
     }
@@ -419,25 +419,25 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .network,
             JobNetwork::Loopback,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .network,
             JobNetwork::Local,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .network,
             JobNetwork::Disabled,
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .network,
             JobNetwork::Disabled,
@@ -459,17 +459,17 @@ mod tests {
         )
         .unwrap();
         assert!(
-            !all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            !all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .enable_writable_file_system
         );
         assert!(
-            !all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            !all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .enable_writable_file_system
         );
@@ -499,13 +499,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .working_directory,
             Some(utf8_path_buf!("/bar"))
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -517,13 +517,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .working_directory,
             None,
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .working_directory,
             Some(utf8_path_buf!("/"))
@@ -545,19 +545,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .user,
             UserId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .user,
             UserId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .user,
             UserId::from(0)
@@ -579,19 +579,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .group,
             GroupId::from(202)
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .group,
             GroupId::from(101)
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .group,
             GroupId::from(0)
@@ -613,19 +613,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .timeout,
             None,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .timeout,
             Timeout::new(100),
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .timeout,
             None,
@@ -661,13 +661,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![]
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -679,13 +679,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![tar_layer!("layer3"), tar_layer!("layer4")],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -697,13 +697,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -715,13 +715,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test4")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test4", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test4")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test4", &NoCaseMetadata))
                 .unwrap()
                 .image,
             Some(ImageSpec {
@@ -733,13 +733,13 @@ mod tests {
             })
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![tar_layer!("layer1"), tar_layer!("layer2")],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .image,
             None,
@@ -765,7 +765,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![
@@ -778,7 +778,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![
@@ -789,7 +789,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .layers,
             vec![tar_layer!("added-layer1"), tar_layer!("added-layer2")],
@@ -841,33 +841,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone(), dir3_env.clone()]
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone()]
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone()]
@@ -941,7 +941,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![
@@ -952,14 +952,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![
@@ -971,14 +971,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![
@@ -988,14 +988,14 @@ mod tests {
             ]
         );
         assert!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .image
                 .unwrap()
                 .use_environment,
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .environment,
             vec![dir1_env.clone(), dir1_added_env.clone(),]
@@ -1022,7 +1022,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![
@@ -1040,7 +1040,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![JobMount::Proc {
@@ -1048,7 +1048,7 @@ mod tests {
             }],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![],
@@ -1095,7 +1095,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![
@@ -1111,7 +1111,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![
@@ -1132,7 +1132,7 @@ mod tests {
             ],
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![JobMount::Tmp {
@@ -1140,7 +1140,7 @@ mod tests {
             }],
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .mounts,
             vec![JobMount::Tmp {
@@ -1165,19 +1165,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Tty},
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Null},
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             EnumSet::EMPTY,
@@ -1213,25 +1213,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test1")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Random},
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test2")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Urandom},
         );
         assert_eq!(
-            all.get_metadata_for_test("package1", &"package1".into(), "test3")
+            all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Zero},
         );
         assert_eq!(
-            all.get_metadata_for_test("package2", &"package2".into(), "test1")
+            all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
                 .devices,
             enum_set! {JobDevice::Tty},
