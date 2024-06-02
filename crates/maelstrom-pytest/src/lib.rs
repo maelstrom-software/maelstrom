@@ -429,12 +429,10 @@ fn maybe_print_collect_error(res: Result<ExitCode>) -> Result<ExitCode> {
     res
 }
 
-fn find_python() -> Result<Vec<PytestArtifactKey>> {
+fn find_artifacts() -> Result<Vec<PytestArtifactKey>> {
     let cwd = Path::new(".").canonicalize()?;
-    let mut glob_builder = globset::GlobSet::builder();
-    glob_builder.add(globset::Glob::new("*.py")?);
     Ok(Fs
-        .glob_walk(&cwd, &glob_builder.build()?)
+        .walk(&cwd)
         .filter_map(|path| {
             path.ok().map(|path| PytestArtifactKey {
                 path: path.strip_prefix(&cwd).unwrap().into(),
@@ -487,7 +485,7 @@ where
         name: "default".into(),
         version: "0".into(),
         id: PytestPackageId("default".into()),
-        artifacts: find_python()?,
+        artifacts: find_artifacts()?,
     }];
 
     let state = MainAppState::new(
