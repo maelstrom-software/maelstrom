@@ -26,6 +26,7 @@ use maelstrom_util::{
     root::{Root, RootBuf},
     template::TemplateVars,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::os::unix::fs::PermissionsExt as _;
@@ -420,6 +421,69 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
             _ => Ok(TestLayers::Provided(vec![])),
         }
     }
+
+    fn remove_fixture_output(_case_str: &str, mut lines: Vec<String>) -> Vec<String> {
+        let start_re = Regex::new("=+ FAILURES =+").unwrap();
+        let end_re = Regex::new("=+ short test summary info =+").unwrap();
+
+        if let Some(pos) = lines.iter().position(|s| start_re.is_match(s.as_str())) {
+            lines = lines[(pos + 2)..].to_vec();
+        }
+        if let Some(pos) = lines.iter().rposition(|s| end_re.is_match(s.as_str())) {
+            lines = lines[..pos].to_vec();
+        }
+        lines
+    }
+}
+
+#[test]
+fn remove_fixture_output_basic_case() {
+    let example = indoc::indoc!(
+        "
+        ============================= test session starts ==============================
+        platform linux -- Python 3.12.3, pytest-8.1.1, pluggy-1.4.0 -- /usr/local/bin/python
+        cachedir: .pytest_cache
+        rootdir: /
+        configfile: pyproject.toml
+        plugins: cov-4.1.0, xdist-3.3.1
+        created: 1/1 worker
+        1 worker [1 item]
+
+        scheduling tests via LoadScheduling
+
+        mypyc/test/test_commandline.py::TestCommandLine::testCompileMypyc
+        [gw0] [100%] FAILED mypyc/test/test_commandline.py::TestCommandLine::testCompileMypyc
+
+        =================================== FAILURES ===================================
+        _______________________________ testCompileMypyc _______________________________
+        [gw0] linux -- Python 3.12.3 /usr/local/bin/python
+        data: /mypyc/test-data/commandline.test:5:
+        Failed: Invalid output (/mypyc/test-data/commandline.test, line 5)
+        ----------------------------- Captured stderr call -----------------------------
+        this is the stderr of the test
+        this is also test output
+        =========================== short test summary info ============================
+        FAILED mypyc/test/test_commandline.py::TestCommandLine::testCompileMypyc
+        ============================== 1 failed in 2.22s ===============================
+        "
+    );
+    let cleansed = PytestTestCollector::remove_fixture_output(
+        "tests::i_be_failing",
+        example.split('\n').map(ToOwned::to_owned).collect(),
+    );
+    assert_eq!(
+        cleansed.join("\n"),
+        indoc::indoc!(
+            "
+            [gw0] linux -- Python 3.12.3 /usr/local/bin/python
+            data: /mypyc/test-data/commandline.test:5:
+            Failed: Invalid output (/mypyc/test-data/commandline.test, line 5)
+            ----------------------------- Captured stderr call -----------------------------
+            this is the stderr of the test
+            this is also test output\
+            "
+        )
+    );
 }
 
 impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
