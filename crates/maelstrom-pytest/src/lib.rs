@@ -216,11 +216,15 @@ impl<'client> PytestTestCollector<'client> {
         ];
         let (sender, receiver) = std::sync::mpsc::channel();
         self.client.add_job(
-            JobSpec::new("/usr/bin/sh", layers)
+            JobSpec::new("/bin/sh", layers)
                 .arguments([
                     "-c".to_owned(),
                     format!(
-                        "pip install -r {} && python -m compileall /",
+                        "
+                        set -ex
+                        pip install --requirement {}
+                        python -m compileall /usr/lib/python* /usr/local/lib/python*
+                        ",
                         source_req_path
                             .to_str()
                             .ok_or_else(|| anyhow!("non-UTF8 path"))?
@@ -243,7 +247,11 @@ impl<'client> PytestTestCollector<'client> {
         match outcome {
             JobOutcome::Completed(completed) => {
                 if completed.status != JobStatus::Exited(0) {
-                    bail!("pip install failed: {:?}", completed.effects.stderr)
+                    bail!(
+                        "pip install failed:\nstderr: {:?}\nstdout{:?}",
+                        completed.effects.stderr,
+                        completed.effects.stdout
+                    )
                 }
             }
             JobOutcome::TimedOut(_) => bail!("pip install timed out"),
