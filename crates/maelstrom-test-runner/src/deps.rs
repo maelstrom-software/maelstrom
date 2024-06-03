@@ -1,4 +1,4 @@
-use crate::{metadata::TestMetadata, BuildDir};
+use crate::{metadata::TestMetadata, progress::ProgressIndicator, BuildDir};
 use anyhow::Result;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Utf8PathBuf};
 use maelstrom_client::{
@@ -149,6 +149,8 @@ pub trait TestPackage: Clone + fmt::Debug {
 }
 
 pub trait CollectTests {
+    const ENQUEUE_MESSAGE: &'static str;
+
     type TestFilter: TestFilter<ArtifactKey = Self::ArtifactKey, CaseMetadata = Self::CaseMetadata>;
 
     type BuildHandle: Wait;
@@ -171,7 +173,11 @@ pub trait CollectTests {
         packages: Vec<String>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
-    fn get_test_layers(&self, metadata: &TestMetadata) -> Result<TestLayers>;
+    fn get_test_layers(
+        &self,
+        metadata: &TestMetadata,
+        ind: &impl ProgressIndicator,
+    ) -> Result<TestLayers>;
 
     fn remove_fixture_output(_case_str: &str, lines: Vec<String>) -> Vec<String> {
         lines

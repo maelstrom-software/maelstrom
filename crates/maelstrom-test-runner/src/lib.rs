@@ -253,7 +253,11 @@ where
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
         let mut layers = self.calculate_job_layers(&test_metadata)?;
 
-        match self.deps.test_collector().get_test_layers(&test_metadata)? {
+        match self
+            .deps
+            .test_collector()
+            .get_test_layers(&test_metadata, &self.ind)?
+        {
             TestLayers::GenerateForBinary => {
                 let dep = self.generate_artifacts()?;
                 layers.push((dep.binary, ArtifactType::Manifest));
@@ -421,7 +425,8 @@ where
     }
 
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
-        self.ind.update_enqueue_status("building artifacts...");
+        self.ind
+            .update_enqueue_status(<MainAppDepsT::TestCollector as CollectTests>::ENQUEUE_MESSAGE);
 
         slog::debug!(self.log, "getting artifacts");
         let Some(ref mut artifacts) = self.artifacts else {
@@ -815,11 +820,12 @@ where
     MainAppDepsT: MainAppDeps,
     'state: 'scope,
 {
+    let spinner_msg = <MainAppDepsT::TestCollector as CollectTests>::ENQUEUE_MESSAGE;
     if state.queuing_state.list_action.is_some() {
         return if stdout_tty {
             Ok(new_helper(
                 state,
-                TestListingProgress::new,
+                |term| TestListingProgress::new(term, spinner_msg),
                 term,
                 driver,
                 timeout_override,
@@ -845,7 +851,7 @@ where
         )?),
         (true, false) => Ok(new_helper(
             state,
-            MultipleProgressBars::new,
+            |term| MultipleProgressBars::new(term, spinner_msg),
             term,
             driver,
             timeout_override,

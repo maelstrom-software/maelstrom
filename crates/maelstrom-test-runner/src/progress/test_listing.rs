@@ -17,8 +17,8 @@ pub struct TestListingProgress {
 }
 
 impl TestListingProgress {
-    pub fn new(_term: impl TermLike + 'static) -> Self {
-        let enqueue_spinner = ProgressBar::new_spinner().with_message("building artifacts...");
+    pub fn new(_term: impl TermLike + 'static, spinner_message: &'static str) -> Self {
+        let enqueue_spinner = ProgressBar::new_spinner().with_message(spinner_message);
         Self {
             enqueue_spinner,
             state: Default::default(),

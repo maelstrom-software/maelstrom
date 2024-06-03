@@ -15,9 +15,9 @@ use maelstrom_client::{
 };
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
-    main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
-    LoggingOutput, MainAppDeps, MainAppState, TestArtifact, TestArtifactKey, TestCaseMetadata,
-    TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
+    TestArtifactKey, TestCaseMetadata, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -157,7 +157,11 @@ struct PytestTestCollector<'client> {
 }
 
 impl<'client> PytestTestCollector<'client> {
-    fn get_pip_packages(&self, image: ImageSpec) -> Result<Utf8PathBuf> {
+    fn get_pip_packages(
+        &self,
+        image: ImageSpec,
+        ind: &impl ProgressIndicator,
+    ) -> Result<Utf8PathBuf> {
         let fs = Fs::new();
 
         // Build some paths
@@ -178,6 +182,8 @@ impl<'client> PytestTestCollector<'client> {
         if Some(source_req) == saved_req {
             return Ok(upper.try_into()?);
         }
+
+        ind.update_enqueue_status("installing pip packages");
 
         // Delete the work dir in case we have leaked it
         let work = packages_path.join("work");
@@ -373,6 +379,8 @@ impl TestPackage for PytestPackage {
 }
 
 impl<'client> CollectTests for PytestTestCollector<'client> {
+    const ENQUEUE_MESSAGE: &'static str = "collecting tests...";
+
     type BuildHandle = pytest::WaitHandle;
     type Artifact = PytestTestArtifact;
     type ArtifactStream = pytest::TestArtifactStream;
@@ -393,10 +401,14 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         Ok((handle, stream))
     }
 
-    fn get_test_layers(&self, metadata: &TestMetadata) -> Result<TestLayers> {
+    fn get_test_layers(
+        &self,
+        metadata: &TestMetadata,
+        ind: &impl ProgressIndicator,
+    ) -> Result<TestLayers> {
         match &metadata.image {
             Some(image) if image.name == "python" => {
-                let packages_path = self.get_pip_packages(image.clone())?;
+                let packages_path = self.get_pip_packages(image.clone(), ind)?;
                 Ok(TestLayers::Provided(vec![Layer::Glob {
                     glob: format!("{packages_path}/**"),
                     prefix_options: PrefixOptions {

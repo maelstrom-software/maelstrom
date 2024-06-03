@@ -25,11 +25,11 @@ pub struct MultipleProgressBars {
 }
 
 impl MultipleProgressBars {
-    pub fn new(term: impl TermLike + 'static) -> Self {
+    pub fn new(term: impl TermLike + 'static, spinner_message: &'static str) -> Self {
         let multi_bar = MultiProgress::new();
         multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
         let enqueue_spinner =
-            multi_bar.add(ProgressBar::new_spinner().with_message("building artifacts..."));
+            multi_bar.add(ProgressBar::new_spinner().with_message(spinner_message));
 
         let mut bars = HashMap::new();
         for (state, color) in JobState::iter().zip(COLORS) {

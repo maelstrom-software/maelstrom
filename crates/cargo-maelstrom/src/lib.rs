@@ -12,9 +12,9 @@ use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    main_app_new, metadata::TestMetadata, progress, BuildDir, CollectTests, ListAction,
-    LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, TestArtifact, TestArtifactKey,
-    TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -316,6 +316,8 @@ impl TestPackage for CargoPackage {
 }
 
 impl CollectTests for CargoTestCollector {
+    const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
+
     type BuildHandle = cargo::WaitHandle;
     type Artifact = CargoTestArtifact;
     type ArtifactStream = CargoTestArtifactStream;
@@ -342,7 +344,11 @@ impl CollectTests for CargoTestCollector {
         Ok((handle, CargoTestArtifactStream(stream)))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> Result<TestLayers> {
+    fn get_test_layers(
+        &self,
+        _metadata: &TestMetadata,
+        _ind: &impl ProgressIndicator,
+    ) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
 

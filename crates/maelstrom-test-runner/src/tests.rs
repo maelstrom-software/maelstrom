@@ -404,6 +404,8 @@ impl TestPackage for FakeTestPackage {
 }
 
 impl CollectTests for TestCollector {
+    const ENQUEUE_MESSAGE: &'static str = "building artifacts...";
+
     type BuildHandle = WaitForNothing;
     type Artifact = FakeTestArtifact;
     type ArtifactStream = std::vec::IntoIter<Result<FakeTestArtifact>>;
@@ -428,7 +430,11 @@ impl CollectTests for TestCollector {
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 
-    fn get_test_layers(&self, _metadata: &TestMetadata) -> Result<TestLayers> {
+    fn get_test_layers(
+        &self,
+        _metadata: &TestMetadata,
+        _ind: &impl ProgressIndicator,
+    ) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
 
