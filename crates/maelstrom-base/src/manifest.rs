@@ -65,9 +65,16 @@ pub struct ManifestEntryMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub enum ManifestFileData {
+    Digest(Sha256Digest),
+    Inline(Vec<u8>),
+    Empty,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub enum ManifestEntryData {
     Directory { opaque: bool },
-    File(Option<Sha256Digest>),
+    File(ManifestFileData),
     Symlink(Vec<u8>),
     Hardlink(Utf8PathBuf),
     Whiteout,
@@ -83,6 +90,7 @@ pub struct ManifestEntry {
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 pub enum ManifestVersion {
-    #[default]
     V0 = 0,
+    #[default]
+    V1 = 1,
 }

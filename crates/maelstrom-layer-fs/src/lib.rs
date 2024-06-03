@@ -591,7 +591,9 @@ mod tests {
     use super::*;
     use maelstrom_base::manifest::UnixTimestamp;
     use maelstrom_base::{
-        manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode},
+        manifest::{
+            ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, Mode,
+        },
         Utf8PathBuf,
     };
     use maelstrom_util::manifest::AsyncManifestWriter;
@@ -1084,11 +1086,11 @@ mod tests {
                                 .unwrap(),
                             FileType::RegularFile => {
                                 let data = match data {
-                                    ty::FileData::Empty => None,
-                                    ty::FileData::Inline(d) => Some(self.add_to_cache(&d).await),
+                                    ty::FileData::Empty => ManifestFileData::Empty,
+                                    ty::FileData::Inline(d) => ManifestFileData::Inline(d),
                                     ty::FileData::Digest { digest, offset, .. } => {
                                         assert_eq!(offset, 0);
-                                        Some(digest)
+                                        ManifestFileData::Digest(digest)
                                     }
                                 };
                                 builder

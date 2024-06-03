@@ -510,7 +510,8 @@ impl<FsT: CacheFs> Cache<FsT> {
 mod tests {
     use super::*;
     use maelstrom_base::manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp,
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, Mode,
+        UnixTimestamp,
     };
     use maelstrom_test::*;
     use maelstrom_util::manifest::ManifestWriter;
@@ -1212,7 +1213,7 @@ mod tests {
                 mode: Mode(0o0555),
                 mtime: UnixTimestamp(1705538554),
             },
-            data: ManifestEntryData::File(Some(digest![43])),
+            data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
         }];
         writer.write_entries(&entries).unwrap();
 

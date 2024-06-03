@@ -15,7 +15,7 @@ use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
 use lru::LruCache;
 use maelstrom_base::{
-    manifest::ManifestEntryData,
+    manifest::{ManifestEntryData, ManifestFileData},
     proto::{Hello, WorkerToBroker},
     ArtifactType, JobError, JobId, JobSpec, Sha256Digest,
 };
@@ -58,7 +58,7 @@ async fn read_manifest(path: &Path) -> Result<HashSet<Sha256Digest>> {
     let mut reader = AsyncManifestReader::new(fs.open_file(path).await?).await?;
     let mut digests = HashSet::new();
     while let Some(entry) = reader.next().await? {
-        if let ManifestEntryData::File(Some(digest)) = entry.data {
+        if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
             digests.insert(digest);
         }
     }

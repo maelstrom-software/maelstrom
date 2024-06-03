@@ -11,7 +11,7 @@ use anyhow_trace::anyhow_trace;
 use futures::stream::{Peekable, StreamExt as _};
 use lru::LruCache;
 use maelstrom_base::{
-    manifest::{ManifestEntryData, Mode, UnixTimestamp},
+    manifest::{ManifestEntryData, ManifestFileData, Mode, UnixTimestamp},
     Sha256Digest, Utf8Component, Utf8Path,
 };
 use maelstrom_util::{async_fs::Fs, ext::BoolExt as _, manifest::AsyncManifestReader, root::Root};
@@ -515,12 +515,13 @@ impl<'fs> BottomLayerBuilder<'fs> {
                 }
                 ManifestEntryData::File(data) => {
                     let data = match data {
-                        Some(digest) => FileData::Digest {
+                        ManifestFileData::Digest(digest) => FileData::Digest {
                             digest,
                             offset: 0,
                             length: entry.metadata.size,
                         },
-                        None => FileData::Empty,
+                        ManifestFileData::Inline(data) => FileData::Inline(data),
+                        ManifestFileData::Empty => FileData::Empty,
                     };
                     self.add_file_path(&path, attrs, data).await?;
                 }

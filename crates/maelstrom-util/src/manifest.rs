@@ -3,8 +3,8 @@ use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use maelstrom_base::{
     manifest::{
-        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestVersion, Mode,
-        UnixTimestamp,
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, ManifestVersion,
+        Mode, UnixTimestamp,
     },
     proto, Sha256Digest, Utf8PathBuf,
 };
@@ -198,6 +198,7 @@ pub struct ManifestBuilder<'cb, WriteT> {
     writer: AsyncManifestWriter<WriteT>,
     follow_symlinks: bool,
     data_upload: Box<dyn DataUpload + 'cb>,
+    inline_limit: u64,
 }
 
 impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
@@ -205,12 +206,14 @@ impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
         writer: WriteT,
         follow_symlinks: bool,
         data_upload: impl DataUpload + 'cb,
+        inline_limit: u64,
     ) -> io::Result<Self> {
         Ok(Self {
             fs: Fs::new(),
             writer: AsyncManifestWriter::new(writer).await?,
             data_upload: Box::new(data_upload),
             follow_symlinks,
+            inline_limit,
         })
     }
 
@@ -240,10 +243,13 @@ impl<'cb, WriteT: AsyncWrite + Unpin> ManifestBuilder<'cb, WriteT> {
             self.fs.symlink_metadata(source.as_ref()).await?
         };
         if meta.is_file() {
-            let data = if meta.size() > 0 {
-                Some(self.data_upload.upload(source.as_ref()).await?)
+            let file_size = meta.size();
+            let data = if file_size <= self.inline_limit {
+                ManifestFileData::Inline(self.fs.read(source.as_ref()).await?)
+            } else if file_size > 0 {
+                ManifestFileData::Digest(self.data_upload.upload(source.as_ref()).await?)
             } else {
-                None
+                ManifestFileData::Empty
             };
             self.add_entry(&meta, dest, ManifestEntryData::File(data))
                 .await
@@ -311,7 +317,7 @@ mod tests {
         ) -> Pin<Box<dyn Future<Output = ()> + 'a>>,
     {
         let mut buffer = vec![];
-        let mut builder = ManifestBuilder::new(&mut buffer, follow_symlinks, TestDataUpload)
+        let mut builder = ManifestBuilder::new(&mut buffer, follow_symlinks, TestDataUpload, 5)
             .await
             .unwrap();
 
@@ -364,7 +370,7 @@ mod tests {
             false, /* follow_symlinks */
             "foo/bar.txt",
             6,
-            ManifestEntryData::File(Some(42u64.into())),
+            ManifestEntryData::File(ManifestFileData::Digest(42u64.into())),
         )
         .await;
     }
@@ -434,7 +440,7 @@ mod tests {
             true, /* follow_symlinks */
             "foo/bar.txt",
             6,
-            ManifestEntryData::File(Some(42u64.into())),
+            ManifestEntryData::File(ManifestFileData::Digest(42u64.into())),
         )
         .await;
     }

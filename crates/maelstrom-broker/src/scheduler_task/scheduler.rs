@@ -4,7 +4,7 @@
 use crate::scheduler_task::cache::{Cache, CacheFs, GetArtifact, GetArtifactForWorkerError};
 use anyhow::Result;
 use maelstrom_base::{
-    manifest::ManifestEntryData,
+    manifest::{ManifestEntryData, ManifestFileData},
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{
         BrokerStatistics, JobState, JobStateCounts, JobStatisticsSample, JobStatisticsTimeSeries,
@@ -619,7 +619,7 @@ impl<CacheT: SchedulerCache, DepsT: SchedulerDeps> Scheduler<CacheT, DepsT> {
     ) -> Result<()> {
         for entry in self.cache.read_manifest(digest)? {
             let entry = entry?;
-            if let ManifestEntryData::File(Some(digest)) = entry.data {
+            if let ManifestEntryData::File(ManifestFileData::Digest(digest)) = entry.data {
                 self.ensure_artifact_for_job(deps, digest, jid, IsManifest::NotManifest);
             }
         }
@@ -1757,7 +1757,7 @@ mod tests {
                         mode: Mode(0o0555),
                         mtime: UnixTimestamp(1705538554),
                     },
-                    data: ManifestEntryData::File(Some(digest![43])),
+                    data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                 }])
             ])
         },
@@ -1806,7 +1806,7 @@ mod tests {
                             mode: Mode(0o0555),
                             mtime: UnixTimestamp(1705538554),
                         },
-                        data: ManifestEntryData::File(Some(digest![43])),
+                        data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                     },
                     ManifestEntry {
                         path: "bar.txt".into(),
@@ -1815,7 +1815,7 @@ mod tests {
                             mode: Mode(0o0555),
                             mtime: UnixTimestamp(1705538554),
                         },
-                        data: ManifestEntryData::File(Some(digest![43])),
+                        data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                     }
                 ])
             ])
@@ -1864,7 +1864,7 @@ mod tests {
                         mode: Mode(0o0555),
                         mtime: UnixTimestamp(1705538554),
                     },
-                    data: ManifestEntryData::File(Some(digest![43])),
+                    data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                 }])
             ])
         },
@@ -1907,7 +1907,7 @@ mod tests {
                         mode: Mode(0o0555),
                         mtime: UnixTimestamp(1705538554),
                     },
-                    data: ManifestEntryData::File(Some(digest![43])),
+                    data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                 }])
             ])
         },
@@ -1950,7 +1950,7 @@ mod tests {
                         mode: Mode(0o0555),
                         mtime: UnixTimestamp(1705538554),
                     },
-                    data: ManifestEntryData::File(Some(digest![43])),
+                    data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                 }])
             ])
         },
@@ -1989,7 +1989,7 @@ mod tests {
                             mode: Mode(0o0555),
                             mtime: UnixTimestamp(1705538554),
                         },
-                        data: ManifestEntryData::File(Some(digest![43])),
+                        data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                     },
                     ManifestEntry {
                         path: "bar.txt".into(),
@@ -1998,7 +1998,7 @@ mod tests {
                             mode: Mode(0o0555),
                             mtime: UnixTimestamp(1705538554),
                         },
-                        data: ManifestEntryData::File(Some(digest![43])),
+                        data: ManifestEntryData::File(ManifestFileData::Digest(digest![43])),
                     }
                 ])
             ])

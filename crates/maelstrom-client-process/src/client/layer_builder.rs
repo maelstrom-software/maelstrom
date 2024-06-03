@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use futures::StreamExt as _;
 use itertools::Itertools as _;
 use maelstrom_base::{
-    manifest::{ManifestEntry, ManifestEntryData, ManifestEntryMetadata, Mode, UnixTimestamp},
+    manifest::{
+        ManifestEntry, ManifestEntryData, ManifestEntryMetadata, ManifestFileData, Mode,
+        UnixTimestamp,
+    },
     ArtifactType, Sha256Digest, Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client_base::{
@@ -83,13 +86,19 @@ fn expand_braces(expr: &str) -> Result<Vec<String>> {
 pub struct LayerBuilder {
     cache_dir: RootBuf<CacheDir>,
     project_dir: RootBuf<ProjectDir>,
+    inline_limit: u64,
 }
 
 impl LayerBuilder {
-    pub fn new(cache_dir: RootBuf<CacheDir>, project_dir: RootBuf<ProjectDir>) -> Self {
+    pub fn new(
+        cache_dir: RootBuf<CacheDir>,
+        project_dir: RootBuf<ProjectDir>,
+        inline_limit: u64,
+    ) -> Self {
         Self {
             cache_dir,
             project_dir,
+            inline_limit,
         }
     }
 
@@ -121,8 +130,13 @@ impl LayerBuilder {
         let tmp_file_path = self.build_manifest_path(&".temp");
         let mut manifest_file = fs.create_file(&tmp_file_path).await?;
         let follow_symlinks = prefix_options.follow_symlinks;
-        let mut builder =
-            ManifestBuilder::new(&mut manifest_file, follow_symlinks, data_upload).await?;
+        let mut builder = ManifestBuilder::new(
+            &mut manifest_file,
+            follow_symlinks,
+            data_upload,
+            self.inline_limit,
+        )
+        .await?;
         let mut path_hasher = PathHasher::new();
         let mut pinned_paths = pin!(paths);
         while let Some(maybe_path) = pinned_paths.next().await {
@@ -164,7 +178,7 @@ impl LayerBuilder {
             let data = if is_dir {
                 ManifestEntryData::Directory { opaque: false }
             } else {
-                ManifestEntryData::File(None)
+                ManifestEntryData::File(ManifestFileData::Empty)
             };
             let metadata = ManifestEntryMetadata {
                 size: 0,
@@ -403,6 +417,7 @@ mod tests {
             let builder = LayerBuilder::new(
                 RootBuf::<CacheDir>::new(cache_dir),
                 RootBuf::<ProjectDir>::new(artifact_dir.clone()),
+                5,
             );
             Self {
                 _temp_dir: temp_dir,
@@ -446,7 +461,27 @@ mod tests {
         verify_single_entry_manifest(
             &manifest,
             &fix.artifact_dir.join("test_artifact"),
-            ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            ManifestEntryData::File(ManifestFileData::Digest(hash_data(b"hello world"))),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn paths_layer_inline_data() {
+        let fix = Fixture::new().await;
+        let test_artifact = fix.artifact_dir.join("test_artifact");
+        fix.fs.write(&test_artifact, b"hi").await.unwrap();
+
+        let manifest = fix
+            .build_layer(Layer::Paths {
+                paths: vec![test_artifact.try_into().unwrap()],
+                prefix_options: Default::default(),
+            })
+            .await;
+        verify_single_entry_manifest(
+            &manifest,
+            &fix.artifact_dir.join("test_artifact"),
+            ManifestEntryData::File(ManifestFileData::Inline(b"hi".to_vec())),
         )
         .await;
     }
@@ -477,7 +512,7 @@ mod tests {
         verify_single_entry_manifest(
             &manifest,
             &expected_path_factory(&fix.artifact_dir),
-            ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            ManifestEntryData::File(ManifestFileData::Digest(hash_data(b"hello world"))),
         )
         .await;
     }
@@ -617,7 +652,7 @@ mod tests {
         verify_single_entry_manifest(
             &manifest,
             expected_path,
-            ManifestEntryData::File(Some(hash_data(b"hello world"))),
+            ManifestEntryData::File(ManifestFileData::Digest(hash_data(b"hello world"))),
         )
         .await;
     }
@@ -731,7 +766,7 @@ mod tests {
             vec![ExpectedManifestEntry::new(
                 "/foo",
                 0o444,
-                ManifestEntryData::File(None),
+                ManifestEntryData::File(ManifestFileData::Empty),
             )],
         )
         .await;
@@ -742,8 +777,16 @@ mod tests {
         stubs_test(
             "/foo/{bar,baz}",
             vec![
-                ExpectedManifestEntry::new("/foo/bar", 0o444, ManifestEntryData::File(None)),
-                ExpectedManifestEntry::new("/foo/baz", 0o444, ManifestEntryData::File(None)),
+                ExpectedManifestEntry::new(
+                    "/foo/bar",
+                    0o444,
+                    ManifestEntryData::File(ManifestFileData::Empty),
+                ),
+                ExpectedManifestEntry::new(
+                    "/foo/baz",
+                    0o444,
+                    ManifestEntryData::File(ManifestFileData::Empty),
+                ),
             ],
         )
         .await;

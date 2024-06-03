@@ -134,6 +134,9 @@ impl ClientState {
     }
 }
 
+/// For files under this size, the data is stashed in the manifest rather than uploaded separately
+const MANIFEST_INLINE_LIMIT: u64 = 200 * 1024;
+
 impl Client {
     pub fn new(log: LoggerFactory) -> Self {
         Self {
@@ -372,7 +375,7 @@ impl Client {
             Ok((
                 ClientState {
                     local_broker_sender,
-                    layer_builder: LayerBuilder::new(cache_dir, project_dir),
+                    layer_builder: LayerBuilder::new(cache_dir, project_dir, MANIFEST_INLINE_LIMIT),
                     artifact_upload_tracker,
                     image_download_tracker,
                     container_image_depot,
