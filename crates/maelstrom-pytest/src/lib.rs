@@ -248,7 +248,7 @@ impl<'client> PytestTestCollector<'client> {
             JobOutcome::Completed(completed) => {
                 if completed.status != JobStatus::Exited(0) {
                     bail!(
-                        "pip install failed:\nstderr: {:?}\nstdout{:?}",
+                        "pip install failed:\nstderr: {}\nstdout{}",
                         completed.effects.stderr,
                         completed.effects.stdout
                     )

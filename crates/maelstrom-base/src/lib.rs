@@ -426,6 +426,19 @@ impl Debug for JobOutputResult {
     }
 }
 
+impl fmt::Display for JobOutputResult {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JobOutputResult::None => Ok(()),
+            JobOutputResult::Inline(bytes) => fmt::Display::fmt(&String::from_utf8_lossy(bytes), f),
+            JobOutputResult::Truncated { first, truncated } => {
+                fmt::Display::fmt(&String::from_utf8_lossy(first), f)?;
+                fmt::Display::fmt(&format!("<{truncated} bytes truncated>"), f)
+            }
+        }
+    }
+}
+
 /// The output and duration of a job that ran for some amount of time. This is generated regardless
 /// of how the job terminated. From our point of view, it doesn't matter. We ran the job until it
 /// was terminated, and gathered its output.
