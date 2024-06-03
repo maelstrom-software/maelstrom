@@ -4,7 +4,10 @@ mod pytest;
 
 use anyhow::{anyhow, bail, Result};
 use indicatif::TermLike;
-use maelstrom_base::{JobNetwork, JobOutcome, JobRootOverlay, JobStatus, Timeout, Utf8PathBuf};
+use maelstrom_base::{
+    enum_set, JobDevice, JobMount, JobNetwork, JobOutcome, JobRootOverlay, JobStatus, Timeout,
+    Utf8PathBuf,
+};
 use maelstrom_client::{
     spec::{Layer, PrefixOptions},
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir,
@@ -195,20 +198,26 @@ impl<'client> PytestTestCollector<'client> {
         }
 
         // Run a local job to install the packages
-        let layer = self.client.add_layer(Layer::Paths {
-            paths: vec![source_req_path.clone().try_into()?],
-            prefix_options: Default::default(),
-        })?;
+        let layers = vec![
+            self.client.add_layer(Layer::Paths {
+                paths: vec![source_req_path.clone().try_into()?],
+                prefix_options: Default::default(),
+            })?,
+            self.client.add_layer(Layer::Stubs {
+                stubs: vec!["/dev/null".into()],
+            })?,
+        ];
         let (sender, receiver) = std::sync::mpsc::channel();
         self.client.add_job(
-            JobSpec::new("/usr/local/bin/pip", vec![layer])
+            JobSpec::new("/usr/bin/sh", layers)
                 .arguments([
-                    "install".to_owned(),
-                    "-r".to_owned(),
-                    source_req_path
-                        .to_str()
-                        .ok_or_else(|| anyhow!("non-UTF8 path"))?
-                        .into(),
+                    "-c".to_owned(),
+                    format!(
+                        "pip install -r {} && python -m compileall /",
+                        source_req_path
+                            .to_str()
+                            .ok_or_else(|| anyhow!("non-UTF8 path"))?
+                    ),
                 ])
                 .working_directory("/")
                 .image(image)
@@ -216,7 +225,10 @@ impl<'client> PytestTestCollector<'client> {
                 .root_overlay(JobRootOverlay::Local {
                     upper: upper.clone().try_into()?,
                     work: work.clone().try_into()?,
-                }),
+                })
+                .mounts([JobMount::Devices {
+                    devices: enum_set![JobDevice::Null],
+                }]),
             move |res| drop(sender.send(res)),
         )?;
         let (_, outcome) = receiver.recv()??;

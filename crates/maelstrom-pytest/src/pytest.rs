@@ -1,5 +1,5 @@
 use crate::{PytestCaseMetadata, PytestPackageId, PytestTestArtifact};
-use anyhow::Result;
+use anyhow::{bail, Result};
 use maelstrom_client::ProjectDir;
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
@@ -40,6 +40,22 @@ impl Iterator for TestArtifactStream {
 
     fn next(&mut self) -> Option<Result<PytestTestArtifact>> {
         self.0.next().map(Ok)
+    }
+}
+
+fn compile_python(path: &Path) -> Result<()> {
+    let mut cmd = Command::new("/usr/bin/env");
+    cmd.args(["python", "-m", "compileall"])
+        .arg(path)
+        .stderr(Stdio::null())
+        .stdout(Stdio::null());
+    let mut child = cmd.spawn()?;
+
+    let exit_status = child.wait()?;
+    if exit_status.success() {
+        Ok(())
+    } else {
+        bail!("failed to compile python")
     }
 }
 
@@ -97,6 +113,8 @@ pub fn pytest_collect_tests(
     _packages: Vec<String>,
     project_dir: &Root<ProjectDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
+    compile_python(project_dir.as_ref())?;
+
     let output = run_python(include_str!("py/collect_tests.py"))?;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
