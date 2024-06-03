@@ -444,18 +444,7 @@ impl Response for ReadResponse {
 }
 
 /// Response from a [`FuseFileSystem::read_link`] request
-#[derive(Debug)]
-pub struct ReadLinkResponse {
-    pub data: Vec<u8>,
-}
-
-impl Response for ReadLinkResponse {
-    type Reply = ReplyData;
-
-    async fn send(self, reply: ReplyData) {
-        reply.data(&self.data).await
-    }
-}
+pub type ReadLinkResponse = ReadResponse;
 
 impl Response for () {
     type Reply = ReplyEmpty;

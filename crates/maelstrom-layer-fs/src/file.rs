@@ -5,6 +5,7 @@ use crate::ty::{
 use crate::LayerFs;
 use anyhow::Result;
 use anyhow_trace::anyhow_trace;
+use maelstrom_base::Sha256Digest;
 use maelstrom_util::async_fs::{File, Fs};
 use maelstrom_util::io::BufferedStream;
 use serde::{Deserialize, Serialize};
@@ -106,6 +107,18 @@ pub struct FileMetadataWriter {
     file_table_start: u64,
     attr_table: BufferedStream<File>,
     attr_table_start: u64,
+    inline_data: File,
+}
+
+#[derive(Debug)]
+pub enum FileDataInput<'a> {
+    Empty,
+    Inline(&'a [u8]),
+    Digest {
+        digest: Sha256Digest,
+        offset: u64,
+        length: u64,
+    },
 }
 
 #[anyhow_trace]
@@ -115,6 +128,7 @@ impl FileMetadataWriter {
         layer_id: LayerId,
         file_table_path: &Path,
         attributes_table_path: &Path,
+        inline_data_path: &Path,
     ) -> Result<Self> {
         let mut file_table = BufferedStream::new(
             CHUNK_SIZE,
@@ -137,12 +151,17 @@ impl FileMetadataWriter {
         encode_with_rich_error(&mut attr_table, &AttributesTableHeader::default()).await?;
         let attr_table_start = file_table.stream_position().await?;
 
+        let inline_data = data_fs
+            .open_or_create_file_read_write(inline_data_path)
+            .await?;
+
         Ok(Self {
             layer_id,
             file_table,
             file_table_start,
             attr_table,
             attr_table_start,
+            inline_data,
         })
     }
 
@@ -150,13 +169,34 @@ impl FileMetadataWriter {
         &mut self,
         kind: FileType,
         attrs: FileAttributes,
-        data: FileData,
+        data: FileDataInput<'_>,
     ) -> Result<FileId> {
         let attr_id = AttributesId::try_from(
             self.attr_table.stream_position().await? - self.attr_table_start + 1,
         )
         .unwrap();
         encode_with_rich_error(&mut self.attr_table, &attrs).await?;
+
+        let data = match data {
+            FileDataInput::Empty => FileData::Empty,
+            FileDataInput::Digest {
+                digest,
+                offset,
+                length,
+            } => FileData::Digest {
+                digest,
+                offset,
+                length,
+            },
+            FileDataInput::Inline(data) => {
+                let offset = self.inline_data.stream_position().await?;
+                self.inline_data.write_all(data).await?;
+                FileData::Inline {
+                    offset,
+                    length: data.len() as u64,
+                }
+            }
+        };
 
         let entry = FileTableEntry {
             kind,

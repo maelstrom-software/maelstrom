@@ -191,7 +191,10 @@ pub struct FileAttributes {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum FileData {
     Empty,
-    Inline(Vec<u8>),
+    Inline {
+        offset: u64,
+        length: u64,
+    },
     Digest {
         digest: Sha256Digest,
         offset: u64,

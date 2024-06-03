@@ -1,8 +1,8 @@
 use crate::dir::{DirectoryDataReader, DirectoryDataWriter, OrderedDirectoryStream};
-use crate::file::FileMetadataWriter;
+use crate::file::{FileDataInput, FileMetadataWriter};
 use crate::ty::{
-    DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileData, FileId, FileType,
-    LayerId, LayerSuper,
+    DirectoryEntryData, DirectoryEntryFileData, FileAttributes, FileId, FileType, LayerId,
+    LayerSuper,
 };
 use crate::{BlobDir, LayerFs};
 use anyhow::bail;
@@ -85,12 +85,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
         let layer_fs = LayerFs::new(data_dir, blob_dir, LayerSuper::default()).await?;
         let file_table_path = layer_fs.file_table_path(LayerId::BOTTOM).await?;
         let attribute_table_path = layer_fs.attributes_table_path(LayerId::BOTTOM).await?;
+        let inline_data_path = layer_fs.inline_data_path(LayerId::BOTTOM).await?;
 
         let mut file_writer = FileMetadataWriter::new(
             data_fs,
             LayerId::BOTTOM,
             &file_table_path,
             &attribute_table_path,
+            &inline_data_path,
         )
         .await?;
         let root = file_writer
@@ -101,7 +103,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
                     mode: Mode(0o777),
                     mtime: time,
                 },
-                FileData::Empty,
+                FileDataInput::Empty,
             )
             .await?;
         assert_eq!(root, FileId::root(LayerId::BOTTOM));
@@ -180,7 +182,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
     ) -> Result<FileId> {
         let file_id = self
             .file_writer
-            .insert_file(FileType::Directory, attrs, FileData::Empty)
+            .insert_file(FileType::Directory, attrs, FileDataInput::Empty)
             .await?;
         self.add_link(parent, name, file_id, FileType::Directory)
             .await?
@@ -233,7 +235,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
         &mut self,
         path: &Utf8Path,
         attrs: FileAttributes,
-        data: FileData,
+        data: FileDataInput<'_>,
     ) -> Result<FileId> {
         let file_id = self
             .file_writer
@@ -336,7 +338,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
     pub async fn add_symlink_path(
         &mut self,
         path: &Utf8Path,
-        target: impl Into<Vec<u8>>,
+        target: impl AsRef<[u8]>,
     ) -> Result<FileId> {
         let attrs = FileAttributes {
             size: 0,
@@ -345,7 +347,11 @@ impl<'fs> BottomLayerBuilder<'fs> {
         };
         let file_id = self
             .file_writer
-            .insert_file(FileType::Symlink, attrs, FileData::Inline(target.into()))
+            .insert_file(
+                FileType::Symlink,
+                attrs,
+                FileDataInput::Inline(target.as_ref()),
+            )
             .await?;
 
         let parent_id = if let Some(parent) = path.parent() {
@@ -446,7 +452,7 @@ impl<'fs> BottomLayerBuilder<'fs> {
                             mode: Mode(header.mode()?),
                             mtime: UnixTimestamp(header.mtime()?.try_into()?),
                         },
-                        FileData::Digest {
+                        FileDataInput::Digest {
                             digest: digest.clone(),
                             offset: entry.raw_file_position(),
                             length: header.entry_size()?,
@@ -514,14 +520,14 @@ impl<'fs> BottomLayerBuilder<'fs> {
                     }
                 }
                 ManifestEntryData::File(data) => {
-                    let data = match data {
-                        ManifestFileData::Digest(digest) => FileData::Digest {
-                            digest,
+                    let data = match &data {
+                        ManifestFileData::Digest(digest) => FileDataInput::Digest {
+                            digest: digest.clone(),
                             offset: 0,
                             length: entry.metadata.size,
                         },
-                        ManifestFileData::Inline(data) => FileData::Inline(data),
-                        ManifestFileData::Empty => FileData::Empty,
+                        ManifestFileData::Inline(data) => FileDataInput::Inline(data),
+                        ManifestFileData::Empty => FileDataInput::Empty,
                     };
                     self.add_file_path(&path, attrs, data).await?;
                 }
@@ -760,38 +766,31 @@ impl<'fs> UpperLayerBuilder<'fs> {
         Ok(Self { upper, lower })
     }
 
-    async fn hard_link_files(&mut self, other: &LayerFs) -> Result<()> {
-        let other_file_table = other
-            .file_table_path(other.layer_super().await?.layer_id)
-            .await?;
-        let upper_file_table = self
-            .upper
-            .file_table_path(self.upper.layer_super().await?.layer_id)
-            .await?;
-        if self.upper.data_fs.exists(&upper_file_table).await {
-            self.upper.data_fs.remove_file(&upper_file_table).await?;
+    async fn do_hard_link(&mut self, original: &Path, link: &Path) -> Result<()> {
+        if self.upper.data_fs.exists(&link).await {
+            self.upper.data_fs.remove_file(&link).await?;
         }
-        self.upper
-            .data_fs
-            .hard_link(other_file_table, upper_file_table)
+        self.upper.data_fs.hard_link(original, link).await?;
+        Ok(())
+    }
+
+    async fn hard_link_files(&mut self, other: &LayerFs) -> Result<()> {
+        let other_layer_id = other.layer_super().await?.layer_id;
+        let upper_layer_id = self.upper.layer_super().await?.layer_id;
+
+        let other_file_table = other.file_table_path(other_layer_id).await?;
+        let upper_file_table = self.upper.file_table_path(upper_layer_id).await?;
+        self.do_hard_link(&other_file_table, &upper_file_table)
             .await?;
 
-        let other_attribute_table = other
-            .attributes_table_path(other.layer_super().await?.layer_id)
+        let other_attribute_table = other.attributes_table_path(other_layer_id).await?;
+        let upper_attribute_table = self.upper.attributes_table_path(upper_layer_id).await?;
+        self.do_hard_link(&other_attribute_table, &upper_attribute_table)
             .await?;
-        let upper_attribute_table = self
-            .upper
-            .attributes_table_path(self.upper.layer_super().await?.layer_id)
-            .await?;
-        if self.upper.data_fs.exists(&upper_attribute_table).await {
-            self.upper
-                .data_fs
-                .remove_file(&upper_attribute_table)
-                .await?;
-        }
-        self.upper
-            .data_fs
-            .hard_link(other_attribute_table, upper_attribute_table)
+
+        let other_inline_data = other.inline_data_path(other_layer_id).await?;
+        let upper_inline_data = self.upper.inline_data_path(upper_layer_id).await?;
+        self.do_hard_link(&other_inline_data, &upper_inline_data)
             .await?;
 
         Ok(())

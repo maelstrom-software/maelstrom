@@ -264,6 +264,10 @@ impl LayerFs {
         Ok(self.data_path(layer_id).await?.join("attributes_table.bin"))
     }
 
+    async fn inline_data_path(&self, layer_id: LayerId) -> Result<PathBuf> {
+        Ok(self.data_path(layer_id).await?.join("inline_data.bin"))
+    }
+
     async fn layer_super(&self) -> Result<LayerSuper> {
         Ok(self.layer_super.read(&self.data_fs).await?.clone())
     }
@@ -306,7 +310,7 @@ impl LayerFs {
 pub struct ReaderCache {
     dir_readers: LruCache<PathBuf, Arc<Mutex<DirectoryDataReader>>>,
     file_readers: LruCache<PathBuf, Arc<Mutex<FileMetadataReader>>>,
-    data_files: LruCache<Sha256Digest, Arc<std::fs::File>>,
+    data_files: LruCache<PathBuf, Arc<std::fs::File>>,
 }
 
 impl Default for ReaderCache {
@@ -363,15 +367,29 @@ impl ReaderCache {
         layer_fs: &LayerFs,
         digest: &Sha256Digest,
     ) -> Result<Arc<std::fs::File>> {
-        if let Some(file) = self.data_files.get(digest) {
+        let path = layer_fs.cache_entry(digest).to_path_buf();
+        if let Some(file) = self.data_files.get(&path) {
             Ok(file.clone())
         } else {
-            let file = layer_fs
-                .data_fs
-                .open_file(layer_fs.cache_entry(digest))
-                .await?;
+            let file = layer_fs.data_fs.open_file(&path).await?;
             let file = Arc::new(file.into_std().await);
-            self.data_files.push(digest.clone(), file.clone());
+            self.data_files.push(path, file.clone());
+            Ok(file)
+        }
+    }
+
+    async fn inline_data(
+        &mut self,
+        layer_fs: &LayerFs,
+        layer_id: LayerId,
+    ) -> Result<Arc<std::fs::File>> {
+        let path = layer_fs.inline_data_path(layer_id).await?;
+        if let Some(file) = self.data_files.get(&path) {
+            Ok(file.clone())
+        } else {
+            let file = layer_fs.data_fs.open_file(&path).await?;
+            let file = Arc::new(file.into_std().await);
+            self.data_files.push(path, file.clone());
             Ok(file)
         }
     }
@@ -390,6 +408,30 @@ impl LayerFsFuseAdapter {
             log,
             cache,
         }
+    }
+
+    fn splice_file(
+        &self,
+        file: Arc<std::fs::File>,
+        file_start: u64,
+        file_length: u64,
+        offset: i64,
+        size: u64,
+    ) -> ErrnoResult<ReadResponse> {
+        let read_start = file_start + to_einval::<u64, _>(self.log.clone(), offset.try_into())?;
+        let file_end = file_start + file_length;
+        if read_start > file_end {
+            return Err(Errno::EINVAL);
+        }
+
+        let read_end = std::cmp::min(read_start + size, file_end);
+        let read_length = read_end - read_start;
+
+        Ok(ReadResponse::Splice {
+            file,
+            offset: read_start,
+            length: read_length as usize,
+        })
     }
 }
 
@@ -471,32 +513,25 @@ impl FuseFileSystem for LayerFsFuseAdapter {
         }
         match data {
             FileData::Empty => Ok(ReadResponse::Buffer { data: vec![] }),
-            FileData::Inline(inline) => {
-                let offset = to_einval(self.log.clone(), usize::try_from(offset))?;
-                if offset >= inline.len() {
-                    return Err(Errno::EINVAL);
-                }
-                let size = std::cmp::min(size as usize, inline.len() - offset);
-
-                Ok(ReadResponse::Buffer {
-                    data: inline[offset..(offset + size)].to_vec(),
-                })
+            FileData::Inline {
+                offset: file_offset,
+                length: file_length,
+            } => {
+                let file = to_eio(
+                    self.log.clone(),
+                    self.cache
+                        .lock()
+                        .await
+                        .inline_data(&self.layer_fs, file.layer())
+                        .await,
+                )?;
+                self.splice_file(file, file_offset, file_length, offset, size as u64)
             }
             FileData::Digest {
                 digest,
-                offset: file_start,
+                offset: file_offset,
                 length: file_length,
             } => {
-                let read_start =
-                    file_start + to_einval::<u64, _>(self.log.clone(), offset.try_into())?;
-                let file_end = file_start + file_length;
-                if read_start > file_end {
-                    return Err(Errno::EINVAL);
-                }
-
-                let read_end = std::cmp::min(read_start + size as u64, file_end);
-                let read_length = read_end - read_start;
-
                 let file = to_eio(
                     self.log.clone(),
                     self.cache
@@ -505,11 +540,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
                         .data_file(&self.layer_fs, &digest)
                         .await,
                 )?;
-                Ok(ReadResponse::Splice {
-                    file,
-                    offset: read_start,
-                    length: read_length as usize,
-                })
+                self.splice_file(file, file_offset, file_length, offset, size as u64)
             }
         }
     }
@@ -573,10 +604,18 @@ impl FuseFileSystem for LayerFsFuseAdapter {
             return Err(Errno::EINVAL);
         }
         match data {
-            FileData::Empty => Ok(ReadLinkResponse { data: vec![] }),
-            FileData::Inline(inline) => Ok(ReadLinkResponse {
-                data: inline.to_vec(),
-            }),
+            FileData::Empty => Ok(ReadLinkResponse::Buffer { data: vec![] }),
+            FileData::Inline { offset, length } => {
+                let file = to_eio(
+                    self.log.clone(),
+                    self.cache
+                        .lock()
+                        .await
+                        .inline_data(&self.layer_fs, file.layer())
+                        .await,
+                )?;
+                self.splice_file(file, offset, length, 0, length)
+            }
             FileData::Digest { .. } => Err(Errno::EIO),
         }
     }
@@ -589,6 +628,7 @@ impl FuseFileSystem for LayerFsFuseAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::file::FileDataInput;
     use maelstrom_base::manifest::UnixTimestamp;
     use maelstrom_base::{
         manifest::{
@@ -610,7 +650,7 @@ mod tests {
     enum BuildEntryData {
         Regular {
             type_: FileType,
-            data: FileData,
+            data: FileDataInput<'static>,
             mode: u32,
             opaque_dir: bool,
         },
@@ -627,8 +667,8 @@ mod tests {
     }
 
     impl BuildEntry {
-        fn reg(path: impl Into<String>, data: impl Into<Vec<u8>>) -> Self {
-            Self::reg_mode(path, FileData::Inline(data.into()), 0o555)
+        fn reg(path: impl Into<String>, data: &'static [u8]) -> Self {
+            Self::reg_mode(path, FileDataInput::Inline(data), 0o555)
         }
 
         fn reg_digest(
@@ -639,7 +679,7 @@ mod tests {
         ) -> Self {
             Self::reg_mode(
                 path,
-                FileData::Digest {
+                FileDataInput::Digest {
                     digest,
                     offset,
                     length,
@@ -657,14 +697,14 @@ mod tests {
                 path: path.into(),
                 data: BuildEntryData::Regular {
                     type_: FileType::RegularFile,
-                    data: FileData::Empty,
+                    data: FileDataInput::Empty,
                     mode,
                     opaque_dir: false,
                 },
             }
         }
 
-        fn reg_mode(path: impl Into<String>, data: FileData, mode: u32) -> Self {
+        fn reg_mode(path: impl Into<String>, data: FileDataInput<'static>, mode: u32) -> Self {
             Self {
                 path: path.into(),
                 data: BuildEntryData::Regular {
@@ -689,7 +729,7 @@ mod tests {
                 path: path.into(),
                 data: BuildEntryData::Regular {
                     type_: FileType::Directory,
-                    data: FileData::Empty,
+                    data: FileDataInput::Empty,
                     mode,
                     opaque_dir: opaque,
                 },
@@ -896,11 +936,11 @@ mod tests {
             for BuildEntry { path, data } in files {
                 let size = match &data {
                     BuildEntryData::Regular {
-                        data: ty::FileData::Inline(d),
+                        data: FileDataInput::Inline(data),
                         ..
-                    } => d.len() as u64,
+                    } => data.len() as u64,
                     BuildEntryData::Regular {
-                        data: ty::FileData::Digest { length, .. },
+                        data: FileDataInput::Digest { length, .. },
                         ..
                     } => *length,
                     _ => 0,
@@ -998,8 +1038,8 @@ mod tests {
                             other => panic!("unsupported entry type {other:?}"),
                         });
                         let data = match data {
-                            ty::FileData::Empty => vec![],
-                            ty::FileData::Inline(d) => d,
+                            FileDataInput::Empty => vec![],
+                            FileDataInput::Inline(d) => d.to_vec(),
                             _ => panic!(),
                         };
                         header.set_size(data.len() as u64);
@@ -1066,9 +1106,9 @@ mod tests {
                         opaque_dir,
                     } => {
                         let size = match &data {
-                            ty::FileData::Empty => 0,
-                            ty::FileData::Inline(d) => d.len() as u64,
-                            ty::FileData::Digest { length, .. } => *length,
+                            FileDataInput::Empty => 0,
+                            FileDataInput::Inline(d) => d.len() as u64,
+                            FileDataInput::Digest { length, .. } => *length,
                         };
                         let metadata = ManifestEntryMetadata {
                             size,
@@ -1086,9 +1126,9 @@ mod tests {
                                 .unwrap(),
                             FileType::RegularFile => {
                                 let data = match data {
-                                    ty::FileData::Empty => ManifestFileData::Empty,
-                                    ty::FileData::Inline(d) => ManifestFileData::Inline(d),
-                                    ty::FileData::Digest { digest, offset, .. } => {
+                                    FileDataInput::Empty => ManifestFileData::Empty,
+                                    FileDataInput::Inline(d) => ManifestFileData::Inline(d.into()),
+                                    FileDataInput::Digest { digest, offset, .. } => {
                                         assert_eq!(offset, 0);
                                         ManifestFileData::Digest(digest)
                                     }
