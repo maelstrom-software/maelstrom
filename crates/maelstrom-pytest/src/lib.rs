@@ -332,6 +332,15 @@ impl TestArtifact for PytestTestArtifact {
             ],
         )
     }
+
+    fn format_case(
+        &self,
+        _package_name: &str,
+        _case_name: &str,
+        case_metadata: &PytestCaseMetadata,
+    ) -> String {
+        case_metadata.node_id.clone()
+    }
 }
 
 #[derive(Clone, Debug)]

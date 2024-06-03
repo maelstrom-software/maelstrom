@@ -210,19 +210,6 @@ where
             .collect::<Result<Vec<_>>>()
     }
 
-    fn format_case_str(&self, case: &str) -> String {
-        let mut s = self.package_name.to_string();
-        s += " ";
-
-        let artifact_name = self.artifact.name();
-        if artifact_name != self.package_name {
-            s += artifact_name;
-            s += " ";
-        }
-        s += case;
-        s
-    }
-
     fn generate_artifacts(&mut self) -> Result<GeneratedArtifacts> {
         if let Some(generated_artifacts) = &self.generated_artifacts {
             return Ok(generated_artifacts.clone());
@@ -241,7 +228,9 @@ where
         case_name: &str,
         case_metadata: &<MainAppDepsT::TestCollector as CollectTests>::CaseMetadata,
     ) -> Result<EnqueueResult> {
-        let case_str = self.format_case_str(case_name);
+        let case_str = self
+            .artifact
+            .format_case(&self.package_name, case_name, case_metadata);
         self.ind
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);

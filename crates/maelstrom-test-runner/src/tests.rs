@@ -363,6 +363,15 @@ impl TestArtifact for FakeTestArtifact {
         let binary_name = self.path().file_name().unwrap().to_str().unwrap();
         (format!("/{binary_name}").into(), vec![case_name.into()])
     }
+
+    fn format_case(
+        &self,
+        package_name: &str,
+        case_name: &str,
+        _case_metadata: &NoCaseMetadata,
+    ) -> String {
+        format!("{package_name} {case_name}")
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -131,6 +131,12 @@ pub trait TestArtifact: fmt::Debug {
         case_name: &str,
         case_metadata: &Self::CaseMetadata,
     ) -> (Utf8PathBuf, Vec<String>);
+    fn format_case(
+        &self,
+        package_name: &str,
+        case_name: &str,
+        case_metadata: &Self::CaseMetadata,
+    ) -> String;
 }
 
 pub trait TestPackage: Clone + fmt::Debug {

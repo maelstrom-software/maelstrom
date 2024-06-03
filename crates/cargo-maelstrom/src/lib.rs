@@ -257,6 +257,24 @@ impl TestArtifact for CargoTestArtifact {
             vec!["--exact".into(), "--nocapture".into(), case_name.into()],
         )
     }
+
+    fn format_case(
+        &self,
+        package_name: &str,
+        case_name: &str,
+        _case_metadata: &NoCaseMetadata,
+    ) -> String {
+        let mut s = package_name.to_string();
+        s += " ";
+
+        let artifact_name = self.name();
+        if artifact_name != package_name {
+            s += artifact_name;
+            s += " ";
+        }
+        s += case_name;
+        s
+    }
 }
 
 struct CargoTestArtifactStream(cargo::TestArtifactStream);
