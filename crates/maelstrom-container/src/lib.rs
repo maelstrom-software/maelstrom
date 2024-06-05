@@ -146,9 +146,11 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
 
 #[anyhow_trace]
 async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
+    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
+
     let url = format!(
         "https://auth.docker.io/\
-        token?service=registry.docker.io&scope=repository:library/{pkg}:pull"
+        token?service=registry.docker.io&scope=repository:{library}/{name}:pull"
     );
     let res: AuthResponse = client.get(&url).send().await?.json().await?;
     Ok(res.token)
@@ -161,11 +163,12 @@ async fn get_image_index(
     pkg: &str,
     tag_or_digest: &str,
 ) -> Result<ImageIndex> {
+    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
     decode_and_check_for_error(
         &format!("{pkg}:{tag_or_digest}"),
         client
             .get(&format!(
-                "https://registry-1.docker.io/v2/library/{pkg}/manifests/{tag_or_digest}"
+                "https://registry-1.docker.io/v2/{library}/{name}/manifests/{tag_or_digest}"
             ))
             .header("Authorization", format!("Bearer {token}"))
             .header(
@@ -198,11 +201,12 @@ async fn get_image_manifest(
     pkg: &str,
     manifest_digest: &str,
 ) -> Result<ImageManifest> {
+    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
     decode_and_check_for_error(
         pkg,
         client
             .get(&format!(
-                "https://registry-1.docker.io/v2/library/{pkg}/manifests/{manifest_digest}"
+                "https://registry-1.docker.io/v2/{library}/{name}/manifests/{manifest_digest}"
             ))
             .header("Authorization", format!("Bearer {token}"))
             .header(
@@ -222,11 +226,12 @@ async fn get_image_config(
     pkg: &str,
     config_digest: &str,
 ) -> Result<ImageConfiguration> {
+    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
     let config: oci_spec::image::ImageConfiguration = decode_and_check_for_error(
         pkg,
         client
             .get(&format!(
-                "https://registry-1.docker.io/v2/library/{pkg}/blobs/{config_digest}"
+                "https://registry-1.docker.io/v2/{library}/{name}/blobs/{config_digest}"
             ))
             .header("Authorization", format!("Bearer {token}"))
             .header(
@@ -311,9 +316,10 @@ async fn download_layer(
     prog: impl ProgressTracker,
     mut out: impl AsyncWrite + Unpin,
 ) -> Result<()> {
+    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
     let tar_stream = client
         .get(&format!(
-            "https://registry-1.docker.io/v2/library/{pkg}/blobs/{digest}"
+            "https://registry-1.docker.io/v2/{library}/{name}/blobs/{digest}"
         ))
         .header("Authorization", format!("Bearer {token}"))
         .send()
