@@ -10,8 +10,8 @@ use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
     self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
     FsconfigCommand, FsmountFlags, FsopenFlags, Gid, Ioctl, MountAttrs, MountFlags, MoveMountFlags,
-    NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, SocketDomain, SocketProtocol, SocketType,
-    Uid, UmountFlags,
+    OpenFlags, OpenTreeFlags, OwnedFd, Sockaddr, SocketDomain, SocketProtocol, SocketType, Uid,
+    UmountFlags,
 };
 
 struct SliceFmt<'a> {
@@ -61,9 +61,9 @@ impl<'a> FdSlot<'a> {
 /// A syscall to call. This should be part of slice, which we refer to as a script. Some variants
 /// deal with a value. This is a `usize` local variable that can be written to and read from.
 pub enum Syscall<'a> {
-    BindNetlink {
+    Bind {
         fd: FdSlot<'a>,
-        addr: &'a NetlinkSocketAddr,
+        addr: &'a Sockaddr,
     },
     Chdir {
         path: &'a CStr,
@@ -176,7 +176,7 @@ pub enum Syscall<'a> {
 impl<'a> Syscall<'a> {
     fn call(&mut self, write_sock: &linux::UnixStream) -> result::Result<(), Errno> {
         match self {
-            Syscall::BindNetlink { fd, addr } => linux::bind_netlink(fd.get(), addr),
+            Syscall::Bind { fd, addr } => linux::bind(fd.get(), addr),
             Syscall::Chdir { path } => linux::chdir(path),
             Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
             Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),

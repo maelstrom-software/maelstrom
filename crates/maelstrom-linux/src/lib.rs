@@ -376,25 +376,6 @@ impl MoveMountFlags {
     pub const T_EMPTY_PATH: Self = Self(libc::MOVE_MOUNT_T_EMPTY_PATH);
 }
 
-#[repr(C)]
-pub struct NetlinkSocketAddr {
-    sin_family: sa_family_t,
-    nl_pad: u16,
-    nl_pid: u32,
-    nl_groups: u32,
-}
-
-impl Default for NetlinkSocketAddr {
-    fn default() -> Self {
-        NetlinkSocketAddr {
-            sin_family: libc::AF_NETLINK as sa_family_t,
-            nl_pad: 0,
-            nl_pid: 0, // the kernel
-            nl_groups: 0,
-        }
-    }
-}
-
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct OpenFlags(c_int);
 
@@ -637,6 +618,37 @@ impl Deref for SockaddrStorage {
 }
 
 #[repr(C)]
+pub struct SockaddrNetlink {
+    sin_family: sa_family_t,
+    nl_pad: u16,
+    nl_pid: u32,
+    nl_groups: u32,
+}
+
+impl Default for SockaddrNetlink {
+    fn default() -> Self {
+        Self {
+            sin_family: libc::AF_NETLINK as sa_family_t,
+            nl_pad: 0,
+            nl_pid: 0, // the kernel
+            nl_groups: 0,
+        }
+    }
+}
+
+impl Deref for SockaddrNetlink {
+    type Target = Sockaddr;
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            Sockaddr::from_raw_parts(
+                self as *const SockaddrNetlink as *const sockaddr,
+                mem::size_of_val(self),
+            )
+        }
+    }
+}
+
+#[repr(C)]
 pub struct SockaddrUn {
     family: sa_family_t,
     path: [u8],
@@ -809,12 +821,6 @@ pub fn accept(fd: Fd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), 
 pub fn bind(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {
     let (addr, len) = sockaddr.as_parts();
     Errno::result(unsafe { libc::bind(fd.0, addr, len) }).map(drop)
-}
-
-pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
-    let sockaddr_ptr = sockaddr as *const NetlinkSocketAddr as *const sockaddr;
-    let sockaddr_len = mem::size_of::<NetlinkSocketAddr>() as socklen_t;
-    Errno::result(unsafe { libc::bind(fd.0, sockaddr_ptr, sockaddr_len) }).map(drop)
 }
 
 pub fn chdir(path: &CStr) -> Result<(), Errno> {

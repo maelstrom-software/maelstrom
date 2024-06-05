@@ -14,8 +14,8 @@ use maelstrom_base::{
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
     Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, Ioctl, MountAttrs, MountFlags,
-    MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, Signal,
-    SockaddrUnStorage, SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
+    MoveMountFlags, OpenFlags, OpenTreeFlags, OwnedFd, Signal, SockaddrNetlink, SockaddrUnStorage,
+    SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
 };
 use maelstrom_util::{
     config::common::InlineLimit,
@@ -119,7 +119,7 @@ pub struct Executor<'clock, ClockT> {
     upper_dir: CString,
     work_dir: CString,
     root_mode: u32,
-    netlink_socket_addr: NetlinkSocketAddr,
+    netlink_socket_addr: SockaddrNetlink,
     netlink_message: Box<[u8]>,
     clock: &'clock ClockT,
 }
@@ -162,7 +162,7 @@ impl<'clock, ClockT> Executor<'clock, ClockT> {
         let tmpfs_dir = CString::new(tmpfs_dir.as_os_str().as_bytes())?;
         let upper_dir = CString::new(upper_dir.as_os_str().as_bytes())?;
         let work_dir = CString::new(work_dir.as_os_str().as_bytes())?;
-        let netlink_socket_addr = NetlinkSocketAddr::default();
+        let netlink_socket_addr = SockaddrNetlink::default();
         let mut netlink_message = LinkMessage::default();
         netlink_message.header.index = 1;
         netlink_message.header.flags |= IFF_UP;
@@ -508,7 +508,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
                 // Bind the socket.
                 builder.push(
-                    Syscall::BindNetlink {
+                    Syscall::Bind {
                         fd,
                         addr: &self.netlink_socket_addr,
                     },
