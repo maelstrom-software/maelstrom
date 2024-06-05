@@ -533,19 +533,11 @@ impl Sockaddr {
         self.family
     }
 
-    fn data_offset(&self) -> usize {
-        let start_ptr = &self.family as *const sa_family_t as *const u8 as usize;
-        let data_ptr = &self.data[0] as *const u8 as usize;
-        let data_offset = data_ptr - start_ptr;
-        assert_eq!(data_offset, 2);
-        data_offset
-    }
-
     /// Return the size, in bytes, of the pointed-to `Sockaddr`. This byte count includes the
     /// leading two bytes used to store the address family.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.data.len() + self.data_offset()
+        self.data.len() + 2
     }
 
     /// Return a reference to the underlying `sockaddr` and the length. This is useful for calling
@@ -567,9 +559,7 @@ impl Sockaddr {
     /// The `sockaddr` pointer must point to a valid `sockaddr` of some sort, and `len` must be
     /// less than or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
-        let res = &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self);
-        assert_eq!(res.data_offset(), 2);
-        res
+        &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self)
     }
 
     pub fn as_sockaddr_un(&self) -> Option<&SockaddrUn> {
@@ -665,7 +655,6 @@ impl SockaddrUn {
     /// or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
         let res = &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self);
-        assert_eq!(res.data_offset(), 2);
         assert_eq!(res.family, libc::AF_UNIX as sa_family_t);
         res
     }
@@ -702,12 +691,10 @@ impl SockaddrUnStorage {
                     path.len(),
                 )
             };
-            let res = Self {
+            Ok(Self {
                 inner,
                 len: path.len() as socklen_t + 2,
-            };
-            assert_eq!(res.data_offset(), 2);
-            Ok(res)
+            })
         }
     }
 
