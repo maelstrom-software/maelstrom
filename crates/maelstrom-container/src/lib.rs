@@ -234,10 +234,6 @@ async fn get_image_config(
                 "https://registry-1.docker.io/v2/{library}/{name}/blobs/{config_digest}"
             ))
             .header("Authorization", format!("Bearer {token}"))
-            .header(
-                "Accept",
-                "sha256:a416a98b71e224a31ee99cff8e16063554498227d2b696152a9c3e0aa65e5824",
-            )
             .send()
             .await?,
     )
