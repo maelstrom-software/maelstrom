@@ -3271,6 +3271,7 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "bumpalo",
+ "bytes",
  "bytesize",
  "bytesize-serde",
  "clap",

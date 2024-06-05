@@ -1,6 +1,6 @@
 //! Easily start and stop processes.
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, Context as _, Error, Result};
 use bumpalo::{
     collections::{String as BumpString, Vec as BumpVec},
     Bump,
@@ -13,9 +13,9 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags,
-    MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, Signal, SocketDomain,
-    SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
+    Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, Ioctl, MountAttrs, MountFlags,
+    MoveMountFlags, NetlinkSocketAddr, OpenFlags, OpenTreeFlags, OwnedFd, Signal,
+    SockaddrUnStorage, SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
 };
 use maelstrom_util::{
     config::common::InlineLimit,
@@ -31,7 +31,7 @@ use std::{
     ffi::{CStr, CString},
     fmt::Write as _,
     fs::File,
-    io::Read as _,
+    io::{Read as _, Write as _},
     mem,
     os::{
         fd,
@@ -42,7 +42,7 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, Interest, ReadBuf},
+    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, AsyncWrite, Interest, ReadBuf},
     runtime, select,
     sync::oneshot,
     task::JoinSet,
@@ -252,7 +252,9 @@ async fn wait_for_child(
 }
 
 /// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
-struct AsyncFile(AsyncFd<File>);
+struct AsyncFile {
+    inner: AsyncFd<File>,
+}
 
 impl AsyncRead for AsyncFile {
     fn poll_read(
@@ -261,7 +263,7 @@ impl AsyncRead for AsyncFile {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<io::Result<()>> {
         loop {
-            let mut guard = ready!(self.0.poll_read_ready(cx))?;
+            let mut guard = ready!(self.inner.poll_read_ready(cx))?;
 
             let unfilled = buf.initialize_unfilled();
             match guard.try_io(|inner| inner.get_ref().read(unfilled)) {
@@ -276,12 +278,41 @@ impl AsyncRead for AsyncFile {
     }
 }
 
+impl AsyncWrite for AsyncFile {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let mut guard = ready!(self.inner.poll_write_ready(cx))?;
+
+            match guard.try_io(|inner| inner.get_ref().write(buf)) {
+                Ok(result) => return Poll::Ready(result),
+                Err(_would_block) => continue,
+            }
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        todo!();
+        //        self.inner.get_ref().shutdown(std::net::Shutdown::Write)?;
+        //        Poll::Ready(Ok(()))
+    }
+}
+
 /// Read all of the contents of `stream` and return the appropriate [`JobOutputResult`].
 async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
     // Make the read side of the pipe non-blocking so that we can use it with Tokio.
     linux::fcntl_setfl(fd.as_fd(), OpenFlags::NONBLOCK).map_err(Error::from)?;
-    let stream = AsyncFile(AsyncFd::new(File::from(fd::OwnedFd::from(fd))).map_err(Error::from)?);
+    let stream = AsyncFile {
+        inner: AsyncFd::new(File::from(fd::OwnedFd::from(fd))).map_err(Error::from)?,
+    };
     let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
@@ -430,6 +461,20 @@ impl<'bump> Drop for ChildProcess<'bump> {
     }
 }
 
+enum Stdio {
+    Pipes {
+        stdout_read: OwnedFd,
+        stdout_write: OwnedFd,
+        stderr_read: OwnedFd,
+        stderr_write: OwnedFd,
+    },
+    Pty {
+        master: OwnedFd,
+        slave: OwnedFd,
+        socket: OwnedFd,
+    },
+}
+
 impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
     // Set up the network namespace. It's possible that we won't even create a new network
     // namespace, if JobNetwork::Local is specified.
@@ -496,36 +541,79 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
     }
 
-    fn set_up_stdout_and_stderr<'bump>(
-        &'bump self,
-        stdout: &OwnedFd,
-        stderr: &OwnedFd,
-        builder: &mut ScriptBuilder<'bump>,
-    ) {
-        // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old stdout
-        // and stderr. We don't have to worry about closing the old fds because they will be marked
-        // close-on-exec below.
-        builder.push(
-            Syscall::Dup2 {
-                from: stdout.as_fd(),
-                to: Fd::STDOUT,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
-        );
-        builder.push(
-            Syscall::Dup2 {
-                from: stderr.as_fd(),
-                to: Fd::STDERR,
-            },
-            &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
-        );
-    }
-
     fn set_up_session<'bump>(&'bump self, builder: &mut ScriptBuilder<'bump>) {
         // Make the child process the leader of a new session and process group. If we didn't do
         // this, then the process would be a member of a process group and session headed by a
         // process outside of the pid namespace, which would be confusing.
+        //
+        // This needs to be called before set_up_stdio because if we're allocating a PTY, the child
+        // needs to be in its own session before it can make the PTY slave its controlling
+        // terminal.
         builder.push(Syscall::SetSid, &|err| syserr(anyhow!("setsid: {err}")));
+    }
+
+    fn set_up_stdio<'bump>(&'bump self, stdio: &Stdio, builder: &mut ScriptBuilder<'bump>) {
+        match stdio {
+            Stdio::Pipes {
+                stdout_write,
+                stderr_write,
+                ..
+            } => {
+                // Dup2 the pipe file descriptors to be stdout and stderr. This will close the old
+                // stdout and stderr. We don't have to worry about closing the old fds because they
+                // will be marked close-on-exec below.
+                builder.push(
+                    Syscall::Dup2 {
+                        from: stdout_write.as_fd(),
+                        to: Fd::STDOUT,
+                    },
+                    &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
+                );
+                builder.push(
+                    Syscall::Dup2 {
+                        from: stderr_write.as_fd(),
+                        to: Fd::STDERR,
+                    },
+                    &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
+                );
+            }
+            Stdio::Pty { slave, .. } => {
+                // Dup2 the pipe file descriptor to be stdin, stdout, and stderr. This will close
+                // the old stdin, stdout, and stderr. We don't have to worry about closing the old
+                // fd because it will be marked close-on-exec below.
+                builder.push(
+                    Syscall::Dup2 {
+                        from: slave.as_fd(),
+                        to: Fd::STDIN,
+                    },
+                    &|err| syserr(anyhow!("dup2-ing to stdin: {err}")),
+                );
+                builder.push(
+                    Syscall::Dup2 {
+                        from: slave.as_fd(),
+                        to: Fd::STDOUT,
+                    },
+                    &|err| syserr(anyhow!("dup2-ing to stdout: {err}")),
+                );
+                builder.push(
+                    Syscall::Dup2 {
+                        from: slave.as_fd(),
+                        to: Fd::STDERR,
+                    },
+                    &|err| syserr(anyhow!("dup2-ing to stderr: {err}")),
+                );
+
+                // We now have to make the slave PTY be our controlling terminal.
+                builder.push(
+                    Syscall::IoctlInt {
+                        fd: Fd::STDIN,
+                        ioctl: Ioctl::TIOCSCTTY,
+                        arg: 0,
+                    },
+                    &|err| syserr(anyhow!("setting TIOCSCTTY on stdin: {err}")),
+                );
+            }
+        }
     }
 
     fn set_up_user_namespace<'bump>(
@@ -1248,8 +1336,59 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // unnecessary ends in the parent and child. Alternatively, we could creates the pipes in
         // the child and then send the read ends back over the socket, but that seems unnecessarily
         // complex.
-        let (stdout_read_fd, stdout_write_fd) = linux::pipe().map_err(syserr)?;
-        let (stderr_read_fd, stderr_write_fd) = linux::pipe().map_err(syserr)?;
+        let stdio = match spec.allocate_tty {
+            None => {
+                let (stdout_read, stdout_write) = linux::pipe().map_err(syserr)?;
+                let (stderr_read, stderr_write) = linux::pipe().map_err(syserr)?;
+                Stdio::Pipes {
+                    stdout_read,
+                    stdout_write,
+                    stderr_read,
+                    stderr_write,
+                }
+            }
+            Some(addr) => {
+                // Open and connect the socket.
+                let socket = linux::socket(
+                    SocketDomain::UNIX,
+                    SocketType::STREAM | SocketType::NONBLOCK,
+                    Default::default(),
+                )
+                .map_err(syserr)?;
+                let sockaddr = SockaddrUnStorage::new(addr.as_slice()).map_err(syserr)?;
+                linux::connect(socket.as_fd(), &sockaddr).map_err(syserr)?;
+
+                // Open the master.
+                let master = linux::open(
+                    c"/dev/ptmx",
+                    OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK,
+                    Default::default(),
+                )
+                .context("opening /dev/ptmx")
+                .map_err(syserr)?;
+                linux::grantpt(master.as_fd()).map_err(syserr)?;
+                linux::unlockpt(master.as_fd()).map_err(syserr)?;
+
+                // Open the slave.
+                let mut slave_name = [0u8; 100];
+                linux::ptsname(master.as_fd(), slave_name.as_mut_slice()).map_err(syserr)?;
+                let slave_name =
+                    CStr::from_bytes_until_nul(slave_name.as_slice()).map_err(syserr)?;
+                let slave = linux::open(
+                    slave_name,
+                    OpenFlags::RDWR | OpenFlags::NOCTTY,
+                    Default::default(),
+                )
+                .map_err(syserr)?;
+
+                Stdio::Pty {
+                    master,
+                    slave,
+                    socket,
+                }
+            }
+        };
+
         let (read_sock, write_sock) = linux::UnixStream::pair().map_err(syserr)?;
 
         // At a high level, the approach we're going to take is to build a "script" here in the
@@ -1292,8 +1431,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // group leader, and detach it from the parent's controlling terminal.
         self.set_up_session(&mut builder);
 
-        // Dup stdout and stderr.
-        self.set_up_stdout_and_stderr(&stdout_write_fd, &stderr_write_fd, &mut builder);
+        // Set up stdio to either be pipes or a PTY. This has to happen after setting up the
+        // session if we're allocating a PTY.
+        self.set_up_stdio(&stdio, &mut builder);
 
         // Set up the network namespace, returning true iff we should actually create a new network
         // namespace. If `newnet` is false, we should share the parent's network namespace.
@@ -1426,26 +1566,80 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             let _ = status_sender.send(wait_for_child(child_pidfd, kill_event_receiver).await);
         });
 
-        // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
-        // that we don't cause a deadlock on one while we're reading the other one.
-        //
-        // We put these in a JoinSet so that they will be canceled if we return early.
-        //
-        // We have to drop our own copies of the write side of the pipe. If we didn't, these tasks
-        // would never complete.
-        drop(stdout_write_fd);
-        drop(stderr_write_fd);
         let (stdout_sender, stdout_receiver) = oneshot::channel();
         let (stderr_sender, stderr_receiver) = oneshot::channel();
+
         let mut joinset = JoinSet::new();
-        joinset.spawn_on(
-            output_reader_task_main(stdout_read_fd, inline_limit, stdout_sender),
-            &runtime,
-        );
-        joinset.spawn_on(
-            output_reader_task_main(stderr_read_fd, inline_limit, stderr_sender),
-            &runtime,
-        );
+        match stdio {
+            Stdio::Pipes {
+                stdout_read,
+                stdout_write,
+                stderr_read,
+                stderr_write,
+            } => {
+                // Spawn independent tasks to consume stdout and stderr. We want to do this in parallel so
+                // that we don't cause a deadlock on one while we're reading the other one.
+                //
+                // We put these in a JoinSet so that they will be canceled if we return early.
+                //
+                // We have to drop our own copies of the write side of the pipe. If we didn't, these tasks
+                // would never complete.
+                drop(stdout_write);
+                drop(stderr_write);
+                joinset.spawn_on(
+                    output_reader_task_main(stdout_read, inline_limit, stdout_sender),
+                    &runtime,
+                );
+                joinset.spawn_on(
+                    output_reader_task_main(stderr_read, inline_limit, stderr_sender),
+                    &runtime,
+                );
+            }
+            Stdio::Pty {
+                master,
+                slave,
+                socket,
+            } => {
+                // There is no output sent back in the JobResult if there is a pty allocated.
+                let _ = stdout_sender.send(Ok(JobOutputResult::None));
+                let _ = stderr_sender.send(Ok(JobOutputResult::None));
+
+                // We don't use the PTY slave in the parent.
+                drop(slave);
+
+                // Turn the fds into things that tokio can use. Both of these were previously
+                // opened non-blocking.
+                let master = AsyncFile {
+                    inner: AsyncFd::new(File::from(fd::OwnedFd::from(master))).map_err(syserr)?,
+                };
+                let socket = AsyncFile {
+                    inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).map_err(syserr)?,
+                };
+                let (mut master_read, mut master_write) = io::split(master);
+                let (mut socket_read, mut socket_write) = io::split(socket);
+
+                // Spawn two tasks to proxy between the master and the socket.
+                let master_to_socket_handle = joinset.spawn_on(
+                    async move {
+                        let _ = io::copy(&mut master_read, &mut socket_write).await;
+                    },
+                    &runtime,
+                );
+                joinset.spawn_on(
+                    async move {
+                        let _ = io::copy(&mut socket_read, &mut master_write).await;
+                        // If the socket shuts down, we want to close the master. To do so, we
+                        // need to cancel the other which is reading from the master. Once that
+                        // task and this task exit, the read and write sides of the AsyncFile will
+                        // be dropped, which will drop the AsyncFd, which will close the file
+                        // descriptor for the master. This will cause the child process to get a
+                        // SIGHUP.
+                        master_to_socket_handle.abort();
+                    },
+                    &runtime,
+                );
+            }
+        }
 
         // Wait for everything and return the result.
         fn read_from_receiver<T>(receiver: oneshot::Receiver<Result<T>>) -> JobResult<T, Error> {
@@ -1488,15 +1682,17 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 mod tests {
     use super::*;
     use assert_matches::*;
+    use bytes::BytesMut;
     use bytesize::ByteSize;
     use indoc::indoc;
     use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path};
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
+    use maelstrom_linux::AcceptFlags;
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::{collections::HashSet, env, fs, path::PathBuf, str, sync::Arc};
+    use std::{collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration};
     use tempfile::{NamedTempFile, TempDir};
-    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::oneshot, sync::Mutex, task};
+    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::oneshot, sync::Mutex, task, time};
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -1578,7 +1774,7 @@ mod tests {
         expected_status: JobStatus,
         expected_stdout: JobOutputResult,
         expected_stderr: JobOutputResult,
-        expected_duration: std::time::Duration,
+        expected_duration: Duration,
     }
 
     impl Test {
@@ -1589,7 +1785,7 @@ mod tests {
                 expected_status: JobStatus::Exited(0),
                 expected_stdout: JobOutputResult::None,
                 expected_stderr: JobOutputResult::None,
-                expected_duration: std::time::Duration::from_secs(1),
+                expected_duration: Duration::from_secs(1),
             }
         }
 
@@ -2624,5 +2820,95 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
+    }
+
+    async fn expect(mut socket: impl AsyncRead + Unpin, expect: &str) {
+        let mut bytes = BytesMut::with_capacity(1000);
+        while let Ok(read_result) =
+            time::timeout(Duration::from_millis(100), socket.read_buf(&mut bytes)).await
+        {
+            read_result.unwrap();
+        }
+        assert_eq!(str::from_utf8(&*bytes).unwrap(), expect,);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tty() {
+        let sock =
+            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
+        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
+        linux::listen(sock.as_fd(), 1).unwrap();
+        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
+        let path = sockaddr.as_sockaddr_un().unwrap().path();
+        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(AbstractUnixDomainAddress::new(
+            path.try_into().unwrap(),
+        )));
+
+        let job_handle =
+            tokio::task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+
+        let (socket, _) = linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK).unwrap();
+        let mut socket = AsyncFile {
+            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
+        };
+
+        expect(&mut socket, "bash-5.2# ").await;
+
+        socket.write_all(b"echo foo\n").await.unwrap();
+        expect(&mut socket, "echo foo\r\nfoo\r\nbash-5.2# ").await;
+
+        socket.write_all(b"cat\n").await.unwrap();
+        expect(&mut socket, "cat\r\n").await;
+
+        socket.write_all(b"dog\n").await.unwrap();
+        expect(&mut socket, "dog\r\ndog\r\n").await;
+
+        socket.write_all(b"cow\n").await.unwrap();
+        expect(&mut socket, "cow\r\ncow\r\n").await;
+
+        socket.write_all(b"\x04").await.unwrap(); // ^D should send EOF
+        expect(&mut socket, "bash-5.2# ").await;
+
+        socket.write_all(b"exit 1\r\n").await.unwrap();
+
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = job_handle.await.unwrap();
+        assert_eq!(stderr, JobOutputResult::None);
+        assert_eq!(stdout, JobOutputResult::None);
+        assert_eq!(status, JobStatus::Exited(1));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn tty_hup() {
+        let sock =
+            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
+        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
+        linux::listen(sock.as_fd(), 1).unwrap();
+        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
+        let path = sockaddr.as_sockaddr_un().unwrap().path();
+        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(AbstractUnixDomainAddress::new(
+            path.try_into().unwrap(),
+        )));
+
+        let job_handle =
+            tokio::task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+
+        let (socket, _) = linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK).unwrap();
+        let mut socket = AsyncFile {
+            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
+        };
+
+        expect(&mut socket, "bash-5.2# ").await;
+        drop(socket);
+
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = job_handle.await.unwrap();
+        assert_eq!(stderr, JobOutputResult::None);
+        assert_eq!(stdout, JobOutputResult::None);
+        assert_eq!(status, JobStatus::Exited(129));
     }
 }

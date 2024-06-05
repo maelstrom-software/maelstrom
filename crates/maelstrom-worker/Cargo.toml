@@ -42,6 +42,7 @@ xdg.workspace = true
 [dev-dependencies]
 assert_matches.workspace = true
 anyhow.workspace = true
+bytes.workspace = true
 colored-diff.workspace = true
 indoc.workspace = true
 itertools.workspace = true

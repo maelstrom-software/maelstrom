@@ -4,11 +4,12 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use core::{ffi::CStr, fmt, mem, ptr, time::Duration};
+use core::{ffi::CStr, fmt, mem, ops::Deref, ptr, time::Duration};
 use derive_more::{BitOr, BitOrAssign, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
-    pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, socklen_t, uid_t,
+    pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, sockaddr_storage, sockaddr_un,
+    socklen_t, uid_t,
 };
 
 #[cfg(any(test, feature = "std"))]
@@ -18,6 +19,14 @@ extern "C" {
     fn sigabbrev_np(sig: c_int) -> *const c_char;
     fn strerrorname_np(errnum: c_int) -> *const c_char;
     fn strerrordesc_np(errnum: c_int) -> *const c_char;
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
+pub struct AcceptFlags(c_int);
+
+impl AcceptFlags {
+    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
+    pub const NONBLOCK: Self = Self(libc::SOCK_NONBLOCK);
 }
 
 #[derive(Clone)]
@@ -323,6 +332,13 @@ impl Gid {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct Ioctl(libc::Ioctl);
+
+impl Ioctl {
+    pub const TIOCSCTTY: Self = Self(libc::TIOCSCTTY);
+}
+
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct MountAttrs(c_uint);
 
@@ -387,6 +403,7 @@ impl OpenFlags {
     pub const WRONLY: Self = Self(libc::O_WRONLY);
     pub const TRUNC: Self = Self(libc::O_TRUNC);
     pub const NONBLOCK: Self = Self(libc::O_NONBLOCK);
+    pub const NOCTTY: Self = Self(libc::O_NOCTTY);
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
@@ -524,14 +541,214 @@ impl fmt::Display for Signal {
     }
 }
 
+#[repr(C)]
+pub struct Sockaddr {
+    family: sa_family_t,
+    data: [u8],
+}
+
+impl Sockaddr {
+    pub fn family(&self) -> sa_family_t {
+        self.family
+    }
+
+    fn data_offset(&self) -> usize {
+        let start_ptr = &self.family as *const sa_family_t as *const u8 as usize;
+        let data_ptr = &self.data[0] as *const u8 as usize;
+        let data_offset = data_ptr - start_ptr;
+        assert_eq!(data_offset, 2);
+        data_offset
+    }
+
+    /// Return the size, in bytes, of the pointed-to `Sockaddr`. This byte count includes the
+    /// leading two bytes used to store the address family.
+    #[allow(clippy::len_without_is_empty)]
+    pub fn len(&self) -> usize {
+        self.data.len() + self.data_offset()
+    }
+
+    /// Return a reference to the underlying `sockaddr` and the length. This is useful for calling
+    /// underlying libc functions that take a constant sockaddr. For libc functions that take
+    /// mutable sockaddrs, see [`SockaddrStorage::as_mut_parts`].
+    pub fn as_parts(&self) -> (&sockaddr, socklen_t) {
+        unsafe {
+            (
+                &*mem::transmute::<*const sa_family_t, *const sockaddr>(&self.family),
+                self.len() as socklen_t,
+            )
+        }
+    }
+
+    /// Create a `Sockaddr` reference from a `sockaddr` pointer and a size.
+    ///
+    /// # Safety
+    ///
+    /// The `sockaddr` pointer must point to a valid `sockaddr` of some sort, and `len` must be
+    /// less than or equal to the size of the underlying `sockaddr` object.
+    pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
+        let ptr = ptr::slice_from_raw_parts(addr as *const u8, len - 2);
+        let ptr = mem::transmute::<_, *const Self>(ptr);
+        let res = &*ptr;
+        assert_eq!(res.data_offset(), 2);
+        res
+    }
+
+    pub fn as_sockaddr_un(&self) -> Option<&SockaddrUn> {
+        (self.family == libc::AF_UNIX as sa_family_t).then(|| unsafe { mem::transmute(self) })
+    }
+}
+
+pub struct SockaddrStorage {
+    inner: sockaddr_storage,
+    len: socklen_t,
+}
+
+impl SockaddrStorage {
+    /// Return raw mutable references into the `SockaddrStorage` so that a function can be used to
+    /// initialize the sockaddr.
+    ///
+    /// # Safety
+    ///
+    /// The referenced length cannot be adjusted to a larger size.
+    pub unsafe fn as_mut_parts(&mut self) -> (&mut sockaddr, &mut socklen_t) {
+        (mem::transmute(&mut self.inner), &mut self.len)
+    }
+}
+
+impl Default for SockaddrStorage {
+    fn default() -> Self {
+        Self {
+            inner: unsafe { mem::zeroed() },
+            len: mem::size_of::<sockaddr_storage>() as socklen_t,
+        }
+    }
+}
+
+impl Deref for SockaddrStorage {
+    type Target = Sockaddr;
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            Sockaddr::from_raw_parts(
+                &self.inner as *const sockaddr_storage as *const sockaddr,
+                self.len as usize,
+            )
+        }
+    }
+}
+
+#[repr(C)]
+pub struct SockaddrUn {
+    family: sa_family_t,
+    path: [u8],
+}
+
+impl SockaddrUn {
+    pub fn path(&self) -> &[u8] {
+        &self.path
+    }
+
+    /// Create a `SockaddrUn` reference from a `sockaddr_un` pointer and a size.
+    ///
+    /// # Safety
+    ///
+    /// The `sockaddr_un` pointer must point to a valid `sockaddr_un`, and `len` must be less than
+    /// or equal to the size of the underlying `sockaddr` object.
+    pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
+        let ptr = ptr::slice_from_raw_parts(addr as *const u8, len - 2);
+        let ptr = mem::transmute::<_, *const Self>(ptr);
+        let res = &*ptr;
+        assert_eq!(res.data_offset(), 2);
+        assert_eq!(res.family, libc::AF_UNIX as sa_family_t);
+        res
+    }
+}
+
+impl Deref for SockaddrUn {
+    type Target = Sockaddr;
+    fn deref(&self) -> &Self::Target {
+        unsafe { mem::transmute(self) }
+    }
+}
+
+pub struct SockaddrUnStorage {
+    inner: sockaddr_un,
+    len: socklen_t,
+}
+
+impl SockaddrUnStorage {
+    pub fn new(path: &[u8]) -> Result<Self, SockaddrUnStoragePathTooLongError> {
+        let mut inner = sockaddr_un {
+            sun_family: libc::AF_UNIX as sa_family_t,
+            sun_path: unsafe { mem::zeroed() },
+        };
+        if mem::size_of_val(&inner.sun_path) < path.len() {
+            Err(SockaddrUnStoragePathTooLongError {
+                maximum_accepted: mem::size_of_val(&inner.sun_path),
+                actual: path.len(),
+            })
+        } else {
+            unsafe {
+                ptr::copy_nonoverlapping(
+                    path.as_ptr(),
+                    inner.sun_path.as_mut_ptr() as *mut u8,
+                    path.len(),
+                )
+            };
+            let res = Self {
+                inner,
+                len: path.len() as socklen_t + 2,
+            };
+            assert_eq!(res.data_offset(), 2);
+            Ok(res)
+        }
+    }
+
+    pub fn new_autobind() -> Self {
+        Self::new(b"").unwrap()
+    }
+}
+
+impl Deref for SockaddrUnStorage {
+    type Target = SockaddrUn;
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            SockaddrUn::from_raw_parts(
+                &self.inner as *const sockaddr_un as *const sockaddr,
+                self.len as usize,
+            )
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SockaddrUnStoragePathTooLongError {
+    pub maximum_accepted: usize,
+    pub actual: usize,
+}
+
+impl fmt::Display for SockaddrUnStoragePathTooLongError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "sockaddr_un path too long; maximum_accepted: {maximum_accepted}, actual: {actual}",
+            maximum_accepted = self.maximum_accepted,
+            actual = self.actual
+        )
+    }
+}
+
+#[cfg(any(test, feature = "std"))]
+impl std::error::Error for SockaddrUnStoragePathTooLongError {}
+
 #[derive(Clone, Copy)]
 pub struct SocketDomain(c_int);
 
 impl SocketDomain {
     pub const NETLINK: Self = Self(libc::PF_NETLINK);
+    pub const UNIX: Self = Self(libc::PF_UNIX);
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct SocketProtocol(c_int);
 
 impl SocketProtocol {
@@ -543,6 +760,9 @@ pub struct SocketType(c_int);
 
 impl SocketType {
     pub const RAW: Self = Self(libc::SOCK_RAW);
+    pub const STREAM: Self = Self(libc::SOCK_STREAM);
+    pub const NONBLOCK: Self = Self(libc::SOCK_NONBLOCK);
+    pub const CLOEXEC: Self = Self(libc::SOCK_CLOEXEC);
 }
 
 #[derive(Clone, Copy, Display)]
@@ -575,6 +795,20 @@ pub struct WaitResult {
 pub enum WaitStatus {
     Exited(ExitCode),
     Signaled(Signal),
+}
+
+pub fn accept(fd: Fd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), Errno> {
+    let mut sockaddr = SockaddrStorage::default();
+    let (addr_ptr, len_ptr) = unsafe { sockaddr.as_mut_parts() };
+    let fd = Errno::result(unsafe { libc::accept4(fd.0, addr_ptr, len_ptr, flags.0) })
+        .map(Fd)
+        .map(OwnedFd)?;
+    Ok((fd, sockaddr))
+}
+
+pub fn bind(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+    let (addr, len) = sockaddr.as_parts();
+    Errno::result(unsafe { libc::bind(fd.0, addr, len) }).map(drop)
 }
 
 pub fn bind_netlink(fd: Fd, sockaddr: &NetlinkSocketAddr) -> Result<(), Errno> {
@@ -658,6 +892,11 @@ pub fn close_range(
     Errno::result(unsafe { libc::close_range(first, last, flags) }).map(drop)
 }
 
+pub fn connect(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {
+    let (addr, len) = sockaddr.as_parts();
+    Errno::result(unsafe { libc::connect(fd.0, addr, len) }).map(drop)
+}
+
 pub fn dup2(from: Fd, to: Fd) -> Result<Fd, Errno> {
     Errno::result(unsafe { libc::dup2(from.0, to.0) }).map(Fd)
 }
@@ -669,8 +908,16 @@ pub fn execve(path: &CStr, argv: &[Option<&u8>], envp: &[Option<&u8>]) -> Result
     Errno::result(unsafe { libc::execve(path_ptr, argv_ptr, envp_ptr) }).map(drop)
 }
 
+pub fn _exit(status: ExitCode) -> ! {
+    unsafe { libc::_exit(status.0) };
+}
+
 pub fn fcntl_setfl(fd: Fd, flags: OpenFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_SETFL, flags.0) }).map(drop)
+}
+
+pub fn fork() -> Result<Option<Pid>, Errno> {
+    Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
 }
 
 pub fn fsconfig(
@@ -710,12 +957,31 @@ pub fn getpid() -> Pid {
     Pid(unsafe { libc::getpid() })
 }
 
+pub fn getsockname(fd: Fd) -> Result<SockaddrStorage, Errno> {
+    let mut sockaddr = SockaddrStorage::default();
+    let (addr_ptr, len_ptr) = unsafe { sockaddr.as_mut_parts() };
+    Errno::result(unsafe { libc::getsockname(fd.0, addr_ptr, len_ptr) })?;
+    Ok(sockaddr)
+}
+
 pub fn getuid() -> Uid {
     Uid(unsafe { libc::getuid() })
 }
 
+pub fn grantpt(fd: Fd) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::grantpt(fd.0) }).map(drop)
+}
+
+pub fn ioctl_int(fd: Fd, ioctl: Ioctl, arg: i32) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::ioctl(fd.0, ioctl.0, arg) }).map(drop)
+}
+
 pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::kill(pid.0, signal.0) }).map(drop)
+}
+
+pub fn listen(fd: Fd, backlog: u32) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::listen(fd.0, backlog as c_int) }).map(drop)
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
@@ -816,9 +1082,22 @@ pub fn poll(fds: &mut [PollFd], timeout: Duration) -> Result<usize, Errno> {
     Errno::result(unsafe { libc::poll(fds_ptr, nfds, timeout) }).map(|ret| ret as usize)
 }
 
+pub fn posix_openpt(flags: OpenFlags) -> Result<OwnedFd, Errno> {
+    let fd = Errno::result(unsafe { libc::posix_openpt(flags.0) })
+        .map(Fd)
+        .map(OwnedFd)?;
+    Ok(fd)
+}
+
 pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
     let signal = signal.as_c_ulong();
     Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) }).map(drop)
+}
+
+pub fn ptsname(fd: Fd, name: &mut [u8]) -> Result<(), Errno> {
+    let buf_ptr = name.as_mut_ptr() as *mut c_char;
+    let buf_len = name.len();
+    Errno::result(unsafe { libc::ptsname_r(fd.0, buf_ptr, buf_len) }).map(drop)
 }
 
 pub fn raise(signal: Signal) -> Result<(), Errno> {
@@ -850,8 +1129,8 @@ pub fn umount2(path: &CStr, flags: UmountFlags) -> Result<(), Errno> {
     Errno::result(unsafe { libc::umount2(path_ptr, flags.0) }).map(drop)
 }
 
-pub fn _exit(status: ExitCode) -> ! {
-    unsafe { libc::_exit(status.0) };
+pub fn unlockpt(fd: Fd) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::unlockpt(fd.0) }).map(drop)
 }
 
 fn extract_wait_status(status: c_int) -> WaitStatus {
@@ -871,10 +1150,6 @@ fn extract_wait_status_from_siginfo(siginfo: siginfo_t) -> WaitStatus {
         libc::CLD_KILLED | libc::CLD_DUMPED => WaitStatus::Signaled(Signal(status)),
         code => panic!("siginfo's si_code was {code} instead of CLD_EXITED or CLD_KILLED"),
     }
-}
-
-pub fn fork() -> Result<Option<Pid>, Errno> {
-    Errno::result(unsafe { libc::fork() }).map(|p| (p != 0).then_some(Pid(p)))
 }
 
 pub fn wait() -> Result<WaitResult, Errno> {
@@ -1245,5 +1520,16 @@ mod tests {
         assert_eq!(count, 3);
         assert_eq!(&buf, b"bop");
         assert!(fd.is_none());
+    }
+
+    #[test]
+    fn sockaddr_len() {
+        let mut sa: sockaddr = unsafe { mem::zeroed() };
+        sa.sa_family = libc::AF_UNIX as sa_family_t;
+        let sa2 = unsafe { Sockaddr::from_raw_parts(&sa, mem::size_of::<sockaddr>()) };
+        assert_eq!(mem::size_of::<sockaddr>(), 16);
+        assert_eq!(sa2.data.len(), 14);
+        assert_eq!(sa2.family(), libc::AF_UNIX as sa_family_t);
+        assert_eq!(sa2.len(), mem::size_of::<sockaddr>());
     }
 }

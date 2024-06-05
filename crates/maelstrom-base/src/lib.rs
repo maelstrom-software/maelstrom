@@ -271,6 +271,10 @@ impl From<Timeout> for Duration {
 pub struct AbstractUnixDomainAddress([u8; 6]);
 
 impl AbstractUnixDomainAddress {
+    pub fn new(address: &[u8; 6]) -> Self {
+        Self(*address)
+    }
+
     pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
     }
@@ -278,7 +282,7 @@ impl AbstractUnixDomainAddress {
 
 impl From<&[u8; 6]> for AbstractUnixDomainAddress {
     fn from(address: &[u8; 6]) -> Self {
-        Self(*address)
+        Self::new(address)
     }
 }
 
