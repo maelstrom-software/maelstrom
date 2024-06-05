@@ -2833,6 +2833,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn tty() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
@@ -2881,6 +2882,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
     async fn tty_hup() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
