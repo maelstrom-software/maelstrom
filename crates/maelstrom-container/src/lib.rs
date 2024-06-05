@@ -23,7 +23,7 @@ use std::{
 use tokio::{
     io::AsyncWrite,
     io::{AsyncReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     task,
 };
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
@@ -529,6 +529,10 @@ pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDe
     project_dir: RootBuf<ProjectDir>,
     ops: ContainerImageDepotOpsT,
     cache: Mutex<HashMap<(String, String), ContainerImage>>,
+    // We use this lock to make sure only one thread is trying to fill the image cache at a time.
+    // This is important to avoid self-contention on the file-locks.
+    // Contending on a file-lock uses a file-descriptor, and we are only allowed so many.
+    cache_fill_lock: Mutex<()>,
 }
 
 impl ContainerImageDepot<DefaultContainerImageDepotOps> {
@@ -542,12 +546,14 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
 
 const TAG_FILE_NAME: &str = "maelstrom-container-tags.lock";
 
-struct LockedTagsHandle {
+struct LockedTagsHandle<'a, 'b> {
     locked_tags: LockedContainerImageTags,
     lock_file: fs::File,
+    // Holding this lock we ensure we don't contend with ourselves for the file-lock
+    _cache_fill: &'a MutexGuard<'b, ()>,
 }
 
-impl LockedTagsHandle {
+impl<'a, 'b> LockedTagsHandle<'a, 'b> {
     #[anyhow_trace]
     async fn write(mut self) -> Result<()> {
         self.lock_file.seek(SeekFrom::Start(0)).await?;
@@ -580,6 +586,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             cache_dir: cache_dir.to_owned(),
             cache: Default::default(),
             ops,
+            cache_fill_lock: Mutex::new(()),
         })
     }
 
@@ -635,6 +642,8 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     async fn with_cache_lock<RetT>(
         &self,
         digest: &str,
+        // Holding this lock we ensure we don't contend with ourselves for the file-lock
+        _cache_fill: &MutexGuard<'_, ()>,
         body: impl Future<Output = Result<RetT>>,
     ) -> Result<RetT> {
         struct DigestLockFile;
@@ -647,7 +656,10 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     }
 
     #[anyhow_trace]
-    async fn lock_tags(&self) -> Result<LockedTagsHandle> {
+    async fn lock_tags<'a, 'b>(
+        &self,
+        cache_fill: &'a MutexGuard<'b, ()>,
+    ) -> Result<LockedTagsHandle<'a, 'b>> {
         let mut lock_file = self
             .fs
             .open_or_create_file(self.project_dir.join::<ContainerTagFile>(TAG_FILE_NAME))
@@ -660,6 +672,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         Ok(LockedTagsHandle {
             locked_tags,
             lock_file,
+            _cache_fill: cache_fill,
         })
     }
 
@@ -677,13 +690,14 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             return Ok(img.clone());
         }
 
-        let mut tags = self.lock_tags().await?;
+        let cache_fill = self.cache_fill_lock.lock().await;
+        let mut tags = self.lock_tags(&cache_fill).await?;
         let digest = self
             .get_image_digest(&mut tags.locked_tags, name, tag)
             .await?;
 
         let img = self
-            .with_cache_lock(&digest, async {
+            .with_cache_lock(&digest, &cache_fill, async {
                 Ok(if let Some(img) = self.get_cached_image(&digest).await {
                     img
                 } else {
@@ -692,6 +706,7 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
             })
             .await?;
         tags.write().await?;
+        drop(cache_fill);
 
         self.cache.lock().await.insert(cache_key, img.clone());
         Ok(img)
