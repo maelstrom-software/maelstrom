@@ -567,9 +567,7 @@ impl Sockaddr {
     /// The `sockaddr` pointer must point to a valid `sockaddr` of some sort, and `len` must be
     /// less than or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
-        let ptr = ptr::slice_from_raw_parts(addr as *const u8, len - 2);
-        let ptr = mem::transmute::<_, *const Self>(ptr);
-        let res = &*ptr;
+        let res = &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self);
         assert_eq!(res.data_offset(), 2);
         res
     }
@@ -666,9 +664,7 @@ impl SockaddrUn {
     /// The `sockaddr_un` pointer must point to a valid `sockaddr_un`, and `len` must be less than
     /// or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
-        let ptr = ptr::slice_from_raw_parts(addr as *const u8, len - 2);
-        let ptr = mem::transmute::<_, *const Self>(ptr);
-        let res = &*ptr;
+        let res = &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self);
         assert_eq!(res.data_offset(), 2);
         assert_eq!(res.family, libc::AF_UNIX as sa_family_t);
         res
