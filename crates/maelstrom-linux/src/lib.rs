@@ -554,7 +554,7 @@ impl Sockaddr {
     pub fn as_parts(&self) -> (&sockaddr, socklen_t) {
         unsafe {
             (
-                &*mem::transmute::<*const sa_family_t, *const sockaddr>(&self.family),
+                &*(&self.family as *const sa_family_t as *const sockaddr),
                 self.len() as socklen_t,
             )
         }
