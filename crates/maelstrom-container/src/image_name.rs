@@ -1,14 +1,16 @@
 use anyhow::anyhow;
 use combine::{
-    any, attempt, choice, count_min_max, many1, optional,
+    any, attempt, choice, count_min_max, many1, not_followed_by, optional,
     parser::char::{alpha_num, digit, string},
     satisfy, token, Parser, Stream,
 };
 use maelstrom_base::Utf8PathBuf;
 use std::str::FromStr;
 
-pub fn non_special<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = char> {
-    satisfy(|c| c != '.' && c != '/' && c != '@' && c != ':')
+pub fn not_hostname<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
+    not_followed_by(string("localhost/")).with(many1(satisfy(|c| {
+        c != '.' && c != '/' && c != '@' && c != ':'
+    })))
 }
 
 pub fn hostname<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
@@ -74,7 +76,7 @@ impl Host {
 
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         optional(attempt(choice((
-            attempt(many1(non_special()).skip(token('/')))
+            attempt(not_hostname().skip(token('/')))
                 .map(|loc| Self::DockerIo { library: Some(loc) }),
             attempt(hostname().skip(token('/'))).map(|name| Self::Other { name, port: None }),
             attempt((hostname().skip(token(':')), port()).skip(token('/'))).map(|(name, port)| {
@@ -277,6 +279,19 @@ fn parse_docker_reference() {
         DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
+                port: None
+            },
+            name: "bar".into(),
+            tag: None,
+            digest: None,
+        }
+    );
+
+    assert_eq!(
+        parse_str!(DockerReference, "localhost/bar").unwrap(),
+        DockerReference {
+            host: Host::Other {
+                name: "localhost".into(),
                 port: None
             },
             name: "bar".into(),
