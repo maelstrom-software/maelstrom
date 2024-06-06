@@ -1,4 +1,5 @@
 use anyhow::Result;
+use clap::Args;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
     JobStatus,
@@ -11,13 +12,16 @@ use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
+    log,
     process::{ExitCode, ExitCodeAccumulator},
     root::{Root, RootBuf},
 };
-use std::sync::{Condvar, Mutex};
 use std::{
+    env,
     io::{self, Read, Write as _},
+    path::PathBuf,
     sync::Arc,
+    sync::{Condvar, Mutex},
 };
 use xdg::BaseDirectories;
 
@@ -91,6 +95,19 @@ pub struct Config {
     /// The number of job slots available.
     #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Other Command-Line Options")]
+pub struct ExtraCommandLineOptions {
+    #[arg(
+        long,
+        short = 'f',
+        value_name = "PATH",
+        help = "Read the job specifications from the provided file, instead of from standard \
+            input."
+    )]
+    pub file: Option<PathBuf>,
 }
 
 fn print_effects(
@@ -194,12 +211,17 @@ impl JobTracker {
 }
 
 fn main() -> Result<ExitCode> {
-    let config = Config::new("maelstrom/run", "MAELSTROM_RUN")?;
+    let (config, extra_options): (_, ExtraCommandLineOptions) =
+        Config::new_with_extra_from_args("maelstrom/run", "MAELSTROM_RUN", env::args())?;
 
     let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
-    maelstrom_util::log::run_with_logger(config.log_level, |log| {
+    log::run_with_logger(config.log_level, |log| {
         let fs = Fs::new();
+        let reader: Box<dyn Read> = match extra_options.file {
+            Some(path) => Box::new(fs.open_file(path)?),
+            None => Box::new(io::stdin().lock()),
+        };
         let tracker = Arc::new(JobTracker::default());
         fs.create_dir_all(&config.cache_root)?;
         fs.create_dir_all(&config.state_root)?;
@@ -216,7 +238,6 @@ fn main() -> Result<ExitCode> {
             config.slots,
             log,
         )?;
-        let reader: Box<dyn Read> = Box::new(io::stdin().lock());
         let job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
         for job_spec in job_specs {
             let tracker = tracker.clone();

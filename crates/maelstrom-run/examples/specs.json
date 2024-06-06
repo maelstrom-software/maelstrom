@@ -1,0 +1,8 @@
+{
+	"image": {
+		"name": "alpine",
+		"use": [ "layers", "environment" ]
+	},
+	"program": "/bin/ls",
+	"arguments": [ "-l", "/", "/bin" ]
+}
