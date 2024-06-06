@@ -1,9 +1,11 @@
+use anyhow::anyhow;
 use combine::{
     any, attempt, choice, count_min_max, many1, optional,
     parser::char::{digit, string},
     satisfy, token, Parser, Stream,
 };
 use maelstrom_base::Utf8PathBuf;
+use std::str::FromStr;
 
 pub fn non_special<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = char> {
     satisfy(|c| c != '.' && c != '/' && c != '@' && c != ':')
@@ -17,7 +19,7 @@ pub fn port<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = u16>
     count_min_max(1, 5, digit()).map(|s: String| s.parse::<u16>().unwrap())
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum Host {
     DockerIo { library: Option<String> },
     Other { name: String, port: Option<u16> },
@@ -30,6 +32,38 @@ impl Default for Host {
 }
 
 impl Host {
+    pub fn base_url(&self) -> String {
+        match self {
+            Self::DockerIo { library } => {
+                let library = library.as_ref().map(|s| s.as_str()).unwrap_or("library");
+                format!("https://registry-1.docker.io/v2/{library}")
+            }
+            Self::Other { name, port } => {
+                let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
+                format!("http://{name}{port_str}")
+            }
+        }
+    }
+
+    pub fn auth_url(&self, name: &str) -> String {
+        match self {
+            Self::DockerIo { library } => {
+                let library = library.as_ref().map(|s| s.as_str()).unwrap_or("library");
+                format!(
+                    "https://auth.docker.io/\
+                    token?service=registry.docker.io&scope=repository:{library}/{name}:pull"
+                )
+            }
+            Self::Other { name, port } => {
+                let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
+                format!(
+                    "http://{name}{port_str}/\
+                    token?service=registry.docker.io&scope=repository:{name}:pull"
+                )
+            }
+        }
+    }
+
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         optional(attempt(choice((
             attempt(many1(non_special()).skip(token('/')))
@@ -47,7 +81,7 @@ impl Host {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct DockerReference {
     pub host: Host,
     pub name: String,
@@ -56,6 +90,22 @@ pub struct DockerReference {
 }
 
 impl DockerReference {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn tag(&self) -> &str {
+        self.tag.as_deref().unwrap_or("latest")
+    }
+
+    pub fn digest(&self) -> Option<&str> {
+        self.digest.as_deref()
+    }
+
+    pub fn digest_or_tag(&self) -> &str {
+        self.digest().unwrap_or(self.tag())
+    }
+
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         (
             Host::parser(),
@@ -72,7 +122,6 @@ impl DockerReference {
     }
 }
 
-#[cfg(test)]
 macro_rules! parse_str {
     ($ty:ty, $input:expr) => {{
         use combine::{EasyParser as _, Parser as _};
@@ -332,7 +381,7 @@ fn parse_docker_reference_error() {
     parse_str!(DockerReference, "foo@abc123@abc345").unwrap_err();
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct LocalPath {
     pub path: Utf8PathBuf,
     pub reference: Option<String>,
@@ -381,7 +430,7 @@ fn parse_local_path_err() {
     parse_str!(LocalPath, "").unwrap_err();
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub enum ImageName {
     Docker(DockerReference),
     Oci(LocalPath),
@@ -395,6 +444,14 @@ impl ImageName {
             attempt(string("oci:").with(LocalPath::parser().map(Self::Oci))),
             string("oci-archive:").with(LocalPath::parser().map(Self::OciArchive)),
         ))
+    }
+}
+
+impl FromStr for ImageName {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        parse_str!(Self, s).map_err(|e| anyhow!("failed to parse image name: {e}"))
     }
 }
 

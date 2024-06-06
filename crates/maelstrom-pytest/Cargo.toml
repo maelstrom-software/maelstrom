@@ -21,6 +21,7 @@ globset.workspace = true
 indicatif.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
+maelstrom-container.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-test-runner.workspace = true
 maelstrom-util.workspace = true

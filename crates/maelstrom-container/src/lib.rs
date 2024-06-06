@@ -1,5 +1,6 @@
 pub mod image_name;
 
+pub use image_name::{DockerReference, ImageName};
 pub use oci_spec::image::{Arch, Os};
 
 use anyhow::{bail, Result};
@@ -147,14 +148,9 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
 }
 
 #[anyhow_trace]
-async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
-    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
-
-    let url = format!(
-        "https://auth.docker.io/\
-        token?service=registry.docker.io&scope=repository:{library}/{name}:pull"
-    );
-    let res: AuthResponse = client.get(&url).send().await?.json().await?;
+async fn get_token(client: &reqwest::Client, ref_: &DockerReference) -> Result<AuthToken> {
+    let auth_url = ref_.host.auth_url(ref_.name());
+    let res: AuthResponse = client.get(&auth_url).send().await?.json().await?;
     Ok(res.token)
 }
 
@@ -162,16 +158,15 @@ async fn get_token(client: &reqwest::Client, pkg: &str) -> Result<AuthToken> {
 async fn get_image_index(
     client: &reqwest::Client,
     token: &AuthToken,
-    pkg: &str,
-    tag_or_digest: &str,
+    ref_: &DockerReference,
 ) -> Result<ImageIndex> {
-    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
+    let name = ref_.name();
+    let base_url = ref_.host.base_url();
+    let tag = ref_.tag();
     decode_and_check_for_error(
-        &format!("{pkg}:{tag_or_digest}"),
+        &format!("{ref_:?}"),
         client
-            .get(&format!(
-                "https://registry-1.docker.io/v2/{library}/{name}/manifests/{tag_or_digest}"
-            ))
+            .get(&format!("{base_url}/{name}/manifests/{tag}"))
             .header("Authorization", format!("Bearer {token}"))
             .header(
                 "Accept",
@@ -200,16 +195,15 @@ fn find_manifest_for_platform<'a>(
 async fn get_image_manifest(
     client: &reqwest::Client,
     token: &AuthToken,
-    pkg: &str,
+    ref_: &DockerReference,
     manifest_digest: &str,
 ) -> Result<ImageManifest> {
-    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
+    let name = ref_.name();
+    let base_url = ref_.host.base_url();
     decode_and_check_for_error(
-        pkg,
+        &format!("{ref_:?}"),
         client
-            .get(&format!(
-                "https://registry-1.docker.io/v2/{library}/{name}/manifests/{manifest_digest}"
-            ))
+            .get(&format!("{base_url}/{name}/manifests/{manifest_digest}"))
             .header("Authorization", format!("Bearer {token}"))
             .header(
                 "Accept",
@@ -225,16 +219,15 @@ async fn get_image_manifest(
 async fn get_image_config(
     client: &reqwest::Client,
     token: &AuthToken,
-    pkg: &str,
+    ref_: &DockerReference,
     config_digest: &str,
 ) -> Result<ImageConfiguration> {
-    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
+    let name = ref_.name();
+    let base_url = ref_.host.base_url();
     let config: oci_spec::image::ImageConfiguration = decode_and_check_for_error(
-        pkg,
+        &format!("{ref_:?}"),
         client
-            .get(&format!(
-                "https://registry-1.docker.io/v2/{library}/{name}/blobs/{config_digest}"
-            ))
+            .get(&format!("{base_url}/{name}/blobs/{config_digest}"))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await?,
@@ -309,16 +302,15 @@ impl<ProgressT: ProgressTracker, ReadT: tokio::io::AsyncRead + Unpin> tokio::io:
 async fn download_layer(
     client: &reqwest::Client,
     token: &AuthToken,
-    pkg: &str,
+    ref_: &DockerReference,
     digest: &str,
     prog: impl ProgressTracker,
     mut out: impl AsyncWrite + Unpin,
 ) -> Result<()> {
-    let (library, name) = pkg.split_once('/').unwrap_or(("library", pkg));
+    let base_url = ref_.host.base_url();
+    let name = ref_.name();
     let tar_stream = client
-        .get(&format!(
-            "https://registry-1.docker.io/v2/{library}/{name}/blobs/{digest}"
-        ))
+        .get(&format!("{base_url}/{name}/blobs/{digest}"))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await?
@@ -383,23 +375,23 @@ impl ContainerImage {
 fn download_layer_on_task(
     client: reqwest::Client,
     layer_digest: String,
-    pkg: String,
+    ref_: DockerReference,
     token: AuthToken,
     path: PathBuf,
     prog: impl ProgressTracker,
 ) -> task::JoinHandle<Result<()>> {
     task::spawn(async move {
         let mut file = tokio::fs::File::create(&path).await?;
-        download_layer(&client, &token, &pkg, &layer_digest, prog, &mut file).await?;
+        download_layer(&client, &token, &ref_, &layer_digest, prog, &mut file).await?;
         Ok(())
     })
 }
 
 #[anyhow_trace]
-pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Result<String> {
-    let token = get_token(client, name).await?;
+pub async fn resolve_tag(client: &reqwest::Client, ref_: &DockerReference) -> Result<String> {
+    let token = get_token(client, ref_).await?;
 
-    let index = get_image_index(client, &token, name, tag).await?;
+    let index = get_image_index(client, &token, ref_).await?;
     let manifest = find_manifest_for_platform(index.manifests().iter());
     Ok(manifest.digest().clone())
 }
@@ -407,24 +399,23 @@ pub async fn resolve_tag(client: &reqwest::Client, name: &str, tag: &str) -> Res
 #[anyhow_trace]
 pub async fn download_image(
     client: &reqwest::Client,
-    name: &str,
-    tag_or_digest: &str,
+    ref_: &DockerReference,
     layer_dir: impl AsRef<Path>,
     prog: impl ProgressTracker + Clone,
 ) -> Result<ContainerImage> {
-    let token = get_token(client, name).await?;
+    let token = get_token(client, ref_).await?;
 
-    let manifest_digest: String = if !tag_or_digest.starts_with("sha256:") {
-        let index = get_image_index(client, &token, name, tag_or_digest).await?;
-        let manifest = find_manifest_for_platform(index.manifests().iter());
-        manifest.digest().into()
+    let manifest_digest = if let Some(digest) = ref_.digest() {
+        digest.into()
     } else {
-        tag_or_digest.into()
+        let index = get_image_index(client, &token, ref_).await?;
+        let manifest = find_manifest_for_platform(index.manifests().iter());
+        manifest.digest().clone()
     };
 
-    let image = get_image_manifest(client, &token, name, &manifest_digest).await?;
+    let image = get_image_manifest(client, &token, ref_, &manifest_digest).await?;
 
-    let config = get_image_config(client, &token, name, image.config().digest()).await?;
+    let config = get_image_config(client, &token, ref_, image.config().digest()).await?;
 
     let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
     prog.set_length(total_size as u64);
@@ -436,7 +427,7 @@ pub async fn download_image(
         let handle = download_layer_on_task(
             client.clone(),
             layer.digest().clone(),
-            name.to_owned(),
+            ref_.clone(),
             token.clone(),
             path.clone(),
             prog.clone(),
@@ -451,7 +442,7 @@ pub async fn download_image(
 
     Ok(ContainerImage {
         version: ContainerImageVersion::default(),
-        name: name.into(),
+        name: ref_.name().into(),
         digest: manifest_digest,
         config,
         layers,
@@ -489,11 +480,10 @@ impl LockedContainerImageTags {
 
 #[allow(async_fn_in_trait)]
 pub trait ContainerImageDepotOps {
-    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String>;
+    async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String>;
     async fn download_image(
         &self,
-        name: &str,
-        digest: &str,
+        ref_: &DockerReference,
         layer_dir: &Path,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage>;
@@ -512,18 +502,17 @@ impl DefaultContainerImageDepotOps {
 }
 
 impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
-    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
-        resolve_tag(&self.client, name, tag).await
+    async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
+        resolve_tag(&self.client, ref_).await
     }
 
     async fn download_image(
         &self,
-        name: &str,
-        digest: &str,
+        ref_: &DockerReference,
         layer_dir: &Path,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
-        download_image(&self.client, name, digest, layer_dir, prog).await
+        download_image(&self.client, ref_, layer_dir, prog).await
     }
 }
 
@@ -532,7 +521,7 @@ pub struct ContainerImageDepot<ContainerImageDepotOpsT = DefaultContainerImageDe
     cache_dir: RootBuf<ContainerImageDepotDir>,
     project_dir: RootBuf<ProjectDir>,
     ops: ContainerImageDepotOpsT,
-    cache: Mutex<HashMap<(String, String), ContainerImage>>,
+    cache: Mutex<HashMap<ImageName, ContainerImage>>,
     // We use this lock to make sure only one thread is trying to fill the image cache at a time.
     // This is important to avoid self-contention on the file-locks.
     // Contending on a file-lock uses a file-descriptor, and we are only allowed so many.
@@ -598,16 +587,17 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     async fn get_image_digest(
         &self,
         locked_tags: &mut LockedContainerImageTags,
-        name: &str,
-        tag: &str,
+        ref_: &DockerReference,
     ) -> Result<String> {
-        Ok(if let Some(digest) = locked_tags.get(name, tag) {
-            digest.into()
-        } else {
-            let digest = self.ops.resolve_tag(name, tag).await?;
-            locked_tags.add(name.into(), tag.into(), digest.clone());
-            digest
-        })
+        Ok(
+            if let Some(digest) = locked_tags.get(ref_.name(), ref_.tag()) {
+                digest.into()
+            } else {
+                let digest = self.ops.resolve_tag(ref_).await?;
+                locked_tags.add(ref_.name().into(), ref_.tag().into(), digest.clone());
+                digest
+            },
+        )
     }
 
     #[anyhow_trace]
@@ -618,20 +608,16 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     #[anyhow_trace]
     async fn download_image(
         &self,
-        name: &str,
-        digest: &str,
+        ref_: &DockerReference,
+        output_dir: &Root<DigestDir>,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
-        let output_dir = self.cache_dir.join::<DigestDir>(digest);
         if output_dir.exists() {
             self.fs.remove_dir_all(&output_dir).await?;
         }
         self.fs.create_dir(&output_dir).await?;
 
-        let img = self
-            .ops
-            .download_image(name, digest, &output_dir, prog)
-            .await?;
+        let img = self.ops.download_image(ref_, output_dir, prog).await?;
         self.fs
             .write(
                 output_dir.join::<ContainerConfigFile>("config.json"),
@@ -688,32 +674,38 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     ) -> Result<ContainerImage> {
         self.fs.create_dir_all(&self.cache_dir).await?;
 
-        let (name, tag) = name.split_once(':').unwrap_or((name, "latest"));
+        let image_name: ImageName = name.parse()?;
 
-        let cache_key = (name.into(), tag.into());
-        if let Some(img) = self.cache.lock().await.get(&cache_key) {
+        if let Some(img) = self.cache.lock().await.get(&image_name) {
             return Ok(img.clone());
         }
 
+        let ImageName::Docker(ref_) = &image_name else {
+            bail!("local image path not supported yet");
+        };
+
         let cache_fill = self.cache_fill_lock.lock().await;
         let mut tags = self.lock_tags(&cache_fill).await?;
-        let digest = self
-            .get_image_digest(&mut tags.locked_tags, name, tag)
-            .await?;
+        let digest = self.get_image_digest(&mut tags.locked_tags, ref_).await?;
 
         let img = self
             .with_cache_lock(&digest, &cache_fill, async {
                 Ok(if let Some(img) = self.get_cached_image(&digest).await {
                     img
                 } else {
-                    self.download_image(name, &digest, prog).await?
+                    let output_dir = self.cache_dir.join::<DigestDir>(digest.clone());
+                    let mut specific_ref = ref_.clone();
+                    specific_ref.tag = None;
+                    specific_ref.digest = Some(digest.clone());
+                    self.download_image(&specific_ref, &output_dir, prog)
+                        .await?
                 })
             })
             .await?;
         tags.write().await?;
         drop(cache_fill);
 
-        self.cache.lock().await.insert(cache_key, img.clone());
+        self.cache.lock().await.insert(image_name, img.clone());
         Ok(img)
     }
 }
@@ -723,14 +715,13 @@ struct PanicContainerImageDepotOps;
 
 #[cfg(test)]
 impl ContainerImageDepotOps for PanicContainerImageDepotOps {
-    async fn resolve_tag(&self, _name: &str, _tag: &str) -> Result<String> {
+    async fn resolve_tag(&self, _ref: &DockerReference) -> Result<String> {
         panic!()
     }
 
     async fn download_image(
         &self,
-        _name: &str,
-        _digest: &str,
+        _ref: &DockerReference,
         _layer_dir: &Path,
         _prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
@@ -744,21 +735,22 @@ struct FakeContainerImageDepotOps(HashMap<String, String>);
 
 #[cfg(test)]
 impl ContainerImageDepotOps for FakeContainerImageDepotOps {
-    async fn resolve_tag(&self, name: &str, tag: &str) -> Result<String> {
+    async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
+        let name = ref_.name();
+        let tag = ref_.tag();
         Ok(self.0.get(&format!("{name}-{tag}")).unwrap().clone())
     }
 
     async fn download_image(
         &self,
-        name: &str,
-        digest: &str,
+        ref_: &DockerReference,
         _layer_dir: &Path,
         _prog: impl ProgressTracker,
     ) -> Result<ContainerImage> {
         Ok(ContainerImage {
             version: ContainerImageVersion::default(),
-            name: name.into(),
-            digest: digest.into(),
+            name: ref_.name().into(),
+            digest: ref_.digest().unwrap().into(),
             config: ImageConfiguration::default(),
             layers: vec![],
         })
@@ -802,7 +794,7 @@ async fn container_image_depot_download_dir_structure() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -839,7 +831,7 @@ async fn container_image_depot_download_then_reload() {
     )
     .unwrap();
     let img1 = depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -847,7 +839,7 @@ async fn container_image_depot_download_then_reload() {
     let depot =
         ContainerImageDepot::new_with(project_dir, image_dir, PanicContainerImageDepotOps).unwrap();
     let img2 = depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -871,7 +863,7 @@ async fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -892,7 +884,7 @@ async fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -924,11 +916,11 @@ async fn container_image_depot_update_image() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", NullProgressTracker)
+        .get_container_image("docker://bar", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -951,11 +943,11 @@ async fn container_image_depot_update_image() {
     .unwrap();
     #[allow(clippy::disallowed_names)]
     let foo = depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", NullProgressTracker)
+        .get_container_image("docker://bar", NullProgressTracker)
         .await
         .unwrap();
 
@@ -997,11 +989,11 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
     });
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops.clone()).unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", NullProgressTracker)
+        .get_container_image("docker://bar", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -1011,11 +1003,11 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
 
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops).unwrap();
     depot
-        .get_container_image("foo", NullProgressTracker)
+        .get_container_image("docker://foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", NullProgressTracker)
+        .get_container_image("docker://bar", NullProgressTracker)
         .await
         .unwrap();
 

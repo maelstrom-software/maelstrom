@@ -1,5 +1,5 @@
 [[directives]]
-image.name = "python:3.11-slim"
+image.name = "docker://python:3.11-slim"
 image.use = ["layers", "environment"]
 added_layers = [
     { glob = "**.py" },

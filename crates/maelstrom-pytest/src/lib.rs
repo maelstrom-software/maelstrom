@@ -13,6 +13,7 @@ use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir,
     StateDir,
 };
+use maelstrom_container::{DockerReference, ImageName};
 pub use maelstrom_test_runner::config::Config;
 use maelstrom_test_runner::{
     main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
@@ -160,7 +161,8 @@ struct PytestTestCollector<'client> {
 impl<'client> PytestTestCollector<'client> {
     fn get_pip_packages(
         &self,
-        image: ImageSpec,
+        image_spec: ImageSpec,
+        ref_: &DockerReference,
         ind: &impl ProgressIndicator,
     ) -> Result<Utf8PathBuf> {
         let fs = Fs::new();
@@ -168,7 +170,8 @@ impl<'client> PytestTestCollector<'client> {
         // Build some paths
         let cache_dir: &Path = self.cache_dir.as_ref();
         let project_dir: &Path = self.project_dir.as_ref();
-        let packages_path: PathBuf = cache_dir.join(format!("pip_packages/{}", &image.name));
+        let packages_path: PathBuf =
+            cache_dir.join(format!("pip_packages/{}:{}", ref_.name(), ref_.tag()));
         if !fs.exists(&packages_path) {
             fs.create_dir_all(&packages_path)?;
         }
@@ -230,7 +233,7 @@ impl<'client> PytestTestCollector<'client> {
                     ),
                 ])
                 .working_directory("/")
-                .image(image)
+                .image(image_spec)
                 .network(JobNetwork::Local)
                 .root_overlay(JobRootOverlay::Local {
                     upper: upper.clone().try_into()?,
@@ -415,8 +418,16 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         ind: &impl ProgressIndicator,
     ) -> Result<TestLayers> {
         match &metadata.image {
-            Some(image) if image.name == "python" => {
-                let packages_path = self.get_pip_packages(image.clone(), ind)?;
+            Some(image) => {
+                let image_name: ImageName = image.name.parse()?;
+                let ImageName::Docker(ref_) = image_name else {
+                    return Ok(TestLayers::Provided(vec![]));
+                };
+                if ref_.name() != "python" {
+                    return Ok(TestLayers::Provided(vec![]));
+                }
+
+                let packages_path = self.get_pip_packages(image.clone(), &ref_, ind)?;
                 Ok(TestLayers::Provided(vec![Layer::Glob {
                     glob: format!("{packages_path}/**"),
                     prefix_options: PrefixOptions {
