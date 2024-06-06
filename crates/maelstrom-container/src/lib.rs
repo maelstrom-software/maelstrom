@@ -638,12 +638,20 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
         locked_tags: &mut LockedContainerImageTags,
         ref_: &DockerReference,
     ) -> Result<String> {
+        if let Some(digest) = ref_.digest() {
+            return Ok(digest.into());
+        }
+
+        let mut short_ref = ref_.clone();
+        short_ref.tag = None;
+        let short_ref_str = short_ref.to_string();
+
         Ok(
-            if let Some(digest) = locked_tags.get(ref_.name(), ref_.tag()) {
+            if let Some(digest) = locked_tags.get(&short_ref_str, ref_.tag()) {
                 digest.into()
             } else {
                 let digest = self.ops.resolve_tag(ref_).await?;
-                locked_tags.add(ref_.name().into(), ref_.tag().into(), digest.clone());
+                locked_tags.add(short_ref_str, ref_.tag().into(), digest.clone());
                 digest
             },
         )
