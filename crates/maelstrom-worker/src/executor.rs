@@ -1847,12 +1847,12 @@ mod tests {
         test_spec("/usr/bin/python3").arguments(["-c", script])
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exited_0() {
         Test::new(bash_spec("exit 0")).run().await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn exited_1() {
         Test::new(bash_spec("exit 1"))
             .expected_status(JobStatus::Exited(1))
@@ -1863,7 +1863,7 @@ mod tests {
     // $$ returns the pid of outer-most bash. This doesn't do what we expect it to do when using
     // our executor. We should probably rewrite these tests to run python or something, and take
     // input from stdin.
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn signaled_11() {
         Test::new(python_spec(indoc! {r#"
             import os
@@ -1881,7 +1881,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stdout_inline_limit_0() {
         Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(0))
@@ -1893,7 +1893,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stdout_inline_limit_1() {
         Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(1))
@@ -1905,7 +1905,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stdout_inline_limit_2() {
         Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(2))
@@ -1914,7 +1914,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stdout_inline_limit_3() {
         Test::new(bash_spec("echo a"))
             .inline_limit(ByteSize::b(3))
@@ -1923,7 +1923,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stderr_inline_limit_0() {
         Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(0))
@@ -1935,7 +1935,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stderr_inline_limit_1() {
         Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(1))
@@ -1947,7 +1947,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stderr_inline_limit_2() {
         Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(2))
@@ -1956,7 +1956,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stderr_inline_limit_3() {
         Test::new(bash_spec("echo a >&2"))
             .inline_limit(ByteSize::b(3))
@@ -1965,7 +1965,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn environment() {
         Test::new(bash_spec("echo -n $FOO - $BAR").environment(["FOO=3", "BAR=4"]))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"3 - 4")))
@@ -1973,12 +1973,12 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn stdin_empty() {
         Test::new(test_spec("/bin/cat")).run().await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn pid_ppid_pgid_and_sid() {
         // We should be pid 1, that is, init for our namespace).
         // We should have ppid 0, indicating that our parent isn't accessible in our namespace.
@@ -2001,7 +2001,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_loopback() {
         Test::new(
             test_spec("/bin/cat")
@@ -2018,7 +2018,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn loopback() {
         Test::new(
             test_spec("/bin/cat")
@@ -2033,7 +2033,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn local_network() {
         let (port_sender, port_receiver) = oneshot::channel();
         let listening_task = task::spawn(async move {
@@ -2069,7 +2069,7 @@ mod tests {
         listening_task.await.unwrap()
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn user_and_group_0() {
         Test::new(python_spec(indoc! {r#"
             import os
@@ -2084,7 +2084,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn user_and_group_nonzero() {
         Test::new(
             python_spec(indoc! {r#"
@@ -2103,7 +2103,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn close_range() {
         // Throw the kitchen sink in the spec: we want an example of anything that opens a file
         // descriptor.
@@ -2143,7 +2143,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn one_layer_is_read_only() {
         Test::new(test_spec("/bin/touch").arguments(["/foo"]))
             .expected_status(JobStatus::Exited(1))
@@ -2154,7 +2154,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn one_layer_with_tmp_root_overlay_is_writable() {
         Test::new(bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp))
             .expected_status(JobStatus::Exited(0))
@@ -2169,7 +2169,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn multiple_layers_with_tmp_root_overlay_is_writable() {
         let spec = bash_spec("echo bar > /foo && cat /foo").root_overlay(JobRootOverlay::Tmp);
         Test::new(spec)
@@ -2186,7 +2186,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn local_root_overlay_is_writable_and_output_is_captured() {
         let temp_dir = TempDir::new().unwrap();
         let temp_path = temp_dir.path();
@@ -2225,7 +2225,7 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_full() {
         Test::new(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2233,7 +2233,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_full() {
         Test::new(
             bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2245,7 +2245,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_fuse() {
         Test::new(bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2253,7 +2253,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_fuse() {
         Test::new(
             bash_spec("/bin/ls -l /dev/fuse | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2265,7 +2265,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_null() {
         Test::new(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2273,7 +2273,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_null() {
         Test::new(
             bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2285,7 +2285,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_null_write() {
         Test::new(
             bash_spec("echo foo > /dev/null && cat /dev/null").mounts([JobMount::Devices {
@@ -2296,7 +2296,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_ptmx() {
         Test::new(bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2304,7 +2304,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_ptmx() {
         Test::new(
             bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2316,7 +2316,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_random() {
         Test::new(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2324,7 +2324,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_random() {
         Test::new(
             bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'").mounts([
@@ -2338,7 +2338,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_tty() {
         Test::new(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2346,7 +2346,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_tty() {
         Test::new(
             bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2358,7 +2358,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_urandom() {
         Test::new(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2366,7 +2366,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_urandom() {
         Test::new(
             bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'").mounts([
@@ -2380,7 +2380,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mount_dev_zero() {
         Test::new(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2388,7 +2388,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mount_dev_zero() {
         Test::new(
             bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'").mounts([JobMount::Devices {
@@ -2400,7 +2400,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_full() {
         Test::new(bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2408,7 +2408,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_full() {
         Test::new(
             bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
@@ -2419,7 +2419,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_null() {
         Test::new(bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2427,7 +2427,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_null() {
         Test::new(
             bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
@@ -2438,7 +2438,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_null_write() {
         Test::new(
             bash_spec("echo foo > /dev/null && cat /dev/null")
@@ -2448,7 +2448,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_ptmx() {
         Test::new(bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2456,7 +2456,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_ptmx() {
         Test::new(
             bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'")
@@ -2467,7 +2467,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_random() {
         Test::new(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2475,7 +2475,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_random() {
         Test::new(
             bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
@@ -2486,7 +2486,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_tty() {
         Test::new(bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2494,7 +2494,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_tty() {
         Test::new(
             bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
@@ -2505,7 +2505,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_urandom() {
         Test::new(bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2513,7 +2513,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_urandom() {
         Test::new(
             bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
@@ -2524,7 +2524,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_dev_zero() {
         Test::new(bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2532,7 +2532,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn dev_zero() {
         Test::new(
             bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
@@ -2543,7 +2543,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_tmpfs() {
         Test::new(
             test_spec("/bin/grep")
@@ -2557,7 +2557,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn tmpfs() {
         Test::new(
             test_spec("/bin/awk")
@@ -2576,7 +2576,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_sysfs() {
         Test::new(
             test_spec("/bin/grep")
@@ -2590,7 +2590,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn sysfs() {
         Test::new(
             test_spec("/bin/awk")
@@ -2609,14 +2609,14 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_procfs() {
         Test::new(test_spec("/bin/ls").arguments(["/proc"]))
             .run()
             .await
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn procfs() {
         Test::new(
             test_spec("/bin/grep")
@@ -2632,7 +2632,7 @@ mod tests {
         .await
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_devpts() {
         Test::new(
             test_spec("/bin/grep")
@@ -2646,7 +2646,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn devpts() {
         Test::new(
             test_spec("/bin/awk")
@@ -2670,7 +2670,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn devpts_ptmx_mode() {
         Test::new(
             bash_spec("/bin/ls -l /dev/pts/ptmx | awk '{ print $1, $5, $6 }'").mounts([
@@ -2687,7 +2687,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn no_mqueue() {
         Test::new(
             test_spec("/bin/grep")
@@ -2701,7 +2701,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn mqueue() {
         Test::new(
             test_spec("/bin/awk")
@@ -2725,7 +2725,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn bind_mount_writable() {
         let temp_file = NamedTempFile::new().unwrap();
         Test::new(
@@ -2747,7 +2747,7 @@ mod tests {
         assert_eq!(contents, "hello\n");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn bind_mount_read_only() {
         let temp_file = NamedTempFile::new().unwrap();
         let fs = async_fs::Fs::new();
@@ -2773,7 +2773,7 @@ mod tests {
         assert_eq!(contents, "hello\n");
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn bind_mount_path_is_relative_to_pwd() {
         let temp_file = NamedTempFile::new().unwrap();
         let temp_dir_path = temp_file.path().parent().unwrap();
@@ -2800,7 +2800,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn old_mounts_are_unmounted() {
         Test::new(
             test_spec("/bin/wc")
@@ -2814,7 +2814,7 @@ mod tests {
         .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn working_directory_root() {
         Test::new(bash_spec("pwd"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/\n")))
@@ -2822,7 +2822,7 @@ mod tests {
             .await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn working_directory_not_root() {
         Test::new(bash_spec("pwd").working_directory("/usr/bin"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"/usr/bin\n")))
@@ -2837,12 +2837,12 @@ mod tests {
         );
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn execution_error() {
         assert_execution_error(test_spec("a_program_that_does_not_exist")).await;
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn bad_working_directory_is_an_execution_error() {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
     }
