@@ -3,13 +3,16 @@ include_shared_libraries = true
 
 [[directives]]
 filter = "package.equals(maelstrom-worker) && name.starts_with(executor::)"
-layers = [{ stubs = [ "/proc/", "/sys/", "/tmp/", "dev/{full,fuse,null,ptmx,pts/,random,tty,urandom,zero}" ] }]
+layers = [
+    { stubs = [ "/proc/", "/sys/", "/tmp/", "dev/{full,fuse,null,pts/,random,tty,urandom,zero}" ] },
+    { symlinks = [ { link = "/dev/ptmx", target = "/dev/pts/ptmx" } ] },
+]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
     { type = "devpts", mount_point = "/dev/pts" },
-    { type = "devices", devices = ["full", "fuse", "null", "ptmx", "random", "tty", "urandom", "zero"] },
+    { type = "devices", devices = ["full", "fuse", "null", "random", "tty", "urandom", "zero"] },
 ]
 
 [[directives]]

@@ -1034,7 +1034,9 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     }
                 }
                 JobMount::Devpts { .. } => {
-                    normal_mount(bump, builder, mount_fds, c"devpts", "devpts")?;
+                    // The devpts file system doesn't seem to accept new-style configuration
+                    // parameters via the new mount API. As a result, we mount it using the
+                    // old-style mount syscall later.
                 }
                 JobMount::Mqueue { .. } => {
                     normal_mount(bump, builder, mount_fds, c"mqueue", "mqueue")?;
@@ -1176,13 +1178,22 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                         );
                     }
                 }
-                JobMount::Devpts { mount_point } => normal_mount(
-                    bump,
-                    builder,
-                    "devpts",
-                    mount_fds.next().unwrap(),
-                    mount_point,
-                )?,
+                JobMount::Devpts { mount_point } => {
+                    let mount_point_cstr =
+                        bump_c_str(bump, mount_point.as_str()).map_err(syserr)?;
+                    builder.push(
+                        Syscall::Mount {
+                            source: None,
+                            target: mount_point_cstr,
+                            fstype: Some(c"devpts"),
+                            flags: Default::default(),
+                            data: Some(c"ptmxmode=0666".to_bytes_with_nul()),
+                        },
+                        bump.alloc(move |err| {
+                            syserr(anyhow!("mount of devpts to {mount_point}: {err}"))
+                        }),
+                    )
+                }
                 JobMount::Mqueue { mount_point } => normal_mount(
                     bump,
                     builder,
@@ -2625,10 +2636,10 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn no_devpty() {
+    async fn no_devpts() {
         Test::new(
             test_spec("/bin/grep")
-                .arguments(["^devpty /dev/pty", "/proc/self/mounts"])
+                .arguments(["^devpts /dev/pty", "/proc/self/mounts"])
                 .mounts([JobMount::Proc {
                     mount_point: utf8_path_buf!("/proc"),
                 }]),
@@ -2639,7 +2650,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn devpty() {
+    async fn devpts() {
         Test::new(
             test_spec("/bin/awk")
                 .arguments([
@@ -2658,6 +2669,23 @@ mod tests {
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(
             b"none /dev/pts devpts\n"
         )))
+        .run()
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn devpts_ptmx_mode() {
+        Test::new(
+            bash_spec("/bin/ls -l /dev/pts/ptmx | awk '{ print $1, $5, $6 }'").mounts([
+                JobMount::Devices {
+                    devices: EnumSet::only(JobDevice::Ptmx),
+                },
+                JobMount::Devpts {
+                    mount_point: utf8_path_buf!("/dev/pts"),
+                },
+            ]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"crw-rw-rw- 5, 2\n")))
         .run()
         .await;
     }
@@ -2833,7 +2861,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
     async fn tty() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
@@ -2882,7 +2909,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore]
     async fn tty_hup() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
