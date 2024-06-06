@@ -22,7 +22,7 @@ pub fn tag_or_name<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output
 }
 
 pub fn digest<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
-    many1(alpha_num())
+    many1(alpha_num().or(token(':')))
 }
 
 pub fn port<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = u16> {
@@ -203,12 +203,12 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foobar@abc123").unwrap(),
+        parse_str!(DockerReference, "foobar@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::default(),
             name: "foobar".into(),
             tag: None,
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -233,12 +233,12 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foobar:latest@abc123").unwrap(),
+        parse_str!(DockerReference, "foobar:latest@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::default(),
             name: "foobar".into(),
             tag: Some("latest".into()),
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -255,14 +255,14 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo/bar@abc123").unwrap(),
+        parse_str!(DockerReference, "foo/bar@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::DockerIo {
                 library: Some("foo".into()),
             },
             name: "bar".into(),
             tag: None,
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -279,14 +279,14 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo/bar:latest@abc123").unwrap(),
+        parse_str!(DockerReference, "foo/bar:latest@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::DockerIo {
                 library: Some("foo".into()),
             },
             name: "bar".into(),
             tag: Some("latest".into()),
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -330,7 +330,7 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo.com/bar@abc123").unwrap(),
+        parse_str!(DockerReference, "foo.com/bar@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
@@ -338,7 +338,7 @@ fn parse_docker_reference() {
             },
             name: "bar".into(),
             tag: None,
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -356,7 +356,7 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo.com/bar:latest@abc123").unwrap(),
+        parse_str!(DockerReference, "foo.com/bar:latest@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
@@ -364,7 +364,7 @@ fn parse_docker_reference() {
             },
             name: "bar".into(),
             tag: Some("latest".into()),
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -382,7 +382,7 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo.com:1234/bar@abc123").unwrap(),
+        parse_str!(DockerReference, "foo.com:1234/bar@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
@@ -390,7 +390,7 @@ fn parse_docker_reference() {
             },
             name: "bar".into(),
             tag: None,
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 
@@ -408,7 +408,7 @@ fn parse_docker_reference() {
     );
 
     assert_eq!(
-        parse_str!(DockerReference, "foo.com:1234/bar:latest@abc123").unwrap(),
+        parse_str!(DockerReference, "foo.com:1234/bar:latest@sha256:abc123").unwrap(),
         DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
@@ -416,7 +416,7 @@ fn parse_docker_reference() {
             },
             name: "bar".into(),
             tag: Some("latest".into()),
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         }
     );
 }
@@ -430,7 +430,6 @@ fn parse_docker_reference_error() {
     parse_str!(DockerReference, "foo@").unwrap_err();
 
     parse_str!(DockerReference, "foo@a.b").unwrap_err();
-    parse_str!(DockerReference, "foo@a:b").unwrap_err();
     parse_str!(DockerReference, "foo@a/b").unwrap_err();
     parse_str!(DockerReference, "foo@a@b").unwrap_err();
     parse_str!(DockerReference, "foo/a/b").unwrap_err();
@@ -538,7 +537,7 @@ impl FromStr for ImageName {
 #[test]
 fn parse_image_name() {
     assert_eq!(
-        parse_str!(ImageName, "docker://foo.com:124/bar:baz@abc123").unwrap(),
+        parse_str!(ImageName, "docker://foo.com:124/bar:baz@sha256:abc123").unwrap(),
         ImageName::Docker(DockerReference {
             host: Host::Other {
                 name: "foo.com".into(),
@@ -546,7 +545,7 @@ fn parse_image_name() {
             },
             name: "bar".into(),
             tag: Some("baz".into()),
-            digest: Some("abc123".into()),
+            digest: Some("sha256:abc123".into()),
         })
     );
 
