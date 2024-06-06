@@ -1,7 +1,7 @@
 use anyhow::anyhow;
 use combine::{
     any, attempt, choice, count_min_max, many1, optional,
-    parser::char::{digit, string},
+    parser::char::{alpha_num, digit, string},
     satisfy, token, Parser, Stream,
 };
 use maelstrom_base::Utf8PathBuf;
@@ -11,8 +11,16 @@ pub fn non_special<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output
     satisfy(|c| c != '.' && c != '/' && c != '@' && c != ':')
 }
 
-pub fn hostname_char<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = char> {
-    satisfy(|c| c != '/' && c != '@' && c != ':')
+pub fn hostname<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
+    many1(satisfy(|c| c != '/' && c != '@' && c != ':'))
+}
+
+pub fn tag_or_name<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
+    many1(alpha_num().or(token('_')).or(token('.')).or(token('-')))
+}
+
+pub fn digest<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
+    many1(alpha_num())
 }
 
 pub fn port<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = u16> {
@@ -68,14 +76,13 @@ impl Host {
         optional(attempt(choice((
             attempt(many1(non_special()).skip(token('/')))
                 .map(|loc| Self::DockerIo { library: Some(loc) }),
-            attempt(many1(hostname_char()).skip(token('/')))
-                .map(|name| Self::Other { name, port: None }),
-            attempt((many1(hostname_char()).skip(token(':')), port()).skip(token('/'))).map(
-                |(name, port)| Self::Other {
+            attempt(hostname().skip(token('/'))).map(|name| Self::Other { name, port: None }),
+            attempt((hostname().skip(token(':')), port()).skip(token('/'))).map(|(name, port)| {
+                Self::Other {
                     name,
                     port: Some(port),
-                },
-            ),
+                }
+            }),
         ))))
         .map(|loc| loc.unwrap_or_default())
     }
@@ -109,9 +116,9 @@ impl DockerReference {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         (
             Host::parser(),
-            many1(non_special()),
-            optional(token(':').with(many1(non_special()))),
-            optional(token('@').with(many1(non_special()))),
+            many1(tag_or_name()),
+            optional(token(':').with(tag_or_name())),
+            optional(token('@').with(digest())),
         )
             .map(|(host, name, tag, digest)| Self {
                 host,
@@ -180,6 +187,16 @@ fn parse_docker_reference() {
             host: Host::default(),
             name: "foobar".into(),
             tag: Some("latest".into()),
+            digest: None,
+        }
+    );
+
+    assert_eq!(
+        parse_str!(DockerReference, "foo.b_ar-2:a1_b.c-d").unwrap(),
+        DockerReference {
+            host: Host::default(),
+            name: "foo.b_ar-2".into(),
+            tag: Some("a1_b.c-d".into()),
             digest: None,
         }
     );
@@ -364,7 +381,7 @@ fn parse_docker_reference() {
 fn parse_docker_reference_error() {
     parse_str!(DockerReference, "").unwrap_err();
     parse_str!(DockerReference, "foo/").unwrap_err();
-    parse_str!(DockerReference, "foo.").unwrap_err();
+    parse_str!(DockerReference, "foo*bar").unwrap_err();
     parse_str!(DockerReference, "foo:").unwrap_err();
     parse_str!(DockerReference, "foo@").unwrap_err();
 
@@ -372,7 +389,6 @@ fn parse_docker_reference_error() {
     parse_str!(DockerReference, "foo@a:b").unwrap_err();
     parse_str!(DockerReference, "foo@a/b").unwrap_err();
     parse_str!(DockerReference, "foo@a@b").unwrap_err();
-    parse_str!(DockerReference, "foo/a.b").unwrap_err();
     parse_str!(DockerReference, "foo/a/b").unwrap_err();
     parse_str!(DockerReference, "foo.com:/bar").unwrap_err();
 
