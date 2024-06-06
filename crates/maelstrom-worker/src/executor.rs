@@ -399,7 +399,6 @@ impl Device {
             JobDevice::Full => (c"/dev/full", "/dev/full"),
             JobDevice::Fuse => (c"/dev/fuse", "/dev/fuse"),
             JobDevice::Null => (c"/dev/null", "/dev/null"),
-            JobDevice::Ptmx => (c"/dev/ptmx", "/dev/ptmx"),
             JobDevice::Random => (c"/dev/random", "/dev/random"),
             JobDevice::Shm => (c"/dev/shm", "/dev/shm"),
             JobDevice::Tty => (c"/dev/tty", "/dev/tty"),
@@ -2297,26 +2296,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn no_mount_dev_ptmx() {
-        Test::new(bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'"))
-            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
-            .run()
-            .await;
-    }
-
-    #[tokio::test]
-    async fn mount_dev_ptmx() {
-        Test::new(
-            bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'").mounts([JobMount::Devices {
-                devices: EnumSet::only(JobDevice::Ptmx),
-            }]),
-        )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 2\n")))
-        .run()
-        .await;
-    }
-
-    #[tokio::test]
     async fn no_mount_dev_random() {
         Test::new(bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'"))
             .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
@@ -2444,25 +2423,6 @@ mod tests {
             bash_spec("echo foo > /dev/null && cat /dev/null")
                 .devices(EnumSet::only(JobDevice::Null)),
         )
-        .run()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn no_dev_ptmx() {
-        Test::new(bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'"))
-            .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"0 Nov\n")))
-            .run()
-            .await;
-    }
-
-    #[tokio::test]
-    async fn dev_ptmx() {
-        Test::new(
-            bash_spec("/bin/ls -l /dev/ptmx | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Ptmx)),
-        )
-        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 2\n")))
         .run()
         .await;
     }
@@ -2674,9 +2634,6 @@ mod tests {
     async fn devpts_ptmx_mode() {
         Test::new(
             bash_spec("/bin/ls -l /dev/pts/ptmx | awk '{ print $1, $5, $6 }'").mounts([
-                JobMount::Devices {
-                    devices: EnumSet::only(JobDevice::Ptmx),
-                },
                 JobMount::Devpts {
                     mount_point: utf8_path_buf!("/dev/pts"),
                 },

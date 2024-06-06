@@ -71,7 +71,6 @@ enum JobDevice {
     Full = 0;
     Fuse = 1;
     Null = 2;
-    Ptmx = 8;
     Random = 3;
     Shm = 4;
     Tty = 5;
