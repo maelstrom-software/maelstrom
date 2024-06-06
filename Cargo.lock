@@ -2990,6 +2990,8 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-util",
  "maplit",
+ "num-derive",
+ "num-traits",
  "oci-spec",
  "reqwest",
  "serde",

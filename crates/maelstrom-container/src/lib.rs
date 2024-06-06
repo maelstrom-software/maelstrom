@@ -3,7 +3,7 @@ pub mod image_name;
 pub use image_name::{DockerReference, ImageName};
 pub use oci_spec::image::{Arch, Os};
 
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
 use async_compression::tokio::bufread::GzipDecoder;
 use core::task::Poll;
@@ -13,6 +13,8 @@ use maelstrom_util::{
     async_fs::{self as fs, Fs},
     root::{Root, RootBuf},
 };
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive as _;
 use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -479,7 +481,9 @@ pub async fn download_image(
     })
 }
 
-#[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
+#[derive(
+    Copy, Clone, Default, Debug, FromPrimitive, PartialEq, Eq, Serialize_repr, Deserialize_repr,
+)]
 #[repr(u32)]
 pub enum LockedContainerImageTagsVersion {
     #[default]
@@ -493,9 +497,24 @@ struct LockedContainerImageTags {
     map: BTreeMap<String, BTreeMap<String, String>>,
 }
 
+const MISSING_VERSION: &str = "missing version";
+const VERSION_NOT_AN_INTEGER: &str = "version field is not an integer";
+
 impl LockedContainerImageTags {
-    fn from_str(s: &str) -> Result<Self> {
-        Ok(toml::from_str(s)?)
+    fn from_str(contents: &str) -> Result<Self> {
+        let mut table: toml::Table = toml::from_str(contents)?;
+        let version = table
+            .remove("version")
+            .ok_or_else(|| anyhow!(MISSING_VERSION))?;
+        let Some(version) = version.as_integer() else {
+            bail!(VERSION_NOT_AN_INTEGER);
+        };
+        match LockedContainerImageTagsVersion::from_i64(version) {
+            None => Err(anyhow!(
+                "old or unknown version of container image tags file"
+            )),
+            Some(LockedContainerImageTagsVersion::V0) => Ok(toml::from_str::<Self>(contents)?),
+        }
     }
 
     fn get(&self, name: &str, tag: &str) -> Option<&String> {
