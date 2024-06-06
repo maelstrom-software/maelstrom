@@ -11,7 +11,6 @@ use libc::{
     pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, sockaddr_storage, sockaddr_un,
     socklen_t, uid_t,
 };
-use static_assertions::assert_eq_align;
 
 #[cfg(any(test, feature = "std"))]
 use std::os::fd;
