@@ -1370,13 +1370,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 linux::connect(socket.as_fd(), &sockaddr).map_err(syserr)?;
 
                 // Open the master.
-                let master = linux::open(
-                    c"/dev/ptmx",
-                    OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK,
-                    Default::default(),
-                )
-                .context("opening /dev/ptmx")
-                .map_err(syserr)?;
+                let master =
+                    linux::posix_openpt(OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK)
+                        .context("posix_openpt")
+                        .map_err(syserr)?;
                 linux::grantpt(master.as_fd()).map_err(syserr)?;
                 linux::unlockpt(master.as_fd()).map_err(syserr)?;
 
