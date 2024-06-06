@@ -58,6 +58,10 @@ impl fmt::Display for Host {
 }
 
 impl Host {
+    pub fn is_docker_io(&self) -> bool {
+        matches!(self, Self::DockerIo { .. })
+    }
+
     pub fn base_url(&self) -> String {
         match self {
             Self::DockerIo { library } => {
@@ -66,7 +70,7 @@ impl Host {
             }
             Self::Other { name, port } => {
                 let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
-                format!("http://{name}{port_str}")
+                format!("http://{name}{port_str}/v2")
             }
         }
     }
