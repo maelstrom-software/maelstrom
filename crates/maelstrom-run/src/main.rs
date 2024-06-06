@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use clap::Args;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
@@ -19,9 +19,9 @@ use maelstrom_util::{
 use std::{
     env,
     io::{self, Read, Write as _},
+    mem,
     path::PathBuf,
-    sync::Arc,
-    sync::{Condvar, Mutex},
+    sync::{Arc, Condvar, Mutex},
 };
 use xdg::BaseDirectories;
 
@@ -97,7 +97,7 @@ pub struct Config {
     pub slots: Slots,
 }
 
-#[derive(Args)]
+#[derive(Args, Debug)]
 #[command(next_help_heading = "Other Command-Line Options")]
 pub struct ExtraCommandLineOptions {
     #[arg(
@@ -108,6 +108,24 @@ pub struct ExtraCommandLineOptions {
             input."
     )]
     pub file: Option<PathBuf>,
+
+    #[arg(
+        long,
+        short = '1',
+        help = "Just execute one job. If multiple job specifications are provided, all but \
+            the first are ignored."
+    )]
+    pub one: bool,
+
+    #[arg(
+        num_args = 0..,
+        requires = "one",
+        value_name = "PROGRAM-AND-ARGUMENTS",
+        help = "Program and arguments override. Can only be used with --one. If provided these \
+            will be used for the program and arguments, ignoring whatever is in the job \
+            specification."
+    )]
+    pub args: Vec<String>,
 }
 
 fn print_effects(
@@ -211,7 +229,7 @@ impl JobTracker {
 }
 
 fn main() -> Result<ExitCode> {
-    let (config, extra_options): (_, ExtraCommandLineOptions) =
+    let (config, mut extra_options): (_, ExtraCommandLineOptions) =
         Config::new_with_extra_from_args("maelstrom/run", "MAELSTROM_RUN", env::args())?;
 
     let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
@@ -238,11 +256,27 @@ fn main() -> Result<ExitCode> {
             config.slots,
             log,
         )?;
-        let job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
-        for job_spec in job_specs {
+        let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
+        if extra_options.one {
+            let mut job_spec = job_specs
+                .next()
+                .ok_or_else(|| anyhow!("no job specification provided"))??;
+            match &mem::take(&mut extra_options.args)[..] {
+                [] => {}
+                [program, arguments @ ..] => {
+                    job_spec.program = program.into();
+                    job_spec.arguments = arguments.to_vec();
+                }
+            }
             let tracker = tracker.clone();
             tracker.add_outstanding();
-            client.add_job(job_spec?, move |res| visitor(res, tracker))?;
+            client.add_job(job_spec, move |res| visitor(res, tracker))?;
+        } else {
+            for job_spec in job_specs {
+                let tracker = tracker.clone();
+                tracker.add_outstanding();
+                client.add_job(job_spec?, move |res| visitor(res, tracker))?;
+            }
         }
         tracker.wait_for_outstanding();
         Ok(tracker.accum.get())
