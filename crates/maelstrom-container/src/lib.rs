@@ -164,7 +164,7 @@ async fn get_image_index(
     let base_url = ref_.host.base_url();
     let tag = ref_.tag();
     decode_and_check_for_error(
-        &format!("{ref_}"),
+        &ref_.to_string(),
         client
             .get(&format!("{base_url}/{name}/manifests/{tag}"))
             .header("Authorization", format!("Bearer {token}"))
@@ -201,7 +201,7 @@ async fn get_image_manifest(
     let name = ref_.name();
     let base_url = ref_.host.base_url();
     decode_and_check_for_error(
-        &format!("{ref_}"),
+        &ref_.to_string(),
         client
             .get(&format!("{base_url}/{name}/manifests/{manifest_digest}"))
             .header("Authorization", format!("Bearer {token}"))
@@ -225,7 +225,7 @@ async fn get_image_config(
     let name = ref_.name();
     let base_url = ref_.host.base_url();
     let config: oci_spec::image::ImageConfiguration = decode_and_check_for_error(
-        &format!("{ref_}"),
+        &ref_.to_string(),
         client
             .get(&format!("{base_url}/{name}/blobs/{config_digest}"))
             .header("Authorization", format!("Bearer {token}"))
