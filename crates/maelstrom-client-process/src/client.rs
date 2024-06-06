@@ -416,13 +416,17 @@ impl Client {
                             Err(err) => {
                                 // This means that the task was either cancelled or it panicked.
                                 warn!(log, "task join failed"; "err" => ?err);
-                                state_machine_clone.fail(err.to_string()).assert_is_true();
+                                state_machine_clone
+                                    .fail(format!("{err:?}"))
+                                    .assert_is_true();
                                 return;
                             }
                             Ok(Err(err)) => {
                                 // One of the tasks ran into an error. Log it and return.
                                 debug!(log, "task completed with error"; "err" => ?err);
-                                state_machine_clone.fail(err.to_string()).assert_is_true();
+                                state_machine_clone
+                                    .fail(format!("{err:?}"))
+                                    .assert_is_true();
                                 return;
                             }
                             Ok(Ok(())) => {
@@ -440,7 +444,7 @@ impl Client {
                 Ok(())
             }
             Err(err) => {
-                activation_handle.fail(err.to_string());
+                activation_handle.fail(format!("{err:?}"));
                 Err(err)
             }
         }
