@@ -2857,7 +2857,7 @@ mod tests {
         assert_eq!(str::from_utf8(&*bytes).unwrap(), expect,);
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn tty() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
@@ -2870,9 +2870,11 @@ mod tests {
         )));
 
         let job_handle =
-            tokio::task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
 
-        let (socket, _) = linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK).unwrap();
+        let accept_handle =
+            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
+        let (socket, _) = accept_handle.await.unwrap().unwrap();
         let mut socket = AsyncFile {
             inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
         };
@@ -2905,7 +2907,7 @@ mod tests {
         assert_eq!(status, JobStatus::Exited(1));
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn tty_hup() {
         let sock =
             linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
@@ -2918,9 +2920,11 @@ mod tests {
         )));
 
         let job_handle =
-            tokio::task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
 
-        let (socket, _) = linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK).unwrap();
+        let accept_handle =
+            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
+        let (socket, _) = accept_handle.await.unwrap().unwrap();
         let mut socket = AsyncFile {
             inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
         };
