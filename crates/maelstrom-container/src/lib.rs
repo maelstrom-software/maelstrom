@@ -1,3 +1,5 @@
+pub mod image_name;
+
 pub use oci_spec::image::{Arch, Os};
 
 use anyhow::{bail, Result};
