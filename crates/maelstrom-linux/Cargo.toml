@@ -12,6 +12,7 @@ version.workspace = true
 [dependencies]
 derive_more.workspace = true
 libc.workspace = true
+static_assertions.workspace = true
 
 [features]
 std = []

@@ -11,6 +11,7 @@ use libc::{
     pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, sockaddr_storage, sockaddr_un,
     socklen_t, uid_t,
 };
+use static_assertions::assert_eq_align;
 
 #[cfg(any(test, feature = "std"))]
 use std::os::fd;
@@ -537,7 +538,9 @@ impl Sockaddr {
     /// leading two bytes used to store the address family.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
-        self.data.len() + 2
+        let res = mem::size_of_val(self);
+        assert_eq!(res, self.data.len() + mem::size_of::<sa_family_t>());
+        res
     }
 
     /// Return a reference to the underlying `sockaddr` and the length. This is useful for calling
@@ -559,7 +562,11 @@ impl Sockaddr {
     /// The `sockaddr` pointer must point to a valid `sockaddr` of some sort, and `len` must be
     /// less than or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
-        &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self)
+        let res =
+            &*(ptr::slice_from_raw_parts(addr as *const u8, len - mem::size_of::<sa_family_t>())
+                as *const Self);
+        assert_eq!(res.len(), len);
+        res
     }
 
     pub fn as_sockaddr_un(&self) -> Option<&SockaddrUn> {
@@ -654,7 +661,10 @@ impl SockaddrUn {
     /// The `sockaddr_un` pointer must point to a valid `sockaddr_un`, and `len` must be less than
     /// or equal to the size of the underlying `sockaddr` object.
     pub unsafe fn from_raw_parts<'a>(addr: *const sockaddr, len: usize) -> &'a Self {
-        let res = &*(ptr::slice_from_raw_parts(addr as *const u8, len - 2) as *const Self);
+        let res =
+            &*(ptr::slice_from_raw_parts(addr as *const u8, len - mem::size_of::<sa_family_t>())
+                as *const Self);
+        assert_eq!(res.len(), len);
         assert_eq!(res.family, libc::AF_UNIX as sa_family_t);
         res
     }
@@ -693,7 +703,7 @@ impl SockaddrUnStorage {
             };
             Ok(Self {
                 inner,
-                len: path.len() as socklen_t + 2,
+                len: (path.len() + mem::size_of::<sa_family_t>()) as socklen_t,
             })
         }
     }
