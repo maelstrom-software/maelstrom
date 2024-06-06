@@ -486,8 +486,9 @@ pub async fn download_image(
 )]
 #[repr(u32)]
 pub enum LockedContainerImageTagsVersion {
-    #[default]
     V0 = 0,
+    #[default]
+    V1 = 1,
 }
 
 #[derive(Clone, Default, Debug, Serialize, Deserialize)]
@@ -510,10 +511,11 @@ impl LockedContainerImageTags {
             bail!(VERSION_NOT_AN_INTEGER);
         };
         match LockedContainerImageTagsVersion::from_i64(version) {
-            None => Err(anyhow!(
-                "old or unknown version of container image tags file"
-            )),
-            Some(LockedContainerImageTagsVersion::V0) => Ok(toml::from_str::<Self>(contents)?),
+            Some(LockedContainerImageTagsVersion::V0) => {
+                Err(anyhow!("old version of container image tags file"))
+            }
+            Some(LockedContainerImageTagsVersion::V1) => Ok(toml::from_str::<Self>(contents)?),
+            _ => Err(anyhow!("unknown version of container image tags file")),
         }
     }
 
@@ -860,7 +862,7 @@ async fn container_image_depot_download_dir_structure() {
             .await
             .unwrap(),
         "\
-            version = 0\n\
+            version = 1\n\
             \n\
             [foo]\n\
             latest = \"sha256:abcdef\"\n\
@@ -1073,7 +1075,7 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
             .await
             .unwrap(),
         "\
-            version = 0\n\
+            version = 1\n\
             \n\
             [bar]\n\
             latest = \"sha256:ghijk\"\n\
