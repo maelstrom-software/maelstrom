@@ -8,6 +8,7 @@ use anyhow_trace::anyhow_trace;
 use async_compression::tokio::bufread::GzipDecoder;
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
+use maelstrom_util::io::Sha256Stream;
 use maelstrom_util::{
     async_fs::{self as fs, Fs},
     root::{Root, RootBuf},
@@ -130,6 +131,17 @@ struct AuthResponse {
 }
 
 #[anyhow_trace]
+async fn check_for_error(name: &str, response: reqwest::Response) -> Result<String> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        bail!("container resource {name:?} not found");
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("could not access {name:?}, are you sure it exists?")
+    }
+    let text = response.text().await?;
+    Ok(text)
+}
+
+#[anyhow_trace]
 async fn decode_and_check_for_error<T: DeserializeOwned>(
     name: &str,
     response: reqwest::Response,
@@ -162,11 +174,11 @@ async fn get_image_index(
 ) -> Result<ImageIndex> {
     let name = ref_.name();
     let base_url = ref_.host.base_url();
-    let tag = ref_.tag();
+    let digest_or_tag = ref_.digest_or_tag();
     decode_and_check_for_error(
         &ref_.to_string(),
         client
-            .get(&format!("{base_url}/{name}/manifests/{tag}"))
+            .get(&format!("{base_url}/{name}/manifests/{digest_or_tag}"))
             .header("Authorization", format!("Bearer {token}"))
             .header(
                 "Accept",
@@ -391,9 +403,31 @@ fn download_layer_on_task(
 pub async fn resolve_tag(client: &reqwest::Client, ref_: &DockerReference) -> Result<String> {
     let token = get_token(client, ref_).await?;
 
-    let index = get_image_index(client, &token, ref_).await?;
-    let manifest = find_manifest_for_platform(index.manifests().iter());
-    Ok(manifest.digest().clone())
+    if ref_.digest().is_some() {
+        bail!("image name has digest")
+    }
+
+    let name = ref_.name();
+    let base_url = ref_.host.base_url();
+    let tag = ref_.tag();
+    let response = check_for_error(
+        &ref_.to_string(),
+        client
+            .get(&format!("{base_url}/{name}/manifests/{tag}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            )
+            .send()
+            .await?,
+    )
+    .await?;
+
+    let mut hasher = Sha256Stream::new(tokio::io::sink());
+    hasher.write_all(response.as_bytes()).await.unwrap();
+    let (_, hash) = hasher.finalize();
+    Ok(format!("sha256:{hash}"))
 }
 
 #[anyhow_trace]
@@ -405,13 +439,9 @@ pub async fn download_image(
 ) -> Result<ContainerImage> {
     let token = get_token(client, ref_).await?;
 
-    let manifest_digest = if let Some(digest) = ref_.digest() {
-        digest.into()
-    } else {
-        let index = get_image_index(client, &token, ref_).await?;
-        let manifest = find_manifest_for_platform(index.manifests().iter());
-        manifest.digest().clone()
-    };
+    let index = get_image_index(client, &token, ref_).await?;
+    let manifest = find_manifest_for_platform(index.manifests().iter());
+    let manifest_digest = manifest.digest().clone();
 
     let image = get_image_manifest(client, &token, ref_, &manifest_digest).await?;
 
