@@ -1,12 +1,13 @@
 use anyhow::{anyhow, Result};
 use clap::Args;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
-    JobStatus,
+    AbstractUnixDomainAddress, ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome,
+    JobOutcomeResult, JobOutputResult, JobStatus,
 };
 use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
+use maelstrom_linux::{self as linux, SockaddrUnStorage, SocketDomain, SocketType};
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
@@ -18,10 +19,12 @@ use maelstrom_util::{
 };
 use std::{
     env,
-    io::{self, Read, Write as _},
+    io::{self, IsTerminal as _, Read, Write as _},
     mem,
+    os::{fd::OwnedFd, unix::net::UnixListener},
     path::PathBuf,
     sync::{Arc, Condvar, Mutex},
+    thread,
 };
 use xdg::BaseDirectories;
 
@@ -97,7 +100,7 @@ pub struct Config {
     pub slots: Slots,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args)]
 #[command(next_help_heading = "Other Command-Line Options")]
 pub struct ExtraCommandLineOptions {
     #[arg(
@@ -109,23 +112,48 @@ pub struct ExtraCommandLineOptions {
     )]
     pub file: Option<PathBuf>,
 
+    #[command(flatten)]
+    pub one_or_tty: OneOrTty,
+
+    #[arg(
+        num_args = 0..,
+        requires = "OneOrTty",
+        value_name = "PROGRAM-AND-ARGUMENTS",
+        help = "Program and arguments override. Can only be used with --one or --tty. If provided \
+            these will be used for the program and arguments, ignoring whatever is in the job \
+            specification."
+    )]
+    pub args: Vec<String>,
+}
+
+#[derive(Args)]
+#[group(multiple = false)]
+pub struct OneOrTty {
     #[arg(
         long,
         short = '1',
-        help = "Just execute one job. If multiple job specifications are provided, all but \
-            the first are ignored."
+        help = "Execute only one job. If multiple job specifications are provided, all but the \
+            first are ignored. Optionally, positional arguments can be provided to override the \
+            job's program and arguments"
     )]
     pub one: bool,
 
     #[arg(
-        num_args = 0..,
-        requires = "one",
-        value_name = "PROGRAM-AND-ARGUMENTS",
-        help = "Program and arguments override. Can only be used with --one. If provided these \
-            will be used for the program and arguments, ignoring whatever is in the job \
-            specification."
+        long,
+        short = 't',
+        help = "Execute only one job, with its standard input, output, and error assigned to \
+            a TTY. The TTY in turn will be connected to this process's standard input, output. \
+            This process's standard input and output must be connected to a TTY. If multiple job \
+            specifications are provided, all but the first are ignored. Optionally, positional \
+            arguments can be provided to override the job's program and arguments."
     )]
-    pub args: Vec<String>,
+    pub tty: bool,
+}
+
+impl OneOrTty {
+    fn any(&self) -> bool {
+        self.one || self.tty
+    }
 }
 
 fn print_effects(
@@ -231,6 +259,16 @@ impl JobTracker {
 fn main() -> Result<ExitCode> {
     let (config, mut extra_options): (_, ExtraCommandLineOptions) =
         Config::new_with_extra_from_args("maelstrom/run", "MAELSTROM_RUN", env::args())?;
+    if extra_options.one_or_tty.tty {
+        if !io::stdin().is_terminal() {
+            eprintln!("error: standard input is not a terminal");
+            return Ok(ExitCode::FAILURE);
+        }
+        if !io::stdout().is_terminal() {
+            eprintln!("error: standard output is not a terminal");
+            return Ok(ExitCode::FAILURE);
+        }
+    }
 
     let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
@@ -257,10 +295,13 @@ fn main() -> Result<ExitCode> {
             log,
         )?;
         let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
-        if extra_options.one {
+        if extra_options.one_or_tty.any() {
+            let tracker = tracker.clone();
+            tracker.add_outstanding();
             let mut job_spec = job_specs
                 .next()
                 .ok_or_else(|| anyhow!("no job specification provided"))??;
+            drop(job_specs);
             match &mem::take(&mut extra_options.args)[..] {
                 [] => {}
                 [program, arguments @ ..] => {
@@ -268,9 +309,48 @@ fn main() -> Result<ExitCode> {
                     job_spec.arguments = arguments.to_vec();
                 }
             }
-            let tracker = tracker.clone();
-            tracker.add_outstanding();
-            client.add_job(job_spec, move |res| visitor(res, tracker))?;
+            if extra_options.one_or_tty.tty {
+                let sock =
+                    linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
+                linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
+                linux::listen(sock.as_fd(), 1)?;
+                let sockaddr = linux::getsockname(sock.as_fd())?;
+                let sockaddr = sockaddr
+                    .as_sockaddr_un()
+                    .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
+                job_spec.allocate_tty =
+                    Some(AbstractUnixDomainAddress::new(sockaddr.path().try_into()?));
+                client.add_job(job_spec, move |res| visitor(res, tracker))?;
+                let listener = UnixListener::from(OwnedFd::from(sock));
+                println!("waiting for job to start");
+                thread::spawn(move || {
+                    let Ok((mut sock, _)) = listener.accept() else {
+                        return;
+                    };
+                    let Ok(mut sock_clone) = sock.try_clone() else {
+                        return;
+                    };
+                    println!("job started, going into raw mode");
+                    crossterm::terminal::enable_raw_mode().unwrap();
+                    thread::spawn(move || {
+                        let mut buf = [0u8; 100];
+                        loop {
+                            match sock_clone.read(&mut buf) {
+                                Err(_) | Ok(0) => {
+                                    break;
+                                }
+                                Ok(n) => {
+                                    let _ = io::stdout().write(&buf[0..n]);
+                                    let _ = io::stdout().flush();
+                                }
+                            }
+                        }
+                    });
+                    let _ = io::copy(&mut io::stdin(), &mut sock);
+                });
+            } else {
+                client.add_job(job_spec, move |res| visitor(res, tracker))?;
+            }
         } else {
             for job_spec in job_specs {
                 let tracker = tracker.clone();
@@ -279,6 +359,7 @@ fn main() -> Result<ExitCode> {
             }
         }
         tracker.wait_for_outstanding();
+        crossterm::terminal::disable_raw_mode().unwrap();
         Ok(tracker.accum.get())
     })
 }

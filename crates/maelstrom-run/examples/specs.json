@@ -1,5 +1,21 @@
 {
 	"image": {
+		"name": "ubuntu",
+		"use": [ "layers", "environment" ]
+	},
+	"mounts": [
+		{ "type": "proc", "mount_point": "/proc" },
+		{ "type": "tmp", "mount_point": "/tmp" },
+		{ "type": "sys", "mount_point": "/sys" }
+	],
+	"enable_writable_file_system": true,
+	"program": "/usr/bin/bash",
+	"environment": [
+		{ "vars": { "TERM": "$env{TERM:-vt100}" }, "extend": true }
+	]
+}
+{
+	"image": {
 		"name": "alpine",
 		"use": [ "layers", "environment" ]
 	},

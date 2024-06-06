@@ -43,6 +43,7 @@ combine = "4"
 concat-idents = "1.1.5"
 console = "0.15"
 console_error_panic_hook = "0.1.7"
+crossterm = { version = "0.27.0", default_features = false }
 darling = "0.20"
 derive_more = "0.99"
 elf = "0.7"

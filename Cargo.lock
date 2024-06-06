@@ -1267,6 +1267,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "248e3bacc7dc6baa3b21e405ee045c3047101a49145e7e9eca583ab4c2ca5345"
 
 [[package]]
+name = "crossterm"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
+dependencies = [
+ "bitflags 2.5.0",
+ "libc",
+ "parking_lot",
+]
+
+[[package]]
 name = "crypto-common"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3123,10 +3134,12 @@ dependencies = [
  "anyhow",
  "assert_matches",
  "clap",
+ "crossterm",
  "enumset",
  "indicatif",
  "maelstrom-base",
  "maelstrom-client",
+ "maelstrom-linux",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
