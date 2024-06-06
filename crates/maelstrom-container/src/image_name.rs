@@ -5,7 +5,7 @@ use combine::{
     satisfy, token, Parser, Stream,
 };
 use maelstrom_base::Utf8PathBuf;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 pub fn not_hostname<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = String> {
     not_followed_by(string("localhost/")).with(many1(satisfy(|c| {
@@ -38,6 +38,22 @@ pub enum Host {
 impl Default for Host {
     fn default() -> Self {
         Self::DockerIo { library: None }
+    }
+}
+
+impl fmt::Display for Host {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DockerIo { library: None } => write!(f, ""),
+            Self::DockerIo {
+                library: Some(library),
+            } => write!(f, "{library}/"),
+            Self::Other { name, port: None } => write!(f, "{name}/"),
+            Self::Other {
+                name,
+                port: Some(port),
+            } => write!(f, "{name}:{port}/"),
+        }
     }
 }
 
@@ -96,6 +112,19 @@ pub struct DockerReference {
     pub name: String,
     pub tag: Option<String>,
     pub digest: Option<String>,
+}
+
+impl fmt::Display for DockerReference {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}{}", &self.host, &self.name)?;
+        if let Some(tag) = &self.tag {
+            write!(f, ":{tag}")?
+        }
+        if let Some(digest) = &self.digest {
+            write!(f, "@{digest}")?
+        }
+        Ok(())
+    }
 }
 
 impl DockerReference {
@@ -418,6 +447,16 @@ pub struct LocalPath {
     pub reference: Option<String>,
 }
 
+impl fmt::Display for LocalPath {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", &self.path)?;
+        if let Some(ref_) = &self.reference {
+            write!(f, ":{ref_}")?;
+        }
+        Ok(())
+    }
+}
+
 impl LocalPath {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         (
@@ -466,6 +505,16 @@ pub enum ImageName {
     Docker(DockerReference),
     Oci(LocalPath),
     OciArchive(LocalPath),
+}
+
+impl fmt::Display for ImageName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Docker(r) => write!(f, "docker://{r}"),
+            Self::Oci(p) => write!(f, "oci://{p}"),
+            Self::OciArchive(p) => write!(f, "oci-archive://{p}"),
+        }
+    }
 }
 
 impl ImageName {

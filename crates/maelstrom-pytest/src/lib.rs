@@ -170,8 +170,7 @@ impl<'client> PytestTestCollector<'client> {
         // Build some paths
         let cache_dir: &Path = self.cache_dir.as_ref();
         let project_dir: &Path = self.project_dir.as_ref();
-        let packages_path: PathBuf =
-            cache_dir.join(format!("pip_packages/{}:{}", ref_.name(), ref_.tag()));
+        let packages_path: PathBuf = cache_dir.join(format!("pip_packages/{ref_}"));
         if !fs.exists(&packages_path) {
             fs.create_dir_all(&packages_path)?;
         }
