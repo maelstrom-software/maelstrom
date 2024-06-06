@@ -88,15 +88,11 @@ impl Job {
         layer_mapper: impl Fn(Layer) -> Result<(Sha256Digest, ArtifactType)>,
     ) -> Result<JobSpec> {
         let environment = self.environment.unwrap_or_default();
-        let mut image = self.image.map(|image| {
-            let (name, tag) = image.split_once(':').unwrap_or((&image, "latest"));
-            ImageSpec {
-                name: name.into(),
-                tag: tag.into(),
-                use_environment: false,
-                use_layers: false,
-                use_working_directory: false,
-            }
+        let mut image = self.image.map(|image| ImageSpec {
+            name: image,
+            use_environment: false,
+            use_layers: false,
+            use_working_directory: false,
         });
         if self.use_image_environment {
             let image = image.as_mut().ok_or_else(|| anyhow!("no image provided"))?;
@@ -589,7 +585,6 @@ mod tests {
             JobSpec::new(string!("/bin/sh"), vec![])
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: false,
                     use_layers: true,
                     use_working_directory: false
@@ -653,7 +648,6 @@ mod tests {
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)])
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: false,
                     use_layers: true,
                     use_working_directory: false
@@ -776,7 +770,6 @@ mod tests {
                 .working_directory("/")
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: true,
                     use_layers: false,
                     use_working_directory: false
@@ -825,7 +818,6 @@ mod tests {
                 }])
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: true,
                     use_layers: false,
                     use_working_directory: false
@@ -877,7 +869,6 @@ mod tests {
                 }])
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: true,
                     use_layers: false,
                     use_working_directory: false
@@ -922,7 +913,6 @@ mod tests {
                 ])
                 .image(ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: true,
                     use_layers: false,
                     use_working_directory: false
@@ -1069,7 +1059,6 @@ mod tests {
             JobSpec::new(string!("/bin/sh"), vec![(digest!(1), ArtifactType::Tar)]).image(
                 ImageSpec {
                     name: "image1".into(),
-                    tag: "latest".into(),
                     use_environment: false,
                     use_layers: false,
                     use_working_directory: true

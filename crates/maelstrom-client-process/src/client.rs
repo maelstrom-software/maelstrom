@@ -118,8 +118,8 @@ impl ClientState {
         Ok(res)
     }
 
-    async fn get_container_image(&self, name: &str, tag: &str) -> Result<ContainerImage> {
-        let dl_name = format!("{name}:{tag}");
+    async fn get_container_image(&self, name: &str) -> Result<ContainerImage> {
+        let dl_name = name.to_owned();
 
         let tracker = self.image_download_tracker.clone();
         let dl_name_clone = dl_name.clone();
@@ -127,7 +127,7 @@ impl ClientState {
 
         let res = self
             .container_image_depot
-            .get_container_image(name, tag, prog)
+            .get_container_image(name, prog)
             .await;
         self.image_download_tracker.remove_task(&dl_name);
         res
@@ -463,16 +463,13 @@ impl Client {
         let mut initial_env = Default::default();
         let mut image_working_directory = None;
         if let Some(image_spec) = spec.image {
-            let image = state
-                .get_container_image(&image_spec.name, &image_spec.tag)
-                .await?;
+            let image = state.get_container_image(&image_spec.name).await?;
             let image_config = ImageConfig {
                 layers: image.layers.clone(),
                 environment: image.env().cloned(),
                 working_directory: image.working_dir().map(From::from),
             };
-            let image_name = format!("{}:{}", &image_spec.name, &image_spec.tag);
-            let image = ConvertedImage::new(&image_name, image_config);
+            let image = ConvertedImage::new(&image_spec.name, image_config);
             if image_spec.use_layers {
                 let end = mem::take(&mut layers);
                 for layer in image.layers()? {

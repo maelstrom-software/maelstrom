@@ -684,10 +684,11 @@ impl<ContainerImageDepotOpsT: ContainerImageDepotOps> ContainerImageDepot<Contai
     pub async fn get_container_image(
         &self,
         name: &str,
-        tag: &str,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         self.fs.create_dir_all(&self.cache_dir).await?;
+
+        let (name, tag) = name.split_once(':').unwrap_or((name, "latest"));
 
         let cache_key = (name.into(), tag.into());
         if let Some(img) = self.cache.lock().await.get(&cache_key) {
@@ -801,7 +802,7 @@ async fn container_image_depot_download_dir_structure() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -838,7 +839,7 @@ async fn container_image_depot_download_then_reload() {
     )
     .unwrap();
     let img1 = depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -846,7 +847,7 @@ async fn container_image_depot_download_then_reload() {
     let depot =
         ContainerImageDepot::new_with(project_dir, image_dir, PanicContainerImageDepotOps).unwrap();
     let img2 = depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -870,7 +871,7 @@ async fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -891,7 +892,7 @@ async fn container_image_depot_redownload_corrupt() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
 
@@ -923,11 +924,11 @@ async fn container_image_depot_update_image() {
     )
     .unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", "latest", NullProgressTracker)
+        .get_container_image("bar", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -950,11 +951,11 @@ async fn container_image_depot_update_image() {
     .unwrap();
     #[allow(clippy::disallowed_names)]
     let foo = depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", "latest", NullProgressTracker)
+        .get_container_image("bar", NullProgressTracker)
         .await
         .unwrap();
 
@@ -996,11 +997,11 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
     });
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops.clone()).unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", "latest", NullProgressTracker)
+        .get_container_image("bar", NullProgressTracker)
         .await
         .unwrap();
     drop(depot);
@@ -1010,11 +1011,11 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
 
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops).unwrap();
     depot
-        .get_container_image("foo", "latest", NullProgressTracker)
+        .get_container_image("foo", NullProgressTracker)
         .await
         .unwrap();
     depot
-        .get_container_image("bar", "latest", NullProgressTracker)
+        .get_container_image("bar", NullProgressTracker)
         .await
         .unwrap();
 

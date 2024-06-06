@@ -169,15 +169,11 @@ impl TestMetadata {
             ref working_directory,
         }: &TestDirective<TestFilterT>,
     ) -> Result<Self> {
-        let mut image = image.as_ref().map(|image| {
-            let (name, tag) = image.split_once(':').unwrap_or((&image, "latest"));
-            ImageSpec {
-                name: name.into(),
-                tag: tag.into(),
-                use_environment: false,
-                use_layers: false,
-                use_working_directory: false,
-            }
+        let mut image = image.as_ref().map(|image| ImageSpec {
+            name: image.into(),
+            use_environment: false,
+            use_layers: false,
+            use_working_directory: false,
         });
 
         self.include_shared_libraries = include_shared_libraries.or(self.include_shared_libraries);
@@ -510,7 +506,6 @@ mod tests {
                 .image,
             Some(ImageSpec {
                 name: "rust".into(),
-                tag: "latest".into(),
                 use_environment: false,
                 use_layers: false,
                 use_working_directory: true,
@@ -672,7 +667,6 @@ mod tests {
                 .image,
             Some(ImageSpec {
                 name: "image1".into(),
-                tag: "latest".into(),
                 use_environment: false,
                 use_layers: true,
                 use_working_directory: false,
@@ -690,7 +684,6 @@ mod tests {
                 .image,
             Some(ImageSpec {
                 name: "image2".into(),
-                tag: "latest".into(),
                 use_environment: false,
                 use_layers: true,
                 use_working_directory: false,
@@ -708,7 +701,6 @@ mod tests {
                 .image,
             Some(ImageSpec {
                 name: "image3".into(),
-                tag: "latest".into(),
                 use_environment: false,
                 use_layers: true,
                 use_working_directory: false,
@@ -726,7 +718,6 @@ mod tests {
                 .image,
             Some(ImageSpec {
                 name: "image2".into(),
-                tag: "latest".into(),
                 use_environment: false,
                 use_layers: true,
                 use_working_directory: false,
