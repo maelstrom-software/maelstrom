@@ -5,6 +5,7 @@ pub mod manifest;
 pub mod proto;
 pub mod ring_buffer;
 pub mod stats;
+pub mod tty;
 
 pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use derive_more::{Constructor, Display, From};
