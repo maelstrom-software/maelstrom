@@ -7,8 +7,9 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    tty, EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
     JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf,
+    WindowSize,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -41,7 +42,10 @@ use std::{
     task::{Context, Poll},
 };
 use tokio::{
-    io::{self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, AsyncWrite, Interest, ReadBuf},
+    io::{
+        self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _,
+        Interest, ReadBuf,
+    },
     runtime, select,
     sync::oneshot,
     task::JoinSet,
@@ -471,6 +475,37 @@ enum Stdio {
         slave: OwnedFd,
         socket: OwnedFd,
     },
+}
+
+struct InputAcceptor {
+    fd: Fd,
+    to_write: Vec<u8>,
+}
+
+impl InputAcceptor {
+    fn new(fd: Fd) -> Self {
+        Self {
+            fd,
+            to_write: Default::default(),
+        }
+    }
+
+    fn take(&mut self) -> Vec<u8> {
+        mem::take(&mut self.to_write)
+    }
+}
+
+impl tty::DecodeInputAcceptor<Error> for &mut InputAcceptor {
+    fn input(&mut self, input: &[u8]) -> Result<()> {
+        self.to_write.extend_from_slice(input);
+        Ok(())
+    }
+
+    fn window_size_change(&mut self, window_size: WindowSize) -> Result<()> {
+        let WindowSize { rows, columns } = window_size;
+        let _ = linux::ioctl_tiocswinsz(self.fd, rows, columns);
+        Ok(())
+    }
 }
 
 impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
@@ -1619,6 +1654,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
                 // Turn the fds into things that tokio can use. Both of these were previously
                 // opened non-blocking.
+                let master_fd = master.as_fd();
                 let master = AsyncFile {
                     inner: AsyncFd::new(File::from(fd::OwnedFd::from(master))).map_err(syserr)?,
                 };
@@ -1637,7 +1673,33 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 );
                 joinset.spawn_on(
                     async move {
-                        let _ = io::copy(&mut socket_read, &mut master_write).await;
+                        let mut acceptor = InputAcceptor::new(master_fd);
+                        let mut buf = [0u8; 1024];
+                        let mut offset = 0;
+                        while let Ok(n) = socket_read.read(&mut buf[offset..]).await {
+                            if n == 0 {
+                                break;
+                            }
+                            match tty::decode_input(&buf[..offset + n], &mut acceptor) {
+                                Err(_) => {
+                                    break;
+                                }
+                                Ok([]) => {
+                                    offset = 0;
+                                }
+                                Ok(remainder) => {
+                                    let remainder = remainder.len();
+                                    buf.copy_within(offset + n - remainder..offset + n, 0);
+                                }
+                            }
+                            let to_write = acceptor.take();
+                            if !to_write.is_empty()
+                                && master_write.write_all(to_write.as_slice()).await.is_err()
+                            {
+                                break;
+                            }
+                        }
+
                         // If the socket shuts down, we want to close the master. To do so, we
                         // need to cancel the other which is reading from the master. Once that
                         // task and this task exit, the read and write sides of the AsyncFile will
@@ -1702,7 +1764,7 @@ mod tests {
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration};
     use tempfile::{NamedTempFile, TempDir};
-    use tokio::{io::AsyncWriteExt as _, net::TcpListener, sync::oneshot, sync::Mutex, task, time};
+    use tokio::{net::TcpListener, sync::oneshot, sync::Mutex, task, time};
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -2930,9 +2992,28 @@ mod tests {
 
         socket.write_all(b"./winsize.py\n").await.unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
-        expect(&mut socket, "./winsize.py\r\n30 90\r\nbash-5.2# ").await;
+        expect(&mut socket, "./winsize.py\r\n30 90\r\n").await;
 
-        socket.write_all(b"exit 0\r\n").await.unwrap();
+        let mut bytes = Vec::<u8>::new();
+        tty::encode_window_size_change(WindowSize::new(40, 100), |msg| -> Result<()> {
+            bytes.extend_from_slice(msg);
+            Ok(())
+        })
+        .unwrap();
+        socket.write_all(bytes.as_slice()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        expect(&mut socket, "40 100\r\n").await;
+
+        tty::encode_window_size_change(WindowSize::new(50, 120), |msg| -> Result<()> {
+            bytes.extend_from_slice(msg);
+            Ok(())
+        })
+        .unwrap();
+        socket.write_all(bytes.as_slice()).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        expect(&mut socket, "50 120\r\n").await;
+
+        drop(socket);
 
         let JobCompleted {
             status,
@@ -2940,6 +3021,6 @@ mod tests {
         } = job_handle.await.unwrap();
         assert_eq!(stderr, JobOutputResult::None);
         assert_eq!(stdout, JobOutputResult::None);
-        assert_eq!(status, JobStatus::Exited(0));
+        assert_eq!(status, JobStatus::Exited(129));
     }
 }
