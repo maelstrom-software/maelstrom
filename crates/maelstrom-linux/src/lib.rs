@@ -332,13 +332,6 @@ impl Gid {
     }
 }
 
-#[derive(Clone, Copy)]
-pub struct Ioctl(libc::Ioctl);
-
-impl Ioctl {
-    pub const TIOCSCTTY: Self = Self(libc::TIOCSCTTY);
-}
-
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct MountAttrs(c_uint);
 
@@ -970,8 +963,8 @@ pub fn grantpt(fd: Fd) -> Result<(), Errno> {
     Errno::result(unsafe { libc::grantpt(fd.0) }).map(drop)
 }
 
-pub fn ioctl_int(fd: Fd, ioctl: Ioctl, arg: i32) -> Result<(), Errno> {
-    Errno::result(unsafe { libc::ioctl(fd.0, ioctl.0, arg) }).map(drop)
+pub fn ioctl_tiocsctty(fd: Fd, arg: i32) -> Result<(), Errno> {
+    Errno::result(unsafe { libc::ioctl(fd.0, libc::TIOCSCTTY, arg as c_int) }).map(drop)
 }
 
 pub fn ioctl_tiocgwinsz(fd: Fd) -> Result<(u16, u16), Errno> {

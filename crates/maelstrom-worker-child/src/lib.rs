@@ -9,7 +9,7 @@
 use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
     self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
-    FsconfigCommand, FsmountFlags, FsopenFlags, Gid, Ioctl, MountAttrs, MountFlags, MoveMountFlags,
+    FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags, MoveMountFlags,
     OpenFlags, OpenTreeFlags, OwnedFd, Sockaddr, SocketDomain, SocketProtocol, SocketType, Uid,
     UmountFlags,
 };
@@ -109,9 +109,8 @@ pub enum Syscall<'a> {
         gid: Gid,
         fuse_fd: FdSlot<'a>,
     },
-    IoctlInt {
+    IoctlTiocsctty {
         fd: Fd,
-        ioctl: Ioctl,
         arg: i32,
     },
     Mkdir {
@@ -224,7 +223,7 @@ impl<'a> Syscall<'a> {
                 let fstype = Some(c"fuse");
                 linux::mount(source, target, fstype, *flags, Some(options.as_slice()))
             }
-            Syscall::IoctlInt { fd, ioctl, arg } => linux::ioctl_int(*fd, *ioctl, *arg),
+            Syscall::IoctlTiocsctty { fd, arg } => linux::ioctl_tiocsctty(*fd, *arg),
             Syscall::Mkdir { path, mode } => linux::mkdir(path, *mode),
             Syscall::Mount {
                 source,

@@ -12,7 +12,7 @@ use maelstrom_base::{
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
-    Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, Ioctl, MountAttrs, MountFlags,
+    Fd, FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags,
     MoveMountFlags, OpenFlags, OpenTreeFlags, OwnedFd, Signal, SockaddrNetlink, SockaddrUnStorage,
     SocketDomain, SocketProtocol, SocketType, Uid, UmountFlags, WaitStatus,
 };
@@ -603,9 +603,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
 
                 // We now have to make the slave PTY be our controlling terminal.
                 builder.push(
-                    Syscall::IoctlInt {
+                    Syscall::IoctlTiocsctty {
                         fd: Fd::STDIN,
-                        ioctl: Ioctl::TIOCSCTTY,
                         arg: 0,
                     },
                     &|err| syserr(anyhow!("setting TIOCSCTTY on stdin: {err}")),
