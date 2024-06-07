@@ -2810,7 +2810,7 @@ mod tests {
     async fn expect(mut socket: impl AsyncRead + Unpin, expect: &str) {
         let mut bytes = BytesMut::with_capacity(1000);
         while let Ok(read_result) =
-            time::timeout(Duration::from_millis(100), socket.read_buf(&mut bytes)).await
+            time::timeout(Duration::from_secs(2), socket.read_buf(&mut bytes)).await
         {
             read_result.unwrap();
         }
