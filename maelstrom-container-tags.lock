@@ -1,7 +1,7 @@
 version = 1
 
-[python]
-"3.11-slim" = "sha256:fc39d2e68b554c3f0a5cb8a776280c0b3d73b4c04b83dbade835e2a171ca27ef"
+["registry.fedoraproject.org/fedora"]
+latest = "sha256:07f2e76ef08cca5c60b426074374f89c532b6db95d311aaae7a80eb3c645f00d"
 
 [rust]
 alpine = "sha256:214477ec837f9bedd80be4b087fec09e3f270831979412840f3f6c38e5a0d9c1"

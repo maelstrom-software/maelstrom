@@ -151,6 +151,16 @@ message ImageSpec {
     bool use_working_directory = 4;
 }
 
+message WindowSize {
+    uint32 rows = 1;
+    uint32 columns = 2;
+}
+
+message JobTty {
+    bytes socket_address = 1;
+    WindowSize window_size = 2;
+}
+
 message JobSpec {
     string program = 1;
     repeated string arguments = 2;
@@ -166,7 +176,7 @@ message JobSpec {
     uint32 group = 12;
     optional uint32 timeout = 13;
     optional Duration estimated_duration = 14;
-    bytes allocate_tty = 16;
+    optional JobTty allocate_tty = 16;
 }
 
 message RunJobRequest {

@@ -974,6 +974,22 @@ pub fn ioctl_int(fd: Fd, ioctl: Ioctl, arg: i32) -> Result<(), Errno> {
     Errno::result(unsafe { libc::ioctl(fd.0, ioctl.0, arg) }).map(drop)
 }
 
+pub fn ioctl_tiocgwinsz(fd: Fd) -> Result<(u16, u16), Errno> {
+    let mut winsize: libc::winsize = unsafe { mem::zeroed() };
+    Errno::result(unsafe { libc::ioctl(fd.0, libc::TIOCGWINSZ, &mut winsize) }).map(drop)?;
+    Ok((winsize.ws_row, winsize.ws_col))
+}
+
+pub fn ioctl_tiocswinsz(fd: Fd, rows: u16, columns: u16) -> Result<(), Errno> {
+    let winsize = libc::winsize {
+        ws_row: rows,
+        ws_col: columns,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+    Errno::result(unsafe { libc::ioctl(fd.0, libc::TIOCSWINSZ, &winsize) }).map(drop)
+}
+
 pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::kill(pid.0, signal.0) }).map(drop)
 }

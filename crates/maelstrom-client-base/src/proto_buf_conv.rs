@@ -414,26 +414,54 @@ impl TryFromProtoBuf for maelstrom_base::ClientJobId {
     }
 }
 
-impl IntoProtoBuf for Option<maelstrom_base::AbstractUnixDomainAddress> {
-    type ProtoBufType = Vec<u8>;
+impl IntoProtoBuf for maelstrom_base::WindowSize {
+    type ProtoBufType = proto::WindowSize;
 
-    fn into_proto_buf(self) -> Vec<u8> {
-        match self {
-            None => vec![],
-            Some(addr) => Vec::from(addr.as_slice()),
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        Self::ProtoBufType {
+            rows: self.rows.into(),
+            columns: self.columns.into(),
         }
     }
 }
 
-impl TryFromProtoBuf for Option<maelstrom_base::AbstractUnixDomainAddress> {
-    type ProtoBufType = Vec<u8>;
+impl TryFromProtoBuf for maelstrom_base::WindowSize {
+    type ProtoBufType = proto::WindowSize;
 
-    fn try_from_proto_buf(v: Vec<u8>) -> Result<Self> {
-        match v.len() {
-            0 => Ok(None),
-            6 => Ok(Some(<&[u8; 6]>::try_from(v.as_slice()).unwrap().into())),
-            _ => Err(anyhow!("malformed AbstractUnixDomainAddress")),
+    fn try_from_proto_buf(window_size: Self::ProtoBufType) -> Result<Self> {
+        Ok(Self {
+            rows: window_size.rows.try_into()?,
+            columns: window_size.columns.try_into()?,
+        })
+    }
+}
+
+impl IntoProtoBuf for maelstrom_base::JobTty {
+    type ProtoBufType = proto::JobTty;
+
+    fn into_proto_buf(self) -> Self::ProtoBufType {
+        Self::ProtoBufType {
+            socket_address: self.socket_address.as_slice().to_vec(),
+            window_size: Some(self.window_size.into_proto_buf()),
         }
+    }
+}
+
+impl TryFromProtoBuf for maelstrom_base::JobTty {
+    type ProtoBufType = proto::JobTty;
+
+    fn try_from_proto_buf(job_tty: Self::ProtoBufType) -> Result<Self> {
+        Ok(Self {
+            socket_address: job_tty
+                .socket_address
+                .try_into()
+                .map_err(|_| anyhow!("malformed JobTty"))?,
+            window_size: maelstrom_base::WindowSize::try_from_proto_buf(
+                job_tty
+                    .window_size
+                    .ok_or_else(|| anyhow!("malformed JobTty"))?,
+            )?,
+        })
     }
 }
 

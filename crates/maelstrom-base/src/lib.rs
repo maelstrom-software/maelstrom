@@ -263,23 +263,37 @@ impl From<Timeout> for Duration {
     }
 }
 
-/// A count of seconds.
+/// The size of a terminal in characters.
 #[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-pub struct AbstractUnixDomainAddress([u8; 6]);
+pub struct WindowSize {
+    pub rows: u16,
+    pub columns: u16,
+}
 
-impl AbstractUnixDomainAddress {
-    pub fn new(address: &[u8; 6]) -> Self {
-        Self(*address)
-    }
-
-    pub fn as_slice(&self) -> &[u8] {
-        self.0.as_slice()
+impl WindowSize {
+    pub fn new(rows: u16, columns: u16) -> Self {
+        Self { rows, columns }
     }
 }
 
-impl From<&[u8; 6]> for AbstractUnixDomainAddress {
-    fn from(address: &[u8; 6]) -> Self {
-        Self::new(address)
+/// The parameters for a TTY for a job.
+#[derive(Copy, Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+pub struct JobTty {
+    /// A Unix domain socket abstract address. We use exactly 6 bytes because that's how many bytes
+    /// the autobind feature in Linux uses. The first byte will always be 0.
+    pub socket_address: [u8; 6],
+
+    /// The initial window size of the TTY. Window size updates may follow.
+    pub window_size: WindowSize,
+}
+
+impl JobTty {
+    pub fn new(socket_address: &[u8; 6], window_size: WindowSize) -> Self {
+        let socket_address = *socket_address;
+        Self {
+            socket_address,
+            window_size,
+        }
     }
 }
 
@@ -299,7 +313,7 @@ pub struct JobSpec {
     pub group: GroupId,
     pub timeout: Option<Timeout>,
     pub estimated_duration: Option<Duration>,
-    pub allocate_tty: Option<AbstractUnixDomainAddress>,
+    pub allocate_tty: Option<JobTty>,
 }
 
 impl JobSpec {
@@ -388,10 +402,7 @@ impl JobSpec {
         self
     }
 
-    pub fn allocate_tty(
-        mut self,
-        allocate_tty: impl Into<Option<AbstractUnixDomainAddress>>,
-    ) -> Self {
+    pub fn allocate_tty(mut self, allocate_tty: impl Into<Option<JobTty>>) -> Self {
         self.allocate_tty = allocate_tty.into();
         self
     }
@@ -924,7 +935,7 @@ mod tests {
         );
         assert_eq!(spec.must_be_run_locally(), false);
 
-        let spec = spec.allocate_tty(Some((b"\0abcde").into()));
+        let spec = spec.allocate_tty(Some(JobTty::new(b"\0abcde", WindowSize::new(20, 80))));
         assert_eq!(spec.must_be_run_locally(), true);
 
         let spec = spec.allocate_tty(None);

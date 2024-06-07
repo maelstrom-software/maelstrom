@@ -1,13 +1,13 @@
 use anyhow::{anyhow, Result};
 use clap::Args;
 use maelstrom_base::{
-    AbstractUnixDomainAddress, ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome,
-    JobOutcomeResult, JobOutputResult, JobStatus,
+    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
+    JobStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
     CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
 };
-use maelstrom_linux::{self as linux, SockaddrUnStorage, SocketDomain, SocketType};
+use maelstrom_linux::{self as linux, Fd, SockaddrUnStorage, SocketDomain, SocketType};
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
@@ -310,6 +310,7 @@ fn main() -> Result<ExitCode> {
                 }
             }
             if extra_options.one_or_tty.tty {
+                let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
                 let sock =
                     linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
                 linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
@@ -318,8 +319,10 @@ fn main() -> Result<ExitCode> {
                 let sockaddr = sockaddr
                     .as_sockaddr_un()
                     .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
-                job_spec.allocate_tty =
-                    Some(AbstractUnixDomainAddress::new(sockaddr.path().try_into()?));
+                job_spec.allocate_tty = Some(JobTty::new(
+                    sockaddr.path().try_into()?,
+                    WindowSize::new(rows, columns),
+                ));
                 client.add_job(job_spec, move |res| visitor(res, tracker))?;
                 let listener = UnixListener::from(OwnedFd::from(sock));
                 println!("waiting for job to start");

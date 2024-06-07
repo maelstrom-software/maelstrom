@@ -7,9 +7,8 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    AbstractUnixDomainAddress, EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError,
-    JobMount, JobNetwork, JobOutputResult, JobResult, JobRootOverlay, JobStatus, Timeout, UserId,
-    Utf8PathBuf,
+    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -70,7 +69,7 @@ pub struct JobSpec {
     pub user: UserId,
     pub group: GroupId,
     pub timeout: Option<Timeout>,
-    pub allocate_tty: Option<AbstractUnixDomainAddress>,
+    pub allocate_tty: Option<JobTty>,
 }
 
 impl JobSpec {
@@ -1357,7 +1356,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     stderr_write,
                 }
             }
-            Some(addr) => {
+            Some(JobTty {
+                socket_address,
+                window_size,
+            }) => {
                 // Open and connect the socket.
                 let socket = linux::socket(
                     SocketDomain::UNIX,
@@ -1365,7 +1367,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     Default::default(),
                 )
                 .map_err(syserr)?;
-                let sockaddr = SockaddrUnStorage::new(addr.as_slice()).map_err(syserr)?;
+                let sockaddr = SockaddrUnStorage::new(socket_address.as_slice()).map_err(syserr)?;
                 linux::connect(socket.as_fd(), &sockaddr).map_err(syserr)?;
 
                 // Open the master.
@@ -1373,6 +1375,8 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                     linux::posix_openpt(OpenFlags::RDWR | OpenFlags::NOCTTY | OpenFlags::NONBLOCK)
                         .context("posix_openpt")
                         .map_err(syserr)?;
+                linux::ioctl_tiocswinsz(master.as_fd(), window_size.rows, window_size.columns)
+                    .map_err(syserr)?;
                 linux::grantpt(master.as_fd()).map_err(syserr)?;
                 linux::unlockpt(master.as_fd()).map_err(syserr)?;
 
@@ -1692,7 +1696,7 @@ mod tests {
     use bytes::BytesMut;
     use bytesize::ByteSize;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path};
+    use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path, WindowSize};
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_linux::AcceptFlags;
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
@@ -2822,8 +2826,9 @@ mod tests {
         linux::listen(sock.as_fd(), 1).unwrap();
         let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
         let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(AbstractUnixDomainAddress::new(
+        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
             path.try_into().unwrap(),
+            WindowSize::new(24, 80),
         )));
 
         let job_handle =
@@ -2872,8 +2877,9 @@ mod tests {
         linux::listen(sock.as_fd(), 1).unwrap();
         let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
         let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(AbstractUnixDomainAddress::new(
+        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
             path.try_into().unwrap(),
+            WindowSize::new(24, 80),
         )));
 
         let job_handle =
@@ -2896,5 +2902,45 @@ mod tests {
         assert_eq!(stderr, JobOutputResult::None);
         assert_eq!(stdout, JobOutputResult::None);
         assert_eq!(status, JobStatus::Exited(129));
+    }
+
+    #[tokio::test]
+    async fn tty_winsize() {
+        let sock =
+            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
+        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
+        linux::listen(sock.as_fd(), 1).unwrap();
+        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
+        let path = sockaddr.as_sockaddr_un().unwrap().path();
+        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
+            path.try_into().unwrap(),
+            WindowSize::new(30, 90),
+        )));
+
+        let job_handle =
+            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+
+        let accept_handle =
+            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
+        let (socket, _) = accept_handle.await.unwrap().unwrap();
+        let mut socket = AsyncFile {
+            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
+        };
+
+        expect(&mut socket, "bash-5.2# ").await;
+
+        socket.write_all(b"./winsize.py\n").await.unwrap();
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        expect(&mut socket, "./winsize.py\r\n30 90\r\nbash-5.2# ").await;
+
+        socket.write_all(b"exit 0\r\n").await.unwrap();
+
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = job_handle.await.unwrap();
+        assert_eq!(stderr, JobOutputResult::None);
+        assert_eq!(stdout, JobOutputResult::None);
+        assert_eq!(status, JobStatus::Exited(0));
     }
 }
