@@ -69,10 +69,6 @@ impl fmt::Display for Host {
 }
 
 impl Host {
-    pub fn is_docker_io(&self) -> bool {
-        matches!(self, Self::DockerIo { .. })
-    }
-
     pub fn base_url(&self) -> String {
         match self {
             Self::DockerIo { path } => {
@@ -82,7 +78,7 @@ impl Host {
             Self::Other { name, port, path } => {
                 let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
                 let path_str = path.as_ref().map(|p| format!("/{p}")).unwrap_or("".into());
-                format!("http://{name}{port_str}/v2{path_str}")
+                format!("https://{name}{port_str}/v2{path_str}")
             }
         }
     }
@@ -96,7 +92,18 @@ impl Host {
                     token?service=registry.docker.io&scope=repository:{path}/{name}:pull"
                 )
             }
-            Self::Other { .. } => unimplemented!(),
+            Self::Other {
+                name: hostname,
+                port,
+                path,
+            } => {
+                let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
+                let path_str = path.as_ref().map(|p| format!("{p}/")).unwrap_or("".into());
+                format!(
+                    "https://{hostname}{port_str}/\
+                    token/?service={hostname}&scope=repository:{path_str}{name}:pull"
+                )
+            }
         }
     }
 

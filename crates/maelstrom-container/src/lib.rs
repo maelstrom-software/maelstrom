@@ -126,10 +126,6 @@ impl fmt::Display for AuthToken {
 #[derive(Deserialize, Debug)]
 struct AuthResponse {
     token: AuthToken,
-    #[allow(dead_code)]
-    expires_in: u32,
-    #[allow(dead_code)]
-    issued_at: String,
 }
 
 #[anyhow_trace]
@@ -163,13 +159,13 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
 
 #[anyhow_trace]
 async fn get_token(client: &reqwest::Client, ref_: &DockerReference) -> Result<Option<AuthToken>> {
-    if ref_.host.is_docker_io() {
-        let auth_url = ref_.host.auth_url(ref_.name());
-        let res: AuthResponse = client.get(&auth_url).send().await?.json().await?;
-        Ok(Some(res.token))
-    } else {
-        Ok(None)
+    let auth_url = ref_.host.auth_url(ref_.name());
+    let resp = client.get(&auth_url).send().await?;
+    if resp.status() != reqwest::StatusCode::OK {
+        return Ok(None);
     }
+    let res: AuthResponse = resp.json().await?;
+    Ok(Some(res.token))
 }
 
 #[anyhow_trace]
