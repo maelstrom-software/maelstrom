@@ -589,6 +589,20 @@ impl ImageDownloader {
     }
 
     #[anyhow_trace]
+    pub async fn inspect(
+        mut self,
+        ref_: &DockerReference,
+    ) -> Result<(ImageManifest, ImageConfiguration)> {
+        let index = self.get_image_index(ref_).await?;
+        let manifest = find_manifest_for_platform(index.manifests().iter());
+        let manifest_digest = manifest.digest().clone();
+
+        let image = self.get_image_manifest(ref_, &manifest_digest).await?;
+        let config = self.get_image_config(ref_, image.config().digest()).await?;
+        Ok((image, config))
+    }
+
+    #[anyhow_trace]
     pub async fn download_image(
         mut self,
         ref_: &DockerReference,
