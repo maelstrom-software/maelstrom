@@ -1299,7 +1299,11 @@ impl UnixStream {
             })? as usize;
 
             assert_eq!(message.msg_flags & libc::MSG_TRUNC, 0);
-            assert_eq!(message.msg_flags & libc::MSG_CTRUNC, 0);
+
+            // I have deduced that when we have too many files open, this is what happens
+            if message.msg_flags & libc::MSG_CTRUNC != 0 {
+                return Err(Errno::EMFILE);
+            }
 
             // See if we got a file descriptor, only checking the first message
             let mut fd_out = None;
