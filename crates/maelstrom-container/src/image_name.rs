@@ -1,3 +1,4 @@
+use crate::parse_str;
 use anyhow::anyhow;
 use combine::{
     any, attempt, choice, count_min_max, many, many1, not_followed_by, optional,
@@ -83,30 +84,6 @@ impl Host {
         }
     }
 
-    pub fn auth_url(&self, name: &str) -> String {
-        match self {
-            Self::DockerIo { path } => {
-                let path = path.as_ref().map(|s| s.as_str()).unwrap_or("library");
-                format!(
-                    "https://auth.docker.io/\
-                    token?service=registry.docker.io&scope=repository:{path}/{name}:pull"
-                )
-            }
-            Self::Other {
-                name: hostname,
-                port,
-                path,
-            } => {
-                let port_str = port.map(|p| format!(":{p}")).unwrap_or("".into());
-                let path_str = path.as_ref().map(|p| format!("{p}/")).unwrap_or("".into());
-                format!(
-                    "https://{hostname}{port_str}/\
-                    token/?service={hostname}&scope=repository:{path_str}{name}:pull"
-                )
-            }
-        }
-    }
-
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         optional(attempt(choice((
             attempt((
@@ -133,16 +110,6 @@ impl Host {
         ))))
         .map(|loc| loc.unwrap_or_default())
     }
-}
-
-macro_rules! parse_str {
-    ($ty:ty, $input:expr) => {{
-        use combine::{EasyParser as _, Parser as _};
-        <$ty>::parser()
-            .skip(combine::eof())
-            .easy_parse(combine::stream::position::Stream::new($input))
-            .map(|x| x.0)
-    }};
 }
 
 #[cfg(test)]

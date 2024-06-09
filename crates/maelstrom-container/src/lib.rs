@@ -6,6 +6,11 @@ pub use oci_spec::image::{Arch, Os};
 use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
 use async_compression::tokio::bufread::GzipDecoder;
+use combine::{
+    between, many, many1,
+    parser::char::{spaces, string},
+    satisfy, sep_by, token, Parser, Stream,
+};
 use core::task::Poll;
 use futures::stream::TryStreamExt as _;
 use maelstrom_util::io::Sha256Stream;
@@ -26,6 +31,7 @@ use std::{
     io::{self, SeekFrom},
     path::{Path, PathBuf},
     pin::Pin,
+    str::FromStr,
 };
 use tokio::{
     io::AsyncWrite,
@@ -34,6 +40,17 @@ use tokio::{
     task,
 };
 use tokio_util::compat::FuturesAsyncReadCompatExt as _;
+
+#[macro_export]
+macro_rules! parse_str {
+    ($ty:ty, $input:expr) => {{
+        use combine::{EasyParser as _, Parser as _};
+        <$ty>::parser()
+            .skip(combine::eof())
+            .easy_parse(combine::stream::position::Stream::new($input))
+            .map(|x| x.0)
+    }};
+}
 
 struct DigestDir;
 struct ContainerConfigFile;
@@ -277,32 +294,155 @@ fn find_manifest_for_platform<'a>(
         .unwrap()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct WwwAuthenticate {
+    realm: Option<String>,
+    service: Option<String>,
+    scope: Option<String>,
+}
+
+// This is similar to as described from RFC-6750 section 3.
+impl WwwAuthenticate {
+    pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        let keyword = || many1(satisfy(|c| c != '='));
+        let quoted = || between(token('"'), token('"'), many(satisfy(|c| c != '"')));
+        string("Bearer ")
+            .with(sep_by(
+                (keyword().skip(token('=')), quoted()),
+                (token(','), spaces()),
+            ))
+            .map(|kw_pairs: Vec<(String, String)>| {
+                let mut values: HashMap<_, _> = kw_pairs.into_iter().collect();
+                Self {
+                    realm: values.remove("realm"),
+                    service: values.remove("service"),
+                    scope: values.remove("scope"),
+                }
+            })
+    }
+
+    fn url(&self) -> Result<String> {
+        let realm = self
+            .realm
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing realm from www-authenticate"))?;
+        let mut url_params = vec![];
+
+        if let Some(service) = &self.service {
+            url_params.push(format!("service={service}"));
+        }
+        if let Some(scope) = &self.scope {
+            url_params.push(format!("scope={scope}"));
+        }
+
+        let mut url = realm.clone();
+        if !url_params.is_empty() {
+            url += "?";
+            url += &url_params.join("&");
+        }
+        Ok(url)
+    }
+}
+
+#[test]
+fn parse_www_authenticate_full() {
+    let s =
+        "Bearer realm=\"https://public.ecr.aws/token/\",service=\"public.ecr.aws\",scope=\"aws\"";
+    assert_eq!(
+        parse_str!(WwwAuthenticate, s).unwrap(),
+        WwwAuthenticate {
+            realm: Some("https://public.ecr.aws/token/".into()),
+            service: Some("public.ecr.aws".into()),
+            scope: Some("aws".into()),
+        }
+    );
+}
+
+#[test]
+fn www_authenticate_url() {
+    let w = WwwAuthenticate {
+        realm: Some("https://public.ecr.aws/token/".into()),
+        service: Some("public.ecr.aws".into()),
+        scope: Some("aws".into()),
+    };
+    assert_eq!(
+        w.url().unwrap(),
+        "https://public.ecr.aws/token/?service=public.ecr.aws&scope=aws"
+    );
+
+    let w = WwwAuthenticate {
+        realm: Some("https://public.ecr.aws/token/".into()),
+        service: Some("public.ecr.aws".into()),
+        scope: None,
+    };
+    assert_eq!(
+        w.url().unwrap(),
+        "https://public.ecr.aws/token/?service=public.ecr.aws"
+    );
+
+    let w = WwwAuthenticate {
+        realm: Some("https://public.ecr.aws/token/".into()),
+        service: None,
+        scope: None,
+    };
+    assert_eq!(w.url().unwrap(), "https://public.ecr.aws/token/");
+
+    let w = WwwAuthenticate {
+        realm: None,
+        service: None,
+        scope: None,
+    };
+    w.url().unwrap_err();
+}
+
+#[test]
+fn parse_www_authenticate_partial() {
+    let s = "Bearer realm=\"https://public.ecr.aws/token/\"";
+    assert_eq!(
+        parse_str!(WwwAuthenticate, s).unwrap(),
+        WwwAuthenticate {
+            realm: Some("https://public.ecr.aws/token/".into()),
+            service: None,
+            scope: None,
+        }
+    );
+}
+
+impl FromStr for WwwAuthenticate {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
+        parse_str!(Self, s).map_err(|e| anyhow!("{e}: invalid www-authenticate: {s:?}"))
+    }
+}
+
 pub struct ImageDownloader {
     client: reqwest::Client,
+    token: Option<AuthToken>,
 }
 
 impl ImageDownloader {
     pub fn new(client: reqwest::Client) -> Self {
-        Self { client }
-    }
-
-    #[anyhow_trace]
-    async fn get_token(&self, ref_: &DockerReference) -> Result<Option<AuthToken>> {
-        let auth_url = ref_.host.auth_url(ref_.name());
-        let resp = self.client.get(&auth_url).send().await?;
-        if resp.status() != reqwest::StatusCode::OK {
-            return Ok(None);
+        Self {
+            client,
+            token: None,
         }
-        let res: AuthResponse = resp.json().await?;
-        Ok(Some(res.token))
+    }
+
+    // See <https://distribution.github.io/distribution/spec/auth/token/> about how this works.
+    #[anyhow_trace]
+    async fn get_token(&mut self, www_authenticate: &str) -> Result<()> {
+        let auth: WwwAuthenticate = www_authenticate.parse()?;
+        let auth_url = auth.url()?;
+
+        let req = self.client.get(&auth_url);
+        let resp: AuthResponse = decode_and_check_for_error(&auth_url, req.send().await?).await?;
+        self.token = Some(resp.token);
+        Ok(())
     }
 
     #[anyhow_trace]
-    async fn get_image_index(
-        &self,
-        token: Option<&AuthToken>,
-        ref_: &DockerReference,
-    ) -> Result<ImageIndex> {
+    async fn get_image_index_inner(&self, ref_: &DockerReference) -> Result<reqwest::Response> {
         let name = ref_.name();
         let base_url = ref_.host.base_url();
         let digest_or_tag = ref_.digest_or_tag();
@@ -314,16 +454,31 @@ impl ImageDownloader {
                 "application/vnd.docker.distribution.manifest.list.v2+json",
             )
             .header("Accept", "application/vnd.oci.image.index.v1+json");
-        if let Some(token) = token {
+        if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"));
         }
-        decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
+        let response = req.send().await?;
+        Ok(response)
+    }
+
+    #[anyhow_trace]
+    async fn get_image_index(&mut self, ref_: &DockerReference) -> Result<ImageIndex> {
+        let mut response = self.get_image_index_inner(ref_).await?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let www_authenticate = response
+                .headers()
+                .get("www-authenticate")
+                .ok_or_else(|| anyhow!("UNAUTHORIZED with no www-authenticate header"))?
+                .to_str()?;
+            self.get_token(www_authenticate).await?;
+            response = self.get_image_index_inner(ref_).await?;
+        }
+        decode_and_check_for_error(&ref_.to_string(), response).await
     }
 
     #[anyhow_trace]
     async fn get_image_manifest(
         &self,
-        token: Option<&AuthToken>,
         ref_: &DockerReference,
         manifest_digest: &str,
     ) -> Result<ImageManifest> {
@@ -337,7 +492,7 @@ impl ImageDownloader {
                 "application/vnd.docker.distribution.manifest.v2+json",
             )
             .header("Accept", "application/vnd.oci.image.manifest.v1+json");
-        if let Some(token) = token {
+        if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"));
         }
         decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
@@ -345,7 +500,6 @@ impl ImageDownloader {
 
     async fn get_image_config(
         &self,
-        token: Option<&AuthToken>,
         ref_: &DockerReference,
         config_digest: &str,
     ) -> Result<ImageConfiguration> {
@@ -354,7 +508,7 @@ impl ImageDownloader {
         let mut req = self
             .client
             .get(format!("{base_url}/{name}/blobs/{config_digest}"));
-        if let Some(token) = token {
+        if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"));
         }
         let config: oci_spec::image::ImageConfiguration =
@@ -365,7 +519,6 @@ impl ImageDownloader {
     #[anyhow_trace]
     async fn download_layer(
         &self,
-        token: Option<&AuthToken>,
         ref_: &DockerReference,
         digest: &str,
         prog: impl ProgressTracker,
@@ -374,7 +527,7 @@ impl ImageDownloader {
         let base_url = ref_.host.base_url();
         let name = ref_.name();
         let mut req = self.client.get(format!("{base_url}/{name}/blobs/{digest}"));
-        if let Some(token) = token {
+        if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"));
         }
         let tar_stream = req.send().await?.error_for_status()?;
@@ -395,13 +548,12 @@ impl ImageDownloader {
         self: Arc<Self>,
         layer_digest: String,
         ref_: DockerReference,
-        token: Option<AuthToken>,
         path: PathBuf,
         prog: impl ProgressTracker,
     ) -> task::JoinHandle<Result<()>> {
         task::spawn(async move {
             let mut file = tokio::fs::File::create(&path).await?;
-            self.download_layer(token.as_ref(), &ref_, &layer_digest, prog, &mut file)
+            self.download_layer(&ref_, &layer_digest, prog, &mut file)
                 .await?;
             Ok(())
         })
@@ -409,8 +561,6 @@ impl ImageDownloader {
 
     #[anyhow_trace]
     pub async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
-        let token = self.get_token(ref_).await?;
-
         if ref_.digest().is_some() {
             bail!("image name has digest")
         }
@@ -427,7 +577,7 @@ impl ImageDownloader {
                 "application/vnd.docker.distribution.manifest.list.v2+json",
             )
             .header("Accept", "application/vnd.oci.image.index.v1+json");
-        if let Some(token) = token {
+        if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"))
         };
         let response = check_for_error(&ref_.to_string(), req.send().await?).await?;
@@ -440,24 +590,18 @@ impl ImageDownloader {
 
     #[anyhow_trace]
     pub async fn download_image(
-        self,
+        mut self,
         ref_: &DockerReference,
         layer_dir: impl AsRef<Path>,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
-        let token = self.get_token(ref_).await?;
-
-        let index = self.get_image_index(token.as_ref(), ref_).await?;
+        let index = self.get_image_index(ref_).await?;
         let manifest = find_manifest_for_platform(index.manifests().iter());
         let manifest_digest = manifest.digest().clone();
 
-        let image = self
-            .get_image_manifest(token.as_ref(), ref_, &manifest_digest)
-            .await?;
+        let image = self.get_image_manifest(ref_, &manifest_digest).await?;
 
-        let config = self
-            .get_image_config(token.as_ref(), ref_, image.config().digest())
-            .await?;
+        let config = self.get_image_config(ref_, image.config().digest()).await?;
 
         let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
         prog.set_length(total_size as u64);
@@ -470,7 +614,6 @@ impl ImageDownloader {
             let handle = self_.clone().download_layer_on_task(
                 layer.digest().clone(),
                 ref_.clone(),
-                token.clone(),
                 path.clone(),
                 prog.clone(),
             );
