@@ -298,7 +298,7 @@ fn find_manifest_for_platform<'a>(
 struct WwwAuthenticate {
     realm: Option<String>,
     service: Option<String>,
-    scope: Option<String>,
+    scopes: Vec<String>,
 }
 
 // This is similar to as described from RFC-6750 section 3.
@@ -316,7 +316,10 @@ impl WwwAuthenticate {
                 Self {
                     realm: values.remove("realm"),
                     service: values.remove("service"),
-                    scope: values.remove("scope"),
+                    scopes: values
+                        .remove("scope")
+                        .map(|s| s.split(' ').map(|s| s.to_owned()).collect())
+                        .unwrap_or_default(),
                 }
             })
     }
@@ -331,7 +334,7 @@ impl WwwAuthenticate {
         if let Some(service) = &self.service {
             url_params.push(format!("service={service}"));
         }
-        if let Some(scope) = &self.scope {
+        for scope in &self.scopes {
             url_params.push(format!("scope={scope}"));
         }
 
@@ -353,7 +356,20 @@ fn parse_www_authenticate_full() {
         WwwAuthenticate {
             realm: Some("https://public.ecr.aws/token/".into()),
             service: Some("public.ecr.aws".into()),
-            scope: Some("aws".into()),
+            scopes: vec!["aws".into()],
+        }
+    );
+}
+
+#[test]
+fn parse_www_authenticate_multiple_scopes() {
+    let s = "Bearer realm=\"https://public.ecr.aws/token/\",scope=\"aws bws cws\"";
+    assert_eq!(
+        parse_str!(WwwAuthenticate, s).unwrap(),
+        WwwAuthenticate {
+            realm: Some("https://public.ecr.aws/token/".into()),
+            service: None,
+            scopes: vec!["aws".into(), "bws".into(), "cws".into()],
         }
     );
 }
@@ -363,7 +379,7 @@ fn www_authenticate_url() {
     let w = WwwAuthenticate {
         realm: Some("https://public.ecr.aws/token/".into()),
         service: Some("public.ecr.aws".into()),
-        scope: Some("aws".into()),
+        scopes: vec!["aws".into()],
     };
     assert_eq!(
         w.url().unwrap(),
@@ -373,7 +389,17 @@ fn www_authenticate_url() {
     let w = WwwAuthenticate {
         realm: Some("https://public.ecr.aws/token/".into()),
         service: Some("public.ecr.aws".into()),
-        scope: None,
+        scopes: vec!["aws".into(), "bws".into()],
+    };
+    assert_eq!(
+        w.url().unwrap(),
+        "https://public.ecr.aws/token/?service=public.ecr.aws&scope=aws&scope=bws"
+    );
+
+    let w = WwwAuthenticate {
+        realm: Some("https://public.ecr.aws/token/".into()),
+        service: Some("public.ecr.aws".into()),
+        scopes: vec![],
     };
     assert_eq!(
         w.url().unwrap(),
@@ -383,14 +409,14 @@ fn www_authenticate_url() {
     let w = WwwAuthenticate {
         realm: Some("https://public.ecr.aws/token/".into()),
         service: None,
-        scope: None,
+        scopes: vec![],
     };
     assert_eq!(w.url().unwrap(), "https://public.ecr.aws/token/");
 
     let w = WwwAuthenticate {
         realm: None,
         service: None,
-        scope: None,
+        scopes: vec![],
     };
     w.url().unwrap_err();
 }
@@ -403,7 +429,7 @@ fn parse_www_authenticate_partial() {
         WwwAuthenticate {
             realm: Some("https://public.ecr.aws/token/".into()),
             service: None,
-            scope: None,
+            scopes: vec![]
         }
     );
 }
