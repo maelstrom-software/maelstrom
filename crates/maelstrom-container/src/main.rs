@@ -1,6 +1,6 @@
 use anyhow::{bail, Result};
 use clap::Parser;
-use maelstrom_container::{download_image, ImageName};
+use maelstrom_container::{ImageDownloader, ImageName};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -20,8 +20,8 @@ async fn main() -> Result<()> {
     };
 
     let ind = indicatif::ProgressBar::new(0);
-    let client = reqwest::Client::new();
-    let image = download_image(&client, ref_, &opt.layer_dir, ind).await?;
+    let downloader = ImageDownloader::new(reqwest::Client::new());
+    let image = downloader.download_image(ref_, &opt.layer_dir, ind).await?;
     println!("{image:#?}");
 
     Ok(())

@@ -18,6 +18,7 @@ use num_traits::FromPrimitive as _;
 use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
@@ -128,120 +129,6 @@ struct AuthResponse {
     token: AuthToken,
 }
 
-#[anyhow_trace]
-async fn check_for_error(name: &str, response: reqwest::Response) -> Result<String> {
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        bail!("container resource {name:?} not found");
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        bail!("could not access {name:?}, are you sure it exists?")
-    }
-    let text = response.text().await?;
-    Ok(text)
-}
-
-#[anyhow_trace]
-async fn decode_and_check_for_error<T: DeserializeOwned>(
-    name: &str,
-    response: reqwest::Response,
-) -> Result<T> {
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        bail!("container resource {name:?} not found");
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        bail!("could not access {name:?}, are you sure it exists?")
-    }
-    let json: serde_json::Value = response.json().await?;
-    if let Some(error) = json.get("errors") {
-        bail!("docker API error: {error:?}");
-    }
-    let value = serde_json::from_value(json)?;
-    Ok(value)
-}
-
-#[anyhow_trace]
-async fn get_token(client: &reqwest::Client, ref_: &DockerReference) -> Result<Option<AuthToken>> {
-    let auth_url = ref_.host.auth_url(ref_.name());
-    let resp = client.get(&auth_url).send().await?;
-    if resp.status() != reqwest::StatusCode::OK {
-        return Ok(None);
-    }
-    let res: AuthResponse = resp.json().await?;
-    Ok(Some(res.token))
-}
-
-#[anyhow_trace]
-async fn get_image_index(
-    client: &reqwest::Client,
-    token: Option<&AuthToken>,
-    ref_: &DockerReference,
-) -> Result<ImageIndex> {
-    let name = ref_.name();
-    let base_url = ref_.host.base_url();
-    let digest_or_tag = ref_.digest_or_tag();
-    let mut req = client
-        .get(format!("{base_url}/{name}/manifests/{digest_or_tag}"))
-        .header(
-            "Accept",
-            "application/vnd.docker.distribution.manifest.list.v2+json",
-        )
-        .header("Accept", "application/vnd.oci.image.index.v1+json");
-    if let Some(token) = token {
-        req = req.header("Authorization", format!("Bearer {token}"));
-    }
-    decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
-}
-
-fn find_manifest_for_platform<'a>(
-    mut manifests: impl Iterator<Item = &'a Descriptor>,
-) -> &'a Descriptor {
-    let current_platform = Platform::default();
-    manifests
-        .find(|des| {
-            des.platform()
-                .as_ref()
-                .is_some_and(|p| p == &current_platform)
-        })
-        .unwrap()
-}
-
-#[anyhow_trace]
-async fn get_image_manifest(
-    client: &reqwest::Client,
-    token: Option<&AuthToken>,
-    ref_: &DockerReference,
-    manifest_digest: &str,
-) -> Result<ImageManifest> {
-    let name = ref_.name();
-    let base_url = ref_.host.base_url();
-    let mut req = client
-        .get(format!("{base_url}/{name}/manifests/{manifest_digest}"))
-        .header(
-            "Accept",
-            "application/vnd.docker.distribution.manifest.v2+json",
-        )
-        .header("Accept", "application/vnd.oci.image.manifest.v1+json");
-    if let Some(token) = token {
-        req = req.header("Authorization", format!("Bearer {token}"));
-    }
-    decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
-}
-
-async fn get_image_config(
-    client: &reqwest::Client,
-    token: Option<&AuthToken>,
-    ref_: &DockerReference,
-    config_digest: &str,
-) -> Result<ImageConfiguration> {
-    let name = ref_.name();
-    let base_url = ref_.host.base_url();
-    let mut req = client.get(format!("{base_url}/{name}/blobs/{config_digest}"));
-    if let Some(token) = token {
-        req = req.header("Authorization", format!("Bearer {token}"));
-    }
-    let config: oci_spec::image::ImageConfiguration =
-        decode_and_check_for_error(&ref_.to_string(), req.send().await?).await?;
-    Ok(config.into())
-}
-
 pub trait ProgressTracker: Unpin + Send + 'static {
     fn set_length(&self, length: u64);
     fn inc(&self, v: u64);
@@ -304,34 +191,6 @@ impl<ProgressT: ProgressTracker, ReadT: tokio::io::AsyncRead + Unpin> tokio::io:
     }
 }
 
-#[anyhow_trace]
-async fn download_layer(
-    client: &reqwest::Client,
-    token: Option<&AuthToken>,
-    ref_: &DockerReference,
-    digest: &str,
-    prog: impl ProgressTracker,
-    mut out: impl AsyncWrite + Unpin,
-) -> Result<()> {
-    let base_url = ref_.host.base_url();
-    let name = ref_.name();
-    let mut req = client.get(format!("{base_url}/{name}/blobs/{digest}"));
-    if let Some(token) = token {
-        req = req.header("Authorization", format!("Bearer {token}"));
-    }
-    let tar_stream = req.send().await?.error_for_status()?;
-    let mut d = GzipDecoder::new(tokio::io::BufReader::new(ProgressTrackerStream::new(
-        prog,
-        tar_stream
-            .bytes_stream()
-            .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
-            .into_async_read()
-            .compat(),
-    )));
-    tokio::io::copy(&mut d, &mut out).await?;
-    Ok(())
-}
-
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u32)]
 pub enum ContainerImageVersion {
@@ -377,106 +236,260 @@ impl ContainerImage {
 }
 
 #[anyhow_trace]
-fn download_layer_on_task(
+async fn check_for_error(name: &str, response: reqwest::Response) -> Result<String> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        bail!("container resource {name:?} not found");
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("could not access {name:?}, are you sure it exists?")
+    }
+    let text = response.text().await?;
+    Ok(text)
+}
+
+#[anyhow_trace]
+async fn decode_and_check_for_error<T: DeserializeOwned>(
+    name: &str,
+    response: reqwest::Response,
+) -> Result<T> {
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        bail!("container resource {name:?} not found");
+    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        bail!("could not access {name:?}, are you sure it exists?")
+    }
+    let json: serde_json::Value = response.json().await?;
+    if let Some(error) = json.get("errors") {
+        bail!("docker API error: {error:?}");
+    }
+    let value = serde_json::from_value(json)?;
+    Ok(value)
+}
+
+fn find_manifest_for_platform<'a>(
+    mut manifests: impl Iterator<Item = &'a Descriptor>,
+) -> &'a Descriptor {
+    let current_platform = Platform::default();
+    manifests
+        .find(|des| {
+            des.platform()
+                .as_ref()
+                .is_some_and(|p| p == &current_platform)
+        })
+        .unwrap()
+}
+
+pub struct ImageDownloader {
     client: reqwest::Client,
-    layer_digest: String,
-    ref_: DockerReference,
-    token: Option<AuthToken>,
-    path: PathBuf,
-    prog: impl ProgressTracker,
-) -> task::JoinHandle<Result<()>> {
-    task::spawn(async move {
-        let mut file = tokio::fs::File::create(&path).await?;
-        download_layer(
-            &client,
-            token.as_ref(),
-            &ref_,
-            &layer_digest,
+}
+
+impl ImageDownloader {
+    pub fn new(client: reqwest::Client) -> Self {
+        Self { client }
+    }
+
+    #[anyhow_trace]
+    async fn get_token(&self, ref_: &DockerReference) -> Result<Option<AuthToken>> {
+        let auth_url = ref_.host.auth_url(ref_.name());
+        let resp = self.client.get(&auth_url).send().await?;
+        if resp.status() != reqwest::StatusCode::OK {
+            return Ok(None);
+        }
+        let res: AuthResponse = resp.json().await?;
+        Ok(Some(res.token))
+    }
+
+    #[anyhow_trace]
+    async fn get_image_index(
+        &self,
+        token: Option<&AuthToken>,
+        ref_: &DockerReference,
+    ) -> Result<ImageIndex> {
+        let name = ref_.name();
+        let base_url = ref_.host.base_url();
+        let digest_or_tag = ref_.digest_or_tag();
+        let mut req = self
+            .client
+            .get(format!("{base_url}/{name}/manifests/{digest_or_tag}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            )
+            .header("Accept", "application/vnd.oci.image.index.v1+json");
+        if let Some(token) = token {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
+    }
+
+    #[anyhow_trace]
+    async fn get_image_manifest(
+        &self,
+        token: Option<&AuthToken>,
+        ref_: &DockerReference,
+        manifest_digest: &str,
+    ) -> Result<ImageManifest> {
+        let name = ref_.name();
+        let base_url = ref_.host.base_url();
+        let mut req = self
+            .client
+            .get(format!("{base_url}/{name}/manifests/{manifest_digest}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.v2+json",
+            )
+            .header("Accept", "application/vnd.oci.image.manifest.v1+json");
+        if let Some(token) = token {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        decode_and_check_for_error(&ref_.to_string(), req.send().await?).await
+    }
+
+    async fn get_image_config(
+        &self,
+        token: Option<&AuthToken>,
+        ref_: &DockerReference,
+        config_digest: &str,
+    ) -> Result<ImageConfiguration> {
+        let name = ref_.name();
+        let base_url = ref_.host.base_url();
+        let mut req = self
+            .client
+            .get(format!("{base_url}/{name}/blobs/{config_digest}"));
+        if let Some(token) = token {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        let config: oci_spec::image::ImageConfiguration =
+            decode_and_check_for_error(&ref_.to_string(), req.send().await?).await?;
+        Ok(config.into())
+    }
+
+    #[anyhow_trace]
+    async fn download_layer(
+        &self,
+        token: Option<&AuthToken>,
+        ref_: &DockerReference,
+        digest: &str,
+        prog: impl ProgressTracker,
+        mut out: impl AsyncWrite + Unpin,
+    ) -> Result<()> {
+        let base_url = ref_.host.base_url();
+        let name = ref_.name();
+        let mut req = self.client.get(format!("{base_url}/{name}/blobs/{digest}"));
+        if let Some(token) = token {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+        let tar_stream = req.send().await?.error_for_status()?;
+        let mut d = GzipDecoder::new(tokio::io::BufReader::new(ProgressTrackerStream::new(
             prog,
-            &mut file,
-        )
-        .await?;
+            tar_stream
+                .bytes_stream()
+                .map_err(|e| futures::io::Error::new(futures::io::ErrorKind::Other, e))
+                .into_async_read()
+                .compat(),
+        )));
+        tokio::io::copy(&mut d, &mut out).await?;
         Ok(())
-    })
-}
-
-#[anyhow_trace]
-pub async fn resolve_tag(client: &reqwest::Client, ref_: &DockerReference) -> Result<String> {
-    let token = get_token(client, ref_).await?;
-
-    if ref_.digest().is_some() {
-        bail!("image name has digest")
     }
 
-    let name = ref_.name();
-    let base_url = ref_.host.base_url();
-    let tag = ref_.tag();
-
-    let mut req = client
-        .get(format!("{base_url}/{name}/manifests/{tag}"))
-        .header(
-            "Accept",
-            "application/vnd.docker.distribution.manifest.list.v2+json",
-        )
-        .header("Accept", "application/vnd.oci.image.index.v1+json");
-    if let Some(token) = token {
-        req = req.header("Authorization", format!("Bearer {token}"))
-    };
-    let response = check_for_error(&ref_.to_string(), req.send().await?).await?;
-
-    let mut hasher = Sha256Stream::new(tokio::io::sink());
-    hasher.write_all(response.as_bytes()).await.unwrap();
-    let (_, hash) = hasher.finalize();
-    Ok(format!("sha256:{hash}"))
-}
-
-#[anyhow_trace]
-pub async fn download_image(
-    client: &reqwest::Client,
-    ref_: &DockerReference,
-    layer_dir: impl AsRef<Path>,
-    prog: impl ProgressTracker + Clone,
-) -> Result<ContainerImage> {
-    let token = get_token(client, ref_).await?;
-
-    let index = get_image_index(client, token.as_ref(), ref_).await?;
-    let manifest = find_manifest_for_platform(index.manifests().iter());
-    let manifest_digest = manifest.digest().clone();
-
-    let image = get_image_manifest(client, token.as_ref(), ref_, &manifest_digest).await?;
-
-    let config = get_image_config(client, token.as_ref(), ref_, image.config().digest()).await?;
-
-    let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
-    prog.set_length(total_size as u64);
-
-    let mut task_handles = vec![];
-    let mut layers = vec![];
-    for (i, layer) in image.layers().iter().enumerate() {
-        let path = layer_dir.as_ref().join(format!("layer_{i}.tar"));
-        let handle = download_layer_on_task(
-            client.clone(),
-            layer.digest().clone(),
-            ref_.clone(),
-            token.clone(),
-            path.clone(),
-            prog.clone(),
-        );
-        task_handles.push(handle);
-        layers.push(path);
+    #[anyhow_trace]
+    fn download_layer_on_task(
+        self: Arc<Self>,
+        layer_digest: String,
+        ref_: DockerReference,
+        token: Option<AuthToken>,
+        path: PathBuf,
+        prog: impl ProgressTracker,
+    ) -> task::JoinHandle<Result<()>> {
+        task::spawn(async move {
+            let mut file = tokio::fs::File::create(&path).await?;
+            self.download_layer(token.as_ref(), &ref_, &layer_digest, prog, &mut file)
+                .await?;
+            Ok(())
+        })
     }
 
-    for handle in task_handles {
-        handle.await??;
+    #[anyhow_trace]
+    pub async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
+        let token = self.get_token(ref_).await?;
+
+        if ref_.digest().is_some() {
+            bail!("image name has digest")
+        }
+
+        let name = ref_.name();
+        let base_url = ref_.host.base_url();
+        let tag = ref_.tag();
+
+        let mut req = self
+            .client
+            .get(format!("{base_url}/{name}/manifests/{tag}"))
+            .header(
+                "Accept",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            )
+            .header("Accept", "application/vnd.oci.image.index.v1+json");
+        if let Some(token) = token {
+            req = req.header("Authorization", format!("Bearer {token}"))
+        };
+        let response = check_for_error(&ref_.to_string(), req.send().await?).await?;
+
+        let mut hasher = Sha256Stream::new(tokio::io::sink());
+        hasher.write_all(response.as_bytes()).await.unwrap();
+        let (_, hash) = hasher.finalize();
+        Ok(format!("sha256:{hash}"))
     }
 
-    Ok(ContainerImage {
-        version: ContainerImageVersion::default(),
-        name: ref_.name().into(),
-        digest: manifest_digest,
-        config,
-        layers,
-    })
+    #[anyhow_trace]
+    pub async fn download_image(
+        self,
+        ref_: &DockerReference,
+        layer_dir: impl AsRef<Path>,
+        prog: impl ProgressTracker + Clone,
+    ) -> Result<ContainerImage> {
+        let token = self.get_token(ref_).await?;
+
+        let index = self.get_image_index(token.as_ref(), ref_).await?;
+        let manifest = find_manifest_for_platform(index.manifests().iter());
+        let manifest_digest = manifest.digest().clone();
+
+        let image = self
+            .get_image_manifest(token.as_ref(), ref_, &manifest_digest)
+            .await?;
+
+        let config = self
+            .get_image_config(token.as_ref(), ref_, image.config().digest())
+            .await?;
+
+        let total_size: i64 = image.layers().iter().map(|l| l.size()).sum();
+        prog.set_length(total_size as u64);
+
+        let self_ = Arc::new(self);
+        let mut task_handles = vec![];
+        let mut layers = vec![];
+        for (i, layer) in image.layers().iter().enumerate() {
+            let path = layer_dir.as_ref().join(format!("layer_{i}.tar"));
+            let handle = self_.clone().download_layer_on_task(
+                layer.digest().clone(),
+                ref_.clone(),
+                token.clone(),
+                path.clone(),
+                prog.clone(),
+            );
+            task_handles.push(handle);
+            layers.push(path);
+        }
+
+        for handle in task_handles {
+            handle.await??;
+        }
+
+        Ok(ContainerImage {
+            version: ContainerImageVersion::default(),
+            name: ref_.name().into(),
+            digest: manifest_digest,
+            config,
+            layers,
+        })
+    }
 }
 
 #[derive(
@@ -552,7 +565,8 @@ impl DefaultContainerImageDepotOps {
 
 impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
     async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
-        resolve_tag(&self.client, ref_).await
+        let downloader = ImageDownloader::new(self.client.clone());
+        downloader.resolve_tag(ref_).await
     }
 
     async fn download_image(
@@ -561,7 +575,8 @@ impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
         layer_dir: &Path,
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
-        download_image(&self.client, ref_, layer_dir, prog).await
+        let downloader = ImageDownloader::new(self.client.clone());
+        downloader.download_image(ref_, layer_dir, prog).await
     }
 }
 
