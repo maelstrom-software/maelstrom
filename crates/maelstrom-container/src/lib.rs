@@ -588,7 +588,7 @@ impl ImageDownloader {
     }
 
     #[anyhow_trace]
-    pub async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
+    pub async fn resolve_tag_inner(&self, ref_: &DockerReference) -> Result<reqwest::Response> {
         if ref_.digest().is_some() {
             bail!("image name has digest")
         }
@@ -608,10 +608,26 @@ impl ImageDownloader {
         if let Some(token) = &self.token {
             req = req.header("Authorization", format!("Bearer {token}"))
         };
-        let response = check_for_error(&ref_.to_string(), req.send().await?).await?;
+        let response = req.send().await?;
+        Ok(response)
+    }
+
+    #[anyhow_trace]
+    async fn resolve_tag(&mut self, ref_: &DockerReference) -> Result<String> {
+        let mut response = self.resolve_tag_inner(ref_).await?;
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+            let www_authenticate = response
+                .headers()
+                .get("www-authenticate")
+                .ok_or_else(|| anyhow!("UNAUTHORIZED with no www-authenticate header"))?
+                .to_str()?;
+            self.get_token(www_authenticate).await?;
+            response = self.resolve_tag_inner(ref_).await?;
+        }
+        let response_str = check_for_error(&ref_.to_string(), response).await?;
 
         let mut hasher = Sha256Stream::new(tokio::io::sink());
-        hasher.write_all(response.as_bytes()).await.unwrap();
+        hasher.write_all(response_str.as_bytes()).await.unwrap();
         let (_, hash) = hasher.finalize();
         Ok(format!("sha256:{hash}"))
     }
@@ -750,7 +766,7 @@ impl DefaultContainerImageDepotOps {
 
 impl ContainerImageDepotOps for DefaultContainerImageDepotOps {
     async fn resolve_tag(&self, ref_: &DockerReference) -> Result<String> {
-        let downloader = ImageDownloader::new(self.client.clone());
+        let mut downloader = ImageDownloader::new(self.client.clone());
         downloader.resolve_tag(ref_).await
     }
 
