@@ -255,15 +255,27 @@ impl ContainerImage {
     }
 }
 
+async fn get_json_error(response: reqwest::Response) -> Option<String> {
+    let errors: ErrorResponse = response.json().await.ok()?;
+    Some(format!("container repository error: {errors:?}"))
+}
+
 #[anyhow_trace]
-async fn check_for_error(name: &str, response: reqwest::Response) -> Result<String> {
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        bail!("container resource {name:?} not found");
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        bail!("could not access {name:?}, are you sure it exists?")
+async fn check_for_error(name: &str, response: reqwest::Response) -> Result<reqwest::Response> {
+    let status_code = response.status();
+    if !status_code.is_success() {
+        let message =
+            format!("container repository error: {status_code}; are you sure {name:?} exists?");
+
+        if response.status().is_client_error() {
+            if let Some(api_errors) = get_json_error(response).await {
+                bail!("{message}; {api_errors}");
+            }
+        }
+
+        bail!("{message}");
     }
-    let text = response.text().await?;
-    Ok(text)
+    Ok(response)
 }
 
 #[anyhow_trace]
@@ -271,16 +283,9 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
     name: &str,
     response: reqwest::Response,
 ) -> Result<T> {
-    let status_code = response.status();
-    if !status_code.is_success() {
-        bail!("container repository error: {status_code}; are you sure {name:?} exists?")
-    }
-    let json: serde_json::Value = response.json().await?;
-    if let Ok(errors) = serde_json::from_value::<ErrorResponse>(json.clone()) {
-        bail!("container repository error: {errors:?}")
-    }
-    let value = serde_json::from_value(json)?;
-    Ok(value)
+    let response = check_for_error(name, response).await?;
+    let v = response.json().await?;
+    Ok(v)
 }
 
 fn find_manifest_for_platform<'a>(
@@ -624,7 +629,8 @@ impl ImageDownloader {
             self.get_token(www_authenticate).await?;
             response = self.resolve_tag_inner(ref_).await?;
         }
-        let response_str = check_for_error(&ref_.to_string(), response).await?;
+        let response = check_for_error(&ref_.to_string(), response).await?;
+        let response_str = response.text().await?;
 
         let mut hasher = Sha256Stream::new(tokio::io::sink());
         hasher.write_all(response_str.as_bytes()).await.unwrap();
