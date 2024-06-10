@@ -18,7 +18,7 @@ PORT=$( \
 )
 cargo run --release --bin maelstrom-worker -- --broker=localhost:$PORT &
 cargo run --release --bin cargo-maelstrom -- \
-    --broker=localhost:$PORT --profile=release --log-level=debug
+    --broker=localhost:$PORT --profile=release
 CARGO_MAELSTROM_STATUS=$?
 kill -9 $BROKER_PID
 rm "$TEMPFILE"
