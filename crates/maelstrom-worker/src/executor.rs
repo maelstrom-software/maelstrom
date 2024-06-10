@@ -2994,8 +2994,8 @@ mod tests {
 
         expect(&mut socket, b"bash-5.2# ").await;
 
-        socket.write_all(b"./winsize.py\n").await.unwrap();
-        expect(&mut socket, b"./winsize.py\r\n30 90\r\n").await;
+        socket.write_all(b"./winsize\n").await.unwrap();
+        expect(&mut socket, b"./winsize\r\n30 90\r\n").await;
 
         socket
             .write_all(tty::encode_window_size_change(WindowSize::new(40, 100)).as_slice())
