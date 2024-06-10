@@ -7,7 +7,8 @@ use bumpalo::{
 };
 use futures::ready;
 use maelstrom_base::{
-    tty, EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
+    tty::{self, DecodeInputChunk, DecodeInputRemainder},
+    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
     JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf,
     WindowSize,
 };
@@ -475,37 +476,6 @@ enum Stdio {
         slave: OwnedFd,
         socket: OwnedFd,
     },
-}
-
-struct InputAcceptor {
-    fd: Fd,
-    to_write: Vec<u8>,
-}
-
-impl InputAcceptor {
-    fn new(fd: Fd) -> Self {
-        Self {
-            fd,
-            to_write: Default::default(),
-        }
-    }
-
-    fn take(&mut self) -> Vec<u8> {
-        mem::take(&mut self.to_write)
-    }
-}
-
-impl tty::DecodeInputAcceptor<Error> for &mut InputAcceptor {
-    fn input(&mut self, input: &[u8]) -> Result<()> {
-        self.to_write.extend_from_slice(input);
-        Ok(())
-    }
-
-    fn window_size_change(&mut self, window_size: WindowSize) -> Result<()> {
-        let WindowSize { rows, columns } = window_size;
-        let _ = linux::ioctl_tiocswinsz(self.fd, rows, columns);
-        Ok(())
-    }
 }
 
 impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
@@ -1673,30 +1643,33 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 );
                 joinset.spawn_on(
                     async move {
-                        let mut acceptor = InputAcceptor::new(master_fd);
                         let mut buf = [0u8; 1024];
-                        let mut offset = 0;
-                        while let Ok(n) = socket_read.read(&mut buf[offset..]).await {
+                        let mut remainder = DecodeInputRemainder::default();
+                        'outer: loop {
+                            let offset = remainder.move_to_slice(&mut buf[..]);
+                            let Ok(n) = socket_read.read(&mut buf[offset..]).await else {
+                                break;
+                            };
                             if n == 0 {
                                 break;
                             }
-                            match tty::decode_input(&buf[..offset + n], &mut acceptor) {
-                                Err(_) => {
-                                    break;
+                            for chunk in tty::decode_input(&buf[..offset + n]) {
+                                match chunk {
+                                    DecodeInputChunk::Input(buf) => {
+                                        if master_write.write_all(buf).await.is_err() {
+                                            break 'outer;
+                                        }
+                                    }
+                                    DecodeInputChunk::WindowSizeChange(WindowSize {
+                                        rows,
+                                        columns,
+                                    }) => {
+                                        let _ = linux::ioctl_tiocswinsz(master_fd, rows, columns);
+                                    }
+                                    DecodeInputChunk::Remainder(new_remainder) => {
+                                        remainder = new_remainder;
+                                    }
                                 }
-                                Ok([]) => {
-                                    offset = 0;
-                                }
-                                Ok(remainder) => {
-                                    let remainder = remainder.len();
-                                    buf.copy_within(offset + n - remainder..offset + n, 0);
-                                }
-                            }
-                            let to_write = acceptor.take();
-                            if !to_write.is_empty()
-                                && master_write.write_all(to_write.as_slice()).await.is_err()
-                            {
-                                break;
                             }
                         }
 
@@ -2994,22 +2967,17 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(1)).await;
         expect(&mut socket, "./winsize.py\r\n30 90\r\n").await;
 
-        let mut bytes = Vec::<u8>::new();
-        tty::encode_window_size_change(WindowSize::new(40, 100), |msg| -> Result<()> {
-            bytes.extend_from_slice(msg);
-            Ok(())
-        })
-        .unwrap();
-        socket.write_all(bytes.as_slice()).await.unwrap();
+        socket
+            .write_all(tty::encode_window_size_change(WindowSize::new(40, 100)).as_slice())
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         expect(&mut socket, "40 100\r\n").await;
 
-        tty::encode_window_size_change(WindowSize::new(50, 120), |msg| -> Result<()> {
-            bytes.extend_from_slice(msg);
-            Ok(())
-        })
-        .unwrap();
-        socket.write_all(bytes.as_slice()).await.unwrap();
+        socket
+            .write_all(tty::encode_window_size_change(WindowSize::new(50, 120)).as_slice())
+            .await
+            .unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
         expect(&mut socket, "50 120\r\n").await;
 

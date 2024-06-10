@@ -1,28 +1,26 @@
 use crate::WindowSize;
+use std::mem;
 
-pub fn encode_input<E>(
-    bytes: &[u8],
-    mut writer: impl FnMut(&[u8]) -> Result<(), E>,
-) -> Result<(), E> {
-    for (n, bytes) in bytes.split(|b| *b == b'\xff').enumerate() {
-        if n > 0 {
-            writer(b"\xff\xff")?;
-        }
-        if !bytes.is_empty() {
-            writer(bytes)?;
-        }
-    }
-    Ok(())
+pub fn encode_input(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    bytes
+        .split(|b| *b == 0xff)
+        .enumerate()
+        .flat_map(|(n, bytes)| {
+            let mut vec = Vec::<&[u8]>::new();
+            if n > 0 {
+                vec.push(b"\xff\xff");
+            }
+            if !bytes.is_empty() {
+                vec.push(bytes);
+            }
+            vec
+        })
 }
 
-pub fn encode_window_size_change<E>(
-    window_size: WindowSize,
-    mut writer: impl FnMut(&[u8]) -> Result<(), E>,
-) -> Result<(), E> {
+pub fn encode_window_size_change(window_size: WindowSize) -> [u8; 6] {
     let rows = window_size.rows.to_be_bytes();
     let columns = window_size.columns.to_be_bytes();
-    let message = [255, 0, rows[0], rows[1], columns[0], columns[1]];
-    writer(message.as_slice())
+    [0xff, 0, rows[0], rows[1], columns[0], columns[1]]
 }
 
 pub trait DecodeInputAcceptor<E> {
@@ -30,363 +28,296 @@ pub trait DecodeInputAcceptor<E> {
     fn window_size_change(&mut self, window_size: WindowSize) -> Result<(), E>;
 }
 
-pub fn decode_input<E>(
-    mut input: &[u8],
-    mut acceptor: impl DecodeInputAcceptor<E>,
-) -> Result<&[u8], E> {
-    loop {
-        match input.iter().position(|byte| *byte == b'\xff') {
-            None => {
-                if !input.is_empty() {
-                    acceptor.input(input)?;
-                }
-                return Ok(b"");
+#[derive(Debug, Default, PartialEq)]
+pub struct DecodeInputRemainder {
+    data: [u8; 5],
+    length: u8,
+}
+
+impl DecodeInputRemainder {
+    pub fn new(remainder: &[u8]) -> Self {
+        let mut res: Self = Default::default();
+        let length = remainder.len();
+        assert!(length <= mem::size_of_val(&res.data));
+        res.data[..length].copy_from_slice(remainder);
+        res.length = length as u8;
+        res
+    }
+
+    pub fn move_to_slice(&mut self, dest: &mut [u8]) -> usize {
+        let length = self.len();
+        dest[..length].copy_from_slice(&self.data[..length]);
+        *self = Self::default();
+        length
+    }
+
+    pub fn len(&self) -> usize {
+        self.length.into()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum DecodeInputChunk<'a> {
+    Input(&'a [u8]),
+    WindowSizeChange(WindowSize),
+    Remainder(DecodeInputRemainder),
+}
+
+pub struct DecodeInputIterator<'a>(&'a [u8]);
+
+impl<'a> Iterator for DecodeInputIterator<'a> {
+    type Item = DecodeInputChunk<'a>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.0 {
+            [] => None,
+            [0xff, 0xff, rest @ ..] => {
+                let res = Some(DecodeInputChunk::Input(&self.0[1..2]));
+                self.0 = rest;
+                res
             }
-            Some(pos) => {
-                let first = &input[0..pos];
-                if !first.is_empty() {
-                    acceptor.input(first)?;
-                }
-                match &input[pos + 1..] {
-                    [0, rh, rl, ch, cl, rest @ ..] => {
-                        acceptor.window_size_change(WindowSize::new(
-                            u16::from_be_bytes([*rh, *rl]),
-                            u16::from_be_bytes([*ch, *cl]),
-                        ))?;
-                        input = rest;
-                    }
-                    [0, ..] | [] => {
-                        return Ok(&input[pos..]);
-                    }
-                    [b'\xff', rest @ ..] => {
-                        acceptor.input(&input[pos + 1..pos + 2])?;
-                        input = rest;
-                    }
-                    [_, rest @ ..] => {
-                        acceptor.input(&input[pos..pos + 2])?;
-                        input = rest;
-                    }
-                }
+            [0xff, 0, rh, rl, ch, cl, rest @ ..] => {
+                let res = Some(DecodeInputChunk::WindowSizeChange(WindowSize::new(
+                    u16::from_be_bytes([*rh, *rl]),
+                    u16::from_be_bytes([*ch, *cl]),
+                )));
+                self.0 = rest;
+                res
+            }
+            [0xff, 0, ..] | [0xff] => {
+                let res = Some(DecodeInputChunk::Remainder(DecodeInputRemainder::new(
+                    self.0,
+                )));
+                self.0 = b"";
+                res
+            }
+            [0xff, _, rest @ ..] => {
+                let res = Some(DecodeInputChunk::Input(&self.0[..2]));
+                self.0 = rest;
+                res
+            }
+            _ => {
+                let next_0xff = self
+                    .0
+                    .iter()
+                    .position(|b| *b == 0xff)
+                    .unwrap_or(self.0.len());
+                let res = Some(DecodeInputChunk::Input(&self.0[..next_0xff]));
+                self.0 = &self.0[next_0xff..];
+                res
             }
         }
     }
 }
 
+pub fn decode_input(input: &[u8]) -> DecodeInputIterator {
+    DecodeInputIterator(input)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use DecodeInputChunk::*;
 
-    struct Writer<E = ()> {
-        writes: Vec<Vec<u8>>,
-        writes_before_error: usize,
-        error: E,
-    }
-
-    impl<E: Clone> Writer<E> {
-        fn new(writes_before_error: usize, error: E) -> Self {
-            Self {
-                writes: Default::default(),
-                writes_before_error,
-                error,
-            }
-        }
-
-        fn writer(&mut self) -> impl FnMut(&[u8]) -> Result<(), E> + '_ {
-            |bytes| {
-                if self.writes_before_error == 0 {
-                    Err(self.error.clone())
-                } else {
-                    self.writes_before_error -= 1;
-                    self.writes.push(Vec::from(bytes));
-                    Ok(())
-                }
-            }
-        }
-
-        fn assert_eq<const N: usize>(&self, expected_writes: [&[u8]; N]) {
-            let expected = Vec::from_iter(expected_writes.into_iter().map(|slice| slice.to_vec()));
-            assert_eq!(self.writes, expected);
-        }
-    }
-
-    impl Default for Writer<()> {
-        fn default() -> Self {
-            Self::new(usize::MAX, ())
-        }
+    fn assert_encode_input<const N: usize>(input: &[u8], expected: [&[u8]; N]) {
+        assert_eq!(
+            Vec::from_iter(encode_input(input)),
+            Vec::from_iter(expected)
+        );
     }
 
     #[test]
     fn encode_input_empty() {
-        let mut writer = Writer::default();
-        encode_input(b"", writer.writer()).unwrap();
-        writer.assert_eq([]);
+        assert_encode_input(b"", []);
     }
 
     #[test]
     fn encode_input_basic() {
-        let mut writer = Writer::default();
-        encode_input(b"abc", writer.writer()).unwrap();
-        writer.assert_eq([b"abc"]);
+        assert_encode_input(b"abc", [b"abc"]);
     }
 
     #[test]
     fn encode_input_leading_escape() {
-        let mut writer = Writer::default();
-        encode_input(b"\xffabcdef", writer.writer()).unwrap();
-        writer.assert_eq([b"\xff\xff", b"abcdef"]);
+        assert_encode_input(b"\xffabcdef", [b"\xff\xff", b"abcdef"]);
     }
 
     #[test]
     fn encode_input_leading_escapes() {
-        let mut writer = Writer::default();
-        encode_input(b"\xff\xff\xffabcdef", writer.writer()).unwrap();
-        writer.assert_eq([b"\xff\xff", b"\xff\xff", b"\xff\xff", b"abcdef"]);
+        assert_encode_input(
+            b"\xff\xff\xffabcdef",
+            [b"\xff\xff", b"\xff\xff", b"\xff\xff", b"abcdef"],
+        );
     }
 
     #[test]
     fn encode_input_only_escape() {
-        let mut writer = Writer::default();
-        encode_input(b"\xff", writer.writer()).unwrap();
-        writer.assert_eq([b"\xff\xff"]);
+        assert_encode_input(b"\xff", [b"\xff\xff"]);
     }
 
     #[test]
     fn encode_input_only_escapes() {
-        let mut writer = Writer::default();
-        encode_input(b"\xff\xff\xff", writer.writer()).unwrap();
-        writer.assert_eq([b"\xff\xff", b"\xff\xff", b"\xff\xff"]);
+        assert_encode_input(b"\xff\xff\xff", [b"\xff\xff", b"\xff\xff", b"\xff\xff"]);
     }
 
     #[test]
     fn encode_input_trailing_escape() {
-        let mut writer = Writer::default();
-        encode_input(b"abcdef\xff", writer.writer()).unwrap();
-        writer.assert_eq([b"abcdef", b"\xff\xff"]);
+        assert_encode_input(b"abcdef\xff", [b"abcdef", b"\xff\xff"]);
     }
 
     #[test]
     fn encode_input_trailing_escapes() {
-        let mut writer = Writer::default();
-        encode_input(b"abcdef\xff\xff\xff", writer.writer()).unwrap();
-        writer.assert_eq([b"abcdef", b"\xff\xff", b"\xff\xff", b"\xff\xff"]);
+        assert_encode_input(
+            b"abcdef\xff\xff\xff",
+            [b"abcdef", b"\xff\xff", b"\xff\xff", b"\xff\xff"],
+        );
     }
 
     #[test]
     fn encode_input_middle_escape() {
-        let mut writer = Writer::default();
-        encode_input(b"abc\xffdef", writer.writer()).unwrap();
-        writer.assert_eq([b"abc", b"\xff\xff", b"def"]);
+        assert_encode_input(b"abc\xffdef", [b"abc", b"\xff\xff", b"def"]);
     }
 
     #[test]
     fn encode_input_middle_escapes() {
-        let mut writer = Writer::default();
-        encode_input(b"abc\xff\xff\xffdef", writer.writer()).unwrap();
-        writer.assert_eq([b"abc", b"\xff\xff", b"\xff\xff", b"\xff\xff", b"def"]);
+        assert_encode_input(
+            b"abc\xff\xff\xffdef",
+            [b"abc", b"\xff\xff", b"\xff\xff", b"\xff\xff", b"def"],
+        );
     }
 
     #[test]
     fn encode_input_escapes() {
-        let mut writer = Writer::default();
-        encode_input(b"\xffabc\xff\xff\xffdef\xff\xff", writer.writer()).unwrap();
-        writer.assert_eq([
-            b"\xff\xff",
-            b"abc",
-            b"\xff\xff",
-            b"\xff\xff",
-            b"\xff\xff",
-            b"def",
-            b"\xff\xff",
-            b"\xff\xff",
-        ]);
-    }
-
-    #[test]
-    fn encode_input_error() {
-        let mut writer = Writer::new(2, "error");
-        let result = encode_input(b"abc\xffdef", writer.writer());
-        assert_eq!(result, Err("error"));
-        writer.assert_eq([b"abc", b"\xff\xff"]);
+        assert_encode_input(
+            b"\xffabc\xff\xff\xffdef\xff\xff",
+            [
+                b"\xff\xff",
+                b"abc",
+                b"\xff\xff",
+                b"\xff\xff",
+                b"\xff\xff",
+                b"def",
+                b"\xff\xff",
+                b"\xff\xff",
+            ],
+        );
     }
 
     #[test]
     fn encode_window_size_change_basic() {
-        let mut writer = Writer::default();
-        encode_window_size_change(WindowSize::new(0x89ab, 0xcdef), writer.writer()).unwrap();
-        writer.assert_eq([b"\xff\x00\x89\xab\xcd\xef"]);
+        assert_eq!(
+            encode_window_size_change(WindowSize::new(0x89ab, 0xcdef)),
+            *b"\xff\x00\x89\xab\xcd\xef"
+        );
     }
 
-    #[test]
-    fn encode_window_size_change_error() {
-        let mut writer = Writer::new(0, "error");
-        let result = encode_window_size_change(WindowSize::new(0x89ab, 0xcdef), writer.writer());
-        assert_eq!(result, Err("error"));
-        writer.assert_eq([]);
-    }
-
-    #[derive(Debug, PartialEq)]
-    enum Chunk<T> {
-        Input(T),
-        WindowSizeChange(WindowSize),
-    }
-
-    struct Acceptor<E = ()> {
-        chunks: Vec<Chunk<Box<[u8]>>>,
-        chunks_before_error: usize,
-        error: E,
-    }
-
-    impl<E: Clone> Acceptor<E> {
-        fn new(chunks_before_error: usize, error: E) -> Self {
-            Self {
-                chunks: Default::default(),
-                chunks_before_error,
-                error,
-            }
-        }
-
-        fn assert_eq<const N: usize>(&self, expected_chunks: [Chunk<&[u8]>; N]) {
-            let expected = Vec::from_iter(expected_chunks.into_iter().map(|chunk| match chunk {
-                Chunk::Input(input) => Chunk::Input(Box::from(input)),
-                Chunk::WindowSizeChange(window_size) => Chunk::WindowSizeChange(window_size),
-            }));
-            assert_eq!(self.chunks, expected);
-        }
-
-        fn check_error(&mut self) -> Result<(), E> {
-            if self.chunks_before_error == 0 {
-                Err(self.error.clone())
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    impl Default for Acceptor<()> {
-        fn default() -> Self {
-            Self::new(usize::MAX, ())
-        }
-    }
-
-    impl<E: Clone> DecodeInputAcceptor<E> for &mut Acceptor<E> {
-        fn input(&mut self, input: &[u8]) -> Result<(), E> {
-            self.check_error()?;
-            self.chunks.push(Chunk::Input(Box::from(input)));
-            Ok(())
-        }
-
-        fn window_size_change(&mut self, window_size: WindowSize) -> Result<(), E> {
-            self.check_error()?;
-            self.chunks.push(Chunk::WindowSizeChange(window_size));
-            Ok(())
-        }
+    fn assert_decode_input<const N: usize>(input: &[u8], expected: [DecodeInputChunk; N]) {
+        assert_eq!(
+            Vec::from_iter(decode_input(input)),
+            Vec::from_iter(expected),
+        );
     }
 
     #[test]
     fn decode_input_empty() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(decode_input(b"", &mut acceptor), Ok(&b""[..]));
-        acceptor.assert_eq([]);
+        assert_decode_input(b"", []);
     }
 
     #[test]
     fn decode_input_no_escapes() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(decode_input(b"abcdef", &mut acceptor), Ok(&b""[..]));
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
+        assert_decode_input(b"abcdef", [Input(b"abcdef")]);
     }
 
     #[test]
     fn decode_input_escape_short_1_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(decode_input(b"abcdef\xff", &mut acceptor), Ok(&b"\xff"[..]));
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
+        assert_decode_input(
+            b"abcdef\xff",
+            [
+                Input(b"abcdef"),
+                Remainder(DecodeInputRemainder::new(b"\xff")),
+            ],
+        );
     }
 
     #[test]
     fn decode_input_escape_window_short_4_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(b"abcdef\xff\x00", &mut acceptor),
-            Ok(&b"\xff\x00"[..])
+        assert_decode_input(
+            b"abcdef\xff\x00",
+            [
+                Input(b"abcdef"),
+                Remainder(DecodeInputRemainder::new(b"\xff\x00")),
+            ],
         );
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
     }
 
     #[test]
     fn decode_input_escape_window_short_3_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(b"abcdef\xff\x00\x89", &mut acceptor),
-            Ok(&b"\xff\x00\x89"[..])
+        assert_decode_input(
+            b"abcdef\xff\x00\x89",
+            [
+                Input(b"abcdef"),
+                Remainder(DecodeInputRemainder::new(b"\xff\x00\x89")),
+            ],
         );
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
     }
 
     #[test]
     fn decode_input_escape_window_short_2_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(b"abcdef\xff\x00\x89\xab", &mut acceptor),
-            Ok(&b"\xff\x00\x89\xab"[..])
+        assert_decode_input(
+            b"abcdef\xff\x00\x89\xab",
+            [
+                Input(b"abcdef"),
+                Remainder(DecodeInputRemainder::new(b"\xff\x00\x89\xab")),
+            ],
         );
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
     }
 
     #[test]
     fn decode_input_escape_window_short_1_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(b"abcdef\xff\x00\x89\xab\xcd", &mut acceptor),
-            Ok(&b"\xff\x00\x89\xab\xcd"[..])
+        assert_decode_input(
+            b"abcdef\xff\x00\x89\xab\xcd",
+            [
+                Input(b"abcdef"),
+                Remainder(DecodeInputRemainder::new(b"\xff\x00\x89\xab\xcd")),
+            ],
         );
-        acceptor.assert_eq([Chunk::Input(b"abcdef")]);
     }
 
     #[test]
     fn decode_input_escape_window_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(b"abcdef\xff\x00\x89\xab\xcd\xef", &mut acceptor),
-            Ok(&b""[..])
+        assert_decode_input(
+            b"abcdef\xff\x00\x89\xab\xcd\xef",
+            [
+                Input(b"abcdef"),
+                WindowSizeChange(WindowSize::new(0x89ab, 0xcdef)),
+            ],
         );
-        acceptor.assert_eq([
-            Chunk::Input(b"abcdef"),
-            Chunk::WindowSizeChange(WindowSize::new(0x89ab, 0xcdef)),
-        ]);
     }
 
     #[test]
     fn decode_input_escape_escape_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(decode_input(b"abcdef\xff\xff", &mut acceptor), Ok(&b""[..]));
-        acceptor.assert_eq([Chunk::Input(b"abcdef"), Chunk::Input(b"\xff")]);
+        assert_decode_input(b"abcdef\xff\xff", [Input(b"abcdef"), Input(b"\xff")]);
     }
 
     #[test]
     fn decode_input_escape_garbage_last() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(decode_input(b"abcdef\xff\x01", &mut acceptor), Ok(&b""[..]));
-        acceptor.assert_eq([Chunk::Input(b"abcdef"), Chunk::Input(b"\xff\x01")]);
+        assert_decode_input(b"abcdef\xff\x01", [Input(b"abcdef"), Input(b"\xff\x01")]);
     }
 
     #[test]
     fn decode_input_kitchen_sink() {
-        let mut acceptor = Acceptor::default();
-        assert_eq!(
-            decode_input(
-                b"\xff\xff\x00\xff\x00\x89\xab\xcd\xff\xff\xff\xffabc",
-                &mut acceptor
-            ),
-            Ok(&b""[..])
+        assert_decode_input(
+            b"\xff\xff\x00\xff\x00\x89\xab\xcd\xff\xff\xff\xffabc",
+            [
+                Input(b"\xff"),
+                Input(b"\x00"),
+                WindowSizeChange(WindowSize::new(0x89ab, 0xcdff)),
+                Input(b"\xff"),
+                Input(b"\xffa"),
+                Input(b"bc"),
+            ],
         );
-        acceptor.assert_eq([
-            Chunk::Input(b"\xff"),
-            Chunk::Input(b"\x00"),
-            Chunk::WindowSizeChange(WindowSize::new(0x89ab, 0xcdff)),
-            Chunk::Input(b"\xff"),
-            Chunk::Input(b"\xffa"),
-            Chunk::Input(b"bc"),
-        ]);
     }
 }
