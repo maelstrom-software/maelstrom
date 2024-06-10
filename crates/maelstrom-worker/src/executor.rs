@@ -1735,7 +1735,9 @@ mod tests {
     use maelstrom_linux::AcceptFlags;
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
-    use std::{collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration};
+    use std::{
+        ascii, collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration,
+    };
     use tempfile::{NamedTempFile, TempDir};
     use tokio::{net::TcpListener, sync::oneshot, sync::Mutex, task, time};
 
@@ -2842,14 +2844,41 @@ mod tests {
         assert_execution_error(test_spec("/bin/cat").working_directory("/dev/null")).await;
     }
 
-    async fn expect(mut socket: impl AsyncRead + Unpin, expect: &str) {
-        let mut bytes = BytesMut::with_capacity(1000);
-        while let Ok(read_result) =
-            time::timeout(Duration::from_secs(2), socket.read_buf(&mut bytes)).await
-        {
-            read_result.unwrap();
+    async fn expect(mut socket: impl AsyncRead + Unpin, expected: &[u8]) {
+        fn escaped_string(bytes: &[u8]) -> String {
+            bytes
+                .into_iter()
+                .copied()
+                .flat_map(ascii::escape_default)
+                .map(|c| char::from_u32(c.into()).unwrap())
+                .collect()
         }
-        assert_eq!(str::from_utf8(&*bytes).unwrap(), expect,);
+        let mut bytes = BytesMut::with_capacity(1000);
+        loop {
+            let actual = &*bytes;
+            if actual.len() < expected.len() {
+                let expected_prefix = &expected[..actual.len()];
+                assert_eq!(
+                    actual,
+                    expected_prefix,
+                    r#"got output that started with "{}" while expecting "{}""#,
+                    &escaped_string(actual),
+                    &escaped_string(expected_prefix),
+                );
+                time::timeout(Duration::from_secs(60), socket.read_buf(&mut bytes))
+                    .await
+                    .unwrap();
+            } else {
+                assert_eq!(
+                    actual,
+                    expected,
+                    r#"got output "{}" while expecting "{}""#,
+                    &escaped_string(actual),
+                    &escaped_string(expected),
+                );
+                break;
+            }
+        }
     }
 
     #[tokio::test]
@@ -2875,22 +2904,22 @@ mod tests {
             inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
         };
 
-        expect(&mut socket, "bash-5.2# ").await;
+        expect(&mut socket, b"bash-5.2# ").await;
 
         socket.write_all(b"echo foo\n").await.unwrap();
-        expect(&mut socket, "echo foo\r\nfoo\r\nbash-5.2# ").await;
+        expect(&mut socket, b"echo foo\r\nfoo\r\nbash-5.2# ").await;
 
         socket.write_all(b"cat\n").await.unwrap();
-        expect(&mut socket, "cat\r\n").await;
+        expect(&mut socket, b"cat\r\n").await;
 
         socket.write_all(b"dog\n").await.unwrap();
-        expect(&mut socket, "dog\r\ndog\r\n").await;
+        expect(&mut socket, b"dog\r\ndog\r\n").await;
 
         socket.write_all(b"cow\n").await.unwrap();
-        expect(&mut socket, "cow\r\ncow\r\n").await;
+        expect(&mut socket, b"cow\r\ncow\r\n").await;
 
         socket.write_all(b"\x04").await.unwrap(); // ^D should send EOF
-        expect(&mut socket, "bash-5.2# ").await;
+        expect(&mut socket, b"bash-5.2# ").await;
 
         socket.write_all(b"exit 1\r\n").await.unwrap();
 
@@ -2926,7 +2955,7 @@ mod tests {
             inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
         };
 
-        expect(&mut socket, "bash-5.2# ").await;
+        expect(&mut socket, b"bash-5.2# ").await;
         drop(socket);
 
         let JobCompleted {
@@ -2961,25 +2990,22 @@ mod tests {
             inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
         };
 
-        expect(&mut socket, "bash-5.2# ").await;
+        expect(&mut socket, b"bash-5.2# ").await;
 
         socket.write_all(b"./winsize.py\n").await.unwrap();
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        expect(&mut socket, "./winsize.py\r\n30 90\r\n").await;
+        expect(&mut socket, b"./winsize.py\r\n30 90\r\n").await;
 
         socket
             .write_all(tty::encode_window_size_change(WindowSize::new(40, 100)).as_slice())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        expect(&mut socket, "40 100\r\n").await;
+        expect(&mut socket, b"40 100\r\n").await;
 
         socket
             .write_all(tty::encode_window_size_change(WindowSize::new(50, 120)).as_slice())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_secs(1)).await;
-        expect(&mut socket, "50 120\r\n").await;
+        expect(&mut socket, b"50 120\r\n").await;
 
         drop(socket);
 
