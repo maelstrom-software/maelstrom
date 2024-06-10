@@ -257,7 +257,22 @@ impl ContainerImage {
 
 async fn get_json_error(response: reqwest::Response) -> Option<String> {
     let errors: ErrorResponse = response.json().await.ok()?;
-    Some(format!("container repository error: {errors:?}"))
+    let mut s = String::new();
+    for d in errors.detail() {
+        if !s.is_empty() {
+            s += "; "
+        }
+        s += &format!("{:?}", d.code());
+        if let Some(message) = d.message() {
+            s += "; ";
+            s += &message;
+        }
+        if let Some(detail) = d.detail() {
+            s += "; ";
+            s += &detail;
+        }
+    }
+    Some(s)
 }
 
 #[anyhow_trace]
