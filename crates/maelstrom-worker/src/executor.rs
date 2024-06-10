@@ -2867,6 +2867,7 @@ mod tests {
                 );
                 time::timeout(Duration::from_secs(60), socket.read_buf(&mut bytes))
                     .await
+                    .unwrap()
                     .unwrap();
             } else {
                 assert_eq!(
