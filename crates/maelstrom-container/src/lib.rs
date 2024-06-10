@@ -1,7 +1,10 @@
 pub mod image_name;
 
 pub use image_name::{DockerReference, ImageName};
-pub use oci_spec::image::{Arch, Os};
+pub use oci_spec::{
+    distribution::ErrorResponse,
+    image::{Arch, Os},
+};
 
 use anyhow::{anyhow, bail, Result};
 use anyhow_trace::anyhow_trace;
@@ -268,14 +271,13 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
     name: &str,
     response: reqwest::Response,
 ) -> Result<T> {
-    if response.status() == reqwest::StatusCode::NOT_FOUND {
-        bail!("container resource {name:?} not found");
-    } else if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        bail!("could not access {name:?}, are you sure it exists?")
+    let status_code = response.status();
+    if !status_code.is_success() {
+        bail!("container repository error: {status_code}; are you sure {name:?} exists?")
     }
     let json: serde_json::Value = response.json().await?;
-    if let Some(error) = json.get("errors") {
-        bail!("docker API error: {error:?}");
+    if let Ok(errors) = serde_json::from_value::<ErrorResponse>(json.clone()) {
+        bail!("container repository error: {errors:?}")
     }
     let value = serde_json::from_value(json)?;
     Ok(value)
