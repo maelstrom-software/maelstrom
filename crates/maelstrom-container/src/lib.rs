@@ -588,7 +588,7 @@ impl ImageDownloader {
     }
 
     #[anyhow_trace]
-    pub async fn resolve_tag_inner(&self, ref_: &DockerReference) -> Result<reqwest::Response> {
+    async fn resolve_tag_inner(&self, ref_: &DockerReference) -> Result<reqwest::Response> {
         if ref_.digest().is_some() {
             bail!("image name has digest")
         }
@@ -613,7 +613,7 @@ impl ImageDownloader {
     }
 
     #[anyhow_trace]
-    async fn resolve_tag(&mut self, ref_: &DockerReference) -> Result<String> {
+    pub async fn resolve_tag(&mut self, ref_: &DockerReference) -> Result<String> {
         let mut response = self.resolve_tag_inner(ref_).await?;
         if response.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www_authenticate = response
