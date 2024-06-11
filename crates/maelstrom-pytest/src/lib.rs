@@ -579,10 +579,9 @@ where
     let log = logger.build(logging_output.clone());
 
     let list_action = extra_options.list.then_some(ListAction::ListTests);
-    let build_dir = Root::<BuildDir>::new(Path::new("target"));
-    let maelstrom_build_dir = build_dir.join::<MaelstromTargetDir>("maelstrom_pytest");
-    let state_dir = maelstrom_build_dir.join::<StateDir>("state");
-    let cache_dir = maelstrom_build_dir.join::<CacheDir>("cache");
+    let build_dir = Root::<BuildDir>::new(Path::new(".maelstrom-pytest"));
+    let state_dir = build_dir.join::<StateDir>("state");
+    let cache_dir = build_dir.join::<CacheDir>("cache");
 
     Fs.create_dir_all(&state_dir)?;
     Fs.create_dir_all(&cache_dir)?;
