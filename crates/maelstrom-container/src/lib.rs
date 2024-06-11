@@ -1,4 +1,5 @@
 pub mod image_name;
+pub mod local_registry;
 
 pub use image_name::{DockerReference, ImageName};
 pub use oci_spec::{
@@ -303,17 +304,23 @@ async fn decode_and_check_for_error<T: DeserializeOwned>(
     Ok(v)
 }
 
-fn find_manifest_for_platform<'a>(
-    mut manifests: impl Iterator<Item = &'a Descriptor>,
-) -> &'a Descriptor {
+fn find_manifest_for_platform(manifests: &[Descriptor]) -> Result<&Descriptor> {
+    if manifests.is_empty() {
+        bail!("empty image index");
+    }
     let current_platform = Platform::default();
-    manifests
-        .find(|des| {
-            des.platform()
-                .as_ref()
-                .is_some_and(|p| p == &current_platform)
-        })
-        .unwrap()
+    if let Some(manifest) = manifests.iter().find(|des| {
+        des.platform()
+            .as_ref()
+            .is_some_and(|p| p == &current_platform)
+    }) {
+        return Ok(manifest);
+    }
+    if manifests.len() != 1 {
+        bail!("no manifest found for the current platform");
+    }
+
+    Ok(&manifests[0])
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -659,7 +666,7 @@ impl ImageDownloader {
         ref_: &DockerReference,
     ) -> Result<(ImageManifest, ImageConfiguration)> {
         let index = self.get_image_index(ref_).await?;
-        let manifest = find_manifest_for_platform(index.manifests().iter());
+        let manifest = find_manifest_for_platform(index.manifests())?;
         let manifest_digest = manifest.digest().clone();
 
         let image = self.get_image_manifest(ref_, &manifest_digest).await?;
@@ -675,7 +682,7 @@ impl ImageDownloader {
         prog: impl ProgressTracker + Clone,
     ) -> Result<ContainerImage> {
         let index = self.get_image_index(ref_).await?;
-        let manifest = find_manifest_for_platform(index.manifests().iter());
+        let manifest = find_manifest_for_platform(index.manifests())?;
         let manifest_digest = manifest.digest().clone();
 
         let image = self.get_image_manifest(ref_, &manifest_digest).await?;
@@ -781,6 +788,16 @@ impl DefaultContainerImageDepotOps {
     fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_insecure() -> Self {
+        Self {
+            client: reqwest::Client::builder()
+                .danger_accept_invalid_certs(true)
+                .build()
+                .unwrap(),
         }
     }
 }
@@ -1322,5 +1339,47 @@ async fn container_image_depot_update_image_but_nothing_to_do() {
     assert_eq!(
         sorted_dir_listing(&fs, image_dir).await,
         vec!["sha256:abcdef", "sha256:ghijk"]
+    );
+}
+
+#[tokio::test]
+async fn container_image_depot_local_registry() {
+    let fs = Fs::new();
+    let project_dir = tempfile::tempdir().unwrap();
+    let project_dir = Root::<ProjectDir>::new(project_dir.path());
+    let image_dir = tempfile::tempdir().unwrap();
+    let image_dir = Root::<ContainerImageDepotDir>::new(image_dir.path());
+
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let log = maelstrom_util::log::test_logger();
+    let registry = local_registry::LocalRegistry::new(manifest_dir.join("src"), log)
+        .await
+        .unwrap();
+    let address = registry.address().unwrap();
+    tokio::task::spawn(async move { registry.run().await.unwrap() });
+
+    let ops = DefaultContainerImageDepotOps::new_insecure();
+    let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops).unwrap();
+    depot
+        .get_container_image(&format!("docker://{address}/busybox"), NullProgressTracker)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fs.read_to_string(project_dir.join::<ContainerTagFile>(TAG_FILE_NAME))
+            .await
+            .unwrap(),
+        format!(
+            "\
+            version = 1\n\
+            \n\
+            [\"{address}/busybox\"]\n\
+            latest = \"sha256:0d3f3db50eadc1930aa204eef3d21966037b797cdbef2c7446bbdf10541bda4b\"\n\
+        "
+        )
+    );
+    assert_eq!(
+        sorted_dir_listing(&fs, image_dir).await,
+        vec!["sha256:0d3f3db50eadc1930aa204eef3d21966037b797cdbef2c7446bbdf10541bda4b"]
     );
 }

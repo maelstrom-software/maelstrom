@@ -63,7 +63,7 @@ gloo-utils = "0.2"
 heck = "0.5.0"
 hex = "0.4.3"
 hyper-tungstenite = "0.11"
-hyper = { version = "0.14", features = ["http1", "server", "tcp"] }
+hyper = { version = "0.14", features = ["http1", "server", "tcp", "stream"] }
 indicatif = { version = "0.17", features = ["in_memory", "tokio"] }
 indoc = "2.0.4"
 itertools = "0.10.5"
@@ -90,6 +90,7 @@ maelstrom-worker = { version = "0.10.0-dev", path = "crates/maelstrom-worker" }
 maelstrom-worker-child = { version = "0.10.0-dev", path = "crates/maelstrom-worker-child" }
 maplit = "1"
 memchr = "2"
+native-tls = "0.2"
 netlink-packet-core = "0.7"
 netlink-packet-route = "0.17"
 nonempty = { version = "0.8.1", features = ["serialize"] }
@@ -126,6 +127,7 @@ syn = { version = "2", features = ["full"] }
 tar = "0.4.38"
 tempfile = "3.5.0"
 tokio = { version = "1.28", features = [ "rt", "rt-multi-thread", "macros", "fs", "io-util" ] }
+tokio-native-tls = "0.3"
 tokio-stream = "0.1"
 tokio-tar = "0.3"
 tokio-util = { version = "0.7.10", features = [ "compat" ] }

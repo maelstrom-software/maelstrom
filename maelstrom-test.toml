@@ -45,10 +45,15 @@ environment = { HOME = "/tmp" }
 [[directives]]
 filter = """
 package.equals(maelstrom-client-process) ||
-package.equals(maelstrom-container) ||
 package.equals(maelstrom-fuse) ||
 package.equals(maelstrom-util)"""
 layers = [{ stubs = ["/tmp/"] }]
+mounts = [{ type = "tmp", mount_point = "/tmp" }]
+
+[[directives]]
+filter = "package.equals(maelstrom-container)"
+network = "loopback"
+layers = [{ stubs = ["/tmp/"] }, { paths = ["crates/maelstrom-container/src/busybox.tar"], canonicalize = true }]
 mounts = [{ type = "tmp", mount_point = "/tmp" }]
 
 [[directives]]

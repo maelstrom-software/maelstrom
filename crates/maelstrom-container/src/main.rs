@@ -1,6 +1,9 @@
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
-use maelstrom_container::{DockerReference, ImageDownloader, ImageName};
+use maelstrom_container::{
+    local_registry::LocalRegistry, DockerReference, ImageDownloader, ImageName,
+};
+use maelstrom_util::config::common::LogLevel;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
@@ -11,6 +14,9 @@ enum CliCommands {
     },
     Inspect {
         image_name: String,
+    },
+    Registry {
+        source_path: PathBuf,
     },
 }
 
@@ -37,8 +43,7 @@ async fn resolve_name(image_name: &str) -> Result<DockerReference> {
 }
 
 #[tokio::main]
-async fn main() -> Result<()> {
-    let opt = CliOptions::parse();
+async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
     match opt.command {
         CliCommands::Download {
             image_name,
@@ -58,7 +63,16 @@ async fn main() -> Result<()> {
             let resp = downloader.inspect(&ref_).await?;
             println!("{resp:#?}");
         }
+        CliCommands::Registry { source_path } => {
+            let registry = LocalRegistry::new(source_path, log).await?;
+            println!("listening on {}", registry.address()?);
+            registry.run().await?;
+        }
     }
-
     Ok(())
+}
+
+fn main() -> Result<()> {
+    let opt = CliOptions::parse();
+    maelstrom_util::log::run_with_logger(LogLevel::Debug, |log| run(opt, log))
 }
