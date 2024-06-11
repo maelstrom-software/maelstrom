@@ -302,17 +302,28 @@ where
         maelstrom_test_toml: &str,
     ) -> Result<Self> {
         struct MaelstromTestTomlFile;
-        let path = project_dir
+        let path1 = project_dir
             .as_ref()
             .join::<MaelstromTestTomlFile>(maelstrom_test_toml);
-        if let Some(contents) = Fs::new().read_to_string_if_exists(&path)? {
-            Ok(Self::from_str(&contents).with_context(|| format!("parsing {}", path.display()))?)
-        } else {
-            slog::debug!(
-                log, "no test metadata configuration found, using default"; "search_path" => ?path
-            );
-            Ok(Default::default())
+        if let Some(contents) = Fs::new().read_to_string_if_exists(&path1)? {
+            return Self::from_str(&contents)
+                .with_context(|| format!("parsing {}", path1.display()));
         }
+
+        let path2 = project_dir
+            .as_ref()
+            .join::<MaelstromTestTomlFile>("maelstrom-test.toml");
+        if let Some(contents) = Fs::new().read_to_string_if_exists(&path2)? {
+            return Self::from_str(&contents)
+                .with_context(|| format!("parsing {}", path2.display()));
+        }
+
+        slog::debug!(
+            log,
+            "no test metadata configuration found, using default";
+            "search_paths" => ?[path1, path2]
+        );
+        Ok(Default::default())
     }
 }
 

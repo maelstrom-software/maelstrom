@@ -31,7 +31,7 @@ use std::{fmt, io};
 
 pub use maelstrom_test_runner::Logger;
 
-pub const MAELSTROM_TEST_TOML: &str = "maelstrom-test.toml";
+pub const MAELSTROM_TEST_TOML: &str = "cargo-maelstrom.toml";
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
