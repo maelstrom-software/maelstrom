@@ -1,6 +1,6 @@
 use indicatif::InMemoryTerm;
 use maelstrom_client::ClientBgProcess;
-use maelstrom_pytest::{cli::ExtraCommandLineOptions, Logger};
+use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
     root::RootBuf,
@@ -22,15 +22,17 @@ fn spawn_bg_proc() -> ClientBgProcess {
 
 #[allow(dead_code)]
 fn do_cargo_maelstrom_test(_source_contents: &str) -> String {
-    let config = maelstrom_test_runner::config::Config {
-        broker: None,
-        log_level: LogLevel::Debug,
-        quiet: false.into(),
-        container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
-        timeout: None,
-        cache_size: CacheSize::default(),
-        inline_limit: InlineLimit::default(),
-        slots: Slots::default(),
+    let config = Config {
+        parent: maelstrom_test_runner::config::Config {
+            broker: None,
+            log_level: LogLevel::Debug,
+            quiet: false.into(),
+            container_image_depot_root: RootBuf::new(PathBuf::from(".cache/maelstrom/container")),
+            timeout: None,
+            cache_size: CacheSize::default(),
+            inline_limit: InlineLimit::default(),
+            slots: Slots::default(),
+        },
     };
     let extra_options = ExtraCommandLineOptions {
         include: vec!["all".into()],

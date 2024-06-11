@@ -14,7 +14,7 @@ use maelstrom_client::{
     StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
-pub use maelstrom_test_runner::config::Config;
+use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
@@ -34,6 +34,12 @@ use std::os::unix::fs::PermissionsExt as _;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+
+#[derive(Config, Debug)]
+pub struct Config {
+    #[config(flatten)]
+    pub parent: maelstrom_test_runner::config::Config,
+}
 
 pub use maelstrom_test_runner::Logger;
 
@@ -583,14 +589,14 @@ where
 
     let client = create_client(
         bg_proc,
-        config.broker,
+        config.parent.broker,
         project_dir,
         &state_dir,
-        config.container_image_depot_root,
+        config.parent.container_image_depot_root,
         &cache_dir,
-        config.cache_size,
-        config.inline_limit,
-        config.slots,
+        config.parent.cache_size,
+        config.parent.inline_limit,
+        config.parent.slots,
         log.clone(),
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, &cache_dir, &client)?;
@@ -621,10 +627,10 @@ where
         let mut app = main_app_new(
             &state,
             stdout_is_tty,
-            config.quiet,
+            config.parent.quiet,
             terminal,
             progress::DefaultProgressDriver::new(scope),
-            config.timeout.map(Timeout::new),
+            config.parent.timeout.map(Timeout::new),
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;

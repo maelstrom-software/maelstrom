@@ -10,9 +10,9 @@ pub fn main() -> Result<ExitCode> {
     let (config, extra_options): (_, ExtraCommandLineOptions) =
         Config::new_with_extra_from_args("maelstrom/maelstrom-pytest", "MAELSTROM_PYTEST", args)?;
 
-    let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
+    let bg_proc = ClientBgProcess::new_from_fork(config.parent.log_level)?;
 
-    let logger = Logger::DefaultLogger(config.log_level);
+    let logger = Logger::DefaultLogger(config.parent.log_level);
 
     let stderr_is_tty = std::io::stderr().is_terminal();
     let stdout_is_tty = std::io::stdout().is_terminal();
