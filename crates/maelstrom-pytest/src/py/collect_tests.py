@@ -40,6 +40,16 @@ class TestCase:
     name: str
     node_id: str
     markers: Sequence[str]
+    skip: bool
+
+
+def is_skip(marker: pytest.Mark) -> bool:
+    if marker.name == "skip":
+        return True
+    elif marker.name == "skipif":
+        return marker.args[0]
+    else:
+        return False
 
 
 def main() -> None:
@@ -49,7 +59,11 @@ def main() -> None:
         file = str(raw_file)
         markers = [m.name for m in item.own_markers]
 
-        case = TestCase(file=file, name=name, node_id=item.nodeid, markers=markers)
+        skip = any(is_skip(m) for m in item.own_markers)
+
+        case = TestCase(
+            file=file, name=name, node_id=item.nodeid, markers=markers, skip=skip
+        )
         print(json.dumps(asdict(case)))
 
 

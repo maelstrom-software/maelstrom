@@ -101,11 +101,10 @@ fn run_python(script: &str) -> Result<String> {
 #[derive(Deserialize)]
 struct PytestCase {
     file: String,
-    #[allow(dead_code)]
     name: String,
     node_id: String,
-    #[allow(dead_code)]
     markers: Vec<String>,
+    skip: bool,
 }
 
 pub fn pytest_collect_tests(
@@ -128,6 +127,9 @@ pub fn pytest_collect_tests(
             ignored_tests: vec![],
             package: PytestPackageId("default".into()),
         });
+        if case.skip {
+            test.ignored_tests.push(case.name.clone());
+        }
         test.tests.push((
             case.name,
             PytestCaseMetadata {
