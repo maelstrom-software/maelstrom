@@ -20,7 +20,7 @@ use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
     fs::Fs,
     process::ExitCode,
-    root::Root,
+    root::{Root, RootBuf},
     template::TemplateVars,
 };
 use pattern::ArtifactKind;
@@ -39,6 +39,7 @@ pub struct MaelstromTargetDir;
 struct DefaultMainAppDeps {
     client: Client,
     test_collector: CargoTestCollector,
+    target_dir: RootBuf<BuildDir>,
 }
 
 impl DefaultMainAppDeps {
@@ -50,6 +51,7 @@ impl DefaultMainAppDeps {
         state_dir: impl AsRef<Root<StateDir>>,
         container_image_depot_dir: impl AsRef<Root<ContainerImageDepotDir>>,
         cache_dir: impl AsRef<Root<CacheDir>>,
+        target_dir: impl AsRef<Root<BuildDir>>,
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
@@ -85,6 +87,7 @@ impl DefaultMainAppDeps {
         Ok(Self {
             client,
             test_collector: CargoTestCollector,
+            target_dir: target_dir.as_ref().to_owned(),
         })
     }
 }
@@ -443,17 +446,13 @@ impl MainAppDeps for DefaultMainAppDeps {
         &self.test_collector
     }
 
-    fn get_template_vars(
-        &self,
-        cargo_options: &CargoOptions,
-        target_dir: &Root<BuildDir>,
-    ) -> Result<TemplateVars> {
+    fn get_template_vars(&self, cargo_options: &CargoOptions) -> Result<TemplateVars> {
         let profile = cargo_options
             .compilation_options
             .profile
             .clone()
             .unwrap_or("dev".into());
-        let mut target = (**target_dir).to_owned();
+        let mut target = (**self.target_dir).to_owned();
         match profile.as_str() {
             "dev" => target.push("debug"),
             other => target.push(other),
@@ -554,6 +553,7 @@ where
             &state_dir,
             config.parent.container_image_depot_root,
             cache_dir,
+            target_dir,
             config.parent.cache_size,
             config.parent.inline_limit,
             config.parent.slots,
@@ -578,7 +578,6 @@ where
                 .map(|p| CargoPackage(p.clone()))
                 .collect::<Vec<_>>(),
             &state_dir,
-            target_dir,
             cargo_options,
             logging_output,
             log,

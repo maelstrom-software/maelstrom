@@ -460,11 +460,7 @@ impl MainAppDeps for TestMainAppDeps {
         &self.test_collector
     }
 
-    fn get_template_vars(
-        &self,
-        _options: &TestOptions,
-        _target_dir: &Root<BuildDir>,
-    ) -> Result<TemplateVars> {
+    fn get_template_vars(&self, _options: &TestOptions) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
 
@@ -523,7 +519,6 @@ fn run_app(
         project_dir,
         &packages,
         target_directory.join::<StateDir>("maelstrom/state"),
-        &target_directory,
         TestOptions,
         LoggingOutput::default(),
         log.clone(),

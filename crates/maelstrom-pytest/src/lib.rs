@@ -522,11 +522,7 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
         &self.test_collector
     }
 
-    fn get_template_vars(
-        &self,
-        _pytest_options: &PytestOptions,
-        _target_dir: &Root<BuildDir>,
-    ) -> Result<TemplateVars> {
+    fn get_template_vars(&self, _pytest_options: &PytestOptions) -> Result<TemplateVars> {
         Ok(TemplateVars::new())
     }
 
@@ -616,7 +612,6 @@ where
         project_dir,
         &packages,
         &state_dir,
-        build_dir,
         PytestOptions,
         logging_output,
         log,

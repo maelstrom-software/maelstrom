@@ -1,11 +1,11 @@
-use crate::{metadata::TestMetadata, progress::ProgressIndicator, BuildDir};
+use crate::{metadata::TestMetadata, progress::ProgressIndicator};
 use anyhow::Result;
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest, Utf8PathBuf};
 use maelstrom_client::{
     spec::{JobSpec, Layer},
     IntrospectResponse,
 };
-use maelstrom_util::{root::Root, template::TemplateVars};
+use maelstrom_util::template::TemplateVars;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     fmt,
@@ -308,7 +308,6 @@ pub trait MainAppDeps: Sync {
     fn get_template_vars(
         &self,
         options: &<Self::TestCollector as CollectTests>::Options,
-        target_dir: &Root<BuildDir>,
     ) -> Result<TemplateVars>;
 
     const MAELSTROM_TEST_TOML: &'static str;

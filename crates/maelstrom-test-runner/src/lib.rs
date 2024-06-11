@@ -531,7 +531,6 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         project_dir: impl AsRef<Root<ProjectDir>>,
         packages: &[<MainAppDepsT::TestCollector as CollectTests>::Package],
         state_dir: impl AsRef<Root<StateDir>>,
-        build_dir: impl AsRef<Root<BuildDir>>,
         collector_options: <MainAppDepsT::TestCollector as CollectTests>::Options,
         logging_output: LoggingOutput,
         log: slog::Logger,
@@ -565,7 +564,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
             "selected_packages" => ?Vec::from_iter(selected_packages.keys()),
         );
 
-        let vars = deps.get_template_vars(&collector_options, build_dir.as_ref())?;
+        let vars = deps.get_template_vars(&collector_options)?;
         test_metadata.replace_template_vars(&vars)?;
 
         Ok(Self {
