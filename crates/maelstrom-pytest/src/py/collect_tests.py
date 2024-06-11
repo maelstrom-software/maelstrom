@@ -1,7 +1,8 @@
 #!/usr/bin/env python
+import json
 import os
 import pytest
-import json
+import sys
 
 from _pytest.nodes import Node as PytestNode
 from contextlib import redirect_stdout
@@ -22,9 +23,16 @@ class Plugin:
 
 def collect_pytest_tests() -> List[pytest.Item]:
     plugin = Plugin()
-    with redirect_stdout(StringIO()):
-        pytest.main(args=["--co"], plugins=[plugin])
+    output = StringIO()
+    with redirect_stdout(output):
+        ret = pytest.main(args=["--co"], plugins=[plugin])
+    if ret != 0:
+        output.seek(0)
+        sys.stderr.write(output.read())
+        os._exit(ret)
+
     return plugin.items
+
 
 @dataclass(frozen=True)
 class TestCase:
@@ -32,6 +40,7 @@ class TestCase:
     name: str
     node_id: str
     markers: Sequence[str]
+
 
 def main() -> None:
     tests = collect_pytest_tests()

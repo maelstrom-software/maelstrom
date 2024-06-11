@@ -40,6 +40,9 @@ impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
 impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
     fn drop(&mut self) {
         self.canceled.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join().unwrap();
+        }
     }
 }
 
@@ -108,12 +111,13 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                     remote_bar_tracker.update(&ind, states);
 
                     if !ind.update_job_states(introspect_resp.job_state_counts)? {
-                        break;
+                        return Ok(());
                     }
 
                     // Don't hammer server with requests
                     thread::sleep(Duration::from_millis(500));
                 }
+                ind.finished()?;
                 Ok(())
             })
         }));

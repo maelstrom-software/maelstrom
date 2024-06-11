@@ -125,6 +125,7 @@ impl ProgressIndicator for MultipleProgressBars {
         for bar in self.bars.values() {
             bar.finish_and_clear();
         }
+        self.enqueue_spinner.finish_and_clear();
         Ok(())
     }
 }
