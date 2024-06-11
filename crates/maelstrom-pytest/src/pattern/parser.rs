@@ -204,7 +204,6 @@ impl Matcher {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CompoundSelectorName {
     File,
-    Marker,
     Name,
     NodeId,
     Package,
@@ -214,7 +213,6 @@ impl CompoundSelectorName {
     pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
         choice((
             attempt(prefix("file", 1)).map(|_| Self::File),
-            attempt(prefix("marker", 1)).map(|_| Self::Marker),
             attempt(prefix("name", 2)).map(|_| Self::Name),
             attempt(prefix("node_id", 2)).map(|_| Self::NodeId),
             attempt(prefix("package", 1)).map(|_| Self::Package),
@@ -272,6 +270,19 @@ impl SimpleSelector {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MarkersSelector {
+    pub contains: MatcherParameter,
+}
+
+impl MarkersSelector {
+    pub fn parser<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = Self> {
+        string("markers.")
+            .with(prefix("contains", 1).with(MatcherParameter::parser()))
+            .map(|contains| Self { contains })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum SimpleExpression {
     #[from(types(OrExpression))]
@@ -280,6 +291,8 @@ pub enum SimpleExpression {
     SimpleSelector(SimpleSelector),
     #[from]
     CompoundSelector(CompoundSelector),
+    #[from]
+    MarkersSelector(MarkersSelector),
 }
 
 impl From<AndExpression> for SimpleExpression {
@@ -299,6 +312,7 @@ impl SimpleExpression {
             ))
             .map(|o| Self::Or(Box::new(o))),
             attempt(CompoundSelector::parser().map(Self::CompoundSelector)),
+            attempt(MarkersSelector::parser().map(Self::MarkersSelector)),
             attempt(SimpleSelector::parser().map(Self::SimpleSelector)),
         ))
     }
@@ -311,7 +325,13 @@ fn not_operator<InputT: Stream<Token = char>>() -> impl Parser<InputT, Output = 
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub enum NotExpression {
     Not(Box<NotExpression>),
-    #[from(types(SimpleSelector, SimpleSelectorName, CompoundSelector, OrExpression))]
+    #[from(types(
+        SimpleSelector,
+        SimpleSelectorName,
+        CompoundSelector,
+        OrExpression,
+        MarkersSelector
+    ))]
     Simple(SimpleExpression),
 }
 
@@ -356,6 +376,7 @@ pub enum AndExpression {
         SimpleExpression,
         SimpleSelector,
         SimpleSelectorName,
+        MarkersSelector,
         CompoundSelector
     ))]
     Not(NotExpression),
@@ -391,6 +412,7 @@ pub enum OrExpression {
         SimpleExpression,
         SimpleSelector,
         SimpleSelectorName,
+        MarkersSelector,
         CompoundSelector
     ))]
     And(AndExpression),
@@ -473,7 +495,7 @@ fn simple_expr() {
     fn test_it_err(a: &str) {
         assert!(parse_str!(SimpleExpression, a).is_err());
     }
-    for n in ["file", "marker", "name", "node_id", "package"] {
+    for n in ["file", "markers", "name", "node_id", "package"] {
         test_it_err(&format!("{n}"));
         test_it_err(&format!("{n}()"));
     }
@@ -510,11 +532,6 @@ fn simple_expr_compound() {
     }
     test_it("name.matches<foo>", Name, Matches(regex!("foo").into()));
     test_it("node_id.equals([a-z].*)", NodeId, Equals("[a-z].*".into()));
-    test_it(
-        "marker.starts_with<(hi)>",
-        Marker,
-        StartsWith("(hi)".into()),
-    );
     test_it("file.ends_with[hey?]", File, EndsWith("hey?".into()));
     test_it(
         "node_id.contains{s(oi)l}",
@@ -547,6 +564,29 @@ fn matcher_prefixes() {
     test_it("starts_with", 1, StartsWith("foo".into()));
     test_it("ends_with", 2, EndsWith("foo".into()));
     test_it("contains", 1, Contains("foo".into()));
+}
+
+#[test]
+fn pattern_markers() {
+    fn test_it(a: &str, pattern: impl Into<Pattern>) {
+        assert_eq!(parse_str!(Pattern, a), Ok(pattern.into()));
+    }
+
+    test_it(
+        "markers.contains(a)",
+        OrExpression::from(MarkersSelector {
+            contains: "a".into(),
+        }),
+    );
+
+    test_it(
+        "markers.c/a/",
+        OrExpression::from(MarkersSelector {
+            contains: "a".into(),
+        }),
+    );
+
+    parse_str!(Pattern, "markers.equals(a)").unwrap_err();
 }
 
 #[test]

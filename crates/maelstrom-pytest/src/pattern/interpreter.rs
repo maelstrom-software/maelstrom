@@ -48,15 +48,14 @@ fn interpret_matcher(s: &str, matcher: &Matcher) -> bool {
     }
 }
 
+fn interpret_matcher_for_markers(markers: &[String], arg: &String) -> Option<bool> {
+    Some(markers.contains(arg))
+}
+
 pub fn interpret_compound_selector(s: &CompoundSelector, c: &Context) -> Option<bool> {
     use CompoundSelectorName::*;
     Some(match s.name {
         File => interpret_matcher(c.file()?, &s.matcher),
-        Marker => c
-            .case()?
-            .markers
-            .iter()
-            .any(|m| interpret_matcher(m, &s.matcher)),
         Name => interpret_matcher(&c.case()?.name, &s.matcher),
         NodeId => interpret_matcher(&c.case()?.node_id, &s.matcher),
         Package => interpret_matcher(&c.package, &s.matcher),
@@ -103,6 +102,7 @@ pub fn interpret_simple_expression(s: &SimpleExpression, c: &Context) -> Option<
         Or(o) => interpret_or_expression(o, c),
         SimpleSelector(s) => interpret_simple_selector(s),
         CompoundSelector(s) => interpret_compound_selector(s, c),
+        MarkersSelector(s) => interpret_matcher_for_markers(&c.case()?.markers, &s.contains.0),
     }
 }
 
@@ -192,6 +192,47 @@ fn simple_expression_compound_selector_globs() {
     test_compound_sel(p, Some("bazbarbin"), Some(true));
     test_compound_sel(p, Some("binbaz"), Some(false));
     test_compound_sel(p, None, None);
+}
+
+#[test]
+fn markers_contains() {
+    let c = Context {
+        package: "foo".into(),
+        file: Some("file.py".into()),
+        case: Some(Case {
+            name: "Test::case".into(),
+            node_id: "file.py:Test::case".into(),
+            markers: vec!["a".into(), "b".into(), "c".into()],
+        }),
+    };
+    assert_eq!(
+        interpret_simple_expression(
+            &parse_str!(SimpleExpression, "markers.contains(a)").unwrap(),
+            &c
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        interpret_simple_expression(
+            &parse_str!(SimpleExpression, "markers.contains(b)").unwrap(),
+            &c
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        interpret_simple_expression(
+            &parse_str!(SimpleExpression, "markers.contains(c)").unwrap(),
+            &c
+        ),
+        Some(true)
+    );
+    assert_eq!(
+        interpret_simple_expression(
+            &parse_str!(SimpleExpression, "markers.contains(d)").unwrap(),
+            &c
+        ),
+        Some(false)
+    );
 }
 
 #[cfg(test)]
