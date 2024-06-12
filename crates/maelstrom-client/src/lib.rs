@@ -17,16 +17,24 @@ use maelstrom_util::{
     root::Root,
 };
 use spec::Layer;
-use std::os::linux::net::SocketAddrExt as _;
 use std::{
     future::Future,
     io::{BufRead as _, BufReader},
-    os::unix::net::{SocketAddr, UnixListener, UnixStream},
+    net::Shutdown,
+    os::linux::net::SocketAddrExt as _,
+    os::unix::net::{SocketAddr, UnixListener, UnixStream as StdUnixStream},
     path::Path,
     pin::Pin,
     process,
     process::{Command, Stdio},
+    result,
+    sync::mpsc::{self as std_mpsc, Receiver},
     thread,
+};
+use tokio::{
+    net::UnixStream as TokioUnixStream,
+    sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
+    task,
 };
 
 type BoxedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -36,18 +44,17 @@ type RequestFn = Box<
         + Sync
         + 'static,
 >;
-type RequestReceiver = tokio::sync::mpsc::UnboundedReceiver<RequestFn>;
-type RequestSender = tokio::sync::mpsc::UnboundedSender<RequestFn>;
+type RequestReceiver = UnboundedReceiver<RequestFn>;
+type RequestSender = UnboundedSender<RequestFn>;
 
-type TonicResult<T> = std::result::Result<T, tonic::Status>;
+type TonicResult<T> = result::Result<T, tonic::Status>;
 type TonicResponse<T> = TonicResult<tonic::Response<T>>;
 
 #[tokio::main]
-async fn run_dispatcher(std_sock: UnixStream, mut requester: RequestReceiver) -> Result<()> {
+async fn run_dispatcher(std_sock: StdUnixStream, mut requester: RequestReceiver) -> Result<()> {
     std_sock.set_nonblocking(true)?;
-    let sock = tokio::net::UnixStream::from_std(std_sock.try_clone()?)?;
-    let mut closure =
-        Some(move || async move { std::result::Result::<_, tower::BoxError>::Ok(sock) });
+    let sock = TokioUnixStream::from_std(std_sock.try_clone()?)?;
+    let mut closure = Some(move || async move { result::Result::<_, tower::BoxError>::Ok(sock) });
     let channel = tonic::transport::Endpoint::try_from("http://[::]")?
         .connect_with_connector(tower::service_fn(move |_| {
             (closure.take().expect("unexpected reconnect"))()
@@ -55,10 +62,10 @@ async fn run_dispatcher(std_sock: UnixStream, mut requester: RequestReceiver) ->
         .await?;
 
     while let Some(f) = requester.recv().await {
-        tokio::spawn(f(ClientProcessClient::new(channel.clone())));
+        task::spawn(f(ClientProcessClient::new(channel.clone())));
     }
 
-    std_sock.shutdown(std::net::Shutdown::Both)?;
+    std_sock.shutdown(Shutdown::Both)?;
 
     Ok(())
 }
@@ -80,25 +87,21 @@ impl ClientBgHandle {
 
 pub struct ClientBgProcess {
     handle: ClientBgHandle,
-    sock: Option<UnixStream>,
+    sock: Option<StdUnixStream>,
 }
 
 impl ClientBgProcess {
     pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
-        let (sock1, sock2) = UnixStream::pair()?;
-        if let Some(pid) = maelstrom_linux::fork().map_err(|e| anyhow!("fork failed: {e}"))? {
+        let (sock1, sock2) = StdUnixStream::pair()?;
+        if let Some(pid) = maelstrom_linux::fork().context("forking client background process")? {
             Ok(Self {
                 handle: ClientBgHandle(pid),
                 sock: Some(sock1),
             })
         } else {
-            match maelstrom_client_process::main(sock2, LoggerFactory::FromLevel(log_level)) {
-                Ok(()) => process::exit(0),
-                Err(err) => {
-                    eprintln!("exiting because of error: {err}");
-                    process::exit(1);
-                }
-            }
+            maelstrom_client_process::main(sock2, LoggerFactory::FromLevel(log_level))
+                .context("client background process")?;
+            process::exit(0);
         }
     }
 
@@ -108,7 +111,7 @@ impl ClientBgProcess {
             .stdout(Stdio::piped())
             .spawn()?;
         let stderr = proc.stderr.take().unwrap();
-        std::thread::spawn(move || {
+        thread::spawn(move || {
             for line in BufReader::new(stderr).lines() {
                 let Ok(line) = line else { break };
                 println!("client bg-process: {line}");
@@ -120,15 +123,16 @@ impl ClientBgProcess {
         if trimmed_address.is_empty() {
             bail!("process didn't return any address")
         }
-        let sock =
-            UnixStream::connect_addr(&SocketAddr::from_abstract_name(trimmed_address.as_bytes())?)?;
+        let sock = StdUnixStream::connect_addr(&SocketAddr::from_abstract_name(
+            trimmed_address.as_bytes(),
+        )?)?;
         Ok(Self {
             handle: ClientBgHandle(proc.into()),
             sock: Some(sock),
         })
     }
 
-    fn take_socket(&mut self) -> UnixStream {
+    fn take_socket(&mut self) -> StdUnixStream {
         self.sock.take().unwrap()
     }
 
@@ -188,7 +192,7 @@ impl Client {
         slots: Slots,
         log: slog::Logger,
     ) -> Result<Self> {
-        let (send, recv) = tokio::sync::mpsc::unbounded_channel();
+        let (send, recv) = tokio_mpsc::unbounded_channel();
 
         let sock = process_handle.take_socket();
         let dispatcher_handle = thread::spawn(move || run_dispatcher(sock, recv));
@@ -229,16 +233,15 @@ impl Client {
     fn send_async<BuilderT, FutureT, ProtRetT>(
         &self,
         builder: BuilderT,
-    ) -> Result<std::sync::mpsc::Receiver<Result<ProtRetT::Output>>>
+    ) -> Result<Receiver<Result<ProtRetT::Output>>>
     where
         BuilderT: FnOnce(ClientProcessClient<tonic::transport::Channel>) -> FutureT,
         BuilderT: Send + Sync + 'static,
-        FutureT:
-            Future<Output = std::result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
+        FutureT: Future<Output = result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
         ProtRetT: IntoResult,
         ProtRetT::Output: Send + 'static,
     {
-        let (send, recv) = std::sync::mpsc::channel();
+        let (send, recv) = std_mpsc::channel();
         self.requester
             .as_ref()
             .unwrap()
@@ -255,8 +258,7 @@ impl Client {
     where
         BuilderT: FnOnce(ClientProcessClient<tonic::transport::Channel>) -> FutureT,
         BuilderT: Send + Sync + 'static,
-        FutureT:
-            Future<Output = std::result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
+        FutureT: Future<Output = result::Result<tonic::Response<ProtRetT>, tonic::Status>> + Send,
         ProtRetT: IntoResult,
         ProtRetT::Output: Send + 'static,
     {
@@ -305,7 +307,7 @@ impl Client {
                         ))
                     }
                     .await;
-                    tokio::task::spawn_blocking(move || handler(res));
+                    task::spawn_blocking(move || handler(res));
                 })
             }))?;
         Ok(())
@@ -320,7 +322,7 @@ impl Client {
 }
 
 pub fn bg_proc_main() -> Result<()> {
-    let name = format!("maelstrom-client-{}", std::process::id());
+    let name = format!("maelstrom-client-{}", process::id());
     maelstrom_client_process::clone_into_pid_and_user_namespace()?;
 
     maelstrom_util::log::run_with_logger(maelstrom_util::config::common::LogLevel::Debug, |log| {
