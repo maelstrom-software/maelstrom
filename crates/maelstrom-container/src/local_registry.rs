@@ -94,6 +94,22 @@ impl LocalRegistry {
         Ok(address)
     }
 
+    #[tokio::main]
+    async fn run_with_runtime(
+        source_dir: impl Into<PathBuf>,
+        log: slog::Logger,
+        send: tokio::sync::oneshot::Sender<Result<SocketAddr>>,
+    ) {
+        send.send(Self::run(source_dir, log).await).ok();
+    }
+
+    pub fn run_sync(source_dir: impl Into<PathBuf>, log: slog::Logger) -> Result<SocketAddr> {
+        let (send, recv) = tokio::sync::oneshot::channel();
+        let source_dir = source_dir.into();
+        std::thread::spawn(move || Self::run_with_runtime(source_dir, log, send));
+        recv.blocking_recv().unwrap()
+    }
+
     pub fn address(&self) -> Result<SocketAddr> {
         let addr = self.listener.local_addr()?;
         Ok(addr)
