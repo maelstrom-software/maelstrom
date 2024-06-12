@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Context as _, Error, Result};
 use bumpalo::{
-    collections::{String as BumpString, Vec as BumpVec},
+    collections::{CollectIn as _, String as BumpString, Vec as BumpVec},
     Bump,
 };
 use futures::ready;
@@ -40,6 +40,7 @@ use std::{
     },
     path::Path,
     pin::Pin,
+    result,
     task::{Context, Poll},
 };
 use tokio::{
@@ -1322,10 +1323,34 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         }
         environment.push(None);
         builder.push(
-            Syscall::Execve {
-                path: program,
-                argv: arguments.into_bump_slice(),
-                envp: environment.into_bump_slice(),
+            match (
+                spec.environment.iter().find(|var| var.starts_with("PATH=")),
+                spec.program.as_str(),
+            ) {
+                (Some(path), program_str) if !program_str.contains('/') => Syscall::ExecveList {
+                    paths: path
+                        .strip_prefix("PATH=")
+                        .unwrap()
+                        .split(|c| c == ':')
+                        .filter(|dir| !dir.is_empty())
+                        .map(|dir| {
+                            let mut bump_string = BumpString::from_str_in(dir, bump);
+                            bump_string.push('/');
+                            bump_string.push_str(program_str);
+                            bump_c_str(bump, bump_string.as_str())
+                        })
+                        .collect_in::<result::Result<BumpVec<_>, _>>(bump)
+                        .map_err(syserr)?
+                        .into_bump_slice(),
+                    fallback: program,
+                    argv: arguments.into_bump_slice(),
+                    envp: environment.into_bump_slice(),
+                },
+                _ => Syscall::Execve {
+                    path: program,
+                    argv: arguments.into_bump_slice(),
+                    envp: environment.into_bump_slice(),
+                },
             },
             &|err| execerr(anyhow!("execvc: {err}")),
         );
@@ -2886,6 +2911,19 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    #[allow(non_snake_case)]
+    async fn PATH_can_be_used() {
+        Test::new(
+            test_spec("echo")
+                .arguments(["foo"])
+                .environment(["PATH=/bin"]),
+        )
+        .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"foo\n")))
+        .run()
+        .await;
     }
 
     fn unix_listener() -> (UnixListener, [u8; 6]) {

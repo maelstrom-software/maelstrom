@@ -8,10 +8,10 @@
 
 use core::{cell::UnsafeCell, ffi::CStr, fmt::Write as _, result};
 use maelstrom_linux::{
-    self as linux, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd, FileMode,
-    FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags, MoveMountFlags,
-    OpenFlags, OpenTreeFlags, OwnedFd, Sockaddr, SocketDomain, SocketProtocol, SocketType, Uid,
-    UmountFlags,
+    self as linux, AccessMode, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno, Fd,
+    FileMode, FsconfigCommand, FsmountFlags, FsopenFlags, Gid, MountAttrs, MountFlags,
+    MoveMountFlags, OpenFlags, OpenTreeFlags, OwnedFd, Sockaddr, SocketDomain, SocketProtocol,
+    SocketType, Uid, UmountFlags,
 };
 
 struct SliceFmt<'a> {
@@ -79,6 +79,12 @@ pub enum Syscall<'a> {
     },
     Execve {
         path: &'a CStr,
+        argv: &'a [Option<&'a u8>],
+        envp: &'a [Option<&'a u8>],
+    },
+    ExecveList {
+        paths: &'a [&'a CStr],
+        fallback: &'a CStr,
         argv: &'a [Option<&'a u8>],
         envp: &'a [Option<&'a u8>],
     },
@@ -180,6 +186,19 @@ impl<'a> Syscall<'a> {
             Syscall::CloseRange { first, last, flags } => linux::close_range(*first, *last, *flags),
             Syscall::Dup2 { from, to } => linux::dup2(*from, *to).map(drop),
             Syscall::Execve { path, argv, envp } => linux::execve(path, argv, envp),
+            Syscall::ExecveList {
+                paths,
+                fallback,
+                argv,
+                envp,
+            } => {
+                for path in paths.iter() {
+                    if linux::access(path, AccessMode::X).is_ok() {
+                        return linux::execve(path, argv, envp);
+                    }
+                }
+                linux::execve(fallback, argv, envp)
+            }
             Syscall::Fsmount {
                 fd,
                 flags,

@@ -22,6 +22,16 @@ extern "C" {
 }
 
 #[derive(BitOr, Clone, Copy, Default)]
+pub struct AccessMode(c_int);
+
+impl AccessMode {
+    pub const F: Self = Self(libc::F_OK);
+    pub const R: Self = Self(libc::R_OK);
+    pub const W: Self = Self(libc::W_OK);
+    pub const X: Self = Self(libc::X_OK);
+}
+
+#[derive(BitOr, Clone, Copy, Default)]
 pub struct AcceptFlags(c_int);
 
 impl AcceptFlags {
@@ -792,6 +802,11 @@ pub struct WaitResult {
 pub enum WaitStatus {
     Exited(ExitCode),
     Signaled(Signal),
+}
+
+pub fn access(path: &CStr, mode: AccessMode) -> Result<(), Errno> {
+    let path_ptr = path.as_ptr();
+    Errno::result(unsafe { libc::access(path_ptr, mode.0) }).map(drop)
 }
 
 pub fn accept(fd: Fd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), Errno> {
