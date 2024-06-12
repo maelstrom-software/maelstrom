@@ -2,8 +2,15 @@
 //!
 //! This code is originally forked from egui-plot
 
-use axis::AxisWidget;
 pub use axis::{Axis, AxisHints, HPlacement, Placement, VPlacement};
+pub use items::{
+    Line, LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints, Points, Polygon, StackedLine,
+    Text,
+};
+pub use legend::{Corner, Legend};
+pub use transform::{PlotBounds, PlotTransform};
+
+use axis::AxisWidget;
 use egui::{
     ahash::{self, HashMap},
     epaint::{self, util::FloatOrd, Hsva},
@@ -12,14 +19,8 @@ use egui::{
     WidgetText,
 };
 use items::{horizontal_line, rulers_color, vertical_line, PlotItem};
-pub use items::{
-    Line, LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints, Points, Polygon, StackedLine,
-    Text,
-};
 use legend::LegendWidget;
-pub use legend::{Corner, Legend};
 use std::{ops::RangeInclusive, sync::Arc};
-pub use transform::{PlotBounds, PlotTransform};
 
 mod axis;
 mod items;

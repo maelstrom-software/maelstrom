@@ -103,11 +103,13 @@ mod dir;
 mod file;
 mod ty;
 
-use anyhow::{anyhow, Result};
-use anyhow_trace::anyhow_trace;
 pub use builder::*;
 pub use dir::DirectoryDataReader;
 pub use file::FileMetadataReader;
+pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
+
+use anyhow::{anyhow, Result};
+use anyhow_trace::anyhow_trace;
 use futures::stream::StreamExt as _;
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
@@ -120,13 +122,14 @@ use maelstrom_util::{
     async_fs::Fs,
     root::{Root, RootBuf},
 };
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::sync::Arc;
-use std::time::Duration;
+use std::{
+    ffi::OsStr,
+    path::{Path, PathBuf},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 use tokio::sync::{MappedMutexGuard, Mutex, MutexGuard};
-pub use ty::{FileAttributes, FileData, FileId, FileType, LayerId, LayerSuper};
 
 const TTL: Duration = Duration::from_secs(1); // 1 second
                                               //

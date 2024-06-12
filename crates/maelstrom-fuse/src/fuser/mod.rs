@@ -2,33 +2,29 @@
 //!
 //! This code is copied and adapted from <https://github.com/cberner/fuser>
 
-use libc::{c_int, ENOSYS, EPERM};
-use serde::{Deserialize, Serialize};
-use std::ffi::OsStr;
-use std::path::Path;
-use std::time::Duration;
-use std::time::SystemTime;
-
-use ll::fuse_abi::consts::*;
-pub use ll::fuse_abi::fuse_forget_one;
 pub use ll::{
-    fuse_abi::{consts, FUSE_ROOT_ID},
+    fuse_abi::{consts, fuse_forget_one, FUSE_ROOT_ID},
     TimeOrNow,
 };
-pub use mnt::fuse_mount_sys;
-pub use mnt::mount_options::MountOption;
-pub use reply::ReplyPoll;
-pub use reply::ReplyXattr;
-pub use reply::{Reply, ReplyAttr, ReplyData, ReplyEmpty, ReplyEntry, ReplyOpen};
+pub use mnt::{fuse_mount_sys, mount_options::MountOption};
 pub use reply::{
-    ReplyBmap, ReplyCreate, ReplyDirectory, ReplyDirectoryPlus, ReplyIoctl, ReplyLock, ReplyLseek,
-    ReplyStatfs, ReplyWrite,
+    Reply, ReplyAttr, ReplyBmap, ReplyCreate, ReplyData, ReplyDirectory, ReplyDirectoryPlus,
+    ReplyEmpty, ReplyEntry, ReplyIoctl, ReplyLock, ReplyLseek, ReplyOpen, ReplyPoll, ReplyStatfs,
+    ReplyWrite, ReplyXattr,
 };
 pub use request::Request;
-use session::MAX_WRITE_SIZE;
 pub use session::{Session, SessionACL};
-use std::cmp::max;
-use std::cmp::min;
+
+use libc::{c_int, ENOSYS, EPERM};
+use ll::fuse_abi::consts::*;
+use serde::{Deserialize, Serialize};
+use session::MAX_WRITE_SIZE;
+use std::{
+    cmp::{max, min},
+    ffi::OsStr,
+    path::Path,
+    time::{Duration, SystemTime},
+};
 
 mod channel;
 mod ll;

@@ -1,3 +1,5 @@
+pub use maelstrom_fuse::FileType;
+
 use anyhow::{Context as _, Result};
 use derive_more::{From, Into};
 use maelstrom_base::{
@@ -5,15 +7,15 @@ use maelstrom_base::{
     Sha256Digest,
 };
 use maelstrom_fuse::ErrnoResult;
-pub use maelstrom_fuse::FileType;
 use maelstrom_linux::Errno;
 use maelstrom_util::async_fs::{Fs, GetPath};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::collections::HashMap;
-use std::num::{NonZeroU32, NonZeroU64};
-use std::path::Path;
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    num::{NonZeroU32, NonZeroU64},
+    path::{Path, PathBuf},
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 /// Identifier for a layer within a given LayerFS stacking.

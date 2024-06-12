@@ -3,22 +3,27 @@
 //! The guts were adapted from the fuser crate and can be found in the [`fuser`] module
 pub mod fuser;
 
-use anyhow::Result;
 pub use fuser::{FileAttr, FileType};
+
+use anyhow::Result;
 use fuser::{MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry};
 use futures::stream::{Stream, StreamExt};
 use maelstrom_linux::{self as linux, Errno};
 use maelstrom_util::r#async::await_and_every_sec;
-use std::ffi::OsStr;
-use std::fs::File;
-use std::future::Future;
-use std::os::fd::AsRawFd as _;
-use std::path::{Path, PathBuf};
-use std::pin::pin;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Semaphore;
-use tokio::task::{self, JoinHandle};
+use std::{
+    ffi::OsStr,
+    fs::File,
+    future::Future,
+    os::fd::AsRawFd as _,
+    path::{Path, PathBuf},
+    pin::pin,
+    sync::Arc,
+    time::Duration,
+};
+use tokio::{
+    sync::Semaphore,
+    task::{self, JoinHandle},
+};
 
 /// The number of requests the [`DispatchingFs`] allow in-flight. When this limit is reached it
 /// will block the next FUSE request until an existing one finishes.

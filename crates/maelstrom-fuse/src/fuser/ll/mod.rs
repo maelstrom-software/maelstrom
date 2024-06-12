@@ -5,10 +5,10 @@ pub mod fuse_abi;
 pub(crate) mod reply;
 mod request;
 
-use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
-
 pub use reply::Response;
 pub use request::{AnyRequest, FileHandle, INodeNo, Lock, Operation, Request, RequestId, Version};
+
+use std::{convert::TryInto, num::NonZeroI32, time::SystemTime};
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 /// Possible input arguments for atime & mtime, which can either be set to a specified time,

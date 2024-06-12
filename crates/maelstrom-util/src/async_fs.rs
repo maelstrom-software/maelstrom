@@ -1,12 +1,15 @@
 pub use crate::fs::{GetPath, Metadata};
+
 use anyhow::{Context as _, Result};
 use fs2::FileExt as _;
 use futures_lite::stream::StreamExt;
-use std::ffi::OsString;
-use std::io;
-use std::path::{Path, PathBuf};
-use std::pin::{pin, Pin};
-use std::task::{Context, Poll};
+use std::{
+    ffi::OsString,
+    io,
+    path::{Path, PathBuf},
+    pin::{pin, Pin},
+    task::{Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncSeek, AsyncWrite, ReadBuf};
 
 impl<T> GetPath for tokio::io::BufReader<T>

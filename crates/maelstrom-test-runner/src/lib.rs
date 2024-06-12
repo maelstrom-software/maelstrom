@@ -9,10 +9,11 @@ pub mod visitor;
 #[cfg(test)]
 mod tests;
 
+pub use deps::*;
+
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use config::Quiet;
-pub use deps::*;
 use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};

@@ -5,19 +5,22 @@ mod quiet_no_bar;
 mod quiet_progress_bar;
 mod test_listing;
 
-use anyhow::Result;
-use colored::Colorize as _;
 pub use driver::{DefaultProgressDriver, ProgressDriver};
-use indicatif::{ProgressBar, ProgressStyle, TermLike};
-use maelstrom_base::stats::JobStateCounts;
 pub use multiple_progress_bars::MultipleProgressBars;
 pub use no_bar::NoBar;
 pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
-use std::io;
-use std::panic::{RefUnwindSafe, UnwindSafe};
-use std::sync::MutexGuard;
 pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
+
+use anyhow::Result;
+use colored::Colorize as _;
+use indicatif::{ProgressBar, ProgressStyle, TermLike};
+use maelstrom_base::stats::JobStateCounts;
+use std::{
+    io,
+    panic::{RefUnwindSafe, UnwindSafe},
+    sync::MutexGuard,
+};
 
 pub trait ProgressPrinter {
     /// Prints a line to stdout while not interfering with any progress bars

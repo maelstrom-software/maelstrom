@@ -8,11 +8,12 @@ pub mod stats;
 pub mod tty;
 
 pub use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
+pub use enumset::{enum_set, EnumSet};
+pub use nonempty::{nonempty, NonEmpty};
+
 use derive_more::{Constructor, Display, From};
 use enumset::EnumSetType;
-pub use enumset::{enum_set, EnumSet};
 use hex::{self, FromHexError};
-pub use nonempty::{nonempty, NonEmpty};
 use serde::{Deserialize, Serialize};
 use std::{
     error::Error,

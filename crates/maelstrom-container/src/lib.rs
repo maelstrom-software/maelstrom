@@ -15,11 +15,10 @@ use combine::{
     parser::char::{spaces, string},
     satisfy, sep_by, token, Parser, Stream,
 };
-use core::task::Poll;
 use futures::stream::TryStreamExt as _;
-use maelstrom_util::io::Sha256Stream;
 use maelstrom_util::{
     async_fs::{self as fs, Fs},
+    io::Sha256Stream,
     root::{Root, RootBuf},
 };
 use num_derive::FromPrimitive;
@@ -27,7 +26,6 @@ use num_traits::FromPrimitive as _;
 use oci_spec::image::{Descriptor, ImageIndex, ImageManifest, Platform};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
-use std::sync::Arc;
 use std::{
     collections::{BTreeMap, HashMap},
     fmt,
@@ -36,6 +34,8 @@ use std::{
     path::{Path, PathBuf},
     pin::Pin,
     str::FromStr,
+    sync::Arc,
+    task::Poll,
 };
 use tokio::{
     io::AsyncWrite,

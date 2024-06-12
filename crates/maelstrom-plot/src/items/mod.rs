@@ -1,3 +1,5 @@
+pub use values::{LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints};
+
 use super::{Cursor, LabelFormatter, PlotBounds, PlotTransform};
 use egui::{
     epaint,
@@ -7,7 +9,6 @@ use egui::{
 };
 use std::ops::RangeInclusive;
 use values::{ClosestElem, PlotGeometry};
-pub use values::{LineStyle, MarkerShape, Orientation, PlotPoint, PlotPoints};
 
 mod values;
 

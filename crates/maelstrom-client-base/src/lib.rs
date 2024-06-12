@@ -10,10 +10,11 @@ pub mod proto {
 #[cfg(test)]
 extern crate self as maelstrom_client;
 
+pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
+
 use anyhow::{anyhow, Result};
 use enum_map::EnumMap;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
-pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
 /// The project directory is used for two things. First, any relative paths in layer specifications
 /// are resolved based on this path. Second, it's where the client process looks for the
