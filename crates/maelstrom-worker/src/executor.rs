@@ -1736,10 +1736,16 @@ mod tests {
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{
-        ascii, collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration,
+        ascii, collections::HashSet, env, fs, os::unix::net::UnixListener as StdUnixListener,
+        path::PathBuf, str, sync::Arc, time::Duration,
     };
     use tempfile::{NamedTempFile, TempDir};
-    use tokio::{net::TcpListener, sync::oneshot, sync::Mutex, task, time};
+    use tokio::{
+        net::{TcpListener, UnixListener, UnixStream},
+        sync::{oneshot, Mutex},
+        task::{self, JoinHandle},
+        time,
+    };
 
     const ARBITRARY_TIME: maelstrom_base::manifest::UnixTimestamp =
         maelstrom_base::manifest::UnixTimestamp(1705000271);
@@ -1781,7 +1787,7 @@ mod tests {
             }
         }
 
-        fn spawn(&self, fd: linux::OwnedFd) {
+        fn spawn(&self, fd: OwnedFd) {
             let layer_fs = LayerFs::from_path(&self.data_path, &self.blob_dir).unwrap();
             let cache = self.cache.clone();
             task::spawn(async move { layer_fs.run_fuse(test_logger(), cache, fd).await.unwrap() });
@@ -2882,36 +2888,53 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn tty() {
-        let sock =
-            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
+    fn unix_listener() -> (UnixListener, [u8; 6]) {
+        let sock = linux::socket(
+            SocketDomain::UNIX,
+            SocketType::STREAM | SocketType::NONBLOCK,
+            Default::default(),
+        )
+        .unwrap();
         linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
         linux::listen(sock.as_fd(), 1).unwrap();
         let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
         let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
-            path.try_into().unwrap(),
-            WindowSize::new(24, 80),
-        )));
+        let listener =
+            UnixListener::from_std(StdUnixListener::from(fd::OwnedFd::from(sock))).unwrap();
+        (listener, path.try_into().unwrap())
+    }
 
-        let job_handle =
-            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+    async fn start_tty_job(
+        program: &str,
+        window_size: WindowSize,
+    ) -> (JoinHandle<JobCompleted>, UnixStream) {
+        let (listener, path) = unix_listener();
+        let program_string = program.to_string();
+        let job_handle = task::spawn(async move {
+            run(
+                test_spec(&program_string).allocate_tty(Some(JobTty::new(&path, window_size))),
+                InlineLimit::from_bytes(0),
+            )
+            .await
+            .unwrap()
+        });
+        let socket = listener.accept().await.unwrap().0;
+        (job_handle, socket)
+    }
 
-        let accept_handle =
-            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
-        let (socket, _) = accept_handle.await.unwrap().unwrap();
-        let mut socket = AsyncFile {
-            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
-        };
+    fn assert_job_exit(job_completed: JobCompleted, code: u8) {
+        let JobCompleted {
+            status,
+            effects: JobEffects { stdout, stderr, .. },
+        } = job_completed;
+        assert_eq!(stderr, JobOutputResult::None);
+        assert_eq!(stdout, JobOutputResult::None);
+        assert_eq!(status, JobStatus::Exited(code));
+    }
 
-        expect(&mut socket, b"bash-5.2# ").await;
-
-        socket.write_all(b"echo foo\n").await.unwrap();
-        expect(&mut socket, b"echo foo\r\nfoo\r\nbash-5.2# ").await;
-
-        socket.write_all(b"cat\n").await.unwrap();
-        expect(&mut socket, b"cat\r\n").await;
+    #[tokio::test]
+    async fn tty_eof() {
+        let (job_handle, mut socket) = start_tty_job("/bin/cat", WindowSize::new(24, 80)).await;
 
         socket.write_all(b"dog\n").await.unwrap();
         expect(&mut socket, b"dog\r\ndog\r\n").await;
@@ -2919,83 +2942,61 @@ mod tests {
         socket.write_all(b"cow\n").await.unwrap();
         expect(&mut socket, b"cow\r\ncow\r\n").await;
 
-        socket.write_all(b"\x04").await.unwrap(); // ^D should send EOF
-        expect(&mut socket, b"bash-5.2# ").await;
+        // ^D will send EOF, which will cause cat to exit normally.
+        socket.write_all(b"\x04").await.unwrap();
+        assert_job_exit(job_handle.await.unwrap(), 0);
+    }
 
-        socket.write_all(b"exit 1\r\n").await.unwrap();
+    #[tokio::test]
+    async fn tty_ctrl_c() {
+        let (job_handle, mut socket) = start_tty_job("/exitsig", WindowSize::new(24, 80)).await;
 
-        let JobCompleted {
-            status,
-            effects: JobEffects { stdout, stderr, .. },
-        } = job_handle.await.unwrap();
-        assert_eq!(stderr, JobOutputResult::None);
-        assert_eq!(stdout, JobOutputResult::None);
-        assert_eq!(status, JobStatus::Exited(1));
+        expect(&mut socket, b"okay\r\n").await;
+
+        // ^C will send SIGTERM, which will be caught an turned into an exit of 2.
+        socket.write_all(b"\x03").await.unwrap();
+        assert_job_exit(job_handle.await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn tty_ctrl_z() {
+        let (job_handle, mut socket) = start_tty_job("/exitsig", WindowSize::new(24, 80)).await;
+
+        expect(&mut socket, b"okay\r\n").await;
+
+        // ^Z will send SIGTSTP, which will be caught an turned into an exit of 20.
+        socket.write_all(b"\x1a").await.unwrap();
+        assert_job_exit(job_handle.await.unwrap(), 20);
+    }
+
+    #[tokio::test]
+    async fn tty_ctrl_backslash() {
+        let (job_handle, mut socket) = start_tty_job("/exitsig", WindowSize::new(24, 80)).await;
+
+        expect(&mut socket, b"okay\r\n").await;
+
+        // ^\ will send SIGQUIT, which will be caught an turned into an exit of 3.
+        socket.write_all(b"\x1c").await.unwrap();
+        assert_job_exit(job_handle.await.unwrap(), 3);
     }
 
     #[tokio::test]
     async fn tty_hup() {
-        let sock =
-            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
-        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
-        linux::listen(sock.as_fd(), 1).unwrap();
-        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
-        let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
-            path.try_into().unwrap(),
-            WindowSize::new(24, 80),
-        )));
+        let (job_handle, mut socket) = start_tty_job("/exitsig", WindowSize::new(24, 80)).await;
 
-        let job_handle =
-            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
+        expect(&mut socket, b"okay\r\n").await;
 
-        let accept_handle =
-            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
-        let (socket, _) = accept_handle.await.unwrap().unwrap();
-        let mut socket = AsyncFile {
-            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
-        };
-
-        expect(&mut socket, b"bash-5.2# ").await;
+        // Closing the socket will close the controlling terminal, which will send a SIGHUP, which
+        // will be caught and turned into an exit of 1.
         drop(socket);
-
-        let JobCompleted {
-            status,
-            effects: JobEffects { stdout, stderr, .. },
-        } = job_handle.await.unwrap();
-        assert_eq!(stderr, JobOutputResult::None);
-        assert_eq!(stdout, JobOutputResult::None);
-        // For some reason, bash sometimes exits with status 0 in this scenario.
-        assert!(status == JobStatus::Exited(129) || status == JobStatus::Exited(0));
+        assert_job_exit(job_handle.await.unwrap(), 1);
     }
 
     #[tokio::test]
     async fn tty_winsize() {
-        let sock =
-            linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default()).unwrap();
-        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
-        linux::listen(sock.as_fd(), 1).unwrap();
-        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
-        let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let spec = test_spec("/usr/bin/bash").allocate_tty(Some(JobTty::new(
-            path.try_into().unwrap(),
-            WindowSize::new(30, 90),
-        )));
+        let (job_handle, mut socket) = start_tty_job("/winsize", WindowSize::new(30, 90)).await;
 
-        let job_handle =
-            task::spawn(async move { run(spec, InlineLimit::from_bytes(0)).await.unwrap() });
-
-        let accept_handle =
-            task::spawn_blocking(move || linux::accept(sock.as_fd(), AcceptFlags::NONBLOCK));
-        let (socket, _) = accept_handle.await.unwrap().unwrap();
-        let mut socket = AsyncFile {
-            inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).unwrap(),
-        };
-
-        expect(&mut socket, b"bash-5.2# ").await;
-
-        socket.write_all(b"./winsize\n").await.unwrap();
-        expect(&mut socket, b"./winsize\r\n30 90\r\n").await;
+        expect(&mut socket, b"30 90\r\n").await;
 
         socket
             .write_all(tty::encode_window_size_change(WindowSize::new(40, 100)).as_slice())
@@ -3009,14 +3010,8 @@ mod tests {
             .unwrap();
         expect(&mut socket, b"50 120\r\n").await;
 
+        // exitsig catches the sighup and exits.
         drop(socket);
-
-        let JobCompleted {
-            status,
-            effects: JobEffects { stdout, stderr, .. },
-        } = job_handle.await.unwrap();
-        assert_eq!(stderr, JobOutputResult::None);
-        assert_eq!(stdout, JobOutputResult::None);
-        assert_eq!(status, JobStatus::Exited(129));
+        assert_job_exit(job_handle.await.unwrap(), 0);
     }
 }
