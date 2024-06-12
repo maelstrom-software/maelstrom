@@ -66,7 +66,7 @@ async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
         CliCommands::Registry { source_path } => {
             let registry = LocalRegistry::new(source_path, log).await?;
             println!("listening on {}", registry.address()?);
-            registry.run().await?;
+            registry.run_until_error().await?;
         }
     }
     Ok(())

@@ -1352,11 +1352,9 @@ async fn container_image_depot_local_registry() {
 
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let log = maelstrom_util::log::test_logger();
-    let registry = local_registry::LocalRegistry::new(manifest_dir.join("src"), log)
+    let address = local_registry::LocalRegistry::run(manifest_dir.join("src"), log)
         .await
         .unwrap();
-    let address = registry.address().unwrap();
-    tokio::task::spawn(async move { registry.run().await.unwrap() });
 
     let ops = DefaultContainerImageDepotOps::new_insecure();
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops).unwrap();

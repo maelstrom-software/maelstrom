@@ -72,7 +72,6 @@ async fn get_from_tar(path: impl AsRef<Path>, tar_path: impl AsRef<Path>) -> Res
 }
 
 pub struct LocalRegistry {
-    #[allow(dead_code)]
     source_dir: PathBuf,
     listener: TcpListener,
     log: slog::Logger,
@@ -88,12 +87,19 @@ impl LocalRegistry {
         })
     }
 
+    pub async fn run(source_dir: impl Into<PathBuf>, log: slog::Logger) -> Result<SocketAddr> {
+        let self_ = Self::new(source_dir, log).await?;
+        let address = self_.address()?;
+        tokio::task::spawn(async move { self_.run_until_error().await.unwrap() });
+        Ok(address)
+    }
+
     pub fn address(&self) -> Result<SocketAddr> {
         let addr = self.listener.local_addr()?;
         Ok(addr)
     }
 
-    pub async fn run(self) -> Result<()> {
+    pub async fn run_until_error(self) -> Result<()> {
         let self_ = Arc::new(self);
 
         let identity = native_tls::Identity::from_pkcs8(canned_cert(), canned_key())?;
