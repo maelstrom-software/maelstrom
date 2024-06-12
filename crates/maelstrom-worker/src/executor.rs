@@ -1757,7 +1757,6 @@ mod tests {
     use indoc::indoc;
     use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path, WindowSize};
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
-    use maelstrom_linux::AcceptFlags;
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{
