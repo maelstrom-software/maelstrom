@@ -11,10 +11,12 @@ enum CliCommands {
     Download {
         image_name: String,
         layer_dir: PathBuf,
+        #[arg(short, long)]
         accept_invalid_certs: bool,
     },
     Inspect {
         image_name: String,
+        #[arg(short, long)]
         accept_invalid_certs: bool,
     },
     Registry {
