@@ -11,6 +11,7 @@ message StartRequest {
     uint64 inline_limit = 6;
     uint32 slots = 7;
     bytes container_image_depot_dir = 8;
+    bool accept_invalid_remote_container_tls_certs = 9;
 }
 
 message TarLayer {

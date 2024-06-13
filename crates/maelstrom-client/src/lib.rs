@@ -1,7 +1,8 @@
 pub use maelstrom_client_base::{
     spec,
     spec::{ImageSpec, JobSpec},
-    CacheDir, IntrospectResponse, ProjectDir, RemoteProgress, StateDir, MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, RemoteProgress,
+    StateDir, MANIFEST_DIR,
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
@@ -190,6 +191,7 @@ impl Client {
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
+        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         log: slog::Logger,
     ) -> Result<Self> {
         let (send, recv) = tokio_mpsc::unbounded_channel();
@@ -223,6 +225,8 @@ impl Client {
             cache_size: cache_size.into_proto_buf(),
             inline_limit: inline_limit.into_proto_buf(),
             slots: slots.into_proto_buf(),
+            accept_invalid_remote_container_tls_certs: accept_invalid_remote_container_tls_certs
+                .into_proto_buf(),
         };
         s.send_sync(|mut client| async move { client.start(msg).await })?;
         slog::debug!(s.log, "client completed start");

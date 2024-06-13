@@ -785,17 +785,10 @@ pub struct DefaultContainerImageDepotOps {
 }
 
 impl DefaultContainerImageDepotOps {
-    fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
-    }
-
-    #[cfg(test)]
-    fn new_insecure() -> Self {
+    fn new(accept_invalid_certs: bool) -> Self {
         Self {
             client: reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_certs(accept_invalid_certs)
                 .build()
                 .unwrap(),
         }
@@ -835,8 +828,13 @@ impl ContainerImageDepot<DefaultContainerImageDepotOps> {
     pub fn new(
         project_dir: impl AsRef<Root<ProjectDir>>,
         cache_dir: impl AsRef<Root<ContainerImageDepotDir>>,
+        accept_invalid_certs: bool,
     ) -> Result<Self> {
-        Self::new_with(project_dir, cache_dir, DefaultContainerImageDepotOps::new())
+        Self::new_with(
+            project_dir,
+            cache_dir,
+            DefaultContainerImageDepotOps::new(accept_invalid_certs),
+        )
     }
 }
 
@@ -1356,7 +1354,7 @@ async fn container_image_depot_local_registry() {
         .await
         .unwrap();
 
-    let ops = DefaultContainerImageDepotOps::new_insecure();
+    let ops = DefaultContainerImageDepotOps::new(true /* accept_invalid_certs */);
     let depot = ContainerImageDepot::new_with(project_dir, image_dir, ops).unwrap();
     depot
         .get_container_image(&format!("docker://{address}/busybox"), NullProgressTracker)

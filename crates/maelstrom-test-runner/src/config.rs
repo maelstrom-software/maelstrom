@@ -1,5 +1,5 @@
 use derive_more::From;
-use maelstrom_client::ContainerImageDepotDir;
+use maelstrom_client::{AcceptInvalidRemoteContainerTlsCerts, ContainerImageDepotDir};
 use maelstrom_macro::Config;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
@@ -88,4 +88,8 @@ pub struct Config {
     /// The number of job slots available.
     #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
+
+    /// Whether to accept invalid TLS certificates when downloading container images.
+    #[config(flag, value_name = "ACCEPT_INVALID_REMOTE_CONTAINER_TLS_CERTS")]
+    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
 }

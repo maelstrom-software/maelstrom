@@ -4,7 +4,8 @@ use maelstrom_base::{
     Utf8Path, Utf8PathBuf,
 };
 use maelstrom_client::{
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_client_base::spec::{JobSpec, Layer, PrefixOptions, SymlinkSpec};
 use maelstrom_util::{elf::read_shared_libraries, fs::Fs, log::test_logger, root::Root};
@@ -61,6 +62,7 @@ impl ClientFixture {
             "1mb".parse().unwrap(), /* cache_size */
             "1mb".parse().unwrap(), /* inline_limit */
             2u16.try_into().unwrap(),
+            AcceptInvalidRemoteContainerTlsCerts::from(true),
             log.clone(),
         )
         .unwrap();

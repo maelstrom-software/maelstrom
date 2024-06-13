@@ -9,7 +9,8 @@ use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
 use indicatif::TermLike;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
     main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
@@ -55,6 +56,7 @@ impl DefaultMainAppDeps {
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
+        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         log: slog::Logger,
     ) -> Result<Self> {
         let project_dir = project_dir.as_ref();
@@ -82,6 +84,7 @@ impl DefaultMainAppDeps {
             cache_size,
             inline_limit,
             slots,
+            accept_invalid_remote_container_tls_certs,
             log,
         )?;
         Ok(Self {
@@ -557,6 +560,7 @@ where
             config.parent.cache_size,
             config.parent.inline_limit,
             config.parent.slots,
+            config.parent.accept_invalid_remote_container_tls_certs,
             log.clone(),
         )?;
 

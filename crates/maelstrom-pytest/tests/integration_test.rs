@@ -32,6 +32,7 @@ fn do_cargo_maelstrom_test(_source_contents: &str) -> String {
             cache_size: CacheSize::default(),
             inline_limit: InlineLimit::default(),
             slots: Slots::default(),
+            accept_invalid_remote_container_tls_certs: true.into(),
         },
     };
     let extra_options = ExtraCommandLineOptions {

@@ -10,8 +10,8 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     spec::{Layer, PrefixOptions},
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir,
-    StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ImageSpec, JobSpec, ProjectDir, StateDir,
 };
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_macro::Config;
@@ -57,6 +57,7 @@ fn create_client(
     cache_size: CacheSize,
     inline_limit: InlineLimit,
     slots: Slots,
+    accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
     log: slog::Logger,
 ) -> Result<Client> {
     let project_dir = project_dir.as_ref();
@@ -84,6 +85,7 @@ fn create_client(
         cache_size,
         inline_limit,
         slots,
+        accept_invalid_remote_container_tls_certs,
         log,
     )
 }
@@ -592,6 +594,7 @@ where
         config.parent.cache_size,
         config.parent.inline_limit,
         config.parent.slots,
+        config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
     let deps = DefaultMainAppDeps::new(project_dir, &cache_dir, &client)?;

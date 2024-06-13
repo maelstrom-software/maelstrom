@@ -2,7 +2,8 @@ use crate::client::Client;
 use anyhow::Result;
 use maelstrom_client_base::{
     proto::{self, client_process_server::ClientProcess},
-    CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir, TryFromProtoBuf,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntoProtoBuf, IntoResult, ProjectDir, StateDir,
+    TryFromProtoBuf,
 };
 use maelstrom_container::ContainerImageDepotDir;
 use maelstrom_util::{
@@ -58,6 +59,9 @@ impl ClientProcess for Handler {
                     CacheSize::try_from_proto_buf(request.cache_size)?,
                     InlineLimit::try_from_proto_buf(request.inline_limit)?,
                     Slots::try_from_proto_buf(request.slots)?,
+                    AcceptInvalidRemoteContainerTlsCerts::try_from_proto_buf(
+                        request.accept_invalid_remote_container_tls_certs,
+                    )?,
                 )
                 .await
                 .map(IntoProtoBuf::into_proto_buf)

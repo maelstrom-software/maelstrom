@@ -11,6 +11,7 @@ enum CliCommands {
     Download {
         image_name: String,
         layer_dir: PathBuf,
+        accept_invalid_certs: bool,
     },
     Inspect {
         image_name: String,
@@ -48,11 +49,16 @@ async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
         CliCommands::Download {
             image_name,
             layer_dir,
+            accept_invalid_certs,
         } => {
             let ref_ = resolve_name(&image_name).await?;
 
             let ind = indicatif::ProgressBar::new(0);
-            let downloader = ImageDownloader::new(reqwest::Client::new());
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .build()
+                .unwrap();
+            let downloader = ImageDownloader::new(client);
             let image = downloader.download_image(&ref_, &layer_dir, ind).await?;
             println!("{image:#?}");
         }

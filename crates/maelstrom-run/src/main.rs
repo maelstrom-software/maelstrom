@@ -5,7 +5,8 @@ use maelstrom_base::{
     JobStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
-    CacheDir, Client, ClientBgProcess, ContainerImageDepotDir, ProjectDir, StateDir,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
+    ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, SockaddrUnStorage, SocketDomain, SocketType};
 use maelstrom_macro::Config;
@@ -98,6 +99,10 @@ pub struct Config {
     /// The number of job slots available.
     #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
+
+    /// Whether to accept invalid TLS certificates when downloading container images.
+    #[config(flag, value_name = "ACCEPT_INVALID_REMOTE_CONTAINER_TLS_CERTS")]
+    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
 }
 
 #[derive(Args)]
@@ -292,6 +297,7 @@ fn main() -> Result<ExitCode> {
             config.cache_size,
             config.inline_limit,
             config.slots,
+            config.accept_invalid_remote_container_tls_certs,
             log,
         )?;
         let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));

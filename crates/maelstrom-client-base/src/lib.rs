@@ -13,8 +13,11 @@ extern crate self as maelstrom_client;
 pub use proto_buf_conv::{IntoProtoBuf, TryFromProtoBuf};
 
 use anyhow::{anyhow, Result};
+use derive_more::From;
 use enum_map::EnumMap;
 use maelstrom_macro::{IntoProtoBuf, TryFromProtoBuf};
+use serde::Deserialize;
+use std::fmt;
 
 /// The project directory is used for two things. First, any relative paths in layer specifications
 /// are resolved based on this path. Second, it's where the client process looks for the
@@ -103,4 +106,36 @@ pub struct IntrospectResponse {
     pub job_state_counts: EnumMap<maelstrom_base::stats::JobState, u64>,
     pub artifact_uploads: Vec<RemoteProgress>,
     pub image_downloads: Vec<RemoteProgress>,
+}
+
+#[derive(Clone, Deserialize, From)]
+#[serde(transparent)]
+pub struct AcceptInvalidRemoteContainerTlsCerts(bool);
+
+impl AcceptInvalidRemoteContainerTlsCerts {
+    pub fn into_inner(self) -> bool {
+        self.0
+    }
+}
+
+impl fmt::Debug for AcceptInvalidRemoteContainerTlsCerts {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl TryFromProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
+    type ProtoBufType = bool;
+
+    fn try_from_proto_buf(v: bool) -> Result<Self> {
+        Ok(Self::from(v))
+    }
+}
+
+impl IntoProtoBuf for AcceptInvalidRemoteContainerTlsCerts {
+    type ProtoBufType = bool;
+
+    fn into_proto_buf(self) -> bool {
+        self.into_inner()
+    }
 }

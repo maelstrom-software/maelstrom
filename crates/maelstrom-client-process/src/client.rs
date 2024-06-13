@@ -16,7 +16,8 @@ use maelstrom_base::{
 };
 use maelstrom_client_base::{
     spec::{environment_eval, std_env_lookup, ConvertedImage, ImageConfig, JobSpec, Layer},
-    CacheDir, IntrospectResponse, ProjectDir, StateDir, STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
+    AcceptInvalidRemoteContainerTlsCerts, CacheDir, IntrospectResponse, ProjectDir, StateDir,
+    STUB_MANIFEST_DIR, SYMLINK_MANIFEST_DIR,
 };
 use maelstrom_container::{
     self as container, ContainerImage, ContainerImageDepot, ContainerImageDepotDir,
@@ -155,6 +156,7 @@ impl Client {
         cache_size: CacheSize,
         inline_limit: InlineLimit,
         slots: Slots,
+        accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
     ) -> Result<()> {
         async fn file_logger(
             log_level: LogLevel,
@@ -181,6 +183,7 @@ impl Client {
             cache_size: CacheSize,
             inline_limit: InlineLimit,
             slots: Slots,
+            accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
         ) -> Result<(ClientState, JoinSet<Result<()>>)> {
             let fs = async_fs::Fs::new();
 
@@ -216,6 +219,7 @@ impl Client {
             let container_image_depot = ContainerImageDepot::new(
                 project_dir.transmute::<container::ProjectDir>(),
                 container_image_depot_cache_dir,
+                accept_invalid_remote_container_tls_certs.into_inner(),
             )?;
             let digest_repo = DigestRepository::new(&cache_dir);
             let artifact_upload_tracker = ProgressTracker::default();
@@ -402,6 +406,7 @@ impl Client {
             cache_size,
             inline_limit,
             slots,
+            accept_invalid_remote_container_tls_certs,
         )
         .await;
         match result {

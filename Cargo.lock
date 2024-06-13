@@ -2934,6 +2934,7 @@ name = "maelstrom-client-base"
 version = "0.10.0-dev"
 dependencies = [
  "anyhow",
+ "derive_more",
  "enum-map",
  "enumset",
  "maelstrom-base",
