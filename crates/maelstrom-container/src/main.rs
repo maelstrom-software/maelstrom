@@ -15,6 +15,7 @@ enum CliCommands {
     },
     Inspect {
         image_name: String,
+        accept_invalid_certs: bool,
     },
     Registry {
         source_path: PathBuf,
@@ -28,14 +29,18 @@ struct CliOptions {
     command: CliCommands,
 }
 
-async fn resolve_name(image_name: &str) -> Result<DockerReference> {
+async fn resolve_name(image_name: &str, accept_invalid_certs: bool) -> Result<DockerReference> {
     let image_name: ImageName = image_name.parse()?;
 
     let ImageName::Docker(mut ref_) = image_name else {
         bail!("local image path not supported yet");
     };
 
-    let mut downloader = ImageDownloader::new(reqwest::Client::new());
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(accept_invalid_certs)
+        .build()
+        .unwrap();
+    let mut downloader = ImageDownloader::new(client);
     let digest = downloader.resolve_tag(&ref_).await?;
     println!("digest = {digest:#?}");
     ref_.tag = None;
@@ -51,7 +56,7 @@ async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
             layer_dir,
             accept_invalid_certs,
         } => {
-            let ref_ = resolve_name(&image_name).await?;
+            let ref_ = resolve_name(&image_name, accept_invalid_certs).await?;
 
             let ind = indicatif::ProgressBar::new(0);
             let client = reqwest::Client::builder()
@@ -62,10 +67,17 @@ async fn run(opt: CliOptions, log: slog::Logger) -> Result<()> {
             let image = downloader.download_image(&ref_, &layer_dir, ind).await?;
             println!("{image:#?}");
         }
-        CliCommands::Inspect { image_name } => {
-            let ref_ = resolve_name(&image_name).await?;
+        CliCommands::Inspect {
+            image_name,
+            accept_invalid_certs,
+        } => {
+            let ref_ = resolve_name(&image_name, accept_invalid_certs).await?;
 
-            let downloader = ImageDownloader::new(reqwest::Client::new());
+            let client = reqwest::Client::builder()
+                .danger_accept_invalid_certs(accept_invalid_certs)
+                .build()
+                .unwrap();
+            let downloader = ImageDownloader::new(client);
             let resp = downloader.inspect(&ref_).await?;
             println!("{resp:#?}");
         }
