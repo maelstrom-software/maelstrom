@@ -88,10 +88,17 @@ impl LocalRegistry {
     }
 
     pub async fn run(source_dir: impl Into<PathBuf>, log: slog::Logger) -> Result<SocketAddr> {
+        Self::run_inner(source_dir, log).await.map(|(addr, _)| addr)
+    }
+
+    async fn run_inner(
+        source_dir: impl Into<PathBuf>,
+        log: slog::Logger,
+    ) -> Result<(SocketAddr, tokio::task::JoinHandle<()>)> {
         let self_ = Self::new(source_dir, log).await?;
         let address = self_.address()?;
-        tokio::task::spawn(async move { self_.run_until_error().await.unwrap() });
-        Ok(address)
+        let handle = tokio::task::spawn(async move { self_.run_until_error().await.unwrap() });
+        Ok((address, handle))
     }
 
     #[tokio::main]
@@ -100,7 +107,15 @@ impl LocalRegistry {
         log: slog::Logger,
         send: tokio::sync::oneshot::Sender<Result<SocketAddr>>,
     ) {
-        send.send(Self::run(source_dir, log).await).ok();
+        match Self::run_inner(source_dir, log).await {
+            Ok((address, handle)) => {
+                send.send(Ok(address)).ok();
+                handle.await.unwrap();
+            }
+            Err(error) => {
+                send.send(Err(error)).ok();
+            }
+        }
     }
 
     pub fn run_sync(source_dir: impl Into<PathBuf>, log: slog::Logger) -> Result<SocketAddr> {
