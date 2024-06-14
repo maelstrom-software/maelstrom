@@ -43,6 +43,23 @@ mounts = [
 environment = { HOME = "/tmp" }
 
 [[directives]]
+filter = "package.equals(maelstrom-pytest) && test.equals(integration_test)"
+image.name = "docker://python:3.11-slim"
+image.use = ["layers", "environment"]
+added_layers = [
+    { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
+    { paths = ["crates/maelstrom-pytest/src/python.tar"], canonicalize = true },
+    { paths = ["<build-dir>/pytest-client-bg-proc"], canonicalize = true }
+]
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null", "fuse"] },
+]
+network = "local"
+enable_writable_file_system = true
+
+[[directives]]
 filter = """
 package.equals(maelstrom-client-process) ||
 package.equals(maelstrom-fuse) ||
