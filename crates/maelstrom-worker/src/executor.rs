@@ -5,7 +5,6 @@ use bumpalo::{
     collections::{CollectIn as _, String as BumpString, Vec as BumpVec},
     Bump,
 };
-use futures::ready;
 use maelstrom_base::{
     tty::{self, DecodeInputChunk, DecodeInputRemainder},
     GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutputResult,
@@ -19,6 +18,7 @@ use maelstrom_linux::{
 };
 use maelstrom_util::{
     config::common::InlineLimit,
+    io::AsyncFile,
     root::RootBuf,
     sync::EventReceiver,
     time::{Clock, ClockInstant as _},
@@ -30,23 +30,13 @@ use std::{
     cell::UnsafeCell,
     ffi::{CStr, CString},
     fmt::Write as _,
-    fs::File,
-    io::{Read as _, Write as _},
     mem,
-    os::{
-        fd,
-        unix::{ffi::OsStrExt as _, fs::MetadataExt},
-    },
+    os::unix::{ffi::OsStrExt as _, fs::MetadataExt},
     path::Path,
-    pin::Pin,
     result,
-    task::{Context, Poll},
 };
 use tokio::{
-    io::{
-        self, unix::AsyncFd, AsyncRead, AsyncReadExt as _, AsyncWrite, AsyncWriteExt as _,
-        Interest, ReadBuf,
-    },
+    io::{self, unix::AsyncFd, AsyncReadExt as _, AsyncWriteExt as _, Interest},
     runtime, select,
     sync::oneshot,
     task::JoinSet,
@@ -250,68 +240,12 @@ async fn wait_for_child(
     })
 }
 
-/// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
-struct AsyncFile {
-    inner: AsyncFd<File>,
-}
-
-impl AsyncRead for AsyncFile {
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<io::Result<()>> {
-        loop {
-            let mut guard = ready!(self.inner.poll_read_ready(cx))?;
-
-            let unfilled = buf.initialize_unfilled();
-            match guard.try_io(|inner| inner.get_ref().read(unfilled)) {
-                Ok(Ok(len)) => {
-                    buf.advance(len);
-                    return Poll::Ready(Ok(()));
-                }
-                Ok(Err(err)) => return Poll::Ready(Err(err)),
-                Err(_would_block) => continue,
-            }
-        }
-    }
-}
-
-impl AsyncWrite for AsyncFile {
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<io::Result<usize>> {
-        loop {
-            let mut guard = ready!(self.inner.poll_write_ready(cx))?;
-
-            match guard.try_io(|inner| inner.get_ref().write(buf)) {
-                Ok(result) => return Poll::Ready(result),
-                Err(_would_block) => continue,
-            }
-        }
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        todo!();
-        //        self.inner.get_ref().shutdown(std::net::Shutdown::Write)?;
-        //        Poll::Ready(Ok(()))
-    }
-}
-
 /// Read all of the contents of `stream` and return the appropriate [`JobOutputResult`].
 async fn output_reader(fd: OwnedFd, inline_limit: InlineLimit) -> Result<JobOutputResult> {
     let mut buf = Vec::<u8>::new();
     // Make the read side of the pipe non-blocking so that we can use it with Tokio.
     linux::fcntl_setfl(fd.as_fd(), OpenFlags::NONBLOCK).map_err(Error::from)?;
-    let stream = AsyncFile {
-        inner: AsyncFd::new(File::from(fd::OwnedFd::from(fd))).map_err(Error::from)?,
-    };
+    let stream = AsyncFile::new(fd)?;
     let mut take = stream.take(inline_limit.as_bytes());
     take.read_to_end(&mut buf).await?;
     let buf = buf.into_boxed_slice();
@@ -1585,14 +1519,10 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 // Turn the fds into things that tokio can use. Both of these were previously
                 // opened non-blocking.
                 let master_fd = master.as_fd();
-                let master = AsyncFile {
-                    inner: AsyncFd::new(File::from(fd::OwnedFd::from(master))).map_err(syserr)?,
-                };
-                let socket = AsyncFile {
-                    inner: AsyncFd::new(File::from(fd::OwnedFd::from(socket))).map_err(syserr)?,
-                };
-                let (mut master_read, mut master_write) = io::split(master);
-                let (mut socket_read, mut socket_write) = io::split(socket);
+                let (mut master_read, mut master_write) =
+                    AsyncFile::new(master).map_err(syserr)?.into_split();
+                let (mut socket_read, mut socket_write) =
+                    AsyncFile::new(socket).map_err(syserr)?.into_split();
 
                 // Spawn two tasks to proxy between the master and the socket.
                 let master_to_socket_handle = joinset.spawn_on(
@@ -1697,11 +1627,13 @@ mod tests {
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{
-        ascii, collections::HashSet, env, fs, os::unix::net::UnixListener as StdUnixListener,
-        path::PathBuf, str, sync::Arc, time::Duration,
+        ascii, collections::HashSet, env, fs, os::fd,
+        os::unix::net::UnixListener as StdUnixListener, path::PathBuf, str, sync::Arc,
+        time::Duration,
     };
     use tempfile::{NamedTempFile, TempDir};
     use tokio::{
+        io::AsyncRead,
         net::{TcpListener, UnixListener, UnixStream},
         sync::{oneshot, Mutex},
         task::{self, JoinHandle},

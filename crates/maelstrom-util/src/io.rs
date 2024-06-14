@@ -4,14 +4,20 @@ use crate::ext::OptionExt as _;
 use byteorder::{BigEndian, ReadBytesExt as _, WriteBytesExt as _};
 use lru::LruCache;
 use maelstrom_base::Sha256Digest;
-use maelstrom_linux as linux;
+use maelstrom_linux::{self as linux};
 use sha2::{Digest as _, Sha256};
-use std::io::{self, Chain, Read, Repeat, Take, Write};
-use std::num::NonZeroUsize;
-use std::pin::{pin, Pin};
-use std::task::ready;
-use std::task::{Context, Poll};
-use tokio::io::{AsyncRead, AsyncSeek, AsyncSeekExt as _, AsyncWrite, ReadBuf};
+use std::{
+    fs::File,
+    io::{self, Chain, Read, Repeat, Take, Write},
+    num::NonZeroUsize,
+    os::fd,
+    pin::{pin, Pin},
+    task::{ready, Context, Poll},
+};
+use tokio::io::{
+    self as tokio_io, unix::AsyncFd, AsyncRead, AsyncSeek, AsyncSeekExt as _, AsyncWrite, ReadBuf,
+    ReadHalf, WriteHalf,
+};
 
 /// A [`Read`]er wrapper that will always reads a specific number of bytes, except on error. If the
 /// inner, wrapped, reader returns EOF before the specified number of bytes have been returned,
@@ -1202,5 +1208,65 @@ fn slow_writer() {
                 j,
             );
         }
+    }
+}
+
+/// A wrapper for a raw, non-blocking fd that allows it to be read from async code.
+pub struct AsyncFile(AsyncFd<File>);
+
+impl AsyncFile {
+    pub fn new(fd: linux::OwnedFd) -> anyhow::Result<Self> {
+        Ok(Self(AsyncFd::new(File::from(fd::OwnedFd::from(fd)))?))
+    }
+
+    pub fn into_split(self) -> (ReadHalf<Self>, WriteHalf<Self>) {
+        tokio_io::split(self)
+    }
+}
+
+impl AsyncRead for AsyncFile {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        loop {
+            let mut guard = ready!(self.0.poll_read_ready(cx))?;
+
+            let unfilled = buf.initialize_unfilled();
+            match guard.try_io(|inner| inner.get_ref().read(unfilled)) {
+                Ok(Ok(len)) => {
+                    buf.advance(len);
+                    return Poll::Ready(Ok(()));
+                }
+                Ok(Err(err)) => return Poll::Ready(Err(err)),
+                Err(_would_block) => continue,
+            }
+        }
+    }
+}
+
+impl AsyncWrite for AsyncFile {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        loop {
+            let mut guard = ready!(self.0.poll_write_ready(cx))?;
+
+            match guard.try_io(|inner| inner.get_ref().write(buf)) {
+                Ok(result) => return Poll::Ready(result),
+                Err(_would_block) => continue,
+            }
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }
