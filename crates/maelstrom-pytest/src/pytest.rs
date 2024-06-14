@@ -59,9 +59,10 @@ fn compile_python(path: &Path) -> Result<()> {
     }
 }
 
-fn run_python(script: &str) -> Result<String> {
+fn run_python(script: &str, cwd: &Path) -> Result<String> {
     let mut cmd = Command::new("/usr/bin/env");
     cmd.args(["python", "-c", script])
+        .current_dir(cwd)
         .stderr(Stdio::piped())
         .stdout(Stdio::piped());
     let mut child = cmd.spawn()?;
@@ -114,7 +115,7 @@ pub fn pytest_collect_tests(
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     compile_python(project_dir.as_ref())?;
 
-    let output = run_python(include_str!("py/collect_tests.py"))?;
+    let output = run_python(include_str!("py/collect_tests.py"), project_dir)?;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
         let case: PytestCase = serde_json::from_str(line)?;

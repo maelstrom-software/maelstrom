@@ -435,10 +435,11 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
                 }
 
                 let packages_path = self.get_pip_packages(image.clone(), &ref_, ind)?;
+                let packages_path = packages_path.strip_prefix(&self.project_dir).unwrap();
                 Ok(TestLayers::Provided(vec![Layer::Glob {
                     glob: format!("{packages_path}/**"),
                     prefix_options: PrefixOptions {
-                        strip_prefix: Some(packages_path),
+                        strip_prefix: Some(packages_path.into()),
                         ..Default::default()
                     },
                 }]))
@@ -559,9 +560,11 @@ fn find_artifacts() -> Result<Vec<PytestArtifactKey>> {
         .collect())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn main<TermT>(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
+    project_dir: &Root<ProjectDir>,
     bg_proc: ClientBgProcess,
     logger: Logger,
     stderr_is_tty: bool,
@@ -571,13 +574,12 @@ pub fn main<TermT>(
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
-    let cwd = Path::new(".").canonicalize()?;
-    let project_dir = Root::<ProjectDir>::new(&cwd);
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 
     let list_action = extra_options.list.then_some(ListAction::ListTests);
-    let build_dir = Root::<BuildDir>::new(Path::new(".maelstrom-pytest"));
+    let build_dir = AsRef::<Path>::as_ref(project_dir).join(".maelstrom-pytest");
+    let build_dir = Root::<BuildDir>::new(&build_dir);
     let state_dir = build_dir.join::<StateDir>("state");
     let cache_dir = build_dir.join::<CacheDir>("cache");
 
