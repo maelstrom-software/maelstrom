@@ -12,7 +12,9 @@ version.workspace = true
 [dependencies]
 derive_more.workspace = true
 libc.workspace = true
+tokio = { workspace = true, optional = true }
 
 [features]
 std = []
 test = []
+tokio = ["std", "dep:tokio"]

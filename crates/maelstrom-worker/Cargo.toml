@@ -24,7 +24,7 @@ lru.workspace = true
 maelstrom-base.workspace = true
 maelstrom-fuse.workspace = true
 maelstrom-layer-fs.workspace = true
-maelstrom-linux = { workspace = true, features = ["std"] }
+maelstrom-linux = { workspace = true, features = ["std", "tokio"] }
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 maelstrom-worker-child.workspace = true

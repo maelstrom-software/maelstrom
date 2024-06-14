@@ -129,7 +129,7 @@ fn fake_fork(test: &str) -> ForkResult {
         .unwrap();
         linux::bind(sock.as_fd(), &linux::SockaddrUnStorage::new_autobind()).unwrap();
         linux::listen(sock.as_fd(), 1).unwrap();
-        let listener = UnixListener::from(std::os::fd::OwnedFd::from(sock));
+        let listener = UnixListener::from(sock);
         let local_addr = listener.local_addr().unwrap();
         let address_bytes = local_addr.as_abstract_name().unwrap();
         let address_str = std::str::from_utf8(address_bytes).unwrap();

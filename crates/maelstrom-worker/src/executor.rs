@@ -37,6 +37,7 @@ use std::{
 };
 use tokio::{
     io::{self, unix::AsyncFd, AsyncReadExt as _, AsyncWriteExt as _, Interest},
+    net::UnixStream,
     runtime, select,
     sync::oneshot,
     task::JoinSet,
@@ -1522,7 +1523,7 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
                 let (mut master_read, mut master_write) =
                     AsyncFile::new(master).map_err(syserr)?.into_split();
                 let (mut socket_read, mut socket_write) =
-                    AsyncFile::new(socket).map_err(syserr)?.into_split();
+                    UnixStream::try_from(socket).map_err(syserr)?.into_split();
 
                 // Spawn two tasks to proxy between the master and the socket.
                 let master_to_socket_handle = joinset.spawn_on(
@@ -1627,9 +1628,7 @@ mod tests {
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
     use std::{
-        ascii, collections::HashSet, env, fs, os::fd,
-        os::unix::net::UnixListener as StdUnixListener, path::PathBuf, str, sync::Arc,
-        time::Duration,
+        ascii, collections::HashSet, env, fs, path::PathBuf, str, sync::Arc, time::Duration,
     };
     use tempfile::{NamedTempFile, TempDir};
     use tokio::{
@@ -2822,9 +2821,7 @@ mod tests {
         linux::listen(sock.as_fd(), 1).unwrap();
         let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
         let path = sockaddr.as_sockaddr_un().unwrap().path();
-        let listener =
-            UnixListener::from_std(StdUnixListener::from(fd::OwnedFd::from(sock))).unwrap();
-        (listener, path.try_into().unwrap())
+        (sock.try_into().unwrap(), path.try_into().unwrap())
     }
 
     async fn start_tty_job(

@@ -449,6 +449,36 @@ impl From<fd::OwnedFd> for OwnedFd {
     }
 }
 
+#[cfg(any(test, feature = "std"))]
+impl From<OwnedFd> for std::os::unix::net::UnixStream {
+    fn from(owned_fd: OwnedFd) -> std::os::unix::net::UnixStream {
+        fd::OwnedFd::from(owned_fd).into()
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl TryFrom<OwnedFd> for tokio::net::UnixStream {
+    type Error = std::io::Error;
+    fn try_from(owned_fd: OwnedFd) -> Result<tokio::net::UnixStream, Self::Error> {
+        tokio::net::UnixStream::from_std(fd::OwnedFd::from(owned_fd).into())
+    }
+}
+
+#[cfg(any(test, feature = "std"))]
+impl From<OwnedFd> for std::os::unix::net::UnixListener {
+    fn from(owned_fd: OwnedFd) -> std::os::unix::net::UnixListener {
+        fd::OwnedFd::from(owned_fd).into()
+    }
+}
+
+#[cfg(feature = "tokio")]
+impl TryFrom<OwnedFd> for tokio::net::UnixListener {
+    type Error = std::io::Error;
+    fn try_from(owned_fd: OwnedFd) -> Result<tokio::net::UnixListener, Self::Error> {
+        tokio::net::UnixListener::from_std(fd::OwnedFd::from(owned_fd).into())
+    }
+}
+
 impl Drop for OwnedFd {
     fn drop(&mut self) {
         // Just ignore the return value from close.

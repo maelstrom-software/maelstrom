@@ -30,10 +30,7 @@ use std::{
     io::{self, IsTerminal as _, Read, Stdin, Write as _},
     mem,
     net::Shutdown,
-    os::{
-        fd::OwnedFd,
-        unix::net::{UnixListener, UnixStream},
-    },
+    os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     slice,
     sync::{
@@ -387,7 +384,7 @@ fn tty_job_main(
 /// gone away.
 fn tty_listener_main(sock: linux::OwnedFd, sender: SyncSender<TtyMainMessage>) -> Result<()> {
     fn inner(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
-        let listener = UnixListener::from(OwnedFd::from(sock));
+        let listener = UnixListener::from(sock);
         let sock = listener.accept()?.0;
         let sock_clone = sock.try_clone()?;
         Ok((sock, sock_clone))
