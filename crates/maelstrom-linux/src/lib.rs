@@ -873,7 +873,7 @@ impl SocketProtocol {
     pub const NETLINK_ROUTE: Self = Self(0);
 }
 
-#[derive(BitOr, Clone, Copy)]
+#[derive(BitOr, Clone, Copy, Default)]
 pub struct SocketType(c_int);
 
 impl SocketType {
@@ -927,6 +927,26 @@ pub fn accept(fd: Fd, flags: AcceptFlags) -> Result<(OwnedFd, SockaddrStorage), 
         .map(Fd)
         .map(OwnedFd)?;
     Ok((fd, sockaddr))
+}
+
+pub fn autobound_unix_listener(
+    socket_flags: SocketType,
+    backlog: u32,
+) -> Result<(OwnedFd, [u8; 6]), Errno> {
+    let sock = socket(
+        SocketDomain::UNIX,
+        SocketType::STREAM | socket_flags,
+        Default::default(),
+    )?;
+    bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
+    listen(sock.as_fd(), backlog)?;
+    let addr = getsockname(sock.as_fd())?
+        .as_sockaddr_un()
+        .unwrap()
+        .path()
+        .try_into()
+        .unwrap();
+    Ok((sock, addr))
 }
 
 pub fn bind(fd: Fd, sockaddr: &Sockaddr) -> Result<(), Errno> {

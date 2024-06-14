@@ -2811,17 +2811,8 @@ mod tests {
     }
 
     fn unix_listener() -> (UnixListener, [u8; 6]) {
-        let sock = linux::socket(
-            SocketDomain::UNIX,
-            SocketType::STREAM | SocketType::NONBLOCK,
-            Default::default(),
-        )
-        .unwrap();
-        linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind()).unwrap();
-        linux::listen(sock.as_fd(), 1).unwrap();
-        let sockaddr = linux::getsockname(sock.as_fd()).unwrap();
-        let path = sockaddr.as_sockaddr_un().unwrap().path();
-        (sock.try_into().unwrap(), path.try_into().unwrap())
+        let (sock, path) = linux::autobound_unix_listener(SocketType::NONBLOCK, 1).unwrap();
+        (sock.try_into().unwrap(), path)
     }
 
     async fn start_tty_job(

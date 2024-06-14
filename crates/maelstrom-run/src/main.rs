@@ -8,10 +8,7 @@ use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
-use maelstrom_linux::{
-    self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow, SockaddrUnStorage,
-    SocketDomain, SocketType,
-};
+use maelstrom_linux::{self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow};
 use maelstrom_macro::Config;
 use maelstrom_run::{
     escape::{self, EscapeChar, EscapeChunk},
@@ -631,18 +628,9 @@ fn tty_main(
     escape_char: EscapeChar,
     mut job_spec: JobSpec,
 ) -> Result<ExitCode> {
-    let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
-    linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
-    linux::listen(sock.as_fd(), 1)?;
-    let sockaddr = linux::getsockname(sock.as_fd())?;
-    let sockaddr = sockaddr
-        .as_sockaddr_un()
-        .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
     let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
-    job_spec.allocate_tty = Some(JobTty::new(
-        sockaddr.path().try_into()?,
-        WindowSize::new(rows, columns),
-    ));
+    let (sock, addr) = linux::autobound_unix_listener(Default::default(), 1)?;
+    job_spec.allocate_tty = Some(JobTty::new(&addr, WindowSize::new(rows, columns)));
 
     print!("Waiting for job to start...");
     io::stdout().flush()?;

@@ -12,7 +12,7 @@ use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
-use maelstrom_linux as linux;
+use maelstrom_linux::{self as linux, Pid};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
@@ -21,7 +21,7 @@ use maelstrom_util::{
 use spec::Layer;
 use std::{
     future::Future,
-    io::{BufRead as _, BufReader, Read as _, Write as _},
+    io::{BufRead as _, BufReader, Read as _},
     net::Shutdown,
     os::linux::net::SocketAddrExt as _,
     os::unix::net::{SocketAddr, UnixListener, UnixStream as StdUnixStream},
@@ -29,7 +29,7 @@ use std::{
     pin::Pin,
     process,
     process::{Command, Stdio},
-    result,
+    result, str,
     sync::mpsc::{self as std_mpsc, Receiver},
     thread,
 };
@@ -81,7 +81,7 @@ fn print_error(label: &str, res: Result<()>) {
     }
 }
 
-struct ClientBgHandle(linux::Pid);
+struct ClientBgHandle(Pid);
 
 impl ClientBgHandle {
     fn wait(&mut self) -> Result<()> {
@@ -336,23 +336,13 @@ pub fn bg_proc_main() -> Result<()> {
     maelstrom_client_process::clone_into_pid_and_user_namespace()?;
 
     maelstrom_util::log::run_with_logger(maelstrom_util::config::common::LogLevel::Debug, |log| {
-        let sock = linux::socket(
-            linux::SocketDomain::UNIX,
-            linux::SocketType::STREAM,
-            Default::default(),
-        )?;
-        linux::bind(sock.as_fd(), &linux::SockaddrUnStorage::new_autobind())?;
-        linux::listen(sock.as_fd(), 1)?;
-        let listener = UnixListener::from(sock);
+        let (sock, path) = linux::autobound_unix_listener(Default::default(), 1)?;
+        let name = str::from_utf8(&path[1..]).unwrap();
 
-        let local_addr = listener.local_addr()?;
-        slog::info!(log, "listening on {local_addr:?}",);
+        slog::info!(log, "listening on unix-abstract:{name}");
+        println!("{name}");
 
-        let address_bytes = local_addr.as_abstract_name().unwrap();
-        std::io::stdout().write_all(address_bytes)?;
-        println!();
-
-        let (sock, addr) = listener.accept()?;
+        let (sock, addr) = UnixListener::from(sock).accept()?;
         slog::info!(log, "got connection"; "address" => ?addr);
 
         let res = maelstrom_client_process::main_after_clone(
