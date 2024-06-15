@@ -129,7 +129,7 @@ fn do_maelstrom_pytest_test(source_contents: &str) -> String {
 }
 
 #[test]
-fn test_simple() {
+fn test_simple_success() {
     let contents = do_maelstrom_pytest_test(&indoc::indoc! {"
         def test_noop():
             pass
@@ -146,6 +146,38 @@ fn test_simple() {
             Failed Tests    :         0\
         "
         ),
+        "{contents}"
+    );
+}
+
+#[test]
+fn test_simple_failure() {
+    let contents = do_maelstrom_pytest_test(&indoc::indoc! {"
+        def test_error():
+            raise Exception('test error')
+    "});
+    let first_line = contents.split("\n").next().unwrap();
+    let rest = &contents[first_line.len() + 1..];
+
+    assert!(
+        first_line.starts_with("test_foo.py::test_error..............FAIL"),
+        "{contents}"
+    );
+    assert_eq!(
+        rest,
+        indoc::indoc! {"
+
+                def test_error():
+            >       raise Exception('test error')
+            E       Exception: test error
+
+            test_foo.py:2: Exception
+
+            ================== Test Summary ==================
+            Successful Tests:         0
+            Failed Tests    :         1
+                test_foo.py::test_error: failure\
+        "},
         "{contents}"
     );
 }
