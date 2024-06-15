@@ -6,12 +6,13 @@ pub use maelstrom_client_base::{
 };
 pub use maelstrom_container::ContainerImageDepotDir;
 
-use anyhow::{anyhow, bail, Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use maelstrom_base::{ArtifactType, ClientJobId, JobOutcomeResult, Sha256Digest};
 use maelstrom_client_base::{
     proto::{self, client_process_client::ClientProcessClient},
     IntoProtoBuf, IntoResult, TryFromProtoBuf,
 };
+use maelstrom_linux as linux;
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     log::LoggerFactory,
@@ -20,7 +21,7 @@ use maelstrom_util::{
 use spec::Layer;
 use std::{
     future::Future,
-    io::{BufRead as _, BufReader},
+    io::{BufRead as _, BufReader, Read as _, Write as _},
     net::Shutdown,
     os::linux::net::SocketAddrExt as _,
     os::unix::net::{SocketAddr, UnixListener, UnixStream as StdUnixStream},
@@ -77,11 +78,11 @@ fn print_error(label: &str, res: Result<()>) {
     }
 }
 
-struct ClientBgHandle(maelstrom_linux::Pid);
+struct ClientBgHandle(linux::Pid);
 
 impl ClientBgHandle {
     fn wait(&mut self) -> Result<()> {
-        maelstrom_linux::waitpid(self.0).map_err(|e| anyhow!("waitpid failed: {e}"))?;
+        linux::waitpid(self.0).map_err(|e| anyhow!("waitpid failed: {e}"))?;
         Ok(())
     }
 }
@@ -94,7 +95,7 @@ pub struct ClientBgProcess {
 impl ClientBgProcess {
     pub fn new_from_fork(log_level: LogLevel) -> Result<Self> {
         let (sock1, sock2) = StdUnixStream::pair()?;
-        if let Some(pid) = maelstrom_linux::fork().context("forking client background process")? {
+        if let Some(pid) = linux::fork().context("forking client background process")? {
             Ok(Self {
                 handle: ClientBgHandle(pid),
                 sock: Some(sock1),
@@ -118,15 +119,11 @@ impl ClientBgProcess {
                 println!("client bg-process: {line}");
             }
         });
-        let mut address = String::new();
-        BufReader::new(proc.stdout.take().unwrap()).read_line(&mut address)?;
-        let trimmed_address = address.trim();
-        if trimmed_address.is_empty() {
-            bail!("process didn't return any address")
-        }
-        let sock = StdUnixStream::connect_addr(&SocketAddr::from_abstract_name(
-            trimmed_address.as_bytes(),
-        )?)?;
+        let mut address_bytes = [0; 5]; // We know Linux uses exactly 5 bytes for this
+        proc.stdout.take().unwrap().read_exact(&mut address_bytes)?;
+        let address = SocketAddr::from_abstract_name(address_bytes)?;
+        let sock = StdUnixStream::connect_addr(&address)
+            .with_context(|| format!("failed to connect to {address:?}"))?;
         Ok(Self {
             handle: ClientBgHandle(proc.into()),
             sock: Some(sock),
@@ -326,14 +323,24 @@ impl Client {
 }
 
 pub fn bg_proc_main() -> Result<()> {
-    let name = format!("maelstrom-client-{}", process::id());
     maelstrom_client_process::clone_into_pid_and_user_namespace()?;
 
     maelstrom_util::log::run_with_logger(maelstrom_util::config::common::LogLevel::Debug, |log| {
-        let listener = UnixListener::bind_addr(&SocketAddr::from_abstract_name(name.as_bytes())?)?;
-        slog::info!(log, "listening on unix-abstract:{name}");
+        let sock = linux::socket(
+            linux::SocketDomain::UNIX,
+            linux::SocketType::STREAM,
+            Default::default(),
+        )?;
+        linux::bind(sock.as_fd(), &linux::SockaddrUnStorage::new_autobind())?;
+        linux::listen(sock.as_fd(), 1)?;
+        let listener = UnixListener::from(std::os::fd::OwnedFd::from(sock));
 
-        println!("{name}");
+        let local_addr = listener.local_addr()?;
+        slog::info!(log, "listening on {local_addr:?}",);
+
+        let address_bytes = local_addr.as_abstract_name().unwrap();
+        std::io::stdout().write_all(address_bytes)?;
+        println!();
 
         let (sock, addr) = listener.accept()?;
         slog::info!(log, "got connection"; "address" => ?addr);
