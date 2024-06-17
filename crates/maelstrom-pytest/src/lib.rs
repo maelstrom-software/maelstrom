@@ -555,8 +555,8 @@ fn maybe_print_collect_error(
     res
 }
 
-fn find_artifacts() -> Result<Vec<PytestArtifactKey>> {
-    let cwd = Path::new(".").canonicalize()?;
+fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
+    let cwd = path.canonicalize()?;
     Ok(Fs
         .walk(&cwd)
         .filter_map(|path| {
@@ -613,7 +613,7 @@ where
         name: "default".into(),
         version: "0".into(),
         id: PytestPackageId("default".into()),
-        artifacts: find_artifacts()?,
+        artifacts: find_artifacts(project_dir.as_ref())?,
     }];
 
     let state = MainAppState::new(
