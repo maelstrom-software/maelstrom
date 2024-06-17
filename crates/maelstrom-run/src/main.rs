@@ -268,7 +268,6 @@ fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
     let tracker_clone = tracker.clone();
     client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
     tracker.wait_for_outstanding();
-    crossterm::terminal::disable_raw_mode().unwrap();
     Ok(tracker.accum.get())
 }
 
@@ -374,7 +373,6 @@ fn main_with_logger(
             client.add_job(job_spec?, move |res| visitor(res, tracker))?;
         }
         tracker.wait_for_outstanding();
-        crossterm::terminal::disable_raw_mode().unwrap();
         Ok(tracker.accum.get())
     }
 }
