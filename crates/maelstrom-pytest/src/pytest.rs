@@ -59,9 +59,10 @@ fn compile_python(path: &Path) -> Result<()> {
     }
 }
 
-fn run_python(script: &str, cwd: &Path) -> Result<String> {
+fn run_python(script: &str, cwd: &Path, args: Vec<String>) -> Result<String> {
     let mut cmd = Command::new("/usr/bin/env");
     cmd.args(["python", "-c", script])
+        .args(args)
         .current_dir(cwd)
         .stderr(Stdio::piped())
         .stdout(Stdio::piped());
@@ -111,11 +112,17 @@ struct PytestCase {
 pub fn pytest_collect_tests(
     _color: bool,
     _packages: Vec<String>,
+    pyargs: Option<&String>,
     project_dir: &Root<ProjectDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     compile_python(project_dir.as_ref())?;
 
-    let output = run_python(include_str!("py/collect_tests.py"), project_dir)?;
+    let mut args = vec![];
+    if let Some(arg) = pyargs {
+        args.push("--pyargs".into());
+        args.push(arg.into());
+    }
+    let output = run_python(include_str!("py/collect_tests.py"), project_dir, args)?;
     let mut tests = HashMap::new();
     for line in output.split('\n').filter(|l| !l.is_empty()) {
         let case: PytestCase = serde_json::from_str(line)?;

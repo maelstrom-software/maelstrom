@@ -154,6 +154,7 @@ fn test_simple_success() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
+            pyargs: None,
         },
     );
     assert!(
@@ -183,6 +184,7 @@ fn test_simple_failure() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
+            pyargs: None,
         },
     );
     assert_eq!(stderr, "");
@@ -224,6 +226,7 @@ fn test_collection_failure() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
+            pyargs: None,
         },
     );
     assert_eq!(contents, "");
@@ -259,6 +262,7 @@ fn test_listing_all() {
             include: vec!["all".into()],
             exclude: vec![],
             list: true,
+            pyargs: None,
         },
     );
 
@@ -286,6 +290,7 @@ fn test_listing_node_id() {
             include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
             exclude: vec![],
             list: true,
+            pyargs: None,
         },
     );
 
@@ -315,6 +320,7 @@ fn test_listing_marker() {
             include: vec!["markers.contains(baz)".into()],
             exclude: vec![],
             list: true,
+            pyargs: None,
         },
     );
 
@@ -349,6 +355,7 @@ fn test_ignore() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
+            pyargs: None,
         },
     );
 

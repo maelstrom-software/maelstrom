@@ -98,6 +98,7 @@ struct DefaultMainAppDeps<'client> {
 impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
         project_dir: &Root<ProjectDir>,
+        pyargs: Option<String>,
         cache_dir: &Root<CacheDir>,
         client: &'client Client,
     ) -> Result<Self> {
@@ -107,6 +108,7 @@ impl<'client> DefaultMainAppDeps<'client> {
                 client,
                 project_dir: project_dir.to_owned(),
                 cache_dir: cache_dir.to_owned(),
+                pyargs,
             },
         })
     }
@@ -164,6 +166,7 @@ struct PytestTestCollector<'client> {
     project_dir: RootBuf<ProjectDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
+    pyargs: Option<String>,
 }
 
 impl<'client> PytestTestCollector<'client> {
@@ -415,7 +418,8 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         _options: &PytestOptions,
         packages: Vec<String>,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
-        let (handle, stream) = pytest::pytest_collect_tests(color, packages, &self.project_dir)?;
+        let (handle, stream) =
+            pytest::pytest_collect_tests(color, packages, self.pyargs.as_ref(), &self.project_dir)?;
         Ok((handle, stream))
     }
 
@@ -603,7 +607,7 @@ where
         config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(project_dir, &cache_dir, &client)?;
+    let deps = DefaultMainAppDeps::new(project_dir, extra_options.pyargs, &cache_dir, &client)?;
 
     let packages = vec![PytestPackage {
         name: "default".into(),

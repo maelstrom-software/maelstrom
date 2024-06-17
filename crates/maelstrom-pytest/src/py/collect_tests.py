@@ -21,11 +21,11 @@ class Plugin:
         self.items = items
 
 
-def collect_pytest_tests() -> List[pytest.Item]:
+def collect_pytest_tests(args: Sequence[str]) -> List[pytest.Item]:
     plugin = Plugin()
     output = StringIO()
     with redirect_stdout(output):
-        ret = pytest.main(args=["--co"], plugins=[plugin])
+        ret = pytest.main(args=["--co"] + args, plugins=[plugin])
     if ret != 0:
         output.seek(0)
         sys.stderr.write(output.read())
@@ -53,7 +53,9 @@ def is_skip(marker: pytest.Mark) -> bool:
 
 
 def main() -> None:
-    tests = collect_pytest_tests()
+    args = sys.argv[1:]
+
+    tests = collect_pytest_tests(args)
     for item in tests:
         (raw_file, _, name) = item.reportinfo()
         file = str(raw_file)
