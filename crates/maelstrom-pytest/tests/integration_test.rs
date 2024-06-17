@@ -275,3 +275,54 @@ fn test_listing_marker() {
         "{contents}"
     );
 }
+
+#[test]
+fn test_ignore() {
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
+        import pytest
+
+        @pytest.mark.skip(reason='just because')
+        def test_foo():
+            pass
+
+        @pytest.mark.skipif(True, reason='just because')
+        def test_bar():
+            pass
+
+        @pytest.mark.skipif(False, reason='just because')
+        def test_baz():
+            pass
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            list: false,
+        },
+    );
+
+    assert!(
+        contents.contains("test_foo.py::test_foo.............IGNORED"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("test_foo.py::test_bar.............IGNORED"),
+        "{contents}"
+    );
+    assert!(
+        contents.contains("test_foo.py::test_baz..................OK"),
+        "{contents}"
+    );
+
+    assert!(
+        contents.contains(
+            "\
+            ================== Test Summary ==================\n\
+            Successful Tests:         1\n\
+            Failed Tests    :         0\n\
+            Ignored Tests   :         2\
+        "
+        ),
+        "{contents}"
+    );
+}
