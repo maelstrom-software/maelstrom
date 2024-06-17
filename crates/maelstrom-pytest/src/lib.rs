@@ -29,11 +29,11 @@ use maelstrom_util::{
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::os::unix::fs::PermissionsExt as _;
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::{fmt, io};
 
 #[derive(Config, Debug)]
 pub struct Config {
@@ -538,10 +538,13 @@ impl Wait for pytest::WaitHandle {
     }
 }
 
-fn maybe_print_collect_error(res: Result<ExitCode>) -> Result<ExitCode> {
+fn maybe_print_collect_error(
+    stderr: &mut impl io::Write,
+    res: Result<ExitCode>,
+) -> Result<ExitCode> {
     if let Err(e) = &res {
         if let Some(e) = e.downcast_ref::<pytest::PytestCollectError>() {
-            eprintln!("{}", &e.stderr);
+            io::copy(&mut e.stderr.as_bytes(), stderr)?;
             return Ok(e.exit_code);
         }
     }
@@ -570,6 +573,7 @@ pub fn main<TermT>(
     stderr_is_tty: bool,
     stdout_is_tty: bool,
     terminal: TermT,
+    mut stderr: impl io::Write,
 ) -> Result<ExitCode>
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
@@ -636,5 +640,5 @@ where
         app.finish()
     });
     drop(state);
-    maybe_print_collect_error(res)
+    maybe_print_collect_error(&mut stderr, res)
 }

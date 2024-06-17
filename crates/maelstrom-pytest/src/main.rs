@@ -30,5 +30,6 @@ pub fn main() -> Result<ExitCode> {
         stderr_is_tty,
         stdout_is_tty,
         terminal,
+        std::io::stderr(),
     )
 }

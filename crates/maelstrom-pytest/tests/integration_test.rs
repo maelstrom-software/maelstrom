@@ -6,6 +6,7 @@ use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
+    process::ExitCode,
     root::{Root, RootBuf},
 };
 use std::path::PathBuf;
@@ -49,7 +50,7 @@ fn maybe_install_pytest() {
 fn do_maelstrom_pytest_test(
     source_contents: &str,
     extra_options: ExtraCommandLineOptions,
-) -> String {
+) -> (String, String, ExitCode) {
     maybe_install_pytest();
 
     let fs = Fs::new();
@@ -110,8 +111,9 @@ fn do_maelstrom_pytest_test(
 
     let logger = Logger::GivenLogger(log.clone());
 
+    let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
-    maelstrom_pytest::main(
+    let exit_code = maelstrom_pytest::main(
         config,
         extra_options,
         &Root::<ProjectDir>::new(&project_dir),
@@ -120,15 +122,30 @@ fn do_maelstrom_pytest_test(
         false,
         false,
         term.clone(),
+        &mut stderr,
     )
     .unwrap();
 
-    term.contents()
+    (
+        term.contents(),
+        String::from_utf8(stderr).unwrap(),
+        exit_code,
+    )
+}
+
+fn do_maelstrom_pytest_test_success(
+    source_contents: &str,
+    extra_options: ExtraCommandLineOptions,
+) -> String {
+    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(source_contents, extra_options);
+    assert_eq!(exit_code, ExitCode::SUCCESS);
+    assert_eq!(stderr, "");
+    contents
 }
 
 #[test]
 fn test_simple_success() {
-    let contents = do_maelstrom_pytest_test(
+    let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
         def test_noop():
             pass
@@ -157,7 +174,7 @@ fn test_simple_success() {
 
 #[test]
 fn test_simple_failure() {
-    let contents = do_maelstrom_pytest_test(
+    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
         def test_error():
             raise Exception('test error')
@@ -168,6 +185,9 @@ fn test_simple_failure() {
             list: false,
         },
     );
+    assert_eq!(stderr, "");
+    assert_eq!(exit_code, ExitCode::from(1));
+
     let first_line = contents.split("\n").next().unwrap();
     let rest = &contents[first_line.len() + 1..];
 
@@ -195,8 +215,39 @@ fn test_simple_failure() {
 }
 
 #[test]
+fn test_collection_failure() {
+    let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
+        raise Exception('import error')
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            list: false,
+        },
+    );
+    assert_eq!(contents, "");
+    assert_ne!(exit_code, ExitCode::SUCCESS);
+
+    assert!(
+        stderr.ends_with(indoc::indoc! {"
+            ==================================== ERRORS ====================================
+            _________________________ ERROR collecting test_foo.py _________________________
+            test_foo.py:1: in <module>
+                raise Exception('import error')
+            E   Exception: import error
+            =========================== short test summary info ============================
+            ERROR test_foo.py - Exception: import error
+            !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+            ===================== no tests collected, 1 error in 0.04s =====================
+        "}),
+        "{contents}"
+    );
+}
+
+#[test]
 fn test_listing_all() {
-    let contents = do_maelstrom_pytest_test(
+    let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
         def test_foo():
             pass
@@ -223,7 +274,7 @@ fn test_listing_all() {
 
 #[test]
 fn test_listing_node_id() {
-    let contents = do_maelstrom_pytest_test(
+    let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
         def test_foo():
             pass
@@ -249,7 +300,7 @@ fn test_listing_node_id() {
 
 #[test]
 fn test_listing_marker() {
-    let contents = do_maelstrom_pytest_test(
+    let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
         import pytest
 
@@ -278,7 +329,7 @@ fn test_listing_marker() {
 
 #[test]
 fn test_ignore() {
-    let contents = do_maelstrom_pytest_test(
+    let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
         import pytest
 
