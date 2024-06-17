@@ -328,7 +328,6 @@ fn main_with_logger(
         Some(path) => Box::new(fs.open_file(path)?),
         None => Box::new(io::stdin().lock()),
     };
-    let tracker = Arc::new(JobTracker::default());
     fs.create_dir_all(&config.cache_root)?;
     fs.create_dir_all(&config.state_root)?;
     fs.create_dir_all(&config.container_image_depot_root)?;
@@ -347,7 +346,6 @@ fn main_with_logger(
     )?;
     let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
     if extra_options.one_or_tty.any() {
-        tracker.add_outstanding();
         let mut job_spec = job_specs
             .next()
             .ok_or_else(|| anyhow!("no job specification provided"))??;
@@ -360,11 +358,16 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
+            let tracker = Arc::new(JobTracker::default());
+            tracker.add_outstanding();
             tty_main(client, job_spec, tracker)
         } else {
+            let tracker = Arc::new(JobTracker::default());
+            tracker.add_outstanding();
             one_main(client, job_spec, tracker)
         }
     } else {
+        let tracker = Arc::new(JobTracker::default());
         for job_spec in job_specs {
             let tracker = tracker.clone();
             tracker.add_outstanding();
