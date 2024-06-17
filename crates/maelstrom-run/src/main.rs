@@ -6,7 +6,7 @@ use maelstrom_base::{
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
-    ContainerImageDepotDir, ProjectDir, StateDir,
+    ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
 use maelstrom_linux::{self as linux, Fd, SockaddrUnStorage, SocketDomain, SocketType};
 use maelstrom_macro::Config;
@@ -262,6 +262,57 @@ impl JobTracker {
     }
 }
 
+fn main_for_tty(
+    client: Client,
+    mut job_spec: JobSpec,
+    tracker: Arc<JobTracker>,
+) -> Result<ExitCode> {
+    let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
+    let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
+    linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
+    linux::listen(sock.as_fd(), 1)?;
+    let sockaddr = linux::getsockname(sock.as_fd())?;
+    let sockaddr = sockaddr
+        .as_sockaddr_un()
+        .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
+    job_spec.allocate_tty = Some(JobTty::new(
+        sockaddr.path().try_into()?,
+        WindowSize::new(rows, columns),
+    ));
+    let tracker_clone = tracker.clone();
+    client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
+    let listener = UnixListener::from(OwnedFd::from(sock));
+    println!("waiting for job to start");
+    thread::spawn(move || {
+        let Ok((mut sock, _)) = listener.accept() else {
+            return;
+        };
+        let Ok(mut sock_clone) = sock.try_clone() else {
+            return;
+        };
+        println!("job started, going into raw mode");
+        crossterm::terminal::enable_raw_mode().unwrap();
+        thread::spawn(move || {
+            let mut buf = [0u8; 100];
+            loop {
+                match sock_clone.read(&mut buf) {
+                    Err(_) | Ok(0) => {
+                        break;
+                    }
+                    Ok(n) => {
+                        let _ = io::stdout().write(&buf[0..n]);
+                        let _ = io::stdout().flush();
+                    }
+                }
+            }
+        });
+        let _ = io::copy(&mut io::stdin(), &mut sock);
+    });
+    tracker.wait_for_outstanding();
+    crossterm::terminal::disable_raw_mode().unwrap();
+    Ok(tracker.accum.get())
+}
+
 fn main_with_logger(
     config: Config,
     mut extra_options: ExtraCommandLineOptions,
@@ -292,7 +343,6 @@ fn main_with_logger(
     )?;
     let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
     if extra_options.one_or_tty.any() {
-        let tracker = tracker.clone();
         tracker.add_outstanding();
         let mut job_spec = job_specs
             .next()
@@ -306,48 +356,13 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
-            let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
-            linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
-            linux::listen(sock.as_fd(), 1)?;
-            let sockaddr = linux::getsockname(sock.as_fd())?;
-            let sockaddr = sockaddr
-                .as_sockaddr_un()
-                .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
-            job_spec.allocate_tty = Some(JobTty::new(
-                sockaddr.path().try_into()?,
-                WindowSize::new(rows, columns),
-            ));
-            client.add_job(job_spec, move |res| visitor(res, tracker))?;
-            let listener = UnixListener::from(OwnedFd::from(sock));
-            println!("waiting for job to start");
-            thread::spawn(move || {
-                let Ok((mut sock, _)) = listener.accept() else {
-                    return;
-                };
-                let Ok(mut sock_clone) = sock.try_clone() else {
-                    return;
-                };
-                println!("job started, going into raw mode");
-                crossterm::terminal::enable_raw_mode().unwrap();
-                thread::spawn(move || {
-                    let mut buf = [0u8; 100];
-                    loop {
-                        match sock_clone.read(&mut buf) {
-                            Err(_) | Ok(0) => {
-                                break;
-                            }
-                            Ok(n) => {
-                                let _ = io::stdout().write(&buf[0..n]);
-                                let _ = io::stdout().flush();
-                            }
-                        }
-                    }
-                });
-                let _ = io::copy(&mut io::stdin(), &mut sock);
-            });
+            main_for_tty(client, job_spec, tracker)
         } else {
-            client.add_job(job_spec, move |res| visitor(res, tracker))?;
+            let tracker_clone = tracker.clone();
+            client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
+            tracker.wait_for_outstanding();
+            crossterm::terminal::disable_raw_mode().unwrap();
+            Ok(tracker.accum.get())
         }
     } else {
         for job_spec in job_specs {
@@ -355,10 +370,10 @@ fn main_with_logger(
             tracker.add_outstanding();
             client.add_job(job_spec?, move |res| visitor(res, tracker))?;
         }
+        tracker.wait_for_outstanding();
+        crossterm::terminal::disable_raw_mode().unwrap();
+        Ok(tracker.accum.get())
     }
-    tracker.wait_for_outstanding();
-    crossterm::terminal::disable_raw_mode().unwrap();
-    Ok(tracker.accum.get())
 }
 
 fn main() -> Result<ExitCode> {
