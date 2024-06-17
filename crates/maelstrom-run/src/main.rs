@@ -262,7 +262,9 @@ impl JobTracker {
     }
 }
 
-fn one_main(client: Client, job_spec: JobSpec, tracker: Arc<JobTracker>) -> Result<ExitCode> {
+fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
+    let tracker = Arc::new(JobTracker::default());
+    tracker.add_outstanding();
     let tracker_clone = tracker.clone();
     client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
     tracker.wait_for_outstanding();
@@ -270,7 +272,9 @@ fn one_main(client: Client, job_spec: JobSpec, tracker: Arc<JobTracker>) -> Resu
     Ok(tracker.accum.get())
 }
 
-fn tty_main(client: Client, mut job_spec: JobSpec, tracker: Arc<JobTracker>) -> Result<ExitCode> {
+fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
+    let tracker = Arc::new(JobTracker::default());
+    tracker.add_outstanding();
     let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
@@ -358,13 +362,9 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            let tracker = Arc::new(JobTracker::default());
-            tracker.add_outstanding();
-            tty_main(client, job_spec, tracker)
+            tty_main(client, job_spec)
         } else {
-            let tracker = Arc::new(JobTracker::default());
-            tracker.add_outstanding();
-            one_main(client, job_spec, tracker)
+            one_main(client, job_spec)
         }
     } else {
         let tracker = Arc::new(JobTracker::default());
