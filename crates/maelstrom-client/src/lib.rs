@@ -35,7 +35,10 @@ use std::{
 };
 use tokio::{
     net::UnixStream as TokioUnixStream,
-    sync::mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
+    sync::{
+        mpsc::{self as tokio_mpsc, UnboundedReceiver, UnboundedSender},
+        oneshot,
+    },
     task,
 };
 
@@ -312,6 +315,14 @@ impl Client {
                 })
             }))?;
         Ok(())
+    }
+
+    pub fn run_job(&self, spec: JobSpec) -> Result<(ClientJobId, JobOutcomeResult)> {
+        let (sender, receiver) = oneshot::channel();
+        self.add_job(spec, move |result| {
+            let _ = sender.send(result);
+        })?;
+        receiver.blocking_recv()?
     }
 
     pub fn introspect(&self) -> Result<IntrospectResponse> {

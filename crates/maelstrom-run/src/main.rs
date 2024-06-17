@@ -8,7 +8,7 @@ use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
-use maelstrom_linux::{self as linux, Fd, SockaddrUnStorage, SocketDomain, SocketType};
+use maelstrom_linux::{self as linux, Fd, Signal, SockaddrUnStorage, SocketDomain, SocketType};
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
@@ -163,7 +163,7 @@ impl OneOrTty {
 }
 
 fn print_effects(
-    cjid: ClientJobId,
+    cjid: Option<ClientJobId>,
     JobEffects {
         stdout,
         stderr,
@@ -178,7 +178,11 @@ fn print_effects(
         JobOutputResult::Truncated { first, truncated } => {
             io::stdout().lock().write_all(&first)?;
             io::stdout().lock().flush()?;
-            eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
+            if let Some(cjid) = cjid {
+                eprintln!("job {cjid}: stdout truncated, {truncated} bytes lost");
+            } else {
+                eprintln!("stdout truncated, {truncated} bytes lost");
+            }
         }
     }
     match stderr {
@@ -188,7 +192,11 @@ fn print_effects(
         }
         JobOutputResult::Truncated { first, truncated } => {
             io::stderr().lock().write_all(&first)?;
-            eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+            if let Some(cjid) = cjid {
+                eprintln!("job {cjid}: stderr truncated, {truncated} bytes lost");
+            } else {
+                eprintln!("stderr truncated, {truncated} bytes lost");
+            }
         }
     }
     Ok(())
@@ -197,7 +205,7 @@ fn print_effects(
 fn visitor(res: Result<(ClientJobId, JobOutcomeResult)>, tracker: Arc<JobTracker>) {
     let exit_code = match res {
         Ok((cjid, Ok(JobOutcome::Completed(JobCompleted { status, effects })))) => {
-            print_effects(cjid, effects).ok();
+            print_effects(Some(cjid), effects).ok();
             match status {
                 JobStatus::Exited(0) => ExitCode::SUCCESS,
                 JobStatus::Exited(code) => {
@@ -213,7 +221,7 @@ fn visitor(res: Result<(ClientJobId, JobOutcomeResult)>, tracker: Arc<JobTracker
             }
         }
         Ok((cjid, Ok(JobOutcome::TimedOut(effects)))) => {
-            print_effects(cjid, effects).ok();
+            print_effects(Some(cjid), effects).ok();
             io::stdout().lock().flush().ok();
             eprintln!("job {cjid}: timed out");
             ExitCode::FAILURE
@@ -262,13 +270,38 @@ impl JobTracker {
     }
 }
 
+fn mimic_child_death(res: JobOutcomeResult) -> Result<ExitCode> {
+    Ok(match res {
+        Ok(JobOutcome::Completed(JobCompleted { status, effects })) => {
+            print_effects(None, effects)?;
+            match status {
+                JobStatus::Exited(code) => code.into(),
+                JobStatus::Signaled(signo) => {
+                    let _ = linux::raise(signo.into());
+                    let _ = linux::raise(Signal::KILL);
+                    unreachable!()
+                }
+            }
+        }
+        Ok(JobOutcome::TimedOut(effects)) => {
+            print_effects(None, effects)?;
+            io::stdout().lock().flush()?;
+            eprintln!("timed out");
+            ExitCode::FAILURE
+        }
+        Err(JobError::Execution(err)) => {
+            eprintln!("execution error: {err}");
+            ExitCode::FAILURE
+        }
+        Err(JobError::System(err)) => {
+            eprintln!("system error: {err}");
+            ExitCode::FAILURE
+        }
+    })
+}
+
 fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
-    let tracker = Arc::new(JobTracker::default());
-    tracker.add_outstanding();
-    let tracker_clone = tracker.clone();
-    client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
-    tracker.wait_for_outstanding();
-    Ok(tracker.accum.get())
+    mimic_child_death(client.run_job(job_spec)?.1)
 }
 
 fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {

@@ -525,6 +525,12 @@ impl fmt::Display for Signal {
     }
 }
 
+impl From<u8> for Signal {
+    fn from(signo: u8) -> Self {
+        Self(signo.into())
+    }
+}
+
 #[repr(C)]
 pub struct Sockaddr {
     family: sa_family_t,
