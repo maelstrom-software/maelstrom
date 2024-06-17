@@ -262,11 +262,15 @@ impl JobTracker {
     }
 }
 
-fn main_for_tty(
-    client: Client,
-    mut job_spec: JobSpec,
-    tracker: Arc<JobTracker>,
-) -> Result<ExitCode> {
+fn one_main(client: Client, job_spec: JobSpec, tracker: Arc<JobTracker>) -> Result<ExitCode> {
+    let tracker_clone = tracker.clone();
+    client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
+    tracker.wait_for_outstanding();
+    crossterm::terminal::disable_raw_mode().unwrap();
+    Ok(tracker.accum.get())
+}
+
+fn tty_main(client: Client, mut job_spec: JobSpec, tracker: Arc<JobTracker>) -> Result<ExitCode> {
     let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
@@ -356,13 +360,9 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            main_for_tty(client, job_spec, tracker)
+            tty_main(client, job_spec, tracker)
         } else {
-            let tracker_clone = tracker.clone();
-            client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
-            tracker.wait_for_outstanding();
-            crossterm::terminal::disable_raw_mode().unwrap();
-            Ok(tracker.accum.get())
+            one_main(client, job_spec, tracker)
         }
     } else {
         for job_spec in job_specs {
