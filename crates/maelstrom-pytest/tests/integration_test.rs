@@ -46,7 +46,10 @@ fn maybe_install_pytest() {
     }
 }
 
-fn do_maelstrom_pytest_test(source_contents: &str) -> String {
+fn do_maelstrom_pytest_test(
+    source_contents: &str,
+    extra_options: ExtraCommandLineOptions,
+) -> String {
     maybe_install_pytest();
 
     let fs = Fs::new();
@@ -103,11 +106,6 @@ fn do_maelstrom_pytest_test(source_contents: &str) -> String {
             accept_invalid_remote_container_tls_certs: true.into(),
         },
     };
-    let extra_options = ExtraCommandLineOptions {
-        include: vec!["all".into()],
-        exclude: vec![],
-        list: false,
-    };
     let term = InMemoryTerm::new(50, 50);
 
     let logger = Logger::GivenLogger(log.clone());
@@ -130,10 +128,17 @@ fn do_maelstrom_pytest_test(source_contents: &str) -> String {
 
 #[test]
 fn test_simple_success() {
-    let contents = do_maelstrom_pytest_test(&indoc::indoc! {"
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
         def test_noop():
             pass
-    "});
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            list: false,
+        },
+    );
     assert!(
         contents.contains("test_foo.py::test_noop.................OK"),
         "{contents}"
@@ -152,10 +157,17 @@ fn test_simple_success() {
 
 #[test]
 fn test_simple_failure() {
-    let contents = do_maelstrom_pytest_test(&indoc::indoc! {"
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
         def test_error():
             raise Exception('test error')
-    "});
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            list: false,
+        },
+    );
     let first_line = contents.split("\n").next().unwrap();
     let rest = &contents[first_line.len() + 1..];
 
@@ -177,6 +189,88 @@ fn test_simple_failure() {
             Successful Tests:         0
             Failed Tests    :         1
                 test_foo.py::test_error: failure\
+        "},
+        "{contents}"
+    );
+}
+
+#[test]
+fn test_listing_all() {
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
+        def test_foo():
+            pass
+
+        def test_bar():
+            pass
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            list: true,
+        },
+    );
+
+    assert_eq!(
+        contents,
+        indoc::indoc! {"
+            test_foo.py::test_foo
+            test_foo.py::test_bar\
+        "},
+        "{contents}"
+    );
+}
+
+#[test]
+fn test_listing_node_id() {
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
+        def test_foo():
+            pass
+
+        def test_bar():
+            pass
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
+            exclude: vec![],
+            list: true,
+        },
+    );
+
+    assert_eq!(
+        contents,
+        indoc::indoc! {"
+            test_foo.py::test_foo\
+        "},
+        "{contents}"
+    );
+}
+
+#[test]
+fn test_listing_marker() {
+    let contents = do_maelstrom_pytest_test(
+        &indoc::indoc! {"
+        import pytest
+
+        @pytest.mark.baz
+        def test_foo():
+            pass
+
+        def test_bar():
+            pass
+    "},
+        ExtraCommandLineOptions {
+            include: vec!["markers.contains(baz)".into()],
+            exclude: vec![],
+            list: true,
+        },
+    );
+
+    assert_eq!(
+        contents,
+        indoc::indoc! {"
+            test_foo.py::test_foo\
         "},
         "{contents}"
     );
