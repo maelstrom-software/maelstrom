@@ -25,7 +25,7 @@ use std::{
     mem,
     os::{fd::OwnedFd, unix::net::UnixListener},
     path::PathBuf,
-    sync::{Arc, Condvar, Mutex},
+    sync::{mpsc, Arc, Condvar, Mutex},
     thread,
 };
 use xdg::BaseDirectories;
@@ -304,9 +304,12 @@ fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
     mimic_child_death(client.run_job(job_spec)?.1)
 }
 
+enum TtyMainMessage {
+    JobCompleted(Result<JobOutcomeResult>),
+}
+
 fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
-    let tracker = Arc::new(JobTracker::default());
-    tracker.add_outstanding();
+    let (sender, receiver) = mpsc::sync_channel(0);
     let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
@@ -319,8 +322,11 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
         sockaddr.path().try_into()?,
         WindowSize::new(rows, columns),
     ));
-    let tracker_clone = tracker.clone();
-    client.add_job(job_spec, move |res| visitor(res, tracker_clone))?;
+    thread::spawn(move || {
+        let _ = sender.send(TtyMainMessage::JobCompleted(
+            client.run_job(job_spec).map(|(_cjid, result)| result),
+        ));
+    });
     let listener = UnixListener::from(OwnedFd::from(sock));
     println!("waiting for job to start");
     thread::spawn(move || {
@@ -348,9 +354,12 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
         });
         let _ = io::copy(&mut io::stdin(), &mut sock);
     });
-    tracker.wait_for_outstanding();
-    crossterm::terminal::disable_raw_mode().unwrap();
-    Ok(tracker.accum.get())
+    match receiver.recv()? {
+        TtyMainMessage::JobCompleted(result) => {
+            crossterm::terminal::disable_raw_mode().unwrap();
+            mimic_child_death(result?)
+        }
+    }
 }
 
 fn main_with_logger(
