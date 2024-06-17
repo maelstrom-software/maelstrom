@@ -233,7 +233,7 @@ fn test_collection_failure() {
     assert_ne!(exit_code, ExitCode::SUCCESS);
 
     assert!(
-        stderr.ends_with(indoc::indoc! {"
+        stderr.contains(indoc::indoc! {"
             ==================================== ERRORS ====================================
             _________________________ ERROR collecting test_foo.py _________________________
             test_foo.py:1: in <module>
@@ -242,9 +242,8 @@ fn test_collection_failure() {
             =========================== short test summary info ============================
             ERROR test_foo.py - Exception: import error
             !!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
-            ===================== no tests collected, 1 error in 0.04s =====================
         "}),
-        "{contents}"
+        "{stderr}"
     );
 }
 
