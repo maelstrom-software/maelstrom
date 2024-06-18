@@ -673,6 +673,11 @@ fn main_with_logger(
     )?;
     let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
     if extra_options.one_or_tty.any() {
+        if extra_options.one_or_tty.tty {
+            // Unblock the signals for the local thread. We'll re-block them again once we've read
+            // the job spec and started up.
+            linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&blocked_signals))?;
+        }
         let mut job_spec = job_specs
             .next()
             .ok_or_else(|| anyhow!("no job specification provided"))??;
@@ -687,6 +692,8 @@ fn main_with_logger(
         if extra_options.one_or_tty.tty {
             tty_main(blocked_signals, client, job_spec)
         } else {
+            // Re-block the signals for the local thread.
+            linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&blocked_signals))?;
             one_main(client, job_spec)
         }
     } else {
