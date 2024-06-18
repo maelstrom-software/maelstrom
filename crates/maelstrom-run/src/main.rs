@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use clap::Args;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
@@ -307,9 +307,12 @@ fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
     mimic_child_death(client.run_job(job_spec)?.1)
 }
 
+#[allow(clippy::large_enum_variant)]
 enum TtyMainMessage {
-    JobCompleted(Result<JobOutcomeResult>),
-    JobConnected(Result<(UnixStream, UnixStream)>),
+    Error(Error),
+    JobCompleted(JobOutcomeResult),
+    JobConnected(UnixStream, UnixStream),
+    JobOutput([u8; 1024], usize),
 }
 
 fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
@@ -337,46 +340,62 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
 
     let sender_clone = sender.clone();
     thread::spawn(move || {
-        let _ = sender_clone.send(TtyMainMessage::JobCompleted(
-            client.run_job(job_spec).map(|(_cjid, result)| result),
-        ));
+        let _ = sender_clone.send(match client.run_job(job_spec) {
+            Ok((_cjid, result)) => TtyMainMessage::JobCompleted(result),
+            Err(err) => TtyMainMessage::Error(err.context("client error")),
+        });
     });
 
     println!("waiting for job to start");
+    let sender_clone = sender.clone();
     thread::spawn(move || {
-        let _ = sender.send(TtyMainMessage::JobConnected(tty_listener_main(sock)));
+        let _ = sender_clone.send(match tty_listener_main(sock) {
+            Ok((sock1, sock2)) => TtyMainMessage::JobConnected(sock1, sock2),
+            Err(err) => TtyMainMessage::Error(err.context("job connecting")),
+        });
     });
 
     let mut in_raw_mode = false;
     let result = loop {
         match receiver.recv()? {
-            TtyMainMessage::JobCompleted(result) => {
-                break result;
+            TtyMainMessage::Error(err) => {
+                break Err(err);
             }
-            TtyMainMessage::JobConnected(Ok((mut sock1, mut sock2))) => {
+            TtyMainMessage::JobCompleted(result) => {
+                break Ok(result);
+            }
+            TtyMainMessage::JobConnected(mut sock1, mut sock2) => {
                 println!("job started, going into raw mode");
                 crossterm::terminal::enable_raw_mode()?;
                 in_raw_mode = true;
-                thread::spawn(move || {
-                    let mut buf = [0u8; 100];
+                let sender_clone = sender.clone();
+                thread::spawn(move || -> Result<()> {
+                    let mut bytes = [0u8; 1024];
                     loop {
-                        match sock1.read(&mut buf) {
-                            Err(_) | Ok(0) => {
+                        match sock1.read(&mut bytes) {
+                            Err(err) => {
+                                sender_clone.send(TtyMainMessage::Error(
+                                    Error::new(err).context("reading from job"),
+                                ))?;
+                                break;
+                            }
+                            Ok(0) => {
                                 break;
                             }
                             Ok(n) => {
-                                let _ = io::stdout().write(&buf[0..n]);
-                                let _ = io::stdout().flush();
+                                sender_clone.send(TtyMainMessage::JobOutput(bytes, n))?;
                             }
                         }
                     }
+                    Ok(())
                 });
                 thread::spawn(move || {
                     let _ = io::copy(&mut io::stdin(), &mut sock2);
                 });
             }
-            TtyMainMessage::JobConnected(Err(err)) => {
-                break Err(err);
+            TtyMainMessage::JobOutput(bytes, n) => {
+                io::stdout().write_all(&bytes[..n])?;
+                io::stdout().flush()?;
             }
         }
     };
