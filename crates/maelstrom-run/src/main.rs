@@ -320,8 +320,6 @@ fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
 }
 
 fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
-    let (sender, receiver) = mpsc::sync_channel(0);
-    let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
     linux::listen(sock.as_fd(), 1)?;
@@ -329,29 +327,39 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     let sockaddr = sockaddr
         .as_sockaddr_un()
         .ok_or_else(|| anyhow!("socket is not a unix domain socket"))?;
+    let (rows, columns) = linux::ioctl_tiocgwinsz(Fd::STDIN)?;
     job_spec.allocate_tty = Some(JobTty::new(
         sockaddr.path().try_into()?,
         WindowSize::new(rows, columns),
     ));
+
+    let (sender, receiver) = mpsc::sync_channel(0);
+
     let sender_clone = sender.clone();
     thread::spawn(move || {
         let _ = sender_clone.send(TtyMainMessage::JobCompleted(
             client.run_job(job_spec).map(|(_cjid, result)| result),
         ));
     });
+
     println!("waiting for job to start");
     thread::spawn(move || {
         let _ = sender.send(TtyMainMessage::JobConnected(tty_listener_main(sock)));
     });
+
+    let mut in_raw_mode = false;
     loop {
         match receiver.recv()? {
             TtyMainMessage::JobCompleted(result) => {
-                crossterm::terminal::disable_raw_mode().unwrap();
+                if in_raw_mode {
+                    crossterm::terminal::disable_raw_mode()?;
+                }
                 break mimic_child_death(result?);
             }
             TtyMainMessage::JobConnected(Ok((mut sock1, mut sock2))) => {
                 println!("job started, going into raw mode");
-                crossterm::terminal::enable_raw_mode().unwrap();
+                crossterm::terminal::enable_raw_mode()?;
+                in_raw_mode = true;
                 thread::spawn(move || {
                     let mut buf = [0u8; 100];
                     loop {
@@ -371,6 +379,9 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                 });
             }
             TtyMainMessage::JobConnected(Err(err)) => {
+                if in_raw_mode {
+                    crossterm::terminal::disable_raw_mode()?;
+                }
                 break Err(err);
             }
         }
