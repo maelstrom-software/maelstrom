@@ -23,7 +23,10 @@ use std::{
     env,
     io::{self, IsTerminal as _, Read, Write as _},
     mem,
-    os::{fd::OwnedFd, unix::net::UnixListener},
+    os::{
+        fd::OwnedFd,
+        unix::net::{UnixListener, UnixStream},
+    },
     path::PathBuf,
     sync::{mpsc, Arc, Condvar, Mutex},
     thread,
@@ -306,6 +309,14 @@ fn one_main(client: Client, job_spec: JobSpec) -> Result<ExitCode> {
 
 enum TtyMainMessage {
     JobCompleted(Result<JobOutcomeResult>),
+    JobConnected(Result<(UnixStream, UnixStream)>),
+}
+
+fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
+    let listener = UnixListener::from(OwnedFd::from(sock));
+    let sock = listener.accept()?.0;
+    let sock_clone = sock.try_clone()?;
+    Ok((sock, sock_clone))
 }
 
 fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
@@ -322,42 +333,46 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
         sockaddr.path().try_into()?,
         WindowSize::new(rows, columns),
     ));
+    let sender_clone = sender.clone();
     thread::spawn(move || {
-        let _ = sender.send(TtyMainMessage::JobCompleted(
+        let _ = sender_clone.send(TtyMainMessage::JobCompleted(
             client.run_job(job_spec).map(|(_cjid, result)| result),
         ));
     });
-    let listener = UnixListener::from(OwnedFd::from(sock));
     println!("waiting for job to start");
     thread::spawn(move || {
-        let Ok((mut sock, _)) = listener.accept() else {
-            return;
-        };
-        let Ok(mut sock_clone) = sock.try_clone() else {
-            return;
-        };
-        println!("job started, going into raw mode");
-        crossterm::terminal::enable_raw_mode().unwrap();
-        thread::spawn(move || {
-            let mut buf = [0u8; 100];
-            loop {
-                match sock_clone.read(&mut buf) {
-                    Err(_) | Ok(0) => {
-                        break;
-                    }
-                    Ok(n) => {
-                        let _ = io::stdout().write(&buf[0..n]);
-                        let _ = io::stdout().flush();
-                    }
-                }
-            }
-        });
-        let _ = io::copy(&mut io::stdin(), &mut sock);
+        let _ = sender.send(TtyMainMessage::JobConnected(tty_listener_main(sock)));
     });
-    match receiver.recv()? {
-        TtyMainMessage::JobCompleted(result) => {
-            crossterm::terminal::disable_raw_mode().unwrap();
-            mimic_child_death(result?)
+    loop {
+        match receiver.recv()? {
+            TtyMainMessage::JobCompleted(result) => {
+                crossterm::terminal::disable_raw_mode().unwrap();
+                break mimic_child_death(result?);
+            }
+            TtyMainMessage::JobConnected(Ok((mut sock1, mut sock2))) => {
+                println!("job started, going into raw mode");
+                crossterm::terminal::enable_raw_mode().unwrap();
+                thread::spawn(move || {
+                    let mut buf = [0u8; 100];
+                    loop {
+                        match sock1.read(&mut buf) {
+                            Err(_) | Ok(0) => {
+                                break;
+                            }
+                            Ok(n) => {
+                                let _ = io::stdout().write(&buf[0..n]);
+                                let _ = io::stdout().flush();
+                            }
+                        }
+                    }
+                });
+                thread::spawn(move || {
+                    let _ = io::copy(&mut io::stdin(), &mut sock2);
+                });
+            }
+            TtyMainMessage::JobConnected(Err(err)) => {
+                break Err(err);
+            }
         }
     }
 }
