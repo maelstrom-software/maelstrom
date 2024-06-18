@@ -24,7 +24,7 @@ use maelstrom_util::{
 use slog::Logger;
 use std::{
     env,
-    io::{self, IsTerminal as _, Read, Write as _},
+    io::{self, IsTerminal as _, Read, Stdin, Write as _},
     mem,
     net::Shutdown,
     os::{
@@ -34,7 +34,8 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Condvar, Mutex,
+        mpsc::{self, Receiver, SyncSender},
+        Arc, Condvar, Mutex,
     },
     thread,
 };
@@ -329,11 +330,199 @@ enum TtyJobInputMessage {
     Sigwinch,
 }
 
-fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
-    let listener = UnixListener::from(OwnedFd::from(sock));
-    let sock = listener.accept()?.0;
-    let sock_clone = sock.try_clone()?;
-    Ok((sock, sock_clone))
+/// The signal thread just loops waiting for signals, then sends them to the main thread. For this
+/// to work, it's important that the relevant signals are blocked on all threads. To accomplish
+/// this, we block them on the main thread before we become multi-threaded.
+///
+/// If the thread ever encounters an error writing to the sender, it exits, as it means the main
+/// thread has gone away.
+fn tty_signal_main(blocked_signals: SignalSet, sender: SyncSender<TtyMainMessage>) -> Result<()> {
+    loop {
+        match linux::sigwait(&blocked_signals) {
+            Err(err) => {
+                sender.send(TtyMainMessage::Error(Error::new(err).context("sigwait")))?;
+                break Ok(());
+            }
+            Ok(signal) => {
+                sender.send(TtyMainMessage::Signal(signal))?;
+            }
+        }
+    }
+}
+
+/// The job thread just waits for notification from the client that the job is done. We don't use
+/// add_job and a callback because writing to the sender may block, and we can't block the task
+/// that is delivering the callback.
+///
+/// If the thread an error writing to the sender, it ignores it, as it means the main thread has
+/// gone away.
+fn tty_job_main(
+    client: Client,
+    job_spec: JobSpec,
+    sender: SyncSender<TtyMainMessage>,
+) -> Result<()> {
+    sender
+        .send(match client.run_job(job_spec) {
+            Ok((_cjid, result)) => TtyMainMessage::JobCompleted(result),
+            Err(err) => TtyMainMessage::Error(err.context("client error")),
+        })
+        .map_err(Error::new)
+}
+
+/// The listener thread listens on the socket for a connection, then sends the result to the main
+/// thread.
+///
+/// If the thread an error writing to the sender, it ignores it, as it means the main thread has
+/// gone away.
+fn tty_listener_main(sock: linux::OwnedFd, sender: SyncSender<TtyMainMessage>) -> Result<()> {
+    fn inner(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
+        let listener = UnixListener::from(OwnedFd::from(sock));
+        let sock = listener.accept()?.0;
+        let sock_clone = sock.try_clone()?;
+        Ok((sock, sock_clone))
+    }
+    sender
+        .send(match inner(sock) {
+            Ok((sock1, sock2)) => TtyMainMessage::JobConnected(sock1, sock2),
+            Err(err) => TtyMainMessage::Error(err.context("job connecting")),
+        })
+        .map_err(Error::new)
+}
+
+/// The socket reader thread reads the jobs's stdout from the socket and sends the data to the main
+/// thread. We want the main thread to write to stdout since it is coordinating raw mode, signal
+/// handling, etc.
+///
+/// If the thread encounters an error reading from the socket, it forwards that error to the main
+/// thread and exits. If the thread encounters EOF, it just exits, without telling the main
+/// thread.
+///
+/// If the thread ever encounters an error writing to the sender, it exits, as it means the main
+/// thread has gone away.
+fn tty_socket_reader_main(sender: SyncSender<TtyMainMessage>, mut sock: UnixStream) -> Result<()> {
+    let mut bytes = [0u8; 1024];
+    loop {
+        match sock.read(&mut bytes) {
+            Err(err) => {
+                sender.send(TtyMainMessage::Error(
+                    Error::new(err).context("reading from job"),
+                ))?;
+                break Ok(());
+            }
+            Ok(0) => {
+                break Ok(());
+            }
+            Ok(n) => {
+                sender.send(TtyMainMessage::JobOutput(bytes, n))?;
+            }
+        }
+    }
+}
+
+/// The stdin reader thread reads from stdin and sends the data to the socket writer thread. The
+/// main thread can send window change events to the socket writer thread too, which is why the
+/// stdin reader thread and socket writer thread are separate threads.
+///
+/// If the thread encounters an error reading from stdin, it forwards that error to the main
+/// thread and exits. If the thread encounters EOF on stdin, it tells the socket writer thread (so
+/// it can shutdown the socket) and then exits.
+///
+/// If the thread ever encounters an error writing to either sender, it exits, as it means the
+/// receiving thread had gone away.
+fn tty_stdin_reader_main(
+    job_input_sender: SyncSender<TtyJobInputMessage>,
+    sender: SyncSender<TtyMainMessage>,
+    mut stdin: Stdin,
+) -> Result<()> {
+    let mut bytes = [0u8; 100];
+    loop {
+        match stdin.read(&mut bytes) {
+            Err(err) => {
+                sender.send(TtyMainMessage::Error(
+                    Error::new(err).context("reading from stdin"),
+                ))?;
+                break Ok(());
+            }
+            Ok(0) => {
+                job_input_sender.send(TtyJobInputMessage::Eof)?;
+                break Ok(());
+            }
+            Ok(n) => {
+                job_input_sender.send(TtyJobInputMessage::Output(bytes, n))?;
+            }
+        }
+    }
+}
+
+/// The socket writer thread reads from a channel and writes to the socket. The channel is mostly
+/// written to by the stdin reader thread, but when sigwinches arrive, they are written to by the
+/// main thread.
+///
+/// The protocol for notifying this thread of sigwinches is a little tricky and deserves some
+/// explanation. We want the channel to be synchronous, since we want back-pressure on the stdin
+/// reader thread. One could imagine the job falling far behind the stdin reader, and we wouldn't
+/// want to fill up the queue indefinitely in that scenario. However, we don't want the main thread
+/// to get blocked writing to the channel when it receives a sigwinch. So, the solution chosen here
+/// is to make the channel synchronous, with a non-zero queue size (we choose 1 to minimize the
+/// memory footprint), and then to use an atomic bool to signal a sigwinch has occurred. Whenever
+/// the socket writer thread gets a message from the channel, it must first handly any sigwinch
+/// that has occurred.
+///
+/// When the main thread sends a sigwinch, it writes to the atomic bool first, and then sends a
+/// no-op message to potentially wake up the socket writer thread. The main thread doesn't block
+/// writing to the channel: it doesn't care that it's message gets enqueued, it just cares that any
+/// message is enqueued. The main thread only writes to the channel to handle the case where the
+/// socket writer thread is blocked.
+///
+/// If the thread encounters an error writing to the socket, it ignores the error and exits.
+/// Importantly, it doesn't forward the error to the main thread. The rationale is that when the
+/// job exits, the socket will be closed, which means this thread would get an EPIPE when writing.
+/// If this thread got the error before the job's status made it to the main thread, we'd print a
+/// confusing error for the very normal situation of the job completing.
+///
+/// However, if the thread encounters an error getting the terminal's window size, it forwards it
+/// to the main thread.
+///
+/// Finally, if the thread gets an Eof message from the stdin reader thread, it shutdowns the
+/// socket and exits (again ignoring any error it may get calling shutdown).
+fn tty_socket_writer_main(
+    job_input_receiver: Receiver<TtyJobInputMessage>,
+    sender: SyncSender<TtyMainMessage>,
+    sigwinch_pending: Arc<AtomicBool>,
+    mut sock: UnixStream,
+) -> Result<()> {
+    loop {
+        let message = job_input_receiver.recv()?;
+
+        if sigwinch_pending.swap(false, Ordering::SeqCst) {
+            match linux::ioctl_tiocgwinsz(Fd::STDIN) {
+                Err(err) => {
+                    sender.send(TtyMainMessage::Error(
+                        Error::new(err).context("ioctl(TIOCGWINSZ) on stdin"),
+                    ))?;
+                    break Ok(());
+                }
+                Ok((rows, columns)) => {
+                    sock.write_all(&tty::encode_window_size_change(WindowSize::new(
+                        rows, columns,
+                    )))?;
+                }
+            }
+        }
+
+        match message {
+            TtyJobInputMessage::Eof => {
+                sock.shutdown(Shutdown::Write)?;
+                break Ok(());
+            }
+            TtyJobInputMessage::Output(bytes, n) => {
+                for chunk in tty::encode_input(&bytes[..n]) {
+                    sock.write_all(chunk)?;
+                }
+            }
+            TtyJobInputMessage::Sigwinch => {}
+        }
+    }
 }
 
 fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
@@ -350,39 +539,18 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
         WindowSize::new(rows, columns),
     ));
 
-    let (sender, receiver) = mpsc::sync_channel(0);
-    let sender_clone = sender.clone();
-    thread::spawn(move || -> Result<()> {
-        loop {
-            match linux::sigwait(&blocked_signals) {
-                Err(err) => {
-                    sender_clone.send(TtyMainMessage::Error(Error::new(err).context("sigwait")))?;
-                    break;
-                }
-                Ok(signal) => {
-                    sender_clone.send(TtyMainMessage::Signal(signal))?;
-                }
-            }
-        }
-        Ok(())
-    });
-
-    let sender_clone = sender.clone();
-    thread::spawn(move || {
-        let _ = sender_clone.send(match client.run_job(job_spec) {
-            Ok((_cjid, result)) => TtyMainMessage::JobCompleted(result),
-            Err(err) => TtyMainMessage::Error(err.context("client error")),
-        });
-    });
-
     println!("waiting for job to start");
+
+    let (sender, receiver) = mpsc::sync_channel(0);
+
     let sender_clone = sender.clone();
-    thread::spawn(move || {
-        let _ = sender_clone.send(match tty_listener_main(sock) {
-            Ok((sock1, sock2)) => TtyMainMessage::JobConnected(sock1, sock2),
-            Err(err) => TtyMainMessage::Error(err.context("job connecting")),
-        });
-    });
+    thread::spawn(move || tty_signal_main(blocked_signals, sender_clone));
+
+    let sender_clone = sender.clone();
+    thread::spawn(move || tty_job_main(client, job_spec, sender_clone));
+
+    let sender_clone = sender.clone();
+    thread::spawn(move || tty_listener_main(sock, sender_clone));
 
     let mut in_raw_mode = false;
     let sigwinch_pending = Arc::new(AtomicBool::new(false));
@@ -396,90 +564,30 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
             TtyMainMessage::JobCompleted(result) => {
                 break Ok(result);
             }
-            TtyMainMessage::JobConnected(mut sock1, mut sock2) => {
+            TtyMainMessage::JobConnected(sock1, sock2) => {
                 println!("job started, going into raw mode");
                 crossterm::terminal::enable_raw_mode()?;
                 in_raw_mode = true;
+
                 let sender_clone = sender.clone();
-                thread::spawn(move || -> Result<()> {
-                    let mut bytes = [0u8; 1024];
-                    loop {
-                        match sock1.read(&mut bytes) {
-                            Err(err) => {
-                                sender_clone.send(TtyMainMessage::Error(
-                                    Error::new(err).context("reading from job"),
-                                ))?;
-                                break;
-                            }
-                            Ok(0) => {
-                                break;
-                            }
-                            Ok(n) => {
-                                sender_clone.send(TtyMainMessage::JobOutput(bytes, n))?;
-                            }
-                        }
-                    }
-                    Ok(())
-                });
-                let sender_clone = sender.clone();
+                thread::spawn(move || tty_socket_reader_main(sender_clone, sock1));
+
                 let job_input_sender_clone = job_input_sender.clone();
-                thread::spawn(move || -> Result<()> {
-                    let mut bytes = [0u8; 100];
-                    loop {
-                        match io::stdin().read(&mut bytes) {
-                            Err(err) => {
-                                sender_clone.send(TtyMainMessage::Error(
-                                    Error::new(err).context("reading from stdin"),
-                                ))?;
-                                break;
-                            }
-                            Ok(0) => {
-                                job_input_sender_clone.send(TtyJobInputMessage::Eof)?;
-                                break;
-                            }
-                            Ok(n) => {
-                                job_input_sender_clone
-                                    .send(TtyJobInputMessage::Output(bytes, n))?;
-                            }
-                        }
-                    }
-                    Ok(())
+                let sender_clone = sender.clone();
+                thread::spawn(move || {
+                    tty_stdin_reader_main(job_input_sender_clone, sender_clone, io::stdin())
                 });
+
                 let sender_clone = sender.clone();
                 let sigwinch_pending_clone = sigwinch_pending.clone();
                 let job_input_receiver = job_input_receiver.take().unwrap();
-                thread::spawn(move || -> Result<()> {
-                    loop {
-                        let message = job_input_receiver.recv()?;
-                        if sigwinch_pending_clone.swap(false, Ordering::SeqCst) {
-                            match linux::ioctl_tiocgwinsz(Fd::STDIN) {
-                                Err(err) => {
-                                    sender_clone.send(TtyMainMessage::Error(
-                                        Error::new(err).context("ioctl(TIOCGWINSZ) on stdin"),
-                                    ))?;
-                                    break;
-                                }
-                                Ok((rows, columns)) => {
-                                    sock2.write_all(&tty::encode_window_size_change(
-                                        WindowSize::new(rows, columns),
-                                    ))?;
-                                }
-                            }
-                        }
-                        match message {
-                            TtyJobInputMessage::Eof => {
-                                sock2.shutdown(Shutdown::Write)?;
-                                break;
-                            }
-                            TtyJobInputMessage::Output(bytes, n) => {
-                                for chunk in tty::encode_input(&bytes[..n]) {
-                                    sock2.write_all(chunk)?;
-                                }
-                            }
-                            TtyJobInputMessage::Sigwinch => {}
-                        }
-                    }
-                    Ok(())
+                thread::spawn(move || {
+                    tty_socket_writer_main(
+                        job_input_receiver,
+                        sender_clone,
+                        sigwinch_pending_clone,
+                        sock2,
+                    )
                 });
             }
             TtyMainMessage::JobOutput(bytes, n) => {
