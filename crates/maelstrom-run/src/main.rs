@@ -8,7 +8,10 @@ use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
     ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
-use maelstrom_linux::{self as linux, Fd, Signal, SockaddrUnStorage, SocketDomain, SocketType};
+use maelstrom_linux::{
+    self as linux, Fd, Signal, SignalSet, SigprocmaskHow, SockaddrUnStorage, SocketDomain,
+    SocketType,
+};
 use maelstrom_macro::Config;
 use maelstrom_run::spec::job_spec_iter_from_reader;
 use maelstrom_util::{
@@ -29,7 +32,10 @@ use std::{
         unix::net::{UnixListener, UnixStream},
     },
     path::PathBuf,
-    sync::{mpsc, Arc, Condvar, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Condvar, Mutex,
+    },
     thread,
 };
 use xdg::BaseDirectories;
@@ -314,11 +320,13 @@ enum TtyMainMessage {
     JobCompleted(JobOutcomeResult),
     JobConnected(UnixStream, UnixStream),
     JobOutput([u8; 1024], usize),
+    Signal(Signal),
 }
 
 enum TtyJobInputMessage {
     Eof,
     Output([u8; 100], usize),
+    Sigwinch,
 }
 
 fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
@@ -328,7 +336,7 @@ fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
     Ok((sock, sock_clone))
 }
 
-fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
+fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
     linux::listen(sock.as_fd(), 1)?;
@@ -343,6 +351,21 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     ));
 
     let (sender, receiver) = mpsc::sync_channel(0);
+    let sender_clone = sender.clone();
+    thread::spawn(move || -> Result<()> {
+        loop {
+            match linux::sigwait(&blocked_signals) {
+                Err(err) => {
+                    sender_clone.send(TtyMainMessage::Error(Error::new(err).context("sigwait")))?;
+                    break;
+                }
+                Ok(signal) => {
+                    sender_clone.send(TtyMainMessage::Signal(signal))?;
+                }
+            }
+        }
+        Ok(())
+    });
 
     let sender_clone = sender.clone();
     thread::spawn(move || {
@@ -362,6 +385,9 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     });
 
     let mut in_raw_mode = false;
+    let sigwinch_pending = Arc::new(AtomicBool::new(false));
+    let (job_input_sender, job_input_receiver) = mpsc::sync_channel(1);
+    let mut job_input_receiver = Some(job_input_receiver);
     let result = loop {
         match receiver.recv()? {
             TtyMainMessage::Error(err) => {
@@ -395,8 +421,8 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                     }
                     Ok(())
                 });
-                let (job_input_sender, job_input_receiver) = mpsc::sync_channel(1);
                 let sender_clone = sender.clone();
+                let job_input_sender_clone = job_input_sender.clone();
                 thread::spawn(move || -> Result<()> {
                     let mut bytes = [0u8; 100];
                     loop {
@@ -408,19 +434,39 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                                 break;
                             }
                             Ok(0) => {
-                                job_input_sender.send(TtyJobInputMessage::Eof)?;
+                                job_input_sender_clone.send(TtyJobInputMessage::Eof)?;
                                 break;
                             }
                             Ok(n) => {
-                                job_input_sender.send(TtyJobInputMessage::Output(bytes, n))?;
+                                job_input_sender_clone
+                                    .send(TtyJobInputMessage::Output(bytes, n))?;
                             }
                         }
                     }
                     Ok(())
                 });
+                let sender_clone = sender.clone();
+                let sigwinch_pending_clone = sigwinch_pending.clone();
+                let job_input_receiver = job_input_receiver.take().unwrap();
                 thread::spawn(move || -> Result<()> {
                     loop {
-                        match job_input_receiver.recv()? {
+                        let message = job_input_receiver.recv()?;
+                        if sigwinch_pending_clone.swap(false, Ordering::SeqCst) {
+                            match linux::ioctl_tiocgwinsz(Fd::STDIN) {
+                                Err(err) => {
+                                    sender_clone.send(TtyMainMessage::Error(
+                                        Error::new(err).context("ioctl(TIOCGWINSZ) on stdin"),
+                                    ))?;
+                                    break;
+                                }
+                                Ok((rows, columns)) => {
+                                    sock2.write_all(&tty::encode_window_size_change(
+                                        WindowSize::new(rows, columns),
+                                    ))?;
+                                }
+                            }
+                        }
+                        match message {
                             TtyJobInputMessage::Eof => {
                                 sock2.shutdown(Shutdown::Write)?;
                                 break;
@@ -430,6 +476,7 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                                     sock2.write_all(chunk)?;
                                 }
                             }
+                            TtyJobInputMessage::Sigwinch => {}
                         }
                     }
                     Ok(())
@@ -438,6 +485,37 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
             TtyMainMessage::JobOutput(bytes, n) => {
                 io::stdout().write_all(&bytes[..n])?;
                 io::stdout().flush()?;
+            }
+            TtyMainMessage::Signal(Signal::PIPE) => {
+                // We just ignore SIGPIPE. By blocking it, we caused an EPIPE to be returned to the
+                // offending write.
+            }
+            TtyMainMessage::Signal(Signal::WINCH) => {
+                sigwinch_pending.store(true, Ordering::SeqCst);
+                let _ = job_input_sender.try_send(TtyJobInputMessage::Sigwinch);
+            }
+            TtyMainMessage::Signal(signal @ Signal::TSTP) => {
+                if in_raw_mode {
+                    let _ = crossterm::terminal::disable_raw_mode();
+                }
+                let mut set = SignalSet::empty();
+                set.insert(signal);
+                linux::sigprocmask(SigprocmaskHow::UNBLOCK, Some(&set))?;
+                linux::raise(signal)?;
+                linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&set))?;
+                if in_raw_mode {
+                    crossterm::terminal::enable_raw_mode()?;
+                }
+            }
+            TtyMainMessage::Signal(signal) => {
+                if in_raw_mode {
+                    let _ = crossterm::terminal::disable_raw_mode();
+                }
+                let mut to_unblock = SignalSet::empty();
+                to_unblock.insert(signal);
+                linux::sigprocmask(SigprocmaskHow::UNBLOCK, Some(&to_unblock))?;
+                linux::raise(signal)?;
+                panic!("should have been killed by signal {signal:?}");
             }
         }
     };
@@ -448,6 +526,7 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
 }
 
 fn main_with_logger(
+    blocked_signals: SignalSet,
     config: Config,
     mut extra_options: ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
@@ -488,7 +567,7 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            tty_main(client, job_spec)
+            tty_main(blocked_signals, client, job_spec)
         } else {
             one_main(client, job_spec)
         }
@@ -520,7 +599,19 @@ fn main() -> Result<ExitCode> {
 
     let bg_proc = ClientBgProcess::new_from_fork(config.log_level)?;
 
+    // We need to block the signals before we become multi-threaded, but after we've forked a
+    // background process.
+    let mut blocked_signals = SignalSet::empty();
+    if extra_options.one_or_tty.tty {
+        blocked_signals.insert(Signal::INT);
+        blocked_signals.insert(Signal::PIPE);
+        blocked_signals.insert(Signal::TERM);
+        blocked_signals.insert(Signal::TSTP);
+        blocked_signals.insert(Signal::WINCH);
+        linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&blocked_signals))?;
+    }
+
     log::run_with_logger(config.log_level, |log| {
-        main_with_logger(config, extra_options, bg_proc, log)
+        main_with_logger(blocked_signals, config, extra_options, bg_proc, log)
     })
 }

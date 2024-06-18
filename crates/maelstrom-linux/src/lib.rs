@@ -4,12 +4,19 @@
 #[cfg(any(test, feature = "std"))]
 extern crate std;
 
-use core::{ffi::CStr, fmt, mem, ops::Deref, ptr, time::Duration};
+use core::{
+    ffi::CStr,
+    fmt,
+    mem::{self, MaybeUninit},
+    ops::Deref,
+    ptr,
+    time::Duration,
+};
 use derive_more::{BitOr, BitOrAssign, Display, Into};
 use libc::{
     c_char, c_int, c_long, c_short, c_uint, c_ulong, c_void, gid_t, id_t, idtype_t, mode_t, nfds_t,
-    pid_t, pollfd, sa_family_t, siginfo_t, size_t, sockaddr, sockaddr_storage, sockaddr_un,
-    socklen_t, uid_t,
+    pid_t, pollfd, sa_family_t, siginfo_t, sigset_t, size_t, sockaddr, sockaddr_storage,
+    sockaddr_un, socklen_t, uid_t,
 };
 
 #[cfg(any(test, feature = "std"))]
@@ -493,12 +500,17 @@ impl PollFd {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Into)]
+#[derive(Clone, Copy, Debug, Default, Into, PartialEq)]
 pub struct Signal(c_int);
 
 impl Signal {
     pub const CHLD: Self = Self(libc::SIGCHLD);
+    pub const INT: Self = Self(libc::SIGINT);
     pub const KILL: Self = Self(libc::SIGKILL);
+    pub const PIPE: Self = Self(libc::SIGPIPE);
+    pub const TERM: Self = Self(libc::SIGTERM);
+    pub const TSTP: Self = Self(libc::SIGTSTP);
+    pub const WINCH: Self = Self(libc::SIGWINCH);
 
     pub fn as_u8(&self) -> u8 {
         self.0.try_into().unwrap()
@@ -529,6 +541,48 @@ impl From<u8> for Signal {
     fn from(signo: u8) -> Self {
         Self(signo.into())
     }
+}
+
+#[repr(transparent)]
+pub struct SignalSet(sigset_t);
+
+impl SignalSet {
+    pub fn empty() -> Self {
+        let mut inner: MaybeUninit<sigset_t> = MaybeUninit::uninit();
+        let inner_ptr = inner.as_mut_ptr();
+        Errno::result(unsafe { libc::sigemptyset(inner_ptr) }).unwrap();
+        Self(unsafe { inner.assume_init() })
+    }
+
+    pub fn full() -> Self {
+        let mut inner: MaybeUninit<sigset_t> = MaybeUninit::uninit();
+        let inner_ptr = inner.as_mut_ptr();
+        Errno::result(unsafe { libc::sigfillset(inner_ptr) }).unwrap();
+        Self(unsafe { inner.assume_init() })
+    }
+
+    pub fn insert(&mut self, signal: Signal) {
+        Errno::result(unsafe { libc::sigaddset(&mut self.0, signal.0) }).unwrap();
+    }
+
+    pub fn remove(&mut self, signal: Signal) {
+        Errno::result(unsafe { libc::sigdelset(&mut self.0, signal.0) }).unwrap();
+    }
+
+    pub fn contains(&mut self, signal: Signal) -> bool {
+        Errno::result(unsafe { libc::sigismember(&self.0, signal.0) })
+            .map(|res| res != 0)
+            .unwrap()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct SigprocmaskHow(c_int);
+
+impl SigprocmaskHow {
+    pub const BLOCK: Self = Self(libc::SIG_BLOCK);
+    pub const UNBLOCK: Self = Self(libc::SIG_UNBLOCK);
+    pub const SETMASK: Self = Self(libc::SIG_SETMASK);
 }
 
 #[repr(C)]
@@ -1140,6 +1194,19 @@ pub fn read(fd: Fd, buf: &mut [u8]) -> Result<usize, Errno> {
 
 pub fn setsid() -> Result<(), Errno> {
     Errno::result(unsafe { libc::setsid() }).map(drop)
+}
+
+pub fn sigprocmask(how: SigprocmaskHow, set: Option<&SignalSet>) -> Result<SignalSet, Errno> {
+    let set: *const sigset_t = set.map(|s| &s.0 as *const sigset_t).unwrap_or(ptr::null());
+    let mut oldset: MaybeUninit<sigset_t> = MaybeUninit::uninit();
+    Errno::result(unsafe { libc::sigprocmask(how.0, set, oldset.as_mut_ptr()) })?;
+    Ok(SignalSet(unsafe { oldset.assume_init() }))
+}
+
+pub fn sigwait(blocked_signals: &SignalSet) -> Result<Signal, Errno> {
+    let mut signal = Signal::default();
+    Errno::result(unsafe { libc::sigwait(&blocked_signals.0, &mut signal.0) })?;
+    Ok(signal)
 }
 
 pub fn socket(
