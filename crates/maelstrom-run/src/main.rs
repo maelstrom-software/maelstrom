@@ -348,13 +348,10 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     });
 
     let mut in_raw_mode = false;
-    loop {
+    let result = loop {
         match receiver.recv()? {
             TtyMainMessage::JobCompleted(result) => {
-                if in_raw_mode {
-                    crossterm::terminal::disable_raw_mode()?;
-                }
-                break mimic_child_death(result?);
+                break result;
             }
             TtyMainMessage::JobConnected(Ok((mut sock1, mut sock2))) => {
                 println!("job started, going into raw mode");
@@ -379,13 +376,14 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                 });
             }
             TtyMainMessage::JobConnected(Err(err)) => {
-                if in_raw_mode {
-                    crossterm::terminal::disable_raw_mode()?;
-                }
                 break Err(err);
             }
         }
+    };
+    if in_raw_mode {
+        let _ = crossterm::terminal::disable_raw_mode();
     }
+    mimic_child_death(result?)
 }
 
 fn main_with_logger(
