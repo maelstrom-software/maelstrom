@@ -618,9 +618,9 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
                 }
                 let mut set = SignalSet::empty();
                 set.insert(signal);
-                linux::sigprocmask(SigprocmaskHow::UNBLOCK, Some(&set))?;
+                linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&set))?;
                 linux::raise(signal)?;
-                linux::sigprocmask(SigprocmaskHow::BLOCK, Some(&set))?;
+                linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&set))?;
                 if in_raw_mode {
                     crossterm::terminal::enable_raw_mode()?;
                 }
@@ -631,7 +631,7 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
                 }
                 let mut to_unblock = SignalSet::empty();
                 to_unblock.insert(signal);
-                linux::sigprocmask(SigprocmaskHow::UNBLOCK, Some(&to_unblock))?;
+                linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&to_unblock))?;
                 linux::raise(signal)?;
                 panic!("should have been killed by signal {signal:?}");
             }
