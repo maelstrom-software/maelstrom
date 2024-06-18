@@ -1176,6 +1176,13 @@ pub fn prctl_set_pdeathsig(signal: Signal) -> Result<(), Errno> {
     Errno::result(unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, signal) }).map(drop)
 }
 
+pub fn pthread_sigmask(how: SigprocmaskHow, set: Option<&SignalSet>) -> Result<SignalSet, Errno> {
+    let set: *const sigset_t = set.map(|s| &s.0 as *const sigset_t).unwrap_or(ptr::null());
+    let mut oldset: MaybeUninit<sigset_t> = MaybeUninit::uninit();
+    Errno::result(unsafe { libc::pthread_sigmask(how.0, set, oldset.as_mut_ptr()) })?;
+    Ok(SignalSet(unsafe { oldset.assume_init() }))
+}
+
 pub fn ptsname(fd: Fd, name: &mut [u8]) -> Result<(), Errno> {
     let buf_ptr = name.as_mut_ptr() as *mut c_char;
     let buf_len = name.len();

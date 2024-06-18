@@ -491,6 +491,20 @@ fn tty_socket_writer_main(
     sigwinch_pending: Arc<AtomicBool>,
     mut sock: UnixStream,
 ) -> Result<()> {
+    // We block sigpipe so we don't kill the process if the socket is closed out from under us. In
+    // that case, we should just exit the thread.
+    //
+    // SIGPIPE is always delivered to the thread that generated it, so we just need to mask it
+    // here.
+    let mut sigpipe = SignalSet::empty();
+    sigpipe.insert(Signal::PIPE);
+    if let Err(err) = linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&sigpipe)) {
+        sender.send(TtyMainMessage::Error(
+            Error::new(err).context("blocking SIGPIPE"),
+        ))?;
+        return Ok(());
+    }
+
     loop {
         let message = job_input_receiver.recv()?;
 
@@ -593,10 +607,6 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
             TtyMainMessage::JobOutput(bytes, n) => {
                 io::stdout().write_all(&bytes[..n])?;
                 io::stdout().flush()?;
-            }
-            TtyMainMessage::Signal(Signal::PIPE) => {
-                // We just ignore SIGPIPE. By blocking it, we caused an EPIPE to be returned to the
-                // offending write.
             }
             TtyMainMessage::Signal(Signal::WINCH) => {
                 sigwinch_pending.store(true, Ordering::SeqCst);
@@ -712,7 +722,6 @@ fn main() -> Result<ExitCode> {
     let mut blocked_signals = SignalSet::empty();
     if extra_options.one_or_tty.tty {
         blocked_signals.insert(Signal::INT);
-        blocked_signals.insert(Signal::PIPE);
         blocked_signals.insert(Signal::TERM);
         blocked_signals.insert(Signal::TSTP);
         blocked_signals.insert(Signal::WINCH);
