@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Error, Result};
 use clap::Args;
 use maelstrom_base::{
-    ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
-    JobStatus, JobTty, WindowSize,
+    tty, ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult,
+    JobOutputResult, JobStatus, JobTty, WindowSize,
 };
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -23,6 +23,7 @@ use std::{
     env,
     io::{self, IsTerminal as _, Read, Write as _},
     mem,
+    net::Shutdown,
     os::{
         fd::OwnedFd,
         unix::net::{UnixListener, UnixStream},
@@ -315,6 +316,11 @@ enum TtyMainMessage {
     JobOutput([u8; 1024], usize),
 }
 
+enum TtyJobInputMessage {
+    Eof,
+    Output([u8; 100], usize),
+}
+
 fn tty_listener_main(sock: linux::OwnedFd) -> Result<(UnixStream, UnixStream)> {
     let listener = UnixListener::from(OwnedFd::from(sock));
     let sock = listener.accept()?.0;
@@ -389,8 +395,44 @@ fn tty_main(client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
                     }
                     Ok(())
                 });
-                thread::spawn(move || {
-                    let _ = io::copy(&mut io::stdin(), &mut sock2);
+                let (job_input_sender, job_input_receiver) = mpsc::sync_channel(1);
+                let sender_clone = sender.clone();
+                thread::spawn(move || -> Result<()> {
+                    let mut bytes = [0u8; 100];
+                    loop {
+                        match io::stdin().read(&mut bytes) {
+                            Err(err) => {
+                                sender_clone.send(TtyMainMessage::Error(
+                                    Error::new(err).context("reading from stdin"),
+                                ))?;
+                                break;
+                            }
+                            Ok(0) => {
+                                job_input_sender.send(TtyJobInputMessage::Eof)?;
+                                break;
+                            }
+                            Ok(n) => {
+                                job_input_sender.send(TtyJobInputMessage::Output(bytes, n))?;
+                            }
+                        }
+                    }
+                    Ok(())
+                });
+                thread::spawn(move || -> Result<()> {
+                    loop {
+                        match job_input_receiver.recv()? {
+                            TtyJobInputMessage::Eof => {
+                                sock2.shutdown(Shutdown::Write)?;
+                                break;
+                            }
+                            TtyJobInputMessage::Output(bytes, n) => {
+                                for chunk in tty::encode_input(&bytes[..n]) {
+                                    sock2.write_all(chunk)?;
+                                }
+                            }
+                        }
+                    }
+                    Ok(())
                 });
             }
             TtyMainMessage::JobOutput(bytes, n) => {
