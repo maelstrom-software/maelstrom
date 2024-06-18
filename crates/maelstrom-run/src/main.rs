@@ -539,6 +539,48 @@ fn tty_socket_writer_main(
     }
 }
 
+#[derive(Default)]
+struct RawModeKeeper(bool);
+
+impl RawModeKeeper {
+    fn enter(&mut self) -> Result<()> {
+        if !self.0 {
+            crossterm::terminal::enable_raw_mode()?;
+            self.0 = true;
+        }
+        Ok(())
+    }
+
+    fn leave(&mut self) {
+        if self.0 {
+            let _ = crossterm::terminal::disable_raw_mode();
+            self.0 = false;
+        }
+    }
+
+    fn run_without_raw_mode(&mut self, f: impl FnOnce() -> Result<()>) -> Result<()> {
+        let old = self.0;
+
+        self.leave();
+
+        f()?;
+
+        if old {
+            self.enter()?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for RawModeKeeper {
+    fn drop(&mut self) {
+        if self.0 {
+            let _ = crossterm::terminal::disable_raw_mode();
+        }
+    }
+}
+
 fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
@@ -566,7 +608,7 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
     let sender_clone = sender.clone();
     thread::spawn(move || tty_listener_main(sock, sender_clone));
 
-    let mut in_raw_mode = false;
+    let mut raw_mode_keeper = RawModeKeeper::default();
     let sigwinch_pending = Arc::new(AtomicBool::new(false));
     let (job_input_sender, job_input_receiver) = mpsc::sync_channel(1);
     let mut job_input_receiver = Some(job_input_receiver);
@@ -580,8 +622,7 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
             }
             TtyMainMessage::JobConnected(sock1, sock2) => {
                 println!("job started, going into raw mode");
-                crossterm::terminal::enable_raw_mode()?;
-                in_raw_mode = true;
+                raw_mode_keeper.enter()?;
 
                 let sender_clone = sender.clone();
                 thread::spawn(move || tty_socket_reader_main(sender_clone, sock1));
@@ -613,33 +654,27 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
                 let _ = job_input_sender.try_send(TtyJobInputMessage::Sigwinch);
             }
             TtyMainMessage::Signal(signal @ Signal::TSTP) => {
-                if in_raw_mode {
-                    let _ = crossterm::terminal::disable_raw_mode();
-                }
-                let mut set = SignalSet::empty();
-                set.insert(signal);
-                linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&set))?;
-                linux::raise(signal)?;
-                linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&set))?;
-                if in_raw_mode {
-                    crossterm::terminal::enable_raw_mode()?;
-                }
+                raw_mode_keeper.run_without_raw_mode(|| {
+                    let mut set = SignalSet::empty();
+                    set.insert(signal);
+                    linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&set))?;
+                    linux::raise(signal)?;
+                    linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&set))?;
+                    Ok(())
+                })?;
             }
             TtyMainMessage::Signal(signal) => {
-                if in_raw_mode {
-                    let _ = crossterm::terminal::disable_raw_mode();
-                }
-                let mut to_unblock = SignalSet::empty();
-                to_unblock.insert(signal);
-                linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&to_unblock))?;
-                linux::raise(signal)?;
-                panic!("should have been killed by signal {signal:?}");
+                raw_mode_keeper.run_without_raw_mode(|| {
+                    let mut to_unblock = SignalSet::empty();
+                    to_unblock.insert(signal);
+                    linux::pthread_sigmask(SigprocmaskHow::UNBLOCK, Some(&to_unblock))?;
+                    linux::raise(signal)?;
+                    panic!("should have been killed by signal {signal:?}");
+                })?;
             }
         }
     };
-    if in_raw_mode {
-        let _ = crossterm::terminal::disable_raw_mode();
-    }
+    raw_mode_keeper.leave();
     mimic_child_death(result?)
 }
 
