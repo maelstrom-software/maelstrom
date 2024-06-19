@@ -243,7 +243,7 @@ impl ErrnoSentinel for i64 {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ExitCode(c_int);
 
 impl ExitCode {
@@ -500,20 +500,37 @@ impl PollFd {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Into, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Into, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Signal(c_int);
 
 impl Signal {
+    pub const ALRM: Self = Self(libc::SIGALRM);
     pub const CHLD: Self = Self(libc::SIGCHLD);
+    pub const HUP: Self = Self(libc::SIGHUP);
     pub const INT: Self = Self(libc::SIGINT);
+    pub const IO: Self = Self(libc::SIGIO);
     pub const KILL: Self = Self(libc::SIGKILL);
+    pub const LOST: Self = Self(29);
     pub const PIPE: Self = Self(libc::SIGPIPE);
+    pub const POLL: Self = Self(libc::SIGPOLL);
+    pub const PROF: Self = Self(libc::SIGPROF);
+    pub const PWR: Self = Self(libc::SIGPWR);
+    pub const QUIT: Self = Self(libc::SIGQUIT);
     pub const TERM: Self = Self(libc::SIGTERM);
     pub const TSTP: Self = Self(libc::SIGTSTP);
+    pub const TTIN: Self = Self(libc::SIGTTIN);
+    pub const TTOU: Self = Self(libc::SIGTTOU);
+    pub const USR1: Self = Self(libc::SIGUSR1);
+    pub const USR2: Self = Self(libc::SIGUSR2);
+    pub const VTALRM: Self = Self(libc::SIGVTALRM);
     pub const WINCH: Self = Self(libc::SIGWINCH);
 
     pub fn as_u8(&self) -> u8 {
         self.0.try_into().unwrap()
+    }
+
+    pub fn as_c_int(&self) -> c_int {
+        self.0
     }
 
     fn as_c_ulong(&self) -> c_ulong {
@@ -858,7 +875,7 @@ pub struct WaitResult {
     pub status: WaitStatus,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WaitStatus {
     Exited(ExitCode),
     Signaled(Signal),

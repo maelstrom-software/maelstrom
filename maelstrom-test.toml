@@ -20,6 +20,16 @@ filter = "package.equals(maelstrom-worker) && name.equals(executor::tests::local
 network = "loopback"
 
 [[directives]]
+filter = "package.equals(maelstrom-worker) && name.starts_with(signals::)"
+layers = [
+    { stubs = ["/proc/", "/dev/null"] }
+]
+mounts = [
+    { type = "proc", mount_point = "/proc" },
+    { type = "devices", devices = ["null"] }
+]
+
+[[directives]]
 filter = """
 (package.equals(maelstrom-broker) && name.starts_with(artifact_fetcher::tests)) ||
 package.equals(maelstrom-test-runner)"""

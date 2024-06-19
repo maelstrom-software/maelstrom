@@ -7,6 +7,7 @@ mod executor;
 mod fetcher;
 mod layer_fs;
 pub mod local_worker;
+pub mod signals;
 
 use anyhow::{Context as _, Result};
 use cache::{Cache, CacheDir, StdFs};
@@ -45,7 +46,6 @@ use std::{
 use tokio::{
     io::BufReader,
     net::TcpStream,
-    signal::unix::{self, SignalKind},
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
     task::{self, JoinHandle, JoinSet},
     time,
@@ -421,14 +421,6 @@ async fn dispatcher_main(
     }
 }
 
-async fn signal_handler(kind: SignalKind, log: Logger, signame: &'static str) {
-    unix::signal(kind)
-        .expect("failed to register signal handler")
-        .recv()
-        .await;
-    error!(log, "received {signame}")
-}
-
 /// The main function for the worker. This should be called on a task of its own. It will return
 /// when a signal is received or when one of the worker tasks completes because of an error.
 #[tokio::main]
@@ -484,16 +476,7 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
         broker_socket_sender,
         log.clone(),
     ));
-    join_set.spawn(signal_handler(
-        SignalKind::interrupt(),
-        log.clone(),
-        "SIGINT",
-    ));
-    join_set.spawn(signal_handler(
-        SignalKind::terminate(),
-        log.clone(),
-        "SIGTERM",
-    ));
+    join_set.spawn(signals::wait_for_signal(log.clone()));
 
     join_set.join_next().await;
     info!(log, "exiting");
