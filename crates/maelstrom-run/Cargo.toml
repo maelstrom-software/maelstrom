@@ -13,6 +13,7 @@ version.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+ascii.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 enumset.workspace = true

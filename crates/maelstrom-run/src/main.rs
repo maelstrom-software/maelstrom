@@ -13,7 +13,10 @@ use maelstrom_linux::{
     SocketType,
 };
 use maelstrom_macro::Config;
-use maelstrom_run::spec::job_spec_iter_from_reader;
+use maelstrom_run::{
+    escape::{self, EscapeChunk, EscapeChar},
+    spec,
+};
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -94,6 +97,11 @@ pub struct Config {
         }"#
     )]
     pub cache_root: RootBuf<CacheDir>,
+
+    /// The escape character to use in TTY mode. Can be specified as a single character (e.g. "~"),
+    /// using caret notation (e.g. "^C"), or as a hexidecimal escape (e.g. "\x1a").
+    #[config(value_name = "CHARACTER", default = "EscapeChar::default()")]
+    pub escape_char: EscapeChar,
 
     /// The target amount of disk space to use for the cache. This bound won't be followed
     /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
@@ -430,13 +438,21 @@ fn tty_socket_reader_main(sender: SyncSender<TtyMainMessage>, mut sock: UnixStre
 /// If the thread ever encounters an error writing to either sender, it exits, as it means the
 /// receiving thread had gone away.
 fn tty_stdin_reader_main(
+    escape_char: EscapeChar,
     job_input_sender: SyncSender<TtyJobInputMessage>,
     sender: SyncSender<TtyMainMessage>,
     mut stdin: Stdin,
 ) -> Result<()> {
     let mut bytes = [0u8; 100];
+    let mut leading_escape = false;
     loop {
-        match stdin.read(&mut bytes) {
+        let mut offset = 0;
+        if leading_escape {
+            bytes[0] = escape_char.as_byte();
+            offset = 1;
+            leading_escape = false;
+        }
+        match stdin.read(&mut bytes[offset..]) {
             Err(err) => {
                 sender.send(TtyMainMessage::Error(
                     Error::new(err).context("reading from stdin"),
@@ -444,11 +460,33 @@ fn tty_stdin_reader_main(
                 break Ok(());
             }
             Ok(0) => {
+                if offset == 1 {
+                    job_input_sender.send(TtyJobInputMessage::Output(bytes, 1))?;
+                }
                 job_input_sender.send(TtyJobInputMessage::Eof)?;
                 break Ok(());
             }
             Ok(n) => {
-                job_input_sender.send(TtyJobInputMessage::Output(bytes, n))?;
+                let n = offset + n;
+                for chunk in escape::decode_escapes(&bytes[..n], escape_char.as_byte()) {
+                    match chunk {
+                        EscapeChunk::Bytes(bytes) => {
+                            let mut copy = [0u8; 100];
+                            let n = bytes.len();
+                            copy[..n].copy_from_slice(bytes);
+                            job_input_sender.send(TtyJobInputMessage::Output(copy, n))?;
+                        }
+                        EscapeChunk::ControlC => {
+                            sender.send(TtyMainMessage::Signal(Signal::INT))?;
+                        }
+                        EscapeChunk::ControlZ => {
+                            sender.send(TtyMainMessage::Signal(Signal::TSTP))?;
+                        }
+                        EscapeChunk::Remainder => {
+                            leading_escape = true;
+                        }
+                    }
+                }
             }
         }
     }
@@ -577,7 +615,12 @@ impl Drop for RawModeKeeper {
     }
 }
 
-fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -> Result<ExitCode> {
+fn tty_main(
+    blocked_signals: SignalSet,
+    client: Client,
+    escape_char: EscapeChar,
+    mut job_spec: JobSpec,
+) -> Result<ExitCode> {
     let sock = linux::socket(SocketDomain::UNIX, SocketType::STREAM, Default::default())?;
     linux::bind(sock.as_fd(), &SockaddrUnStorage::new_autobind())?;
     linux::listen(sock.as_fd(), 1)?;
@@ -626,7 +669,12 @@ fn tty_main(blocked_signals: SignalSet, client: Client, mut job_spec: JobSpec) -
                 let job_input_sender_clone = job_input_sender.clone();
                 let sender_clone = sender.clone();
                 thread::spawn(move || {
-                    tty_stdin_reader_main(job_input_sender_clone, sender_clone, io::stdin())
+                    tty_stdin_reader_main(
+                        escape_char,
+                        job_input_sender_clone,
+                        sender_clone,
+                        io::stdin(),
+                    )
                 });
 
                 let sender_clone = sender.clone();
@@ -702,7 +750,7 @@ fn main_with_logger(
         config.accept_invalid_remote_container_tls_certs,
         log,
     )?;
-    let mut job_specs = job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
+    let mut job_specs = spec::job_spec_iter_from_reader(reader, |layer| client.add_layer(layer));
     if extra_options.one_or_tty.any() {
         if extra_options.one_or_tty.tty {
             // Unblock the signals for the local thread. We'll re-block them again once we've read
@@ -721,7 +769,7 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            tty_main(blocked_signals, client, job_spec)
+            tty_main(blocked_signals, client, config.escape_char, job_spec)
         } else {
             // Re-block the signals for the local thread.
             linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&blocked_signals))?;

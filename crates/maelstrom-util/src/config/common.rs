@@ -94,6 +94,12 @@ impl<'de> Deserialize<'de> for BrokerAddr {
 #[derive(Debug)]
 pub struct StringError(pub String);
 
+impl StringError {
+    pub fn new<T: ToString>(inner: T) -> Self {
+        Self(inner.to_string())
+    }
+}
+
 impl Display for StringError {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         Display::fmt(&self.0, f)
