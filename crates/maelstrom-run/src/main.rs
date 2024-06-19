@@ -560,15 +560,11 @@ impl RawModeKeeper {
 
     fn run_without_raw_mode(&mut self, f: impl FnOnce() -> Result<()>) -> Result<()> {
         let old = self.0;
-
         self.leave();
-
         f()?;
-
         if old {
             self.enter()?;
         }
-
         Ok(())
     }
 }
