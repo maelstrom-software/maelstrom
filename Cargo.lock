@@ -2929,7 +2929,6 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "tokio-stream",
  "tonic",
  "tower",
  "xdg",
@@ -2988,7 +2987,6 @@ dependencies = [
  "slog",
  "tempfile",
  "tokio",
- "tokio-stream",
  "toml",
  "tonic",
 ]

@@ -10,7 +10,7 @@ pub use maelstrom_worker::clone_into_pid_and_user_namespace;
 
 use anyhow::Result;
 use client::Client;
-use futures::stream::StreamExt as _;
+use futures::stream::{self, StreamExt as _};
 use maelstrom_base::Sha256Digest;
 use maelstrom_client_base::proto::client_process_server::ClientProcessServer;
 use maelstrom_util::{async_fs, io::Sha256Stream, log::LoggerFactory};
@@ -39,7 +39,7 @@ pub async fn main_after_clone(sock: StdUnixStream, log: LoggerFactory) -> Result
     Server::builder()
         .add_service(ClientProcessServer::new(Handler::new(Client::new(log))))
         .serve_with_incoming_shutdown(
-            tokio_stream::once(TokioError::<_>::Ok(sock)).chain(tokio_stream::pending()),
+            stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
             receiver,
         )
         .await?;
