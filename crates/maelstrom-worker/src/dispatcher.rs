@@ -85,6 +85,9 @@ pub trait ArtifactFetcher {
 pub trait BrokerSender {
     /// Send a message to the broker.
     fn send_message_to_broker(&mut self, message: WorkerToBroker);
+
+    /// Close the connection. All further messages will be black-holed.
+    fn close(&mut self);
 }
 
 /// The [`Cache`] dependency for [`Dispatcher`]. This should be exactly the same as [`Cache`]'s
@@ -151,6 +154,7 @@ pub enum Message {
     BuiltBottomFsLayer(Sha256Digest, Result<u64>),
     BuiltUpperFsLayer(Sha256Digest, Result<u64>),
     ReadManifestDigests(Sha256Digest, JobId, Result<HashSet<Sha256Digest>>),
+    Shutdown(Error),
 }
 
 impl<DepsT, ArtifactFetcherT, BrokerSenderT, CacheT>
@@ -216,6 +220,7 @@ where
             Message::ReadManifestDigests(digest, jid, Err(err)) => {
                 self.receive_read_manifest_digests_failure(digest, jid, err)
             }
+            Message::Shutdown(_) => self.receive_shutdown(),
         }
     }
 }
@@ -693,6 +698,22 @@ where
     ) {
         self.job_failure(&digest, jid, "failed to read manifest", &err);
     }
+
+    /// Close our connection to the broker, drop pending work, and cancel all jobs.
+    fn receive_shutdown(&mut self) {
+        self.broker_sender.close();
+        self.awaiting_layers = Default::default();
+        self.available = Default::default();
+
+        for jid in self.executing.keys().cloned().collect::<Vec<_>>() {
+            self.receive_cancel_job(jid);
+        }
+    }
+
+    /// Returns the number of executing jobs
+    pub fn num_executing(&self) -> usize {
+        self.executing.len()
+    }
 }
 
 /*  _            _
@@ -737,6 +758,7 @@ mod tests {
         get_artifact_returns: HashMap<cache::Key, GetArtifact>,
         got_artifact_success_returns: HashMap<cache::Key, (PathBuf, Vec<JobId>)>,
         got_artifact_failure_returns: HashMap<cache::Key, Vec<JobId>>,
+        closed: bool,
     }
 
     struct TestHandle(TestMessage, Rc<RefCell<TestState>>);
@@ -810,9 +832,15 @@ mod tests {
 
     impl BrokerSender for Rc<RefCell<TestState>> {
         fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-            self.borrow_mut()
-                .messages
-                .push(SendMessageToBroker(message));
+            let mut b = self.borrow_mut();
+            if !b.closed {
+                b.messages.push(SendMessageToBroker(message));
+            }
+        }
+
+        fn close(&mut self) {
+            let mut b = self.borrow_mut();
+            b.closed = true;
         }
     }
 
@@ -892,6 +920,7 @@ mod tests {
                 get_artifact_returns: HashMap::from(get_artifact_returns),
                 got_artifact_success_returns: HashMap::from(got_artifact_success_returns),
                 got_artifact_failure_returns: HashMap::from(got_artifact_failure_returns),
+                closed: false,
             }));
             let dispatcher = Dispatcher::new(
                 test_state.clone(),
@@ -1225,6 +1254,58 @@ mod tests {
             CacheDecrementRefCount(BottomFsLayer, digest!(1)),
             StartJob(jid!(2), spec!(2, Tar), path_buf!("/2")),
         };
+    }
+
+    #[test]
+    fn shutdown() {
+        let mut fixture = Fixture::new(
+            1,
+            [
+                (cache_key!(Blob, 1), GetArtifact::Success(path_buf!("/1"))),
+                (cache_key!(Blob, 2), GetArtifact::Success(path_buf!("/2"))),
+                (
+                    cache_key!(BottomFsLayer, 1),
+                    GetArtifact::Success(path_buf!("/1")),
+                ),
+                (
+                    cache_key!(BottomFsLayer, 2),
+                    GetArtifact::Success(path_buf!("/2")),
+                ),
+            ],
+            [],
+            [],
+        );
+
+        fixture
+            .dispatcher
+            .receive_message(Broker(EnqueueJob(jid!(1), spec!(1, Tar))));
+        fixture.expect_messages_in_any_order(vec![
+            CacheGetArtifact(Blob, digest!(1), jid!(1)),
+            CacheGetArtifact(BottomFsLayer, digest!(1), jid!(1)),
+            StartJob(jid!(1), spec!(1, Tar), path_buf!("/1")),
+        ]);
+
+        fixture
+            .dispatcher
+            .receive_message(Broker(EnqueueJob(jid!(2), spec!(2, Tar))));
+        fixture.expect_messages_in_any_order(vec![
+            CacheGetArtifact(Blob, digest!(2), jid!(2)),
+            CacheGetArtifact(BottomFsLayer, digest!(2), jid!(2)),
+        ]);
+
+        fixture
+            .dispatcher
+            .receive_message(Shutdown(anyhow!("test error")));
+        fixture.expect_messages_in_any_order(vec![JobHandleDropped(jid!(1))]);
+
+        assert_eq!(fixture.dispatcher.num_executing(), 1);
+        assert!(fixture.test_state.borrow().closed);
+
+        fixture
+            .dispatcher
+            .receive_message(JobCompleted(jid!(1), Ok(completed!(3))));
+
+        assert_eq!(fixture.dispatcher.num_executing(), 0);
     }
 
     script_test! {

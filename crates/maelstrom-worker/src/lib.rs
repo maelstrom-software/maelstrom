@@ -9,7 +9,7 @@ mod layer_fs;
 pub mod local_worker;
 pub mod signals;
 
-use anyhow::{Context as _, Result};
+use anyhow::{anyhow, Context as _, Result};
 use cache::{Cache, CacheDir, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
@@ -17,7 +17,7 @@ use executor::{Executor, MountDir, TmpfsDir};
 use lru::LruCache;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
-    proto::{Hello, WorkerToBroker},
+    proto::{BrokerToWorker, Hello, WorkerToBroker},
     ArtifactType, JobError, JobId, JobSpec, Sha256Digest,
 };
 use maelstrom_layer_fs::{BlobDir, LayerFs, ReaderCache};
@@ -35,6 +35,7 @@ use maelstrom_util::{
     time::SystemMonotonicClock,
 };
 use slog::{debug, error, info, o, Logger};
+use std::future::Future;
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
@@ -47,7 +48,7 @@ use tokio::{
     io::BufReader,
     net::TcpStream,
     sync::mpsc::{self, UnboundedReceiver, UnboundedSender},
-    task::{self, JoinHandle, JoinSet},
+    task::{self, JoinHandle},
     time,
 };
 
@@ -149,7 +150,8 @@ const MANIFEST_DIGEST_CACHE_SIZE: usize = 10_000;
 
 type DispatcherReceiver = UnboundedReceiver<Message>;
 pub type DispatcherSender = UnboundedSender<Message>;
-type BrokerSocketSender = UnboundedSender<WorkerToBroker>;
+type BrokerSocketOutgoingSender = UnboundedSender<WorkerToBroker>;
+type BrokerSocketIncomingReceiver = UnboundedReceiver<BrokerToWorker>;
 
 pub struct DispatcherAdapter {
     dispatcher_sender: DispatcherSender,
@@ -362,28 +364,83 @@ impl dispatcher::ArtifactFetcher for ArtifactFetcher {
 }
 
 struct BrokerSender {
-    broker_socket_sender: BrokerSocketSender,
+    sender: Option<BrokerSocketOutgoingSender>,
 }
 
 impl BrokerSender {
-    fn new(broker_socket_sender: BrokerSocketSender) -> Self {
+    fn new(broker_socket_outgoing_sender: BrokerSocketOutgoingSender) -> Self {
         Self {
-            broker_socket_sender,
+            sender: Some(broker_socket_outgoing_sender),
         }
     }
 }
 
 impl dispatcher::BrokerSender for BrokerSender {
     fn send_message_to_broker(&mut self, message: WorkerToBroker) {
-        self.broker_socket_sender.send(message).ok();
+        if let Some(sender) = self.sender.as_ref() {
+            sender.send(message).ok();
+        }
+    }
+
+    fn close(&mut self) {
+        self.sender = None;
     }
 }
+
+/// Returns error from shutdown message, or delivers message to dispatcher.
+fn handle_dispatcher_message(msg: Message, dispatcher: &mut DefaultDispatcher) -> Result<()> {
+    if let Message::Shutdown(error) = msg {
+        return Err(error);
+    }
+
+    dispatcher.receive_message(msg);
+    Ok(())
+}
+
+async fn handle_incoming_messages(
+    log: Logger,
+    mut dispatcher_receiver: DispatcherReceiver,
+    mut broker_socket_incoming_recevier: BrokerSocketIncomingReceiver,
+    mut dispatcher: DefaultDispatcher,
+) {
+    // Multiplex messages from broker and others sources
+    let err = loop {
+        let res = tokio::select! {
+            msg = dispatcher_receiver.recv() => {
+                handle_dispatcher_message(msg.expect("missing shutdown"), &mut dispatcher)
+            },
+            msg = broker_socket_incoming_recevier.recv() => {
+                let Some(msg) = msg else { continue };
+                handle_dispatcher_message(Message::Broker(msg), &mut dispatcher)
+            },
+        };
+        if let Err(err) = res {
+            break err;
+        }
+    };
+
+    error!(log, "shutting down due to {err}");
+
+    // This should close the connection with the broker, and canceling running jobs.
+    info!(log, "canceling {} running jobs", dispatcher.num_executing());
+    dispatcher.receive_message(Message::Shutdown(err));
+    drop(broker_socket_incoming_recevier);
+
+    // Wait for the running jobs to finish.
+    while dispatcher.num_executing() > 0 {
+        let msg = dispatcher_receiver.recv().await.expect("missing shutdown");
+        let _ = handle_dispatcher_message(msg, &mut dispatcher);
+    }
+}
+
+type DefaultDispatcher = Dispatcher<DispatcherAdapter, ArtifactFetcher, BrokerSender, Cache<StdFs>>;
 
 async fn dispatcher_main(
     config: Config,
     dispatcher_receiver: DispatcherReceiver,
     dispatcher_sender: DispatcherSender,
-    broker_socket_sender: BrokerSocketSender,
+    broker_socket_outgoing_sender: BrokerSocketOutgoingSender,
+    broker_socket_incoming_receiver: BrokerSocketIncomingReceiver,
     log: Logger,
 ) {
     let mount_dir = config.cache_root.join::<MountDir>("mount");
@@ -391,7 +448,7 @@ async fn dispatcher_main(
     let cache_root = config.cache_root.join::<CacheDir>("artifacts");
     let blob_dir = cache_root.join::<BlobDir>("blob/sha256");
 
-    let broker_sender = BrokerSender::new(broker_socket_sender);
+    let broker_sender = BrokerSender::new(broker_socket_outgoing_sender);
     let cache = Cache::new(StdFs, cache_root, config.cache_size, log.clone());
     let artifact_fetcher =
         ArtifactFetcher::new(dispatcher_sender.clone(), config.broker, log.clone());
@@ -407,18 +464,36 @@ async fn dispatcher_main(
             error!(log, "could not start executor"; "err" => ?err);
         }
         Ok(adapter) => {
-            let mut dispatcher = Dispatcher::new(
+            let dispatcher = Dispatcher::new(
                 adapter,
                 artifact_fetcher,
                 broker_sender,
                 cache,
                 config.slots,
             );
-            let _ =
-                sync::channel_reader(dispatcher_receiver, |msg| dispatcher.receive_message(msg))
-                    .await;
+            handle_incoming_messages(
+                log,
+                dispatcher_receiver,
+                broker_socket_incoming_receiver,
+                dispatcher,
+            )
+            .await;
         }
     }
+}
+
+async fn shutdown_on_error(
+    fut: impl Future<Output = Result<()>>,
+    dispatcher_sender: DispatcherSender,
+) {
+    if let Err(error) = fut.await {
+        let _ = dispatcher_sender.send(Message::Shutdown(error));
+    }
+}
+
+async fn wait_for_signal(log: Logger) -> Result<()> {
+    let signal = signals::wait_for_signal(log).await;
+    Err(anyhow!("signal {signal}"))
 }
 
 /// The main function for the worker. This should be called on a task of its own. It will return
@@ -449,37 +524,53 @@ pub async fn main_inner(config: Config, log: Logger) -> Result<()> {
     })?;
 
     let (dispatcher_sender, dispatcher_receiver) = mpsc::unbounded_channel();
-    let (broker_socket_sender, broker_socket_receiver) = mpsc::unbounded_channel();
-
-    let mut join_set = JoinSet::new();
+    let (broker_socket_outgoing_sender, broker_socket_outgoing_receiver) =
+        mpsc::unbounded_channel();
+    let (broker_socket_incoming_sender, broker_socket_incoming_receiver) =
+        mpsc::unbounded_channel();
 
     let log_clone = log.clone();
-    let dispatcher_sender_clone = dispatcher_sender.clone();
-    join_set.spawn(async move {
-        let _ = net::async_socket_reader(read_stream, dispatcher_sender_clone, move |msg| {
-            debug!(log_clone, "received broker message"; "msg" => ?msg);
-            Message::Broker(msg)
-        })
-        .await;
-    });
+    tokio::task::spawn(shutdown_on_error(
+        async move {
+            net::async_socket_reader(read_stream, broker_socket_incoming_sender, move |msg| {
+                debug!(log_clone, "received broker message"; "msg" => ?msg);
+                msg
+            })
+            .await
+            .context("error communicating with broker")
+        },
+        dispatcher_sender.clone(),
+    ));
+
     let log_clone = log.clone();
-    join_set.spawn(async move {
-        let _ = net::async_socket_writer(broker_socket_receiver, write_stream, move |msg| {
-            debug!(log_clone, "sending broker message"; "msg" => ?msg);
-        })
-        .await;
-    });
-    join_set.spawn(dispatcher_main(
+    tokio::task::spawn(shutdown_on_error(
+        async move {
+            net::async_socket_writer(broker_socket_outgoing_receiver, write_stream, move |msg| {
+                debug!(log_clone, "sending broker message"; "msg" => ?msg);
+            })
+            .await
+            .context("error communicating with broker")
+        },
+        dispatcher_sender.clone(),
+    ));
+
+    tokio::task::spawn(shutdown_on_error(
+        wait_for_signal(log.clone()),
+        dispatcher_sender.clone(),
+    ));
+
+    dispatcher_main(
         config,
         dispatcher_receiver,
         dispatcher_sender,
-        broker_socket_sender,
+        broker_socket_outgoing_sender,
+        broker_socket_incoming_receiver,
         log.clone(),
-    ));
-    join_set.spawn(signals::wait_for_signal(log.clone()));
+    )
+    .await;
 
-    join_set.join_next().await;
     info!(log, "exiting");
+
     Ok(())
 }
 

@@ -70,7 +70,7 @@ fn default_signal_waiter(log: Logger) -> SignalWaiter {
     w
 }
 
-async fn default_signal_handler(mut w: SignalWaiter) {
+async fn default_signal_handler(mut w: SignalWaiter) -> Signal {
     let exit: BTreeSet<_> = EXIT.into_iter().collect();
     let ignore: BTreeSet<_> = IGNORE.into_iter().collect();
     loop {
@@ -78,16 +78,16 @@ async fn default_signal_handler(mut w: SignalWaiter) {
         if ignore.contains(&signal) {
             continue;
         } else if exit.contains(&signal) {
-            break;
+            break signal;
         } else {
             unreachable!()
         }
     }
 }
 
-pub async fn wait_for_signal(log: Logger) {
+pub async fn wait_for_signal(log: Logger) -> Signal {
     let w = default_signal_waiter(log);
-    default_signal_handler(w).await;
+    default_signal_handler(w).await
 }
 
 #[cfg(test)]
@@ -100,7 +100,7 @@ async fn test_wait_for_signal(sock: std::os::unix::net::UnixStream) {
     let w = default_signal_waiter(log);
     sock.write_all(&[12]).await.unwrap();
 
-    default_signal_handler(w).await
+    default_signal_handler(w).await;
 }
 
 #[cfg(test)]

@@ -353,13 +353,19 @@ impl Client {
 
                 // Create a BrokerSender for the local_worker that just forwards messages to
                 // the router.
-                struct BrokerSender(router::Sender);
+                struct BrokerSender(Option<router::Sender>);
                 impl local_worker::BrokerSender for BrokerSender {
                     fn send_message_to_broker(&mut self, msg: WorkerToBroker) {
-                        self.0.send(router::Message::LocalWorker(msg)).ok();
+                        if let Some(sender) = self.0.as_ref() {
+                            sender.send(router::Message::LocalWorker(msg)).ok();
+                        }
+                    }
+
+                    fn close(&mut self) {
+                        self.0 = None;
                     }
                 }
-                let worker_broker_sender = BrokerSender(local_broker_sender.clone());
+                let worker_broker_sender = BrokerSender(Some(local_broker_sender.clone()));
 
                 // Create the actual local_worker.
                 let mut worker_dispatcher = local_worker::Dispatcher::new(
