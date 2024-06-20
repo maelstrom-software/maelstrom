@@ -14,7 +14,7 @@ use maelstrom_linux::{
 };
 use maelstrom_macro::Config;
 use maelstrom_run::{
-    escape::{self, EscapeChunk, EscapeChar},
+    escape::{self, EscapeChar, EscapeChunk},
     spec,
 };
 use maelstrom_util::{

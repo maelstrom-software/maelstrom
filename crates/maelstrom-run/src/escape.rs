@@ -1,9 +1,12 @@
 #![allow(bindings_with_variant_name)]
 
 use ascii::AsAsciiStr as _;
-use std::{str::FromStr, fmt::{self, Formatter, Debug, Display}};
 use maelstrom_util::config::common::StringError;
 use serde::Deserialize;
+use std::{
+    fmt::{self, Debug, Display, Formatter},
+    str::FromStr,
+};
 
 #[derive(Debug, PartialEq)]
 pub enum EscapeChunk<'a> {
@@ -75,12 +78,12 @@ pub fn parse_escape_char(input: &str) -> Result<u8, StringError> {
                 Ok(c.as_byte())
             } else {
                 Err(StringError::new(
-                    "invalid character literal: invalid character after caret"
+                    "invalid character literal: invalid character after caret",
                 ))
             }
         }
         [b'^', _, ..] => Err(StringError::new(
-            "invalid character literal: too many characters after caret"
+            "invalid character literal: too many characters after caret",
         )),
         [b'\\', b'n'] => Ok(b'\n'),
         [b'\\', b'r'] => Ok(b'\r'),
@@ -95,11 +98,13 @@ pub fn parse_escape_char(input: &str) -> Result<u8, StringError> {
                 .unwrap(),
         ),
         [b'\\', b'x', b'8'..=b'9' | b'a'..=b'f' | b'A'..=b'F', b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F'] => {
-            Err(StringError::new("invalid character literal: hex escape yields value too large for ASCII"))
+            Err(StringError::new(
+                "invalid character literal: hex escape yields value too large for ASCII",
+            ))
         }
-        [b'\\', ..] => {
-            Err(StringError::new("invalid character literal: bad byte escape"))
-        }
+        [b'\\', ..] => Err(StringError::new(
+            "invalid character literal: bad byte escape",
+        )),
         [..] => Err(StringError::new("invalid character literal: too long")),
     }
 }
@@ -148,9 +153,7 @@ impl Display for EscapeChar {
 impl FromStr for EscapeChar {
     type Err = StringError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(
-                parse_escape_char(s)?
-        ))
+        Ok(Self(parse_escape_char(s)?))
     }
 }
 
@@ -327,13 +330,7 @@ mod tests {
 
     #[test]
     fn parse_escape_char_backslash_invalid() {
-        assert_parse_escape_char_error(
-            r#"\7"#,
-            "invalid character literal: bad byte escape",
-        );
-        assert_parse_escape_char_error(
-            r#"\x1234"#,
-            "invalid character literal: bad byte escape",
-        );
+        assert_parse_escape_char_error(r#"\7"#, "invalid character literal: bad byte escape");
+        assert_parse_escape_char_error(r#"\x1234"#, "invalid character literal: bad byte escape");
     }
 }
