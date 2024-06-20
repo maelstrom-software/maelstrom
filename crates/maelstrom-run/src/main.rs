@@ -634,7 +634,8 @@ fn tty_main(
         WindowSize::new(rows, columns),
     ));
 
-    println!("waiting for job to start");
+    print!("Waiting for job to start...");
+    io::stdout().flush()?;
 
     let (sender, receiver) = mpsc::sync_channel(0);
 
@@ -660,7 +661,7 @@ fn tty_main(
                 break Ok(result);
             }
             TtyMainMessage::JobConnected(sock1, sock2) => {
-                println!("job started, going into raw mode");
+                println!("\x1B[2K\rJob started. Escape character is {}.", escape_char);
                 raw_mode_keeper.enter()?;
 
                 let sender_clone = sender.clone();
