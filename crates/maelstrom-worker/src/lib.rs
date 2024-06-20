@@ -14,6 +14,7 @@ use cache::{Cache, CacheDir, StdFs};
 use config::Config;
 use dispatcher::{Deps, Dispatcher, Message};
 use executor::{Executor, MountDir, TmpfsDir};
+use futures::StreamExt as _;
 use lru::LruCache;
 use maelstrom_base::{
     manifest::{ManifestEntryData, ManifestFileData},
@@ -36,6 +37,7 @@ use maelstrom_util::{
 };
 use slog::{debug, error, info, o, Logger};
 use std::future::Future;
+use std::pin::pin;
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
@@ -594,6 +596,35 @@ fn mimic_child_death(status: WaitStatus) -> ! {
     }
 }
 
+#[tokio::main(flavor = "current_thread")]
+async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
+    let log = slog::Logger::root(slog::Discard, slog::o!());
+
+    let mut wait_stream = pin!(futures::stream::unfold((), |()| async move {
+        Some((tokio::task::spawn_blocking(linux::wait).await.unwrap(), ()))
+    }));
+
+    loop {
+        tokio::select! {
+            signal = signals::wait_for_signal(log.clone()) => {
+                linux::kill(gen_2_pid, signal).unwrap_or_else(|e| {
+                    panic!("error sending {signal} to child: {e}")
+                });
+            },
+            res = wait_stream.next() => {
+                // Now that we've created the gen 2 process, we need to start reaping
+                // zombies. If we ever notice that the gen 2 process terminated, then it's
+                // time to terminate ourselves.
+                match res.unwrap() {
+                    Err(err) => panic!("error waiting: {err}"),
+                    Ok(result) if result.pid == gen_2_pid => break result.status,
+                    Ok(_) => {}
+                }
+            }
+        }
+    }
+}
+
 /// Create a grandchild process in its own pid and user namespaces.
 ///
 /// We want to run the worker in its own pid namespace so that when it terminates, all descendant
@@ -663,7 +694,7 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Gen 1 process.
 
             // Set parent death signal.
-            linux::prctl_set_pdeathsig(Signal::KILL)?;
+            linux::prctl_set_pdeathsig(Signal::TERM)?;
 
             // Check if the gen 0 process has already terminated. We do this to deal with a race
             // condition. It's possible for the gen 0 process to terminate before we call prctl
@@ -694,20 +725,8 @@ pub fn clone_into_pid_and_user_namespace() -> Result<()> {
             // Fork the gen 2 process.
             match linux::fork()? {
                 Some(gen_2_pid) => {
-                    loop {
-                        // Gen 1 process.
-
-                        // Now that we've created the gen 2 process, we need to start reaping
-                        // zombies. If we ever notice that the gen 2 process terminated, then it's
-                        // time to terminate ourselves.
-                        match linux::wait() {
-                            Err(err) => panic!("error waiting: {err}"),
-                            Ok(result) if result.pid == gen_2_pid => {
-                                mimic_child_death(result.status)
-                            }
-                            Ok(_) => {}
-                        }
-                    }
+                    let child_status = gen_1_process_main(gen_2_pid);
+                    mimic_child_death(child_status);
                 }
                 None => {
                     // Gen 2 process.
