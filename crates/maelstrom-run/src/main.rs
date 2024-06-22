@@ -9,8 +9,8 @@ use maelstrom_client::{
     ContainerImageDepotDir, JobSpec, ProjectDir, StateDir,
 };
 use maelstrom_linux::{
-    self as linux, Fd, Signal, SignalSet, SigprocmaskHow, SockaddrUnStorage, SocketDomain,
-    SocketType,
+    self as linux, Fd, PollEvents, PollFd, Signal, SignalSet, SigprocmaskHow, SockaddrUnStorage,
+    SocketDomain, SocketType,
 };
 use maelstrom_macro::Config;
 use maelstrom_run::{
@@ -35,12 +35,14 @@ use std::{
         unix::net::{UnixListener, UnixStream},
     },
     path::PathBuf,
+    slice,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc::{self, Receiver, SyncSender},
         Arc, Condvar, Mutex,
     },
     thread,
+    time::Duration,
 };
 use xdg::BaseDirectories;
 
@@ -446,13 +448,27 @@ fn tty_stdin_reader_main(
     let mut bytes = [0u8; 100];
     let mut leading_escape = false;
     loop {
-        let mut offset = 0;
-        if leading_escape {
-            bytes[0] = escape_char.as_byte();
-            offset = 1;
-            leading_escape = false;
-        }
-        match stdin.read(&mut bytes[offset..]) {
+        let result = if leading_escape {
+            let mut poll_fd = PollFd::new(Fd::STDIN, PollEvents::IN);
+            if linux::poll(slice::from_mut(&mut poll_fd), Duration::from_millis(1500))? == 0 {
+                job_input_sender.send(TtyJobInputMessage::Output(bytes, 1))?;
+                leading_escape = false;
+                continue;
+            } else {
+                match stdin.read(&mut bytes[1..]) {
+                    Err(err) => Err(err),
+                    Ok(0) => {
+                        job_input_sender.send(TtyJobInputMessage::Output(bytes, 1))?;
+                        Ok(0)
+                    }
+                    Ok(n) => Ok(n + 1),
+                }
+            }
+        } else {
+            stdin.read(&mut bytes)
+        };
+        leading_escape = false;
+        match result {
             Err(err) => {
                 sender.send(TtyMainMessage::Error(
                     Error::new(err).context("reading from stdin"),
@@ -460,14 +476,10 @@ fn tty_stdin_reader_main(
                 break Ok(());
             }
             Ok(0) => {
-                if offset == 1 {
-                    job_input_sender.send(TtyJobInputMessage::Output(bytes, 1))?;
-                }
                 job_input_sender.send(TtyJobInputMessage::Eof)?;
                 break Ok(());
             }
             Ok(n) => {
-                let n = offset + n;
                 for chunk in escape::decode_escapes(&bytes[..n], escape_char.as_byte()) {
                     match chunk {
                         EscapeChunk::Bytes(bytes) => {
