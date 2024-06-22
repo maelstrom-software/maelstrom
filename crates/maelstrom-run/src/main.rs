@@ -661,7 +661,11 @@ fn tty_main(
                 break Ok(result);
             }
             TtyMainMessage::JobConnected(sock1, sock2) => {
-                println!("\x1B[2K\rJob started. Escape character is {}.", escape_char);
+                println!(
+                    "\x1B[2K\rJob started. {escape_char}^C to interrupt, \
+                    {escape_char}^Z to suspend, {escape_char}{escape_char} \
+                    to transmit {escape_char}."
+                );
                 raw_mode_keeper.enter()?;
 
                 let sender_clone = sender.clone();
