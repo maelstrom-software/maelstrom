@@ -774,10 +774,10 @@ fn main_with_logger(
             }
         }
         if extra_options.one_or_tty.tty {
-            tty_main(blocked_signals, client, config.escape_char, job_spec)
-        } else {
             // Re-block the signals for the local thread.
             linux::pthread_sigmask(SigprocmaskHow::BLOCK, Some(&blocked_signals))?;
+            tty_main(blocked_signals, client, config.escape_char, job_spec)
+        } else {
             one_main(client, job_spec)
         }
     } else {
