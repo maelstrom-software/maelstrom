@@ -301,13 +301,10 @@ impl Client {
             .send(Box::new(move |mut client| {
                 Box::pin(async move {
                     let res = async move {
-                        let res = client.run_job(msg).await?.into_inner();
-                        let result: proto::JobOutcomeResult = res
-                            .result
-                            .ok_or_else(|| anyhow!("malformed RunJobResponse"))
-                            .with_context(|| format!("adding job {spec:#?}"))?;
+                        let (client_job_id, result) =
+                            flatten_rpc_result(client.run_job(msg).await)?;
                         Result::<_, anyhow::Error>::Ok((
-                            TryFromProtoBuf::try_from_proto_buf(res.client_job_id)?,
+                            TryFromProtoBuf::try_from_proto_buf(client_job_id)?,
                             TryFromProtoBuf::try_from_proto_buf(result)?,
                         ))
                     }

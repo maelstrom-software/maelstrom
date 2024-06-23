@@ -64,6 +64,14 @@ impl IntoResult for proto::Void {
     }
 }
 
+impl IntoResult for u32 {
+    type Output = u32;
+
+    fn into_result(self) -> Result<u32> {
+        Ok(self)
+    }
+}
+
 impl<V> IntoResult for anyhow::Result<V> {
     type Output = V;
 
@@ -80,6 +88,18 @@ impl<V> IntoResult for Option<V> {
             Some(res) => Ok(res),
             None => Err(anyhow!("malformed response")),
         }
+    }
+}
+
+impl<A, B> IntoResult for (A, B)
+where
+    A: IntoResult,
+    B: IntoResult,
+{
+    type Output = (A::Output, B::Output);
+
+    fn into_result(self) -> Result<Self::Output> {
+        Ok((self.0.into_result()?, self.1.into_result()?))
     }
 }
 
