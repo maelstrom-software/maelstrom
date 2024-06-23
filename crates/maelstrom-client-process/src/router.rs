@@ -1,5 +1,5 @@
 use crate::artifact_pusher;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
     proto::{BrokerToClient, BrokerToWorker, ClientToBroker, WorkerToBroker},
     stats::{JobState, JobStateCounts},
@@ -39,6 +39,7 @@ pub trait Deps {
         result: Result<u64>,
     );
     fn link_artifact_for_local_worker(&self, from: &Path, to: &Path) -> Result<u64>;
+    fn shutdown_local_worker(&self, error: Error);
 }
 
 pub enum Message<DepsT: Deps> {
@@ -53,6 +54,7 @@ pub enum Message<DepsT: Deps> {
     // Only in standalone mode.
     LocalWorker(WorkerToBroker),
     LocalWorkerStartArtifactFetch(Sha256Digest, PathBuf),
+    Shutdown(Error),
 }
 
 struct Router<DepsT: Deps> {
@@ -174,6 +176,7 @@ impl<DepsT: Deps> Router<DepsT> {
                     },
                 );
             }
+            Message::Shutdown(error) => self.deps.shutdown_local_worker(error),
         }
     }
 }
@@ -253,6 +256,12 @@ impl Deps for Adapter {
         self.fs.symlink(from, to)?;
         Ok(self.fs.metadata(to)?.len())
     }
+
+    fn shutdown_local_worker(&self, error: Error) {
+        let _ = self
+            .local_worker_sender
+            .send(local_worker::Message::Shutdown(error));
+    }
 }
 
 pub type Sender = UnboundedSender<Message<Adapter>>;
@@ -298,6 +307,7 @@ mod tests {
         EnqueueJobToLocalWorker(JobId, JobSpec),
         ArtifactFetchCompletedToLocalWorker(Sha256Digest, result::Result<u64, String>),
         LinkArtifactForLocalWorker(PathBuf, PathBuf),
+        ShutdownLocalWorker(String),
     }
 
     struct TestState {
@@ -375,6 +385,12 @@ mod tests {
             } else {
                 Err(anyhow!("link error"))
             }
+        }
+
+        fn shutdown_local_worker(&self, error: Error) {
+            self.borrow_mut()
+                .messages
+                .push(TestMessage::ShutdownLocalWorker(error.to_string()));
         }
     }
 
@@ -571,6 +587,20 @@ mod tests {
         };
         RunJob(spec!(1, Tar), cjid!(1)) => {
             EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
+        };
+    }
+
+    script_test! {
+        shutdown,
+        Fixture::new(true, 1, []),
+        RunJob(spec!(0, Tar), cjid!(0)) => {
+            EnqueueJobToLocalWorker(jid!(0, 0), spec!(0, Tar)),
+        };
+        RunJob(spec!(1, Tar), cjid!(1)) => {
+            EnqueueJobToLocalWorker(jid!(0, 1), spec!(1, Tar)),
+        };
+        Shutdown(anyhow!("test error")) => {
+            ShutdownLocalWorker("test error".into())
         };
     }
 

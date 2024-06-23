@@ -34,15 +34,19 @@ type TokioError<T> = Result<T, Box<dyn error::Error + Send + Sync>>;
 
 #[tokio::main]
 pub async fn main_after_clone(sock: StdUnixStream, log: LoggerFactory) -> Result<()> {
+    let client = Client::new(log);
+
     sock.set_nonblocking(true)?;
     let (sock, receiver) = StreamWrapper::new(TokioUnixStream::from_std(sock)?);
     Server::builder()
-        .add_service(ClientProcessServer::new(Handler::new(Client::new(log))))
+        .add_service(ClientProcessServer::new(Handler::new(client.clone())))
         .serve_with_incoming_shutdown(
             stream::once(async move { TokioError::<_>::Ok(sock) }).chain(stream::pending()),
             receiver,
         )
         .await?;
+    client.shutdown().await;
+
     Ok(())
 }
 

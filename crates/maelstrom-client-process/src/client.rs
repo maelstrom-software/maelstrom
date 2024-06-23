@@ -29,11 +29,12 @@ use maelstrom_util::{
     log::LoggerFactory,
     net,
     root::{Root, RootBuf},
-    sync,
 };
 use maelstrom_worker::local_worker;
-use slog::{debug, warn, Logger};
+use slog::{debug, info, warn, Logger};
 use state_machine::StateMachine;
+use std::future::Future;
+use std::pin::Pin;
 use std::{
     collections::{HashMap, HashSet},
     mem,
@@ -46,8 +47,10 @@ use tokio::{
     task::{self, JoinSet},
 };
 
+#[derive(Clone)]
 pub struct Client {
     state_machine: Arc<StateMachine<LoggerFactory, ClientState>>,
+    clean_up: Arc<CleanUpWork>,
 }
 
 struct ClientState {
@@ -64,6 +67,25 @@ struct ClientStateLocked {
     digest_repo: DigestRepository,
     processed_artifact_paths: HashSet<PathBuf>,
     cached_layers: HashMap<Layer, (Sha256Digest, ArtifactType)>,
+}
+
+#[derive(Default)]
+struct CleanUpWork {
+    work: std::sync::Mutex<Vec<Pin<Box<dyn Future<Output = ()> + Send + Sync + 'static>>>>,
+}
+
+impl CleanUpWork {
+    async fn execute(&self) {
+        let work = std::mem::take(&mut *self.work.lock().unwrap());
+        for w in work {
+            w.await;
+        }
+    }
+
+    fn add_work(&self, fut: impl Future<Output = ()> + Send + Sync + 'static) {
+        let mut work = self.work.lock().unwrap();
+        work.push(Box::pin(fut));
+    }
 }
 
 #[async_trait]
@@ -142,6 +164,7 @@ impl Client {
     pub fn new(log: LoggerFactory) -> Self {
         Self {
             state_machine: Arc::new(StateMachine::new(log)),
+            clean_up: Default::default(),
         }
     }
 
@@ -184,7 +207,11 @@ impl Client {
             inline_limit: InlineLimit,
             slots: Slots,
             accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-        ) -> Result<(ClientState, JoinSet<Result<()>>)> {
+        ) -> Result<(
+            ClientState,
+            JoinSet<Result<()>>,
+            tokio::task::JoinHandle<()>,
+        )> {
             let fs = async_fs::Fs::new();
 
             // Make sure the state dir exists before we try to put a log file in.
@@ -233,7 +260,7 @@ impl Client {
             let (artifact_pusher_sender, artifact_pusher_receiver) = artifact_pusher::channel();
             let (broker_sender, broker_receiver) = mpsc::unbounded_channel();
             let (local_broker_sender, local_broker_receiver) = router::channel();
-            let (local_worker_sender, local_worker_receiver) = mpsc::unbounded_channel();
+            let (local_worker_sender, mut local_worker_receiver) = mpsc::unbounded_channel();
 
             let standalone;
             if let Some(broker_addr) = broker_addr {
@@ -313,7 +340,7 @@ impl Client {
             );
 
             // Start the local_worker.
-            {
+            let worker_handle = {
                 let cache_root = cache_dir.join::<local_worker::WorkerCacheDir>(LOCAL_WORKER_DIR);
                 let mount_dir = cache_root.join::<local_worker::MountDir>("mount");
                 let tmpfs_dir = cache_root.join::<local_worker::TmpfsDir>("upper");
@@ -376,11 +403,52 @@ impl Client {
                     slots,
                 );
 
+                let handle_worker_message =
+                    |msg, worker: &mut local_worker::Dispatcher<_, _, _, _>| -> Result<()> {
+                        if let local_worker::Message::Shutdown(error) = msg {
+                            Err(error)
+                        } else {
+                            worker.receive_message(msg);
+                            Ok(())
+                        }
+                    };
+
                 // Spawn a task for the local_worker.
-                join_set.spawn(sync::channel_reader(local_worker_receiver, move |msg| {
-                    worker_dispatcher.receive_message(msg)
-                }));
-            }
+                let log_clone = log.clone();
+                task::spawn(async move {
+                    let shutdown_error = loop {
+                        let msg = local_worker_receiver
+                            .recv()
+                            .await
+                            .expect("missing shutdown");
+                        if let Err(err) = handle_worker_message(msg, &mut worker_dispatcher) {
+                            break err;
+                        }
+                    };
+
+                    info!(
+                        log_clone,
+                        "shutting down local worker due to {shutdown_error}"
+                    );
+                    worker_dispatcher
+                        .receive_message(local_worker::Message::Shutdown(shutdown_error));
+                    info!(
+                        log_clone,
+                        "canceling {} running jobs",
+                        worker_dispatcher.num_executing()
+                    );
+
+                    while worker_dispatcher.num_executing() > 0 {
+                        let msg = local_worker_receiver
+                            .recv()
+                            .await
+                            .expect("missing shutdown");
+                        let _ = handle_worker_message(msg, &mut worker_dispatcher);
+                    }
+
+                    info!(log_clone, "local worker exiting");
+                })
+            };
 
             Ok((
                 ClientState {
@@ -397,6 +465,7 @@ impl Client {
                     }),
                 },
                 join_set,
+                worker_handle,
             ))
         }
 
@@ -416,10 +485,22 @@ impl Client {
         )
         .await;
         match result {
-            Ok((state, mut join_set)) => {
+            Ok((state, mut join_set, worker_handle)) => {
                 let log = state.log.clone();
                 debug!(log, "client started successfully");
+
+                let shutdown_sender = state.local_broker_sender.clone();
+                let state_machine_clone = self.state_machine.clone();
+                self.clean_up.add_work(async move {
+                    let error = state_machine_clone
+                        .active()
+                        .err()
+                        .unwrap_or_else(|| anyhow!("connection closed"));
+                    let _ = shutdown_sender.send(router::Message::Shutdown(error));
+                    let _ = worker_handle.await;
+                });
                 activation_handle.activate(state);
+
                 let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
                     while let Some(res) = join_set.join_next().await {
@@ -539,5 +620,9 @@ impl Client {
             artifact_uploads,
             image_downloads,
         })
+    }
+
+    pub async fn shutdown(&self) {
+        self.clean_up.execute().await;
     }
 }
