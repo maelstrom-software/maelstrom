@@ -487,6 +487,13 @@ impl Client {
         match result {
             Ok((state, mut join_set, worker_handle)) => {
                 let log = state.log.clone();
+                let state_machine_clone = self.state_machine.clone();
+                tokio::task::spawn(async move {
+                    let signal = maelstrom_worker::signals::wait_for_signal(log.clone()).await;
+                    state_machine_clone.fail(format!("received signal {signal}"));
+                });
+
+                let log = state.log.clone();
                 debug!(log, "client started successfully");
 
                 let shutdown_sender = state.local_broker_sender.clone();
