@@ -44,13 +44,12 @@ impl SignalWaiter {
     }
 }
 
-const EXIT: [Signal; 13] = [
+const EXIT: [Signal; 12] = [
     Signal::ALRM,
     Signal::HUP,
     Signal::INT,
     Signal::IO,
     Signal::LOST,
-    Signal::PIPE,
     Signal::POLL,
     Signal::PROF,
     Signal::PWR,
@@ -60,7 +59,7 @@ const EXIT: [Signal; 13] = [
     Signal::VTALRM,
 ];
 
-const IGNORE: [Signal; 3] = [Signal::TSTP, Signal::TTIN, Signal::TTOU];
+const IGNORE: [Signal; 4] = [Signal::PIPE, Signal::TSTP, Signal::TTIN, Signal::TTOU];
 
 fn default_signal_waiter(log: Logger) -> SignalWaiter {
     let mut w = SignalWaiter::new(log);
