@@ -25,7 +25,6 @@ use maelstrom_container::{
 use maelstrom_util::{
     async_fs,
     config::common::{BrokerAddr, CacheSize, InlineLimit, LogLevel, Slots},
-    ext::BoolExt,
     log::LoggerFactory,
     net,
     root::{Root, RootBuf},
@@ -486,46 +485,44 @@ impl Client {
         .await;
         match result {
             Ok((state, mut join_set, worker_handle)) => {
-                let log = state.log.clone();
+                let shutdown_sender = state.local_broker_sender.clone();
                 let state_machine_clone = self.state_machine.clone();
+                let fail = move |msg: String| {
+                    state_machine_clone.fail(msg.clone());
+                    let _ = shutdown_sender.send(router::Message::Shutdown(anyhow!(msg)));
+                };
+
+                let log = state.log.clone();
+                let fail_clone = fail.clone();
                 tokio::task::spawn(async move {
                     let signal = maelstrom_worker::signals::wait_for_signal(log.clone()).await;
-                    state_machine_clone.fail(format!("received signal {signal}"));
+                    fail_clone(format!("received signal {signal}"));
                 });
 
                 let log = state.log.clone();
                 debug!(log, "client started successfully");
 
                 let shutdown_sender = state.local_broker_sender.clone();
-                let state_machine_clone = self.state_machine.clone();
                 self.clean_up.add_work(async move {
-                    let error = state_machine_clone
-                        .active()
-                        .err()
-                        .unwrap_or_else(|| anyhow!("connection closed"));
-                    let _ = shutdown_sender.send(router::Message::Shutdown(error));
+                    let _ = shutdown_sender
+                        .send(router::Message::Shutdown(anyhow!("connection closed")));
                     let _ = worker_handle.await;
                 });
                 activation_handle.activate(state);
 
-                let state_machine_clone = self.state_machine.clone();
                 task::spawn(async move {
                     while let Some(res) = join_set.join_next().await {
                         match res {
                             Err(err) => {
                                 // This means that the task was either cancelled or it panicked.
                                 warn!(log, "task join failed"; "err" => ?err);
-                                state_machine_clone
-                                    .fail(format!("{err:?}"))
-                                    .assert_is_true();
+                                fail(format!("{err:?}"));
                                 return;
                             }
                             Ok(Err(err)) => {
                                 // One of the tasks ran into an error. Log it and return.
                                 debug!(log, "task completed with error"; "err" => ?err);
-                                state_machine_clone
-                                    .fail(format!("{err:?}"))
-                                    .assert_is_true();
+                                fail(format!("{err:?}"));
                                 return;
                             }
                             Ok(Ok(())) => {
@@ -536,9 +533,7 @@ impl Client {
                     }
                     // Somehow we didn't get a real error. That's not good!
                     warn!(log, "all tasks exited, but none completed with an error");
-                    state_machine_clone
-                        .fail("client unexpectedly exited prematurely".to_string())
-                        .assert_is_true();
+                    fail("client unexpectedly exited prematurely".to_string());
                 });
                 Ok(())
             }
