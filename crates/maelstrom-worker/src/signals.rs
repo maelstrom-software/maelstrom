@@ -60,7 +60,7 @@ const EXIT: [Signal; 13] = [
     Signal::VTALRM,
 ];
 
-const IGNORE: [Signal; 4] = [Signal::QUIT, Signal::TSTP, Signal::TTIN, Signal::TTOU];
+const IGNORE: [Signal; 3] = [Signal::TSTP, Signal::TTIN, Signal::TTOU];
 
 fn default_signal_waiter(log: Logger) -> SignalWaiter {
     let mut w = SignalWaiter::new(log);
