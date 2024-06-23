@@ -104,6 +104,7 @@ impl ClientBgProcess {
                 sock: Some(sock1),
             })
         } else {
+            drop(sock1);
             maelstrom_client_process::main(sock2, LoggerFactory::FromLevel(log_level))
                 .context("client background process")?;
             process::exit(0);
