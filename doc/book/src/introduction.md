@@ -1,13 +1,13 @@
 # What is Maelstrom?
 
-Maelstrom is a Rust test runner, built on top of a general-purpose
-clustered job runner. Maelstrom packages your Rust tests into hermetic
-micro-containers, then distributes them to be run on an arbitrarily large
-cluster of test-runners, or locally on your machine. You might use
-Maelstrom to run your tests because:
+Maelstrom is a suite of tools for running tests in hermetic micro-containers
+locally on your machine or distributed across arbitrarily large clusters.
+Maelstrom currently has test runners for Rust and Python, with more on the
+way.
 
-* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
-  most cases, it just works.
+* It's easy. Maelstrom provides a drop-in replacement for `cargo test`, and a
+  pytest plugin. In most cases, it just works with your existing tests without
+  any configuration.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
@@ -15,15 +15,14 @@ Maelstrom to run your tests because:
   linearly increase test throughput.
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
   without using clustering.
-* It's clean. Maelstrom has a from-scratch, rootless container implementation
-  (not relying on Docker or RunC), optimized to be low-overhead and start
-  quickly.
-* It's Rusty. The whole project is written in Rust.
+* It's clean. Maelstrom has built a rootless container implementation (not
+  relying on Docker or RunC) from scratch, in Rust, optimized to be
+  low-overhead and start quickly.
 
-We started with a Rust test runner, but Maelstrom's underlying job execution
-system is general-purpose. We will add support for other languages' test
-frameworks in the near future. We have also provided tools for adventurous users
-to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.
+While our main focus thus far has been on running tests, Maelstrom's underlying
+job execution system is general-purpose. We provide a general-purpose command
+line utility to run arbitrary commands, as well a gRPC-based API and Rust
+bindings for programmatic access and control.
 
 The project is currently Linux-only (x86 and ARM), as it relies on namespaces
 to implement containers.
