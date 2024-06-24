@@ -607,9 +607,12 @@ async fn gen_1_process_main(gen_2_pid: linux::Pid) -> WaitStatus {
     loop {
         tokio::select! {
             signal = signals::wait_for_signal(log.clone()) => {
-                linux::kill(gen_2_pid, signal).unwrap_or_else(|e| {
-                    panic!("error sending {signal} to child: {e}")
-                });
+                if let Err(e) = linux::kill(gen_2_pid, signal) {
+                    // If we failed to find the process, it already exited, so just ignore.
+                    if e != linux::Errno::ESRCH {
+                        panic!("error sending {signal} to child: {e}")
+                    }
+                }
             },
             res = wait_stream.next() => {
                 // Now that we've created the gen 2 process, we need to start reaping

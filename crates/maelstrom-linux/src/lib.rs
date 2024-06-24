@@ -114,6 +114,7 @@ pub enum CloseRangeLast {
     Fd(Fd),
 }
 
+#[derive(PartialEq, Eq)]
 pub struct Errno(c_int);
 
 impl Errno {
