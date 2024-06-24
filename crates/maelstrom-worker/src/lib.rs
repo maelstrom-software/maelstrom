@@ -588,10 +588,8 @@ fn mimic_child_death(status: WaitStatus) -> ! {
         WaitStatus::Signaled(signal) => {
             linux::raise(signal).unwrap_or_else(|e| panic!("error raising signal {signal}: {e}"));
             // The signal may be blocked, or the process may be pid 1 in the pid namespace. In
-            // those cases, the raise may effectively be a no-op. In that case, bring out the big
-            // guns and go with SIGKILL.
-            linux::raise(Signal::KILL).unwrap_or_else(|e| panic!("error raising SIGKILL: {e}"));
-            unreachable!()
+            // those cases, the raise may effectively be a no-op. In that case, just abort.
+            linux::abort()
         }
     }
 }

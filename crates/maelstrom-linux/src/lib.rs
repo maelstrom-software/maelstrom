@@ -1660,3 +1660,7 @@ mod tests {
         assert_eq!(sa2.len(), mem::size_of::<sockaddr>());
     }
 }
+
+pub fn abort() -> ! {
+    unsafe { libc::abort() }
+}
