@@ -1,8 +1,8 @@
 # Configuration Values
 
-All Maelstrom executables are configured through "configuration values".
-Configuration values can be set through commmand-line options, environment
-variables, or configuration files.
+All Maelstrom [programs](programs.md) are configured through "configuration
+values". Configuration values can be set through commmand-line options,
+environment variables, or configuration files.
 
 Each configuration value has a type, which is either string, number, or
 boolean.

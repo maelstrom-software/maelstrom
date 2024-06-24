@@ -31,10 +31,10 @@ to implement containers.
 
 This book will start out covering how to [install](installation.md) Maelstrom.
 Next, it will cover [common concepts](common.md) that are applicable to all
-Maelstrom components. After that, there are in-depth sections for each of the
-four binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
-[`maelstrom-broker`](broker.md), [`maelstrom-worker`](worker.md), and
-[`maelstrom-run`](run.md).
+Maelstrom components. After that, there are in-depth chapters for each of the
+five binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
+[`maelstrom-pytest`](pytest.md), [`maelstrom-run`](run.md),
+[`maelstrom-broker`](broker.md), and [`maelstrom-worker`](worker.md).
 
-There is no documentation yet for the gRPC API. Contact us if you're interested
-in using it, and we'll help get you started.
+There is no documentation yet for the gRPC API or the Rust bindings. Contact us
+if you're interested in using it, and we'll help get you started.

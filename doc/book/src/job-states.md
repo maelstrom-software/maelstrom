@@ -1,13 +1,15 @@
 # Job States
 
-Jobs transition through a number of states in their journey. This chapter explains those states.
+Jobs transition through a number of states in their journey. This chapter
+explains those states.
 
 ## Waiting for Artifacts
 
 If a broker doesn't have all the required artifacts for a job when it is
-submitted, the job enters this state. The broker will notify the client of the
-missing artifacts, and wait for the client to transfer them. Once all artifacts
-have been received from the client, the job will proceed to the next state.
+submitted, the job enters the `Awaiting-Artifacts` state. The broker will
+notify the client of the missing artifacts, and wait for the client to transfer
+them. Once all artifacts have been received from the client, the job will
+proceed to the next state.
 
 We think of all jobs initially entering this state, and then immediately
 transitioning to [`Pending`](#pending) if the broker has all of the artifacts.
