@@ -1,5 +1,5 @@
 use crate::{GoPackage, GoPackageId, GoTestArtifact};
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use maelstrom_util::fs::Fs;
 use maelstrom_util::process::ExitCode;
 use std::ffi::OsStr;
@@ -54,7 +54,7 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-fn go_build(dir: &Path) -> Result<()> {
+fn go_build(dir: &Path) -> Result<String> {
     let mut child = Command::new("go")
         .current_dir(dir)
         .arg("test")
@@ -77,12 +77,12 @@ fn go_build(dir: &Path) -> Result<()> {
         Ok(stderr_string)
     });
 
-    let _stdout = stdout_handle.join().unwrap()?;
+    let stdout = stdout_handle.join().unwrap()?;
     let stderr = stderr_handle.join().unwrap()?;
 
     let exit_status = child.wait()?;
     if exit_status.success() {
-        Ok(())
+        Ok(stdout)
     } else {
         // Do like bash does and encode the signal in the exit code
         let exit_code = exit_status
@@ -96,16 +96,32 @@ fn go_build(dir: &Path) -> Result<()> {
     }
 }
 
+fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
+    if let Err(e) = res {
+        if let Some(e) = e.downcast_ref::<BuildError>() {
+            return e.stderr.contains("no Go files");
+        }
+    }
+    false
+}
+
 fn multi_go_build(packages: Vec<GoPackage>, send: mpsc::Sender<GoTestArtifact>) -> Result<()> {
     let mut handles = vec![];
     for p in packages {
         let send_clone = send.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            go_build(&p.package_dir)?;
-            let _ = send_clone.send(GoTestArtifact {
-                id: p.id.clone(),
-                path: p.package_dir.join(format!("{}.test", p.id.short_name())),
-            });
+            let res = go_build(&p.package_dir);
+            if is_no_go_files_error(&res) {
+                return Ok(());
+            }
+
+            let output = res?;
+            if !output.contains("[no test files]") {
+                let _ = send_clone.send(GoTestArtifact {
+                    id: p.id.clone(),
+                    path: p.package_dir.join(format!("{}.test", p.id.short_name())),
+                });
+            }
             Ok(())
         }));
     }
@@ -130,7 +146,8 @@ pub fn get_cases_from_binary(binary: &Path, filter: &Option<String>) -> Result<V
 
     let output = Command::new(binary)
         .arg(format!("-test.list={filter}"))
-        .output()?;
+        .output()
+        .with_context(|| format!("running binary {}", binary.display()))?;
     Ok(str::from_utf8(&output.stdout)?
         .split('\n')
         .filter(|s| !s.trim().is_empty())
@@ -152,6 +169,11 @@ pub(crate) fn find_packages(dir: &Path) -> Result<Vec<GoPackage>> {
     let mut packages = vec![];
     for go_mod in iter {
         let go_mod = go_mod?;
+        let contents = Fs.read_to_string(&go_mod)?;
+        if contents.trim().is_empty() {
+            // skip empty go.mod files
+            continue;
+        }
         let package_dir = go_mod.parent().unwrap().to_owned();
         let module_name = go_list(&package_dir)?;
         packages.push(GoPackage {

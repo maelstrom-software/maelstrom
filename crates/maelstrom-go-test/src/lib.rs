@@ -2,7 +2,7 @@ pub mod cli;
 mod go_test;
 pub mod pattern;
 
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use indicatif::TermLike;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
@@ -372,7 +372,7 @@ where
     )?;
     let deps = DefaultMainAppDeps::new(&client)?;
 
-    let packages = go_test::find_packages(project_dir.as_ref())?;
+    let packages = go_test::find_packages(project_dir.as_ref()).context("finding go packages")?;
 
     let state = MainAppState::new(
         deps,
