@@ -1,8 +1,6 @@
 # Local Worker
 
-Every client &mdash; like <span style="white-space: nowrap;">`cargo-maelstrom`</span> and 
-<span style="white-space: nowrap;">`maelstrom-run`</span> &mdash; 
-has a local worker. This worker is used two in two scenarios.
+Every client has a local worker. This worker is used two in two scenarios.
 
 First, if no `broker` [configuration value](config.md) is specified, then the
 client runs in **standalone mode**. In this mode, all jobs are handled by the local worker.

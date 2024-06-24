@@ -12,7 +12,7 @@ Value                                                    | Type    | Description
 
 ## `log-level`
 
-See [here](../log-levels.md).
+See [here](../common-config.md#log-level).
 
 The broker always prints log messages to stderr.
 

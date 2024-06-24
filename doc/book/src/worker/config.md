@@ -24,7 +24,7 @@ Here are some example value socket addresses:
 
 ## `log-level`
 
-See [here](../log-levels.md).
+See [here](../common-config.md#log-level).
 
 The worker always prints log messages to stderr.
 

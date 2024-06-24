@@ -1,6 +1,8 @@
 # Standard Command-Line Options
 
-All Maelstrom programs support a standard base set of command-line options.
+Every Maelstrom program supports the following command-line options, in
+addition to those command line options for configuration [common configuration
+values](common-config.md).
 
 ## `--help`
 

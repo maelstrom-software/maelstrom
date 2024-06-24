@@ -1,18 +1,12 @@
 # Jobs
 
-Maelstrom deals in jobs. Each job has a specification that tells Maelstrom how
-to run the job. This specification, or "job-spec", consists of:
-  - The stack of file system layers,
-  - An indication of whether the file system will be writable or read-only,
-  - A list of mounts of special file systems (e.g. `sysfs`, `proc`, `tmpfs`, etc.),
-  - A list of special devices to put in `/dev` (e.g. `/dev/null`, `/dev/zero`, etc.),
-  - A description of the network environment,
-  - A path to the program to execute,
-  - A list of arguments and environment variables to pass to the program,
-  - A user and group IDs to run the program as,
+The fundamental execution unit in Maelstrom is a job. A job is a program that
+is run in its own container, either locally or on a cluster. Jobs are intended
+to be programs that terminate on their own after doing some fixed amount of work.
+They aren't intended to be interactive or to run indefinitely. However, Maelstrom
+does provide a mechanism for running a job interactively for troubleshooting
+purposes.
 
-## Layers
-
-The root file system that a job sees is a collapsed union mount of all of the
-various layers in the layers stack. In Maelstrom, individual layers can be
-specified in a number of ways.
+[Test runners](programs.md#test-runners) will usually translate each test case
+into its own, standalone job. So, in the context of a test runner, we use the
+term "job" and "test" interchangeably.

@@ -37,7 +37,7 @@ Here are some example value socket addresses:
 
 ## <span style="white-space: nowrap;">`log-level`</span>
 
-See [here](../log-levels.md).
+See [here](../common-config.md#log-level).
 
 <span style="white-space: nowrap;">`cargo-maelstrom`</span> always prints log
 messages to stdout.
