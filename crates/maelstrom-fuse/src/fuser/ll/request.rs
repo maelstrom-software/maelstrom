@@ -267,10 +267,8 @@ mod op {
         abi::consts::*, abi::*, FileHandle, INodeNo, Lock, LockOwner, Operation, RequestId,
     };
     use std::{
-        convert::TryInto,
         ffi::OsStr,
         fmt::Display,
-        num::NonZeroU32,
         path::Path,
         time::{Duration, SystemTime},
     };
@@ -764,38 +762,10 @@ mod op {
     }
     impl_request!(GetXAttr<'a>);
 
-    /// Type for [GetXAttrSizeEnum::GetSize].
-    ///
-    /// Represents a request from the user to get the size of the data stored in the XAttr.
-    #[derive(Debug)]
-    pub struct GetXAttrSize();
-
-    #[derive(Debug)]
-    /// Return type for [GetXAttr::size].
-    pub enum GetXAttrSizeEnum {
-        /// User is requesting the size of the data stored in the XAttr
-        GetSize(GetXAttrSize),
-        /// User is requesting the data stored in the XAttr.  If the data will fit
-        /// in this number of bytes it should be returned, otherwise return [Err(Errno::ERANGE)].
-        Size(#[allow(dead_code)] NonZeroU32),
-    }
     impl<'a> GetXAttr<'a> {
         /// Name of the XAttr
         pub fn name(&self) -> &'a OsStr {
             self.name
-        }
-        /// See [GetXAttrSizeEnum].
-        ///
-        /// You only need to check this value as an optimisation where there's a
-        /// cost difference between checking the size of the data stored in an XAttr
-        /// and actually providing the data.  Otherwise just call [reply()] with the
-        /// data and it will do the right thing.
-        pub fn size(&self) -> GetXAttrSizeEnum {
-            let s: Result<NonZeroU32, _> = self.arg.size.try_into();
-            match s {
-                Ok(s) => GetXAttrSizeEnum::Size(s),
-                Err(_) => GetXAttrSizeEnum::GetSize(GetXAttrSize()),
-            }
         }
         /// The size of the buffer the user has allocated to store the XAttr value.
         pub(crate) fn size_u32(&self) -> u32 {
@@ -1413,8 +1383,7 @@ mod op {
     #[derive(Debug)]
     pub struct CuseInit<'a> {
         header: &'a fuse_in_header,
-        #[allow(unused)]
-        arg: &'a fuse_init_in,
+        pub arg: &'a fuse_init_in,
     }
     impl_request!(CuseInit<'a>);
 
@@ -1440,12 +1409,12 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
-            fuse_opcode::FUSE_GETATTR => Operation::GetAttr(GetAttr { header }),
+            fuse_opcode::FUSE_GETATTR => Operation::GetAttr,
             fuse_opcode::FUSE_SETATTR => Operation::SetAttr(SetAttr {
                 header,
                 arg: data.fetch()?,
             }),
-            fuse_opcode::FUSE_READLINK => Operation::ReadLink(ReadLink { header }),
+            fuse_opcode::FUSE_READLINK => Operation::ReadLink,
             fuse_opcode::FUSE_SYMLINK => Operation::SymLink(SymLink {
                 header,
                 link_name: data.fetch_str()?.as_ref(),
@@ -1497,7 +1466,7 @@ mod op {
                 assert!(out.data().len() == out.arg.size as usize);
                 out
             }),
-            fuse_opcode::FUSE_STATFS => Operation::StatFs(StatFs { header }),
+            fuse_opcode::FUSE_STATFS => Operation::StatFs,
             fuse_opcode::FUSE_RELEASE => Operation::Release(Release {
                 header,
                 arg: data.fetch()?,
@@ -1640,9 +1609,9 @@ use op::*;
 pub enum Operation<'a> {
     Lookup(Lookup<'a>),
     Forget(Forget<'a>),
-    GetAttr(#[allow(dead_code)] GetAttr<'a>),
+    GetAttr,
     SetAttr(SetAttr<'a>),
-    ReadLink(#[allow(dead_code)] ReadLink<'a>),
+    ReadLink,
     SymLink(SymLink<'a>),
     MkNod(MkNod<'a>),
     MkDir(MkDir<'a>),
@@ -1653,7 +1622,7 @@ pub enum Operation<'a> {
     Open(Open<'a>),
     Read(Read<'a>),
     Write(Write<'a>),
-    StatFs(#[allow(dead_code)] StatFs<'a>),
+    StatFs,
     Release(Release<'a>),
     FSync(FSync<'a>),
     SetXAttr(SetXAttr<'a>),
@@ -1683,7 +1652,7 @@ pub enum Operation<'a> {
     Lseek(Lseek<'a>),
     CopyFileRange(CopyFileRange<'a>),
 
-    CuseInit(#[allow(dead_code)] CuseInit<'a>),
+    CuseInit(CuseInit<'a>),
 }
 
 impl<'a> fmt::Display for Operation<'a> {
@@ -1691,9 +1660,9 @@ impl<'a> fmt::Display for Operation<'a> {
         match self {
             Operation::Lookup(x) => write!(f, "LOOKUP name {:?}", x.name()),
             Operation::Forget(x) => write!(f, "FORGET nlookup {}", x.nlookup()),
-            Operation::GetAttr(_) => write!(f, "GETATTR"),
+            Operation::GetAttr => write!(f, "GETATTR"),
             Operation::SetAttr(x) => x.fmt(f),
-            Operation::ReadLink(_) => write!(f, "READLINK"),
+            Operation::ReadLink => write!(f, "READLINK"),
             Operation::SymLink(x) => {
                 write!(
                     f,
@@ -1730,7 +1699,7 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.data().len(),
                 x.write_flags()
             ),
-            Operation::StatFs(_) => write!(f, "STATFS"),
+            Operation::StatFs => write!(f, "STATFS"),
             Operation::Release(x) => write!(
                 f,
                 "RELEASE fh {:?}, flags {:#x}, flush {}, lock owner {:?}",
@@ -1753,7 +1722,7 @@ impl<'a> fmt::Display for Operation<'a> {
                 x.flags()
             ),
             Operation::GetXAttr(x) => {
-                write!(f, "GETXATTR name {:?}, size {:?}", x.name(), x.size())
+                write!(f, "GETXATTR name {:?}, size {:?}", x.name(), x.size_u32())
             }
             Operation::ListXAttr(x) => write!(f, "LISTXATTR size {}", x.size()),
             Operation::RemoveXAttr(x) => write!(f, "REMOVEXATTR name {:?}", x.name()),

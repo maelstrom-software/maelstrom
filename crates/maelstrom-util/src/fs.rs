@@ -335,7 +335,7 @@ impl Fs {
             inner: std::fs::File::open(path)
                 .with_context(|| format!("open(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
+            _fs: self,
         })
     }
 
@@ -350,7 +350,7 @@ impl Fs {
                 .open(path)
                 .with_context(|| format!("open_or_create(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
+            _fs: self,
         })
     }
 
@@ -360,7 +360,7 @@ impl Fs {
             inner: std::fs::File::create(path)
                 .with_context(|| format!("create(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
+            _fs: self,
         })
     }
 
@@ -374,7 +374,7 @@ impl Fs {
                 .open(path)
                 .with_context(|| format!("create_file_read_write(\"{}\")", path.display()))?,
             path: path.into(),
-            fs: self,
+            _fs: self,
         })
     }
 
@@ -428,8 +428,7 @@ pub struct GlobWalker<'fs, 'glob> {
     start_path: PathBuf,
     fs_walker: walkdir::IntoIter,
     glob: &'glob globset::GlobSet,
-    #[allow(dead_code)]
-    fs: &'fs Fs,
+    _fs: &'fs Fs,
 }
 
 impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
@@ -438,7 +437,7 @@ impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
             start_path: path.to_owned(),
             fs_walker: walkdir::WalkDir::new(path).into_iter(),
             glob,
-            fs,
+            _fs: fs,
         }
     }
 
@@ -509,8 +508,7 @@ impl Fs {
 pub struct File<'fs> {
     inner: std::fs::File,
     path: PathBuf,
-    #[allow(dead_code)]
-    fs: &'fs Fs,
+    _fs: &'fs Fs,
 }
 
 impl GetPath for File<'_> {

@@ -309,15 +309,6 @@ pub struct fuse_batch_forget_in {
     pub dummy: u32,
 }
 
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
-pub struct fuse_getattr_in {
-    pub getattr_flags: u32,
-    pub dummy: u32,
-    pub fh: u64,
-}
-
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_attr_out {
@@ -579,31 +570,6 @@ pub struct fuse_init_out {
     pub reserved: [u32; 8],
 }
 
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
-pub struct cuse_init_in {
-    pub major: u32,
-    pub minor: u32,
-    pub unused: u32,
-    pub flags: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug)]
-pub struct cuse_init_out {
-    pub major: u32,
-    pub minor: u32,
-    pub unused: u32,
-    pub flags: u32,
-    pub max_read: u32,
-    pub max_write: u32,
-    pub dev_major: u32, // chardev major
-    pub dev_minor: u32, // chardev minor
-    pub spare: [u32; 10],
-}
-
 #[repr(C)]
 #[derive(Debug, FromBytes, FromZeroes)]
 pub struct fuse_interrupt_in {
@@ -635,14 +601,6 @@ pub struct fuse_ioctl_in {
     pub out_size: u32,
 }
 
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug)]
-pub struct fuse_ioctl_iovec {
-    pub base: u64,
-    pub len: u64,
-}
-
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_ioctl_out {
@@ -666,13 +624,6 @@ pub struct fuse_poll_in {
 pub struct fuse_poll_out {
     pub revents: u32,
     pub padding: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, AsBytes)]
-pub struct fuse_notify_poll_wakeup_out {
-    pub kh: u64,
 }
 
 #[repr(C)]
@@ -725,68 +676,6 @@ pub struct fuse_dirent {
 pub struct fuse_direntplus {
     pub entry_out: fuse_entry_out,
     pub dirent: fuse_dirent,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, AsBytes)]
-pub struct fuse_notify_inval_inode_out {
-    pub ino: u64,
-    pub off: i64,
-    pub len: i64,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, AsBytes)]
-pub struct fuse_notify_inval_entry_out {
-    pub parent: u64,
-    pub namelen: u32,
-    pub padding: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, AsBytes)]
-pub struct fuse_notify_delete_out {
-    pub parent: u64,
-    pub child: u64,
-    pub namelen: u32,
-    pub padding: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, AsBytes)]
-pub struct fuse_notify_store_out {
-    pub nodeid: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub padding: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug)]
-pub struct fuse_notify_retrieve_out {
-    pub notify_unique: u64,
-    pub nodeid: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub padding: u32,
-}
-
-#[allow(dead_code)]
-#[repr(C)]
-#[derive(Debug, FromBytes, FromZeroes)]
-pub struct fuse_notify_retrieve_in {
-    // matches the size of fuse_write_in
-    pub dummy1: u64,
-    pub offset: u64,
-    pub size: u32,
-    pub dummy2: u32,
-    pub dummy3: u64,
-    pub dummy4: u64,
 }
 
 #[repr(C)]

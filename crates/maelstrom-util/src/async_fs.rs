@@ -341,8 +341,7 @@ pub struct GlobWalker<'fs, 'glob> {
     start_path: PathBuf,
     fs_walker: async_walkdir::WalkDir,
     glob: &'glob globset::GlobSet,
-    #[allow(dead_code)]
-    fs: &'fs Fs,
+    _fs: &'fs Fs,
 }
 
 impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
@@ -351,7 +350,7 @@ impl<'fs, 'glob> GlobWalker<'fs, 'glob> {
             start_path: path.to_owned(),
             fs_walker: async_walkdir::WalkDir::new(path),
             glob,
-            fs,
+            _fs: fs,
         }
     }
 

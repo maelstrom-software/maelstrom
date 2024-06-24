@@ -145,7 +145,7 @@ impl<'a> Request<'a> {
                 se.filesystem
                     .forget(self, self.request.nodeid().into(), x.nlookup()); // no reply
             }
-            ll::Operation::GetAttr(_) => {
+            ll::Operation::GetAttr => {
                 se.filesystem
                     .getattr(self, self.request.nodeid().into(), self.reply())
                     .await;
@@ -167,7 +167,7 @@ impl<'a> Request<'a> {
                     )
                     .await;
             }
-            ll::Operation::ReadLink(_) => {
+            ll::Operation::ReadLink => {
                 se.filesystem
                     .readlink(self, self.request.nodeid().into(), self.reply())
                     .await;
@@ -363,7 +363,7 @@ impl<'a> Request<'a> {
                     )
                     .await;
             }
-            ll::Operation::StatFs(_) => {
+            ll::Operation::StatFs => {
                 se.filesystem
                     .statfs(self, self.request.nodeid().into(), self.reply())
                     .await;
@@ -583,8 +583,9 @@ impl<'a> Request<'a> {
                     )
                     .await;
             }
-            ll::Operation::CuseInit(_) => {
+            ll::Operation::CuseInit(x) => {
                 // TODO: handle CUSE_INIT
+                let _ = x.arg;
                 return Err(Errno::ENOSYS);
             }
         }

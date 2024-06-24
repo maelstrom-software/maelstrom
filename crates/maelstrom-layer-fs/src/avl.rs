@@ -233,7 +233,7 @@ where
     }
 
     /// A sorted iterator over all the entries in the tree
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub async fn entries(
         &mut self,
     ) -> Result<impl futures::Stream<Item = Result<(StorageT::Key, StorageT::Value)>> + '_> {
