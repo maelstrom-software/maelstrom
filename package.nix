@@ -21,8 +21,8 @@ let
   inherit (lib) cleanSourceWith optionals;
   inherit (lib.strings) match;
 
-  # Only keeps `.tar` and `.proto` files, plus normal Rust files.
-  srcFilter = path: type: (match ".*\.(tar|proto)$" path != null) || (filterCargoSources path type);
+  # Only keeps `.tar`, `.proto`, `.pem`, `.py` files, plus normal Rust files.
+  srcFilter = path: type: (match ".*\.(tar|proto|pem|py)$" path != null) || (filterCargoSources path type);
 
   self = buildPackage {
     pname = "maelstrom";

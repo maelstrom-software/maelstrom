@@ -27,9 +27,11 @@ fn test_for_protoc() -> Option<PathBuf> {
             // Looks like `libprotoc 24.1`
             if let Some(version) = s.rsplit(' ').next() {
                 if let Some(version) = versions::Versioning::new(version) {
-                    let requirement = versions::Requirement::new("^24.0").unwrap();
+                    let requirement = versions::Requirement::new(">=24.0").unwrap();
                     if requirement.matches(&version) {
                         return None;
+                    } else {
+                        println!("ignoring old protoc version {s:?}");
                     }
                 }
             }
