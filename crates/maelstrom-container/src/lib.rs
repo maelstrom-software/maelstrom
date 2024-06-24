@@ -266,11 +266,11 @@ async fn get_json_error(response: reqwest::Response) -> Option<String> {
         s += &format!("{:?}", d.code());
         if let Some(message) = d.message() {
             s += "; ";
-            s += &message;
+            s += message;
         }
         if let Some(detail) = d.detail() {
             s += "; ";
-            s += &detail;
+            s += detail;
         }
     }
     Some(s)

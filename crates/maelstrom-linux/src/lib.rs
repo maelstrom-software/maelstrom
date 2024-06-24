@@ -666,7 +666,10 @@ impl SockaddrStorage {
     ///
     /// The referenced length cannot be adjusted to a larger size.
     pub unsafe fn as_mut_parts(&mut self) -> (&mut sockaddr, &mut socklen_t) {
-        (mem::transmute(&mut self.inner), &mut self.len)
+        (
+            mem::transmute::<&mut libc::sockaddr_storage, &mut libc::sockaddr>(&mut self.inner),
+            &mut self.len,
+        )
     }
 }
 

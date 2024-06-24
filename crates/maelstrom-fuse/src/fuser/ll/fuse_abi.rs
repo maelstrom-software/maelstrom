@@ -309,6 +309,7 @@ pub struct fuse_batch_forget_in {
     pub dummy: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, FromZeroes)]
 pub struct fuse_getattr_in {
@@ -578,6 +579,7 @@ pub struct fuse_init_out {
     pub reserved: [u32; 8],
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, FromZeroes)]
 pub struct cuse_init_in {
@@ -587,6 +589,7 @@ pub struct cuse_init_in {
     pub flags: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug)]
 pub struct cuse_init_out {
@@ -632,6 +635,7 @@ pub struct fuse_ioctl_in {
     pub out_size: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug)]
 pub struct fuse_ioctl_iovec {
@@ -664,6 +668,7 @@ pub struct fuse_poll_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_notify_poll_wakeup_out {
@@ -722,6 +727,7 @@ pub struct fuse_direntplus {
     pub dirent: fuse_dirent,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_notify_inval_inode_out {
@@ -730,6 +736,7 @@ pub struct fuse_notify_inval_inode_out {
     pub len: i64,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_notify_inval_entry_out {
@@ -738,6 +745,7 @@ pub struct fuse_notify_inval_entry_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_notify_delete_out {
@@ -747,6 +755,7 @@ pub struct fuse_notify_delete_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, AsBytes)]
 pub struct fuse_notify_store_out {
@@ -756,6 +765,7 @@ pub struct fuse_notify_store_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug)]
 pub struct fuse_notify_retrieve_out {
@@ -766,6 +776,7 @@ pub struct fuse_notify_retrieve_out {
     pub padding: u32,
 }
 
+#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, FromBytes, FromZeroes)]
 pub struct fuse_notify_retrieve_in {

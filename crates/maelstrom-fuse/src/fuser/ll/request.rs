@@ -777,7 +777,7 @@ mod op {
         GetSize(GetXAttrSize),
         /// User is requesting the data stored in the XAttr.  If the data will fit
         /// in this number of bytes it should be returned, otherwise return [Err(Errno::ERANGE)].
-        Size(NonZeroU32),
+        Size(#[allow(dead_code)] NonZeroU32),
     }
     impl<'a> GetXAttr<'a> {
         /// Name of the XAttr
@@ -1640,9 +1640,9 @@ use op::*;
 pub enum Operation<'a> {
     Lookup(Lookup<'a>),
     Forget(Forget<'a>),
-    GetAttr(GetAttr<'a>),
+    GetAttr(#[allow(dead_code)] GetAttr<'a>),
     SetAttr(SetAttr<'a>),
-    ReadLink(ReadLink<'a>),
+    ReadLink(#[allow(dead_code)] ReadLink<'a>),
     SymLink(SymLink<'a>),
     MkNod(MkNod<'a>),
     MkDir(MkDir<'a>),
@@ -1653,7 +1653,7 @@ pub enum Operation<'a> {
     Open(Open<'a>),
     Read(Read<'a>),
     Write(Write<'a>),
-    StatFs(StatFs<'a>),
+    StatFs(#[allow(dead_code)] StatFs<'a>),
     Release(Release<'a>),
     FSync(FSync<'a>),
     SetXAttr(SetXAttr<'a>),
@@ -1683,7 +1683,7 @@ pub enum Operation<'a> {
     Lseek(Lseek<'a>),
     CopyFileRange(CopyFileRange<'a>),
 
-    CuseInit(CuseInit<'a>),
+    CuseInit(#[allow(dead_code)] CuseInit<'a>),
 }
 
 impl<'a> fmt::Display for Operation<'a> {

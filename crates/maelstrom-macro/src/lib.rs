@@ -1,3 +1,5 @@
+#![allow(clippy::manual_unwrap_or_default)]
+
 mod config;
 mod into_proto_buf;
 mod into_result;

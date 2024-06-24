@@ -9,8 +9,7 @@ use futures::ready;
 use maelstrom_base::{
     tty::{self, DecodeInputChunk, DecodeInputRemainder},
     EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
-    JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, Timeout, UserId, Utf8PathBuf,
-    WindowSize,
+    JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -74,7 +73,6 @@ pub struct JobSpec {
     pub working_directory: Utf8PathBuf,
     pub user: UserId,
     pub group: GroupId,
-    pub timeout: Option<Timeout>,
     pub allocate_tty: Option<JobTty>,
 }
 
@@ -92,9 +90,9 @@ impl JobSpec {
             working_directory,
             user,
             group,
-            timeout,
             estimated_duration: _,
             allocate_tty,
+            ..
         } = spec;
         JobSpec {
             program,
@@ -107,7 +105,6 @@ impl JobSpec {
             working_directory,
             user,
             group,
-            timeout,
             allocate_tty,
         }
     }

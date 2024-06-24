@@ -121,16 +121,6 @@ impl LineStyle {
     }
 }
 
-impl ToString for LineStyle {
-    fn to_string(&self) -> String {
-        match self {
-            LineStyle::Solid => "Solid".into(),
-            LineStyle::Dotted { spacing } => format!("Dotted{spacing}Px"),
-            LineStyle::Dashed { length } => format!("Dashed{length}Px"),
-        }
-    }
-}
-
 // ----------------------------------------------------------------------------
 
 /// Determines whether a plot element is vertically or horizontally oriented.

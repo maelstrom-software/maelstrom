@@ -212,9 +212,9 @@ trait Response {
     fn send(self, reply: Self::Reply) -> impl Future<Output = ()>;
 }
 
-async fn handle_resp<RespT: Response>(res: ErrnoResult<RespT>, reply: RespT::Reply)
+async fn handle_resp<RespT>(res: ErrnoResult<RespT>, reply: RespT::Reply)
 where
-    RespT: Send + 'static,
+    RespT: Response + Send + 'static,
     RespT::Reply: Send + std::fmt::Debug + 'static,
 {
     match res {
