@@ -25,6 +25,9 @@ pub struct ExtraCommandLineOptions {
 
     #[command(flatten)]
     pub test_metadata: TestMetadataOptions,
+
+    #[arg(long, hide(true), help = "Only used for testing purposes")]
+    pub client_bg_proc: bool,
 }
 
 #[derive(Args)]

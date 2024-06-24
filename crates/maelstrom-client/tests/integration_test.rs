@@ -24,7 +24,7 @@ fn spawn_bg_proc() -> ClientBgProcess {
     }
 
     let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-client"));
-    ClientBgProcess::new_from_bin(&bin_path).unwrap()
+    ClientBgProcess::new_from_bin(&bin_path, &[]).unwrap()
 }
 
 struct ClientFixture {

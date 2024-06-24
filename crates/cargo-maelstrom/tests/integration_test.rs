@@ -26,8 +26,8 @@ fn spawn_bg_proc() -> ClientBgProcess {
         maelstrom_client::bg_proc_main().unwrap();
     }
 
-    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_cargo-client-bg-proc"));
-    ClientBgProcess::new_from_bin(&bin_path).unwrap()
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_cargo-maelstrom"));
+    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"]).unwrap()
 }
 
 fn cmd(args: &[&str], current_dir: &Path) {
@@ -74,6 +74,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             packages: false,
         },
         test_metadata: TestMetadataOptions { init: false },
+        client_bg_proc: false,
     };
     let term = InMemoryTerm::new(50, 50);
 

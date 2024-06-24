@@ -111,8 +111,9 @@ impl ClientBgProcess {
         }
     }
 
-    pub fn new_from_bin(bin_path: &Path) -> Result<Self> {
+    pub fn new_from_bin(bin_path: &Path, args: &[&str]) -> Result<Self> {
         let mut proc = Command::new(bin_path)
+            .args(args)
             .stderr(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()?;

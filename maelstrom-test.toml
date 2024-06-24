@@ -59,7 +59,7 @@ image.use = ["layers", "environment"]
 added_layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
     { paths = ["crates/maelstrom-pytest/src/python.tar"], canonicalize = true },
-    { paths = ["<build-dir>/pytest-client-bg-proc"], canonicalize = true }
+    { paths = ["<build-dir>/maelstrom-pytest"], canonicalize = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },
@@ -117,7 +117,7 @@ image.name = "docker://rust:alpine"
 image.use = ["layers", "environment"]
 added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
-    { paths = ["<build-dir>/cargo-client-bg-proc"], canonicalize = true }
+    { paths = ["<build-dir>/cargo-maelstrom"], canonicalize = true }
 ]
 mounts = [
     { type = "tmp", mount_point = "/tmp" },

@@ -22,8 +22,8 @@ fn spawn_bg_proc() -> ClientBgProcess {
         maelstrom_client::bg_proc_main().unwrap();
     }
 
-    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_pytest-client-bg-proc"));
-    ClientBgProcess::new_from_bin(&bin_path).unwrap()
+    let bin_path = PathBuf::from(env!("CARGO_BIN_EXE_maelstrom-pytest"));
+    ClientBgProcess::new_from_bin(&bin_path, &["--client-bg-proc"]).unwrap()
 }
 
 fn sh(script: &str) -> Result<()> {
@@ -155,6 +155,7 @@ fn test_simple_success() {
             exclude: vec![],
             list: false,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
     assert!(
@@ -185,6 +186,7 @@ fn test_simple_failure() {
             exclude: vec![],
             list: false,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
     assert_eq!(stderr, "");
@@ -227,6 +229,7 @@ fn test_collection_failure() {
             exclude: vec![],
             list: false,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
     assert_eq!(contents, "");
@@ -262,6 +265,7 @@ fn test_listing_all() {
             exclude: vec![],
             list: true,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
 
@@ -290,6 +294,7 @@ fn test_listing_node_id() {
             exclude: vec![],
             list: true,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
 
@@ -320,6 +325,7 @@ fn test_listing_marker() {
             exclude: vec![],
             list: true,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
 
@@ -355,6 +361,7 @@ fn test_ignore() {
             exclude: vec![],
             list: false,
             pyargs: None,
+            client_bg_proc: false,
         },
     );
 

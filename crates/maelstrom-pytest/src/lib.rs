@@ -1,3 +1,4 @@
+mod alternative_mains;
 pub mod cli;
 pub mod pattern;
 mod pytest;
@@ -578,6 +579,10 @@ pub fn main<TermT>(
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
+    if extra_options.client_bg_proc {
+        return alternative_mains::client_bg_proc();
+    }
+
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 

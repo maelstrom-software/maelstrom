@@ -525,10 +525,13 @@ pub fn main<TermT>(
 where
     TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
 {
-    let cargo_metadata = read_cargo_metadata(&config)?;
-    if extra_options.test_metadata.init {
+    if extra_options.client_bg_proc {
+        alternative_mains::client_bg_proc()
+    } else if extra_options.test_metadata.init {
+        let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::init(&cargo_metadata.workspace_root)
     } else if extra_options.list.packages {
+        let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::list_packages(
             &cargo_metadata.workspace_packages(),
             &extra_options.include,
@@ -536,6 +539,7 @@ where
             &mut io::stdout().lock(),
         )
     } else if extra_options.list.binaries {
+        let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::list_binaries(
             &cargo_metadata.workspace_packages(),
             &extra_options.include,
@@ -543,6 +547,7 @@ where
             &mut io::stdout().lock(),
         )
     } else {
+        let cargo_metadata = read_cargo_metadata(&config)?;
         let workspace_dir = Root::<ProjectDir>::new(cargo_metadata.workspace_root.as_std_path());
         let logging_output = LoggingOutput::default();
         let log = logger.build(logging_output.clone());
