@@ -35,13 +35,13 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fmt, io};
 
+pub use maelstrom_test_runner::Logger;
+
 #[derive(Config, Debug)]
 pub struct Config {
     #[config(flatten)]
     pub parent: maelstrom_test_runner::config::Config,
 }
-
-pub use maelstrom_test_runner::Logger;
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
@@ -113,6 +113,7 @@ impl<'client> DefaultMainAppDeps<'client> {
         })
     }
 }
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PytestArtifactKey {
     path: PathBuf,
@@ -373,7 +374,6 @@ impl TestArtifact for PytestTestArtifact {
 #[derive(Clone, Debug)]
 struct PytestPackage {
     name: String,
-    version: String,
     id: PytestPackageId,
     artifacts: Vec<PytestArtifactKey>,
 }
@@ -384,10 +384,6 @@ impl TestPackage for PytestPackage {
 
     fn name(&self) -> &str {
         &self.name
-    }
-
-    fn version(&self) -> &impl fmt::Display {
-        &self.version
     }
 
     fn artifacts(&self) -> Vec<PytestArtifactKey> {
@@ -416,10 +412,10 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         &self,
         color: bool,
         _options: &PytestOptions,
-        packages: Vec<String>,
+        _packages: Vec<&PytestPackage>,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let (handle, stream) =
-            pytest::pytest_collect_tests(color, packages, self.pyargs.as_ref(), &self.project_dir)?;
+            pytest::pytest_collect_tests(color, self.pyargs.as_ref(), &self.project_dir)?;
         Ok((handle, stream))
     }
 
@@ -611,7 +607,6 @@ where
 
     let packages = vec![PytestPackage {
         name: "default".into(),
-        version: "0".into(),
         id: PytestPackageId("default".into()),
         artifacts: find_artifacts(project_dir.as_ref())?,
     }];

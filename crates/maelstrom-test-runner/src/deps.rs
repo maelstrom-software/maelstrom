@@ -143,7 +143,6 @@ pub trait TestPackage: Clone + fmt::Debug {
     type PackageId: TestPackageId;
     type ArtifactKey: TestArtifactKey;
     fn name(&self) -> &str;
-    fn version(&self) -> &impl fmt::Display;
     fn artifacts(&self) -> Vec<Self::ArtifactKey>;
     fn id(&self) -> Self::PackageId;
 }
@@ -170,7 +169,7 @@ pub trait CollectTests {
         &self,
         color: bool,
         options: &Self::Options,
-        packages: Vec<String>,
+        packages: Vec<&Self::Package>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
     fn get_test_layers(

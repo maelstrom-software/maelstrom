@@ -31,7 +31,6 @@ use pretty_assertions::assert_eq;
 use std::{
     cell::RefCell,
     collections::HashSet,
-    fmt,
     path::{Path, PathBuf},
     rc::Rc,
     sync::atomic::{AtomicU32, Ordering},
@@ -142,18 +141,18 @@ impl FakeTests {
             .iter()
             .map(|b| FakeTestPackage {
                 name: b.name.clone(),
-                version: "1.0.0".into(),
                 artifacts: vec![StringArtifactKey::from(b.name.as_ref())],
                 id: FakePackageId(format!("{} 1.0.0", b.name)),
             })
             .collect()
     }
 
-    fn artifacts(&self, bin_path: &Path, packages: &[String]) -> Vec<Result<FakeTestArtifact>> {
-        let packages: HashSet<_> = packages
-            .iter()
-            .map(|p| p.split('@').next().unwrap())
-            .collect();
+    fn artifacts(
+        &self,
+        bin_path: &Path,
+        packages: Vec<&FakeTestPackage>,
+    ) -> Vec<Result<FakeTestArtifact>> {
+        let packages: HashSet<_> = packages.iter().map(|p| p.name()).collect();
         self.test_binaries
             .iter()
             .filter_map(|b| {
@@ -377,7 +376,6 @@ impl TestArtifact for FakeTestArtifact {
 #[derive(Clone, Debug)]
 struct FakeTestPackage {
     name: String,
-    version: String,
     artifacts: Vec<StringArtifactKey>,
     id: FakePackageId,
 }
@@ -388,10 +386,6 @@ impl TestPackage for FakeTestPackage {
 
     fn name(&self) -> &str {
         &self.name
-    }
-
-    fn version(&self) -> &impl fmt::Display {
-        &self.version
     }
 
     fn artifacts(&self) -> Vec<Self::ArtifactKey> {
@@ -420,13 +414,13 @@ impl CollectTests for TestCollector {
         &self,
         _color: bool,
         _options: &TestOptions,
-        packages: Vec<String>,
+        packages: Vec<&FakeTestPackage>,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {
         let fs = Fs::new();
         fs.create_dir_all(&self.target_dir).unwrap();
         fs.write((**self.target_dir).join("test_run"), "").unwrap();
 
-        let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, &packages);
+        let artifacts: Vec<_> = self.tests.artifacts(&self.bin_path, packages);
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 

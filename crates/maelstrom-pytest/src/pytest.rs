@@ -111,7 +111,6 @@ struct PytestCase {
 
 pub fn pytest_collect_tests(
     _color: bool,
-    _packages: Vec<String>,
     pyargs: Option<&String>,
     project_dir: &Root<ProjectDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {

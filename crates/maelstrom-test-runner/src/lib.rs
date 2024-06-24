@@ -389,13 +389,7 @@ where
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let package_names: Vec<_> = queuing_state
-            .packages
-            .values()
-            .map(|p| format!("{}@{}", p.name(), p.version()))
-            .collect();
-
-        let building_tests = !package_names.is_empty()
+        let building_tests = !queuing_state.packages.is_empty()
             && matches!(
                 queuing_state.list_action,
                 None | Some(ListAction::ListTests)
@@ -406,7 +400,7 @@ where
                 deps.test_collector().start(
                     queuing_state.stderr_color,
                     &queuing_state.collector_options,
-                    package_names,
+                    queuing_state.packages.values().collect(),
                 )
             })
             .transpose()?
