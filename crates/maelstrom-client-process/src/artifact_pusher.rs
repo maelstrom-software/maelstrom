@@ -85,8 +85,9 @@ pub fn start_task(
                     let upload_tracker = upload_tracker.clone();
 
                     join_set.spawn(async move {
-                        push_one_artifact(upload_tracker, broker_addr, msg.path, msg.digest)
-                            .await.with_context(|| "Pushing artifact")
+                        push_one_artifact(upload_tracker, broker_addr, msg.path.clone(), msg.digest)
+                            .await
+                            .with_context(|| format!("pushing artifact {}", msg.path.display()))
                     });
                 }
             }
