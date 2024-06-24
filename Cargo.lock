@@ -3053,6 +3053,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "maelstrom-go-test"
+version = "0.10.0-dev"
+dependencies = [
+ "anyhow",
+ "assert_matches",
+ "cargo_metadata",
+ "clap",
+ "combine",
+ "console",
+ "derive_more",
+ "enum-map",
+ "globset",
+ "indicatif",
+ "indoc",
+ "maelstrom-base",
+ "maelstrom-broker",
+ "maelstrom-client",
+ "maelstrom-macro",
+ "maelstrom-test",
+ "maelstrom-test-runner",
+ "maelstrom-util",
+ "maelstrom-worker",
+ "pretty_assertions",
+ "regex",
+ "regex-macro",
+ "serde",
+ "serde_json",
+ "slog",
+ "strum",
+ "tempfile",
+ "xdg",
+]
+
+[[package]]
 name = "maelstrom-layer-fs"
 version = "0.10.0-dev"
 dependencies = [
