@@ -218,6 +218,11 @@ impl<'client> PytestTestCollector<'client> {
             fs.create_dir_all(&upper)?;
         }
 
+        // We need to install our own resolv.conf to get internet access
+        // These two addresses are for cloudflare's DNS server
+        let resolv_conf = packages_path.join("resolv.conf");
+        fs.write(&resolv_conf, b"nameserver 1.1.1.1\nnameserver 1.0.0.1")?;
+
         // Run a local job to install the packages
         let layers = vec![
             self.client.add_layer(Layer::Paths {
@@ -226,6 +231,15 @@ impl<'client> PytestTestCollector<'client> {
             })?,
             self.client.add_layer(Layer::Stubs {
                 stubs: vec!["/dev/null".into()],
+            })?,
+            self.client.add_layer(Layer::Paths {
+                paths: vec![resolv_conf.clone().try_into()?],
+                prefix_options: PrefixOptions {
+                    strip_prefix: Some(resolv_conf.parent().unwrap().to_owned().try_into()?),
+                    prepend_prefix: Some("/etc/".into()),
+                    canonicalize: false,
+                    follow_symlinks: false,
+                },
             })?,
         ];
         let (sender, receiver) = std::sync::mpsc::channel();
