@@ -25,4 +25,7 @@ pub struct ExtraCommandLineOptions {
         help = "Instead of running tests, print the tests that would have been run."
     )]
     pub list: bool,
+
+    #[arg(long, hide(true), help = "Only used for testing purposes")]
+    pub client_bg_proc: bool,
 }

@@ -1,5 +1,8 @@
 version = 1
 
+[golang]
+latest = "sha256:a66eda637829ce891e9cf61ff1ee0edf544e1f6c5b0e666c7310dce231a66f28"
+
 [python]
 "3.11-slim" = "sha256:fc39d2e68b554c3f0a5cb8a776280c0b3d73b4c04b83dbade835e2a171ca27ef"
 

@@ -70,6 +70,22 @@ network = "local"
 enable_writable_file_system = true
 
 [[directives]]
+filter = "package.equals(maelstrom-go-test) && test.equals(integration_test)"
+image.name = "docker://golang"
+image.use = ["layers", "environment"]
+added_layers = [
+    { stubs = ["/{proc,sys,tmp}/", "/dev/{full,fuse,urandom,random,null,zero}"] },
+    { paths = ["<build-dir>/maelstrom-go-test"], canonicalize = true }
+]
+added_environment = { GOCACHE = "/tmp/" }
+mounts = [
+    { type = "tmp", mount_point = "/tmp" },
+    { type = "proc", mount_point = "/proc" },
+    { type = "sys", mount_point = "/sys" },
+    { type = "devices", devices = ["full", "fuse", "urandom", "random", "null", "zero"] },
+]
+
+[[directives]]
 filter = """
 package.equals(maelstrom-client-process) ||
 package.equals(maelstrom-fuse) ||
