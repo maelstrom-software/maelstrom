@@ -47,6 +47,32 @@ type TestListing<TestCollectorT> = test_listing::TestListing<
     <TestCollectorT as CollectTests>::CaseMetadata,
 >;
 
+type CaseIter<CaseMetadataT> = <Vec<(String, CaseMetadataT)> as IntoIterator>::IntoIter;
+
+type ArtifactM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Artifact;
+
+type CaseMetadataM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::CaseMetadata;
+
+type ArtifactKeyM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactKey;
+
+type PackageM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Package;
+
+type CollectOptionsM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::Options;
+
+type TestFilterM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::TestFilter;
+
+type BuildHandleM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::BuildHandle;
+
+type ArtifactStreamM<MainAppDepsT> =
+    <<MainAppDepsT as MainAppDeps>::TestCollector as CollectTests>::ArtifactStream;
+
 /// A collection of objects that are used while enqueuing jobs. This is useful as a separate object
 /// since it can contain things which live longer than the scoped threads and thus can be shared
 /// among them.
@@ -93,8 +119,6 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
     }
 }
 
-type CaseIter<CaseMetadataT> = <Vec<(String, CaseMetadataT)> as IntoIterator>::IntoIter;
-
 /// Enqueues test cases as jobs in the given client from the given artifact
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
@@ -108,10 +132,10 @@ struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
-    artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
+    artifact: ArtifactM<MainAppDepsT>,
     ignored_cases: HashSet<String>,
     package_name: String,
-    cases: CaseIter<<MainAppDepsT::TestCollector as CollectTests>::CaseMetadata>,
+    cases: CaseIter<CaseMetadataM<MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
     generated_artifacts: Option<GeneratedArtifacts>,
 }
@@ -169,7 +193,7 @@ where
         deps: &'a MainAppDepsT,
         width: usize,
         ind: ProgressIndicatorT,
-        artifact: <MainAppDepsT::TestCollector as CollectTests>::Artifact,
+        artifact: ArtifactM<MainAppDepsT>,
         package_name: String,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
@@ -227,7 +251,7 @@ where
     fn queue_job_from_case(
         &mut self,
         case_name: &str,
-        case_metadata: &<MainAppDepsT::TestCollector as CollectTests>::CaseMetadata,
+        case_metadata: &CaseMetadataM<MainAppDepsT>,
     ) -> Result<EnqueueResult> {
         let case_str = self
             .artifact
@@ -368,15 +392,14 @@ struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     deps: &'a MainAppDepsT,
     width: usize,
     ind: ProgressIndicatorT,
-    wait_handle: Option<<MainAppDepsT::TestCollector as CollectTests>::BuildHandle>,
+    wait_handle: Option<BuildHandleM<MainAppDepsT>>,
     package_match: bool,
-    artifacts: Option<<MainAppDepsT::TestCollector as CollectTests>::ArtifactStream>,
+    artifacts: Option<ArtifactStreamM<MainAppDepsT>>,
     artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
 }
 
-impl<'a, ProgressIndicatorT: ProgressIndicator, MainAppDepsT>
-    JobQueuing<'a, ProgressIndicatorT, MainAppDepsT>
+impl<'a, ProgressIndicatorT, MainAppDepsT> JobQueuing<'a, ProgressIndicatorT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
     MainAppDepsT: MainAppDeps,
@@ -422,7 +445,7 @@ where
 
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
         self.ind
-            .update_enqueue_status(<MainAppDepsT::TestCollector as CollectTests>::ENQUEUE_MESSAGE);
+            .update_enqueue_status(MainAppDepsT::TestCollector::ENQUEUE_MESSAGE);
 
         slog::debug!(self.log, "getting artifacts");
         let Some(ref mut artifacts) = self.artifacts else {
@@ -496,10 +519,7 @@ pub struct BuildDir;
 pub struct MainAppState<MainAppDepsT: MainAppDeps> {
     deps: MainAppDepsT,
     queuing_state: JobQueuingState<MainAppDepsT::TestCollector>,
-    test_listing_store: TestListingStore<
-        <MainAppDepsT::TestCollector as CollectTests>::ArtifactKey,
-        <MainAppDepsT::TestCollector as CollectTests>::CaseMetadata,
-    >,
+    test_listing_store: TestListingStore<ArtifactKeyM<MainAppDepsT>, CaseMetadataM<MainAppDepsT>>,
     logging_output: LoggingOutput,
     log: slog::Logger,
 }
@@ -524,9 +544,9 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         list_action: Option<ListAction>,
         stderr_color: bool,
         project_dir: impl AsRef<Root<ProjectDir>>,
-        packages: &[<MainAppDepsT::TestCollector as CollectTests>::Package],
+        packages: &[PackageM<MainAppDepsT>],
         state_dir: impl AsRef<Root<StateDir>>,
-        collector_options: <MainAppDepsT::TestCollector as CollectTests>::Options,
+        collector_options: CollectOptionsM<MainAppDepsT>,
         logging_output: LoggingOutput,
         log: slog::Logger,
     ) -> Result<Self> {
@@ -544,10 +564,7 @@ impl<MainAppDepsT: MainAppDeps> MainAppState<MainAppDepsT> {
         test_listing
             .retain_packages_and_artifacts(packages.iter().map(|p| (p.name(), p.artifacts())));
 
-        let filter = <MainAppDepsT::TestCollector as CollectTests>::TestFilter::compile(
-            &include_filter,
-            &exclude_filter,
-        )?;
+        let filter = TestFilterM::<MainAppDepsT>::compile(&include_filter, &exclude_filter)?;
         let selected_packages: BTreeMap<_, _> = packages
             .iter()
             .filter(|p| filter.filter(p.name(), None, None).unwrap_or(true))
@@ -815,7 +832,7 @@ where
     MainAppDepsT: MainAppDeps,
     'state: 'scope,
 {
-    let spinner_msg = <MainAppDepsT::TestCollector as CollectTests>::ENQUEUE_MESSAGE;
+    let spinner_msg = MainAppDepsT::TestCollector::ENQUEUE_MESSAGE;
     if state.queuing_state.list_action.is_some() {
         return if stdout_tty {
             Ok(new_helper(
