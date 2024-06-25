@@ -274,7 +274,7 @@ impl TestArtifact for CargoTestArtifact {
         s += " ";
 
         let artifact_name = self.name();
-        if artifact_name != package_name {
+        if artifact_name.replace('_', "-") != package_name {
             s += artifact_name;
             s += " ";
         }
