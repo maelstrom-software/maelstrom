@@ -218,7 +218,7 @@ impl FakeTests {
 #[derive(Default, Clone)]
 struct TestProgressDriver<'scope> {
     #[allow(clippy::type_complexity)]
-    update_func: Rc<RefCell<Option<Box<dyn FnMut(JobStateCounts) -> Result<bool> + 'scope>>>>,
+    update_func: Rc<RefCell<Option<Box<dyn FnMut(IntrospectResponse) -> bool + 'scope>>>>,
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
@@ -226,7 +226,8 @@ impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
     where
         'client: 'scope,
     {
-        *self.update_func.borrow_mut() = Some(Box::new(move |state| ind.update_job_states(state)));
+        *self.update_func.borrow_mut() =
+            Some(Box::new(move |resp| ind.update_introspect_state(resp)));
     }
 
     fn stop(&mut self) -> Result<()> {
@@ -235,8 +236,13 @@ impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
 }
 
 impl<'scope> TestProgressDriver<'scope> {
-    fn update(&self, states: JobStateCounts) -> Result<bool> {
-        (self.update_func.borrow_mut().as_mut().unwrap())(states)
+    fn update(&self, job_state_counts: JobStateCounts) -> bool {
+        let resp = IntrospectResponse {
+            job_state_counts,
+            artifact_uploads: vec![],
+            image_downloads: vec![],
+        };
+        (self.update_func.borrow_mut().as_mut().unwrap())(resp)
     }
 }
 
@@ -540,7 +546,7 @@ fn run_app(
         let test = fake_tests.find_case(&package_name, &case);
         running.push(test.desired_state);
 
-        prog_driver.update(counts_from_states(&running)).unwrap();
+        prog_driver.update(counts_from_states(&running));
     }
 
     app.drain().unwrap();

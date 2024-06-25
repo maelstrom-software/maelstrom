@@ -15,7 +15,7 @@ pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 use anyhow::Result;
 use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle, TermLike};
-use maelstrom_base::stats::JobStateCounts;
+use maelstrom_client::IntrospectResponse;
 use std::{
     io,
     panic::{RefUnwindSafe, UnwindSafe},
@@ -48,19 +48,12 @@ pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 
     /// Update the number of pending jobs indicated
     fn update_length(&self, _new_length: u64) {}
 
-    /// Add another progress bar which is meant to show progress of some sub-task, like downloading
-    /// an image or uploading an artifact
-    fn new_side_progress(&self, _msg: impl Into<String>) -> Option<ProgressBar> {
-        None
+    /// Update progress with new introspect data. Returns true if any work was done.
+    fn update_introspect_state(&self, _resp: IntrospectResponse) -> bool {
+        false
     }
 
-    /// Update any information pertaining to the states of jobs. Should be called repeatedly until
-    /// it returns false
-    fn update_job_states(&self, _counts: JobStateCounts) -> Result<bool> {
-        Ok(false)
-    }
-
-    /// Tick and spinners
+    /// Tick any spinners. Returns true if any work was done.
     fn tick(&self) -> bool {
         false
     }

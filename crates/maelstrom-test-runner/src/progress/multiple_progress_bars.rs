@@ -2,11 +2,56 @@ use super::{ProgressBarPrinter, ProgressIndicator, COLORS};
 use anyhow::Result;
 use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, TermLike};
 use maelstrom_base::stats::{JobState, JobStateCounts};
+use maelstrom_client::{IntrospectResponse, RemoteProgress};
 use std::{
     cmp::max,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
+
+#[derive(Default)]
+struct RemoteProgressBarTracker {
+    bars: HashMap<String, ProgressBar>,
+}
+
+impl RemoteProgressBarTracker {
+    fn update(&mut self, ind: &MultipleProgressBars, states: Vec<RemoteProgress>) {
+        let mut existing = HashSet::new();
+        for state in states {
+            existing.insert(state.name.clone());
+
+            let prog = match self.bars.get(&state.name) {
+                Some(prog) => prog.clone(),
+                None => {
+                    let Some(prog) = ind.new_side_progress(&state.name) else {
+                        continue;
+                    };
+                    self.bars.insert(state.name, prog.clone());
+                    prog
+                }
+            };
+            prog.set_length(state.size);
+            prog.set_position(state.progress);
+        }
+
+        self.bars.retain(|name, bar| {
+            if !existing.contains(name) {
+                bar.finish_and_clear();
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
+impl Drop for RemoteProgressBarTracker {
+    fn drop(&mut self) {
+        for bar in self.bars.values() {
+            bar.finish_and_clear();
+        }
+    }
+}
 
 #[derive(Default)]
 struct State {
@@ -22,6 +67,7 @@ pub struct MultipleProgressBars {
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
     print_lock: Arc<Mutex<()>>,
+    remote_bar_tracker: Arc<Mutex<RemoteProgressBarTracker>>,
 }
 
 impl MultipleProgressBars {
@@ -42,7 +88,32 @@ impl MultipleProgressBars {
             enqueue_spinner,
             state: Default::default(),
             print_lock: Default::default(),
+            remote_bar_tracker: Default::default(),
         }
+    }
+
+    fn new_side_progress(&self, msg: impl Into<String>) -> Option<ProgressBar> {
+        Some(
+            self.multi_bar
+                .insert(1, super::make_side_progress_bar("white", msg, 21)),
+        )
+    }
+
+    fn update_job_states(&self, counts: JobStateCounts) -> bool {
+        let state = self.state.lock().unwrap();
+
+        for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
+            let jobs = JobState::iter()
+                .filter(|s| s >= &job_state)
+                .map(|s| counts[s])
+                .sum();
+            let bar = self.bars.get(&job_state).unwrap();
+            let pos = max(jobs, state.finished);
+            bar.set_position(pos);
+        }
+
+        let finished = state.done_queuing_jobs && state.finished >= state.length;
+        !finished
     }
 }
 
@@ -75,34 +146,6 @@ impl ProgressIndicator for MultipleProgressBars {
         }
     }
 
-    fn new_side_progress(&self, msg: impl Into<String>) -> Option<ProgressBar> {
-        Some(
-            self.multi_bar
-                .insert(1, super::make_side_progress_bar("white", msg, 21)),
-        )
-    }
-
-    fn update_enqueue_status(&self, msg: impl Into<String>) {
-        self.enqueue_spinner.set_message(msg.into());
-    }
-
-    fn update_job_states(&self, counts: JobStateCounts) -> Result<bool> {
-        let state = self.state.lock().unwrap();
-
-        for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
-            let jobs = JobState::iter()
-                .filter(|s| s >= &job_state)
-                .map(|s| counts[s])
-                .sum();
-            let bar = self.bars.get(&job_state).unwrap();
-            let pos = max(jobs, state.finished);
-            bar.set_position(pos);
-        }
-
-        let finished = state.done_queuing_jobs && state.finished >= state.length;
-        Ok(!finished)
-    }
-
     fn tick(&self) -> bool {
         let state = self.state.lock().unwrap();
 
@@ -112,6 +155,17 @@ impl ProgressIndicator for MultipleProgressBars {
 
         self.enqueue_spinner.tick();
         true
+    }
+
+    fn update_enqueue_status(&self, msg: impl Into<String>) {
+        self.enqueue_spinner.set_message(msg.into());
+    }
+
+    fn update_introspect_state(&self, resp: IntrospectResponse) -> bool {
+        let mut states = resp.artifact_uploads;
+        states.extend(resp.image_downloads);
+        self.remote_bar_tracker.lock().unwrap().update(self, states);
+        self.update_job_states(resp.job_state_counts)
     }
 
     fn done_queuing_jobs(&self) {
