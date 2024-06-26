@@ -16,9 +16,9 @@ use maelstrom_client::{
 use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
-    metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, Terminal, TestArtifact,
-    TestArtifactKey, TestCaseMetadata, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::UiSender, BuildDir, CollectTests,
+    ListAction, LoggingOutput, MainAppDeps, MainAppState, Terminal, TestArtifact, TestArtifactKey,
+    TestCaseMetadata, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -174,7 +174,7 @@ impl<'client> PytestTestCollector<'client> {
         &self,
         image_spec: ImageSpec,
         ref_: &DockerReference,
-        ind: &impl ProgressIndicator,
+        ind: &UiSender,
     ) -> Result<Utf8PathBuf> {
         let fs = Fs::new();
 
@@ -432,11 +432,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         Ok((handle, stream))
     }
 
-    fn get_test_layers(
-        &self,
-        metadata: &TestMetadata,
-        ind: &impl ProgressIndicator,
-    ) -> Result<TestLayers> {
+    fn get_test_layers(&self, metadata: &TestMetadata, ind: &UiSender) -> Result<TestLayers> {
         match &metadata.image {
             Some(image) => {
                 let image_name: ImageName = image.name.parse()?;

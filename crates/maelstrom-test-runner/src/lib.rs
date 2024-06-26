@@ -4,7 +4,7 @@ mod deps;
 pub mod metadata;
 pub mod progress;
 pub mod test_listing;
-mod ui;
+pub mod ui;
 pub mod visitor;
 
 #[cfg(test)]
@@ -20,7 +20,7 @@ use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
 use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
 use metadata::{AllMetadata, TestMetadata};
-use progress::{ProgressDriver, ProgressIndicator, ProgressPrinter as _};
+use progress::ProgressDriver;
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -31,6 +31,7 @@ use std::{
     },
 };
 use test_listing::TestListingStore;
+use ui::{UiImpl, UiKind, UiSender, UiSenderWriteAdapter};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -122,11 +123,11 @@ impl<TestCollectorT: CollectTests> JobQueuingState<TestCollectorT> {
 ///
 /// This object is stored inside `JobQueuing` and is used to keep track of which artifact it is
 /// currently enqueuing from.
-struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
+struct ArtifactQueuing<'a, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
-    ind: ProgressIndicatorT,
+    ui: UiSender,
     artifact: ArtifactM<MainAppDepsT>,
     ignored_cases: HashSet<String>,
     package_name: String,
@@ -144,11 +145,11 @@ struct TestListingResult<CaseMetadataT> {
 fn list_test_cases<TestCollectorT: CollectTests>(
     log: slog::Logger,
     queuing_state: &JobQueuingState<TestCollectorT>,
-    ind: &impl ProgressIndicator,
+    ui: &UiSender,
     artifact: &TestCollectorT::Artifact,
     package_name: &str,
 ) -> Result<TestListingResult<TestCollectorT::CaseMetadata>> {
-    ind.update_enqueue_status(format!("getting test list for {package_name}"));
+    ui.update_enqueue_status(format!("getting test list for {package_name}"));
 
     slog::debug!(log, "listing ignored tests"; "artifact" => ?artifact);
     let ignored_cases: HashSet<_> = artifact.list_ignored_tests()?.into_iter().collect();
@@ -176,9 +177,8 @@ fn list_test_cases<TestCollectorT: CollectTests>(
     })
 }
 
-impl<'a, ProgressIndicatorT, MainAppDepsT> ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>
+impl<'a, MainAppDepsT> ArtifactQueuing<'a, MainAppDepsT>
 where
-    ProgressIndicatorT: ProgressIndicator,
     MainAppDepsT: MainAppDeps,
 {
     #[allow(clippy::too_many_arguments)]
@@ -186,14 +186,14 @@ where
         log: slog::Logger,
         queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
-        ind: ProgressIndicatorT,
+        ui: UiSender,
         artifact: ArtifactM<MainAppDepsT>,
         package_name: String,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
-        let listing = list_test_cases(log.clone(), queuing_state, &ind, &artifact, &package_name)?;
+        let listing = list_test_cases(log.clone(), queuing_state, &ui, &artifact, &package_name)?;
 
-        ind.update_enqueue_status(format!("generating artifacts for {package_name}"));
+        ui.update_enqueue_status(format!("generating artifacts for {package_name}"));
         slog::debug!(
             log,
             "generating artifacts";
@@ -204,7 +204,7 @@ where
             log,
             queuing_state,
             deps,
-            ind,
+            ui,
             artifact,
             ignored_cases: listing.ignored_cases,
             package_name,
@@ -249,12 +249,12 @@ where
         let case_str = self
             .artifact
             .format_case(&self.package_name, case_name, case_metadata);
-        self.ind
+        self.ui
             .update_enqueue_status(format!("processing {case_str}"));
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
         if self.queuing_state.list_action.is_some() {
-            self.ind.lock_printing().println(case_str);
+            self.ui.lock_printing().println(case_str);
             return Ok(EnqueueResult::Listed);
         }
 
@@ -266,7 +266,7 @@ where
                 &self.artifact.to_key(),
                 (case_name, case_metadata),
             )?;
-        self.ind
+        self.ui
             .update_enqueue_status(format!("calculating layers for {case_str}"));
         slog::debug!(&self.log, "calculating job layers"; "case" => &case_str);
         let mut layers = self.calculate_job_layers(&test_metadata)?;
@@ -274,7 +274,7 @@ where
         match self
             .deps
             .test_collector()
-            .get_test_layers(&test_metadata, &self.ind)?
+            .get_test_layers(&test_metadata, &self.ui)?
         {
             TestLayers::GenerateForBinary => {
                 let dep = self.generate_artifacts()?;
@@ -295,7 +295,7 @@ where
             .queuing_state
             .jobs_queued
             .fetch_add(1, Ordering::AcqRel);
-        self.ind.update_length(std::cmp::max(
+        self.ui.update_length(std::cmp::max(
             self.queuing_state.expected_job_count,
             count + 1,
         ));
@@ -308,7 +308,7 @@ where
             self.artifact.to_key(),
             case_name.to_owned(),
             case_str.clone(),
-            self.ind.clone(),
+            self.ui.clone(),
             MainAppDepsT::TestCollector::remove_fixture_output
                 as fn(&str, Vec<String>) -> Vec<String>,
         );
@@ -327,7 +327,7 @@ where
             .unwrap()
             .get_timing(&self.package_name, &self.artifact.to_key(), case_name);
 
-        self.ind
+        self.ui
             .update_enqueue_status(format!("submitting job for {case_str}"));
         slog::debug!(&self.log, "submitting job"; "case" => &case_str);
         let (program, arguments) = self.artifact.build_command(case_name, case_metadata);
@@ -378,28 +378,27 @@ where
 ///
 /// This object is like an iterator, it maintains a position in the test listing and enqueues the
 /// next thing when asked.
-struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
+struct JobQueuing<'a, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
-    ind: ProgressIndicatorT,
+    ui: UiSender,
     wait_handle: Option<BuildHandleM<MainAppDepsT>>,
     package_match: bool,
     artifacts: Option<ArtifactStreamM<MainAppDepsT>>,
-    artifact_queuing: Option<ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT>>,
+    artifact_queuing: Option<ArtifactQueuing<'a, MainAppDepsT>>,
     timeout_override: Option<Option<Timeout>>,
 }
 
-impl<'a, ProgressIndicatorT, MainAppDepsT> JobQueuing<'a, ProgressIndicatorT, MainAppDepsT>
+impl<'a, MainAppDepsT> JobQueuing<'a, MainAppDepsT>
 where
-    ProgressIndicatorT: ProgressIndicator,
     MainAppDepsT: MainAppDeps,
 {
     fn new(
         log: slog::Logger,
         queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
-        ind: ProgressIndicatorT,
+        ui: UiSender,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
         let building_tests = !queuing_state.packages.is_empty()
@@ -423,7 +422,7 @@ where
             log,
             queuing_state,
             deps,
-            ind,
+            ui,
             package_match: false,
             artifacts,
             artifact_queuing: None,
@@ -433,7 +432,7 @@ where
     }
 
     fn start_queuing_from_artifact(&mut self) -> Result<bool> {
-        self.ind
+        self.ui
             .update_enqueue_status(MainAppDepsT::TestCollector::ENQUEUE_MESSAGE);
 
         slog::debug!(self.log, "getting artifacts");
@@ -457,7 +456,7 @@ where
             self.log.clone(),
             self.queuing_state,
             self.deps,
-            self.ind.clone(),
+            self.ui.clone(),
             artifact,
             package_name.into(),
             self.timeout_override,
@@ -611,49 +610,47 @@ impl EnqueueResult {
     }
 }
 
-struct MainApp<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
+struct MainApp<'state, ProgressDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
-    queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
+    queuing: JobQueuing<'state, MainAppDepsT>,
     prog_driver: ProgressDriverT,
-    prog: ProgressIndicatorT,
+    ui: UiSender,
 }
 
-impl<'state, 'scope, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
-    MainApp<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
+impl<'state, 'scope, ProgressDriverT, MainAppDepsT> MainApp<'state, ProgressDriverT, MainAppDepsT>
 where
-    ProgressIndicatorT: ProgressIndicator,
     ProgressDriverT: ProgressDriver<'scope>,
     MainAppDepsT: MainAppDeps,
 {
     pub fn new(
         state: &'state MainAppState<MainAppDepsT>,
-        prog: ProgressIndicatorT,
+        ui: UiSender,
         mut prog_driver: ProgressDriverT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self>
     where
         'state: 'scope,
     {
-        prog_driver.drive(state.deps.client(), prog.clone());
-        prog.update_length(state.queuing_state.expected_job_count);
+        prog_driver.drive(state.deps.client(), ui.clone());
+        ui.update_length(state.queuing_state.expected_job_count);
 
         state
             .logging_output
-            .update(progress::ProgressWriteAdapter::new(prog.clone()));
+            .update(UiSenderWriteAdapter::new(ui.clone()));
         slog::debug!(state.log, "main app created");
 
         let queuing = JobQueuing::new(
             state.log.clone(),
             &state.queuing_state,
             &state.deps,
-            prog.clone(),
+            ui.clone(),
             timeout_override,
         )?;
         Ok(Self {
             state,
             queuing,
             prog_driver,
-            prog,
+            ui,
         })
     }
 
@@ -666,9 +663,9 @@ where
     /// Indicates that we have finished enqueuing jobs and starts tearing things down
     fn drain(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "draining");
-        self.prog
+        self.ui
             .update_length(self.state.queuing_state.jobs_queued.load(Ordering::Acquire));
-        self.prog.done_queuing_jobs();
+        self.ui.done_queuing_jobs();
         Ok(())
     }
 
@@ -679,7 +676,7 @@ where
         self.prog_driver.stop()?;
 
         let summary_cb = self.state.queuing_state.tracker.print_summary_cb();
-        self.prog.finished(summary_cb)?;
+        self.ui.finished(summary_cb)?;
 
         self.state.test_listing_store.save(
             self.state
@@ -697,7 +694,7 @@ where
 
 #[derive(Default)]
 struct LoggingOutputInner {
-    prog: Option<Box<dyn io::Write + Send + Sync + 'static>>,
+    ui: Option<Box<dyn io::Write + Send + Sync + 'static>>,
 }
 
 #[derive(Clone, Default)]
@@ -706,17 +703,17 @@ pub struct LoggingOutput {
 }
 
 impl LoggingOutput {
-    fn update(&self, prog: impl io::Write + Send + Sync + 'static) {
+    fn update(&self, ui: impl io::Write + Send + Sync + 'static) {
         let mut inner = self.inner.lock().unwrap();
-        inner.prog = Some(Box::new(prog));
+        inner.ui = Some(Box::new(ui));
     }
 }
 
 impl io::Write for LoggingOutput {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut inner = self.inner.lock().unwrap();
-        if let Some(prog) = &mut inner.prog {
-            prog.write(buf)
+        if let Some(ui) = &mut inner.ui {
+            ui.write(buf)
         } else {
             io::stdout().write(buf)
         }
@@ -724,8 +721,8 @@ impl io::Write for LoggingOutput {
 
     fn flush(&mut self) -> io::Result<()> {
         let mut inner = self.inner.lock().unwrap();
-        if let Some(prog) = &mut inner.prog {
-            prog.flush()
+        if let Some(ui) = &mut inner.ui {
+            ui.flush()
         } else {
             io::stdout().flush()
         }
@@ -764,13 +761,13 @@ where
     TermT: Terminal,
 {
     let (ui_send, ui_recv) = std::sync::mpsc::channel();
-    let prog = ui::UiSender::new(ui_send);
+    let ui_sender = UiSender::new(ui_send);
     let list = state.queuing_state.list_action.is_some();
 
     let spinner_msg = MainAppDepsT::TestCollector::ENQUEUE_MESSAGE;
     let ui_handle = std::thread::spawn(move || {
-        let mut ui = ui::UiImpl::new(
-            ui::UiKind::Simple,
+        let mut ui = UiImpl::new(
+            UiKind::Simple,
             spinner_msg,
             list,
             stdout_is_tty,
@@ -783,7 +780,7 @@ where
     let exit_code = std::thread::scope(|scope| {
         let mut app = MainApp::new(
             &state,
-            prog,
+            ui_sender,
             progress::DefaultProgressDriver::new(scope),
             timeout_override,
         )?;

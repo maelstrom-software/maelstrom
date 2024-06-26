@@ -1,5 +1,6 @@
-use crate::progress::{PrintWidthCb, ProgressIndicator, ProgressPrinter};
+use crate::progress::PrintWidthCb;
 use crate::test_listing::TestListing;
+use crate::ui::{UiSender, UiSenderPrinter};
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
@@ -130,7 +131,6 @@ impl JobStatusTracker {
 }
 
 pub struct JobStatusVisitor<
-    ProgressIndicatorT,
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
     RemoveFixtureOutputFn,
@@ -141,12 +141,12 @@ pub struct JobStatusVisitor<
     artifact: ArtifactKeyT,
     case: String,
     case_str: String,
-    ind: ProgressIndicatorT,
+    ui: UiSender,
     remove_fixture_output: RemoveFixtureOutputFn,
 }
 
-impl<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+impl<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+    JobStatusVisitor<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
@@ -159,7 +159,7 @@ where
         artifact: ArtifactKeyT,
         case: String,
         case_str: String,
-        ind: ProgressIndicatorT,
+        ui: UiSender,
         remove_fixture_output: RemoveFixtureOutputFn,
     ) -> Self {
         Self {
@@ -169,7 +169,7 @@ where
             artifact,
             case,
             case_str,
-            ind,
+            ui,
             remove_fixture_output,
         }
     }
@@ -213,8 +213,8 @@ fn format_test_output(
     test_output_lines
 }
 
-impl<ProgressIndicatorT: ProgressIndicator, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
-    JobStatusVisitor<ProgressIndicatorT, ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+impl<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
+    JobStatusVisitor<ArtifactKeyT, CaseMetadataT, RemoveFixtureOutputFn>
 where
     ArtifactKeyT: TestArtifactKey,
     CaseMetadataT: TestCaseMetadata,
@@ -224,7 +224,7 @@ where
         &self,
         result_str: ColoredString,
         duration_str: String,
-        printer: &impl ProgressPrinter,
+        printer: &UiSenderPrinter<'_>,
     ) {
         let case_str = self.case_str.clone();
         printer.println_width(move |width| {
@@ -369,7 +369,7 @@ where
                 ExitCode::FAILURE
             }
         };
-        let printer = self.ind.lock_printing();
+        let printer = self.ui.lock_printing();
         self.print_job_result(result_str, duration_str, &printer);
 
         if let Some(details_str) = result_details {
@@ -383,15 +383,15 @@ where
         }
         drop(printer);
 
-        self.ind.job_finished();
+        self.ui.job_finished();
 
         // This call unblocks main thread, so it must go last
         self.tracker.job_exited(self.case_str.clone(), exit_code);
     }
 
     pub fn job_ignored(&self) {
-        self.print_job_result("IGNORED".yellow(), "".into(), &self.ind.lock_printing());
-        self.ind.job_finished();
+        self.print_job_result("IGNORED".yellow(), "".into(), &self.ui.lock_printing());
+        self.ui.job_finished();
 
         // This call unblocks main thread, so it must go last
         self.tracker.job_ignored(self.case_str.clone());

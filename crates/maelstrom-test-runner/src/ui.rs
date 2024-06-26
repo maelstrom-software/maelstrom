@@ -1,10 +1,12 @@
 mod simple;
 
 use crate::config::Quiet;
-use crate::progress::{PrintWidthCb, ProgressIndicator, ProgressPrinter, Terminal};
+use crate::progress::{PrintWidthCb, Terminal};
 use anyhow::Result;
+use colored::Colorize as _;
 use derive_more::From;
 use maelstrom_client::IntrospectResponse;
+use std::io;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -25,13 +27,19 @@ pub struct UiSenderPrinter<'a> {
     _guard: MutexGuard<'a, ()>,
 }
 
-impl<'a> ProgressPrinter for UiSenderPrinter<'a> {
-    fn println(&self, msg: String) {
+impl<'a> UiSenderPrinter<'a> {
+    pub fn println(&self, msg: String) {
         let _ = self.send.send(UiMessage::PrintLine(msg));
     }
 
-    fn println_width(&self, cb: impl FnOnce(usize) -> String + Send + Sync + 'static) {
+    pub fn println_width(&self, cb: impl FnOnce(usize) -> String + Send + Sync + 'static) {
         let _ = self.send.send(UiMessage::PrintLineWidth(Box::new(cb)));
+    }
+
+    pub fn eprintln(&self, msg: impl AsRef<str>) {
+        for line in msg.as_ref().lines() {
+            self.println(format!("{} {line}", "stderr:".red()))
+        }
     }
 }
 
@@ -50,39 +58,37 @@ impl UiSender {
     }
 }
 
-impl ProgressIndicator for UiSender {
-    type Printer<'a> = UiSenderPrinter<'a>;
-
-    fn lock_printing(&self) -> Self::Printer<'_> {
+impl UiSender {
+    pub fn lock_printing(&self) -> UiSenderPrinter<'_> {
         UiSenderPrinter {
             send: self.send.clone(),
             _guard: self.print_lock.lock().unwrap(),
         }
     }
 
-    fn job_finished(&self) {
+    pub fn job_finished(&self) {
         let _ = self.send.send(UiMessage::JobFinished);
     }
 
-    fn update_length(&self, new_length: u64) {
+    pub fn update_length(&self, new_length: u64) {
         let _ = self
             .send
             .send(UiMessage::UpdatePendingJobsCount(new_length));
     }
 
-    fn update_enqueue_status(&self, msg: impl Into<String>) {
+    pub fn update_enqueue_status(&self, msg: impl Into<String>) {
         let _ = self.send.send(UiMessage::UpdateEnqueueStatus(msg.into()));
     }
 
-    fn update_introspect_state(&self, resp: IntrospectResponse) {
+    pub fn update_introspect_state(&self, resp: IntrospectResponse) {
         let _ = self.send.send(UiMessage::UpdateIntrospectState(resp));
     }
 
-    fn done_queuing_jobs(&self) {
+    pub fn done_queuing_jobs(&self) {
         let _ = self.send.send(UiMessage::DoneQueuingJobs);
     }
 
-    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+    pub fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         let _ = self
             .send
             .send(UiMessage::AllJobsFinished(Box::new(summary)));
@@ -121,5 +127,35 @@ where
         match self {
             Self::Simple(u) => u.run(recv),
         }
+    }
+}
+
+pub struct UiSenderWriteAdapter {
+    send: UiSender,
+    line: String,
+}
+
+impl UiSenderWriteAdapter {
+    pub fn new(send: UiSender) -> Self {
+        Self {
+            send,
+            line: String::new(),
+        }
+    }
+}
+
+impl io::Write for UiSenderWriteAdapter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.line += &String::from_utf8_lossy(buf);
+        if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
+            let remaining = self.line.split_off(p);
+            let line = std::mem::replace(&mut self.line, remaining[1..].into());
+            self.send.lock_printing().println(line);
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }

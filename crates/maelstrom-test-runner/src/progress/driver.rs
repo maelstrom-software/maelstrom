@@ -1,5 +1,4 @@
-use super::ProgressIndicator;
-use crate::ClientTrait;
+use crate::{ui, ClientTrait};
 use anyhow::Result;
 use std::{
     sync::{
@@ -11,7 +10,7 @@ use std::{
 };
 
 pub trait ProgressDriver<'scope> {
-    fn drive<'client>(&mut self, deps: &'client impl ClientTrait, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, deps: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope;
 
@@ -44,7 +43,7 @@ impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
 }
 
 impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
-    fn drive<'client>(&mut self, client: &'client impl ClientTrait, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, client: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope,
     {

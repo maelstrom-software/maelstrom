@@ -17,7 +17,6 @@ use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle, TermLike};
 use maelstrom_client::IntrospectResponse;
 use std::{
-    io,
     panic::{RefUnwindSafe, UnwindSafe},
     sync::MutexGuard,
 };
@@ -79,39 +78,6 @@ pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 
 
     /// Called when all jobs are done
     fn finished(&self, _summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
-        Ok(())
-    }
-}
-
-pub struct ProgressWriteAdapter<ProgressIndicatorT> {
-    prog: ProgressIndicatorT,
-    line: String,
-}
-
-impl<ProgressIndicatorT> ProgressWriteAdapter<ProgressIndicatorT> {
-    pub fn new(prog: ProgressIndicatorT) -> Self {
-        Self {
-            prog,
-            line: String::new(),
-        }
-    }
-}
-
-impl<ProgressIndicatorT> io::Write for ProgressWriteAdapter<ProgressIndicatorT>
-where
-    ProgressIndicatorT: ProgressIndicator,
-{
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.line += &String::from_utf8_lossy(buf);
-        if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
-            let remaining = self.line.split_off(p);
-            let line = std::mem::replace(&mut self.line, remaining[1..].into());
-            self.prog.lock_printing().println(line);
-        }
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }

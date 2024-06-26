@@ -11,9 +11,9 @@ use maelstrom_client::{
 };
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
-    metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal,
-    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::UiSender, BuildDir, CollectTests,
+    ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal, TestArtifact,
+    TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -280,11 +280,7 @@ impl CollectTests for GoTestCollector {
         go_test::build_and_collect(color, packages)
     }
 
-    fn get_test_layers(
-        &self,
-        _metadata: &TestMetadata,
-        _ind: &impl ProgressIndicator,
-    ) -> Result<TestLayers> {
+    fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
 

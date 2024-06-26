@@ -1,7 +1,7 @@
 use crate::{
     config::Quiet,
     metadata::TestMetadata,
-    progress::{ProgressDriver, ProgressIndicator},
+    progress::ProgressDriver,
     test_listing::{TestListing, TestListingStore},
     ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
     MainAppDeps, MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
@@ -221,7 +221,7 @@ struct TestProgressDriver<'scope> {
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
-    fn drive<'client>(&mut self, _client: &'client impl ClientTrait, ind: impl ProgressIndicator)
+    fn drive<'client>(&mut self, _client: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope,
     {
@@ -429,11 +429,7 @@ impl CollectTests for TestCollector {
         Ok((WaitForNothing, artifacts.into_iter()))
     }
 
-    fn get_test_layers(
-        &self,
-        _metadata: &TestMetadata,
-        _ind: &impl ProgressIndicator,
-    ) -> Result<TestLayers> {
+    fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &ui::UiSender) -> Result<TestLayers> {
         Ok(TestLayers::GenerateForBinary)
     }
 
