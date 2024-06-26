@@ -124,18 +124,9 @@ impl<TermT> UiImpl<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(
-        kind: UiKind,
-        spinner_message: &'static str,
-        list: bool,
-        stdout_is_tty: bool,
-        quiet: Quiet,
-        term: TermT,
-    ) -> Self {
+    pub fn new(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet, term: TermT) -> Self {
         match kind {
-            UiKind::Simple => {
-                simple::SimpleUi::new(spinner_message, list, stdout_is_tty, quiet, term).into()
-            }
+            UiKind::Simple => simple::SimpleUi::new(list, stdout_is_tty, quiet, term).into(),
         }
     }
     pub fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {

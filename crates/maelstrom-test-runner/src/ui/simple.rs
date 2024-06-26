@@ -25,26 +25,20 @@ impl<TermT> SimpleUi<TermT>
 where
     TermT: Terminal,
 {
-    pub fn new(
-        spinner_message: &'static str,
-        list: bool,
-        stdout_is_tty: bool,
-        quiet: Quiet,
-        term: TermT,
-    ) -> Self
+    pub fn new(list: bool, stdout_is_tty: bool, quiet: Quiet, term: TermT) -> Self
     where
         TermT: Terminal,
     {
         if list {
             if stdout_is_tty {
-                TestListingProgress::new(term, spinner_message).into()
+                TestListingProgress::new(term, "starting...").into()
             } else {
                 TestListingProgressNoSpinner::new(term).into()
             }
         } else {
             match (stdout_is_tty, quiet.into_inner()) {
                 (true, true) => QuietProgressBar::new(term).into(),
-                (true, false) => MultipleProgressBars::new(term, spinner_message).into(),
+                (true, false) => MultipleProgressBars::new(term, "starting...").into(),
                 (false, true) => QuietNoBar::new(term).into(),
                 (false, false) => NoBar::new(term).into(),
             }

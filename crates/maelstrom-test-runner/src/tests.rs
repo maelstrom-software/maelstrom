@@ -549,14 +549,7 @@ fn run_app(
     drop(introspect_driver);
     drop(state);
 
-    let mut ui = ui::UiImpl::new(
-        ui::UiKind::Simple,
-        TestCollector::ENQUEUE_MESSAGE,
-        is_list,
-        stdout_tty,
-        quiet,
-        term.clone(),
-    );
+    let mut ui = ui::UiImpl::new(ui::UiKind::Simple, is_list, stdout_tty, quiet, term.clone());
     ui.run(ui_recv).unwrap();
 
     slog::info!(log, "test complete");

@@ -401,6 +401,8 @@ where
         ui: UiSender,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
+        ui.update_enqueue_status(MainAppDepsT::TestCollector::ENQUEUE_MESSAGE);
+
         let building_tests = !queuing_state.packages.is_empty()
             && matches!(
                 queuing_state.list_action,
@@ -765,16 +767,8 @@ where
     let ui_sender = UiSender::new(ui_send);
     let list = state.queuing_state.list_action.is_some();
 
-    let spinner_msg = MainAppDepsT::TestCollector::ENQUEUE_MESSAGE;
     let ui_handle = std::thread::spawn(move || {
-        let mut ui = UiImpl::new(
-            UiKind::Simple,
-            spinner_msg,
-            list,
-            stdout_is_tty,
-            quiet,
-            terminal,
-        );
+        let mut ui = UiImpl::new(UiKind::Simple, list, stdout_is_tty, quiet, terminal);
         ui.run(ui_recv)
     });
 
