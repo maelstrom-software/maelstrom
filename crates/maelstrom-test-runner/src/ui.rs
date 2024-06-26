@@ -1,14 +1,29 @@
 mod simple;
 
 use crate::config::Quiet;
-use crate::progress::{PrintWidthCb, Terminal};
 use anyhow::Result;
 use colored::Colorize as _;
 use derive_more::From;
+use indicatif::TermLike;
 use maelstrom_client::IntrospectResponse;
 use std::io;
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
+
+pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
+
+impl<TermT> Terminal for TermT where
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
+{
+}
+
+pub trait PrintWidthCb<RetT>: FnOnce(usize) -> RetT + Send + Sync + 'static {}
+
+impl<PrintCbT, RetT> PrintWidthCb<RetT> for PrintCbT where
+    PrintCbT: FnOnce(usize) -> RetT + Send + Sync + 'static
+{
+}
 
 #[allow(dead_code)]
 pub enum UiMessage {

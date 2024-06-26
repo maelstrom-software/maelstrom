@@ -1,5 +1,5 @@
-use crate::progress::PrintWidthCb;
 use crate::test_listing::TestListing;
+use crate::ui::PrintWidthCb;
 use crate::ui::{UiSender, UiSenderPrinter};
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;

@@ -11,7 +11,7 @@ pub mod visitor;
 mod tests;
 
 pub use deps::*;
-pub use progress::Terminal;
+pub use ui::Terminal;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;

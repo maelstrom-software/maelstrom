@@ -1,8 +1,8 @@
-use super::UiMessage;
+use super::{Terminal, UiMessage};
 use crate::config::Quiet;
 use crate::progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressPrinter as _, QuietNoBar,
-    QuietProgressBar, Terminal, TestListingProgress, TestListingProgressNoSpinner,
+    QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
 };
 use anyhow::Result;
 use derive_more::From;

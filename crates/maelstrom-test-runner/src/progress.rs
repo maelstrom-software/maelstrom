@@ -12,28 +12,15 @@ pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
 pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
+use crate::ui::{PrintWidthCb, Terminal};
 use anyhow::Result;
 use colored::Colorize as _;
-use indicatif::{ProgressBar, ProgressStyle, TermLike};
+use indicatif::{ProgressBar, ProgressStyle};
 use maelstrom_client::IntrospectResponse;
 use std::{
     panic::{RefUnwindSafe, UnwindSafe},
     sync::MutexGuard,
 };
-
-pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
-
-impl<TermT> Terminal for TermT where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
-{
-}
-
-pub trait PrintWidthCb<RetT>: FnOnce(usize) -> RetT + Send + Sync + 'static {}
-
-impl<PrintCbT, RetT> PrintWidthCb<RetT> for PrintCbT where
-    PrintCbT: FnOnce(usize) -> RetT + Send + Sync + 'static
-{
-}
 
 pub trait ProgressPrinter {
     /// Prints a line to stdout while not interfering with any progress bars
