@@ -217,7 +217,7 @@ impl FakeTests {
 #[derive(Default, Clone)]
 struct TestProgressDriver<'scope> {
     #[allow(clippy::type_complexity)]
-    update_func: Rc<RefCell<Option<Box<dyn FnMut(IntrospectResponse) -> bool + 'scope>>>>,
+    update_func: Rc<RefCell<Option<Box<dyn FnMut(IntrospectResponse) + 'scope>>>>,
 }
 
 impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
@@ -235,7 +235,7 @@ impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
 }
 
 impl<'scope> TestProgressDriver<'scope> {
-    fn update(&self, job_state_counts: JobStateCounts) -> bool {
+    fn update(&self, job_state_counts: JobStateCounts) {
         let resp = IntrospectResponse {
             job_state_counts,
             artifact_uploads: vec![],

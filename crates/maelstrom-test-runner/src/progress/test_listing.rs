@@ -48,15 +48,14 @@ where
         self.enqueue_spinner.set_message(msg.into());
     }
 
-    fn tick(&self) -> bool {
+    fn tick(&self) {
         let state = self.state.lock().unwrap();
 
         if state.done_queuing_jobs {
-            return false;
+            return;
         }
 
         self.enqueue_spinner.tick();
-        true
     }
 
     fn done_queuing_jobs(&self) {

@@ -65,15 +65,11 @@ pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 
     /// Update the number of pending jobs indicated
     fn update_length(&self, _new_length: u64) {}
 
-    /// Update progress with new introspect data. Returns true if any work was done.
-    fn update_introspect_state(&self, _resp: IntrospectResponse) -> bool {
-        false
-    }
+    /// Update progress with new introspect data.
+    fn update_introspect_state(&self, _resp: IntrospectResponse) {}
 
-    /// Tick any spinners. Returns true if any work was done.
-    fn tick(&self) -> bool {
-        false
-    }
+    /// Tick any spinners.
+    fn tick(&self) {}
 
     /// Update the message for the spinner which indicates jobs are being enqueued
     fn update_enqueue_status(&self, _msg: impl Into<String>) {}

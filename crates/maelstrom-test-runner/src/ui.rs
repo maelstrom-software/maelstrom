@@ -74,10 +74,8 @@ impl ProgressIndicator for UiSender {
         let _ = self.send.send(UiMessage::UpdateEnqueueStatus(msg.into()));
     }
 
-    fn update_introspect_state(&self, resp: IntrospectResponse) -> bool {
-        self.send
-            .send(UiMessage::UpdateIntrospectState(resp))
-            .is_ok()
+    fn update_introspect_state(&self, resp: IntrospectResponse) {
+        let _ = self.send.send(UiMessage::UpdateIntrospectState(resp));
     }
 
     fn done_queuing_jobs(&self) {

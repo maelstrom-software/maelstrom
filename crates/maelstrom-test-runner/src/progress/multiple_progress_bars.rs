@@ -112,7 +112,7 @@ where
         )
     }
 
-    fn update_job_states(&self, counts: JobStateCounts) -> bool {
+    fn update_job_states(&self, counts: JobStateCounts) {
         let state = self.state.lock().unwrap();
 
         for job_state in JobState::iter().filter(|s| s != &JobState::Complete) {
@@ -124,9 +124,6 @@ where
             let pos = max(jobs, state.finished);
             bar.set_position(pos);
         }
-
-        let finished = state.done_queuing_jobs && state.finished >= state.length;
-        !finished
     }
 }
 
@@ -163,22 +160,21 @@ where
         }
     }
 
-    fn tick(&self) -> bool {
+    fn tick(&self) {
         let state = self.state.lock().unwrap();
 
         if state.done_queuing_jobs {
-            return false;
+            return;
         }
 
         self.enqueue_spinner.tick();
-        true
     }
 
     fn update_enqueue_status(&self, msg: impl Into<String>) {
         self.enqueue_spinner.set_message(msg.into());
     }
 
-    fn update_introspect_state(&self, resp: IntrospectResponse) -> bool {
+    fn update_introspect_state(&self, resp: IntrospectResponse) {
         let mut states = resp.artifact_uploads;
         states.extend(resp.image_downloads);
         self.remote_bar_tracker.lock().unwrap().update(self, states);

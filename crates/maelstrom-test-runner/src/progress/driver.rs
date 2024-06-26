@@ -50,23 +50,14 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
     {
         let canceled = self.canceled.clone();
         self.handle = Some(self.scope.spawn(move || {
-            thread::scope(|scope| {
-                scope.spawn(|| {
-                    while ind.tick() && !canceled.load(Ordering::Acquire) {
-                        thread::sleep(Duration::from_millis(500))
-                    }
-                });
-                while !canceled.load(Ordering::Acquire) {
-                    let introspect_resp = client.introspect()?;
-                    if !ind.update_introspect_state(introspect_resp) {
-                        return Ok(());
-                    }
+            while !canceled.load(Ordering::Acquire) {
+                let introspect_resp = client.introspect()?;
+                ind.update_introspect_state(introspect_resp);
 
-                    // Don't hammer server with requests
-                    thread::sleep(Duration::from_millis(500));
-                }
-                Ok(())
-            })
+                // Don't hammer server with requests
+                thread::sleep(Duration::from_millis(500));
+            }
+            Ok(())
         }));
     }
 
