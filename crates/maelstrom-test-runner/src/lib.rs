@@ -611,57 +611,59 @@ impl EnqueueResult {
     }
 }
 
-/// This is the public API for the MainApp
-///
-/// N.B. This API is a trait only for type-erasure purposes
-pub trait MainApp {
-    /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
-    /// `EnqueueResult::Done` is returned, or an error is encountered.
-    fn enqueue_one(&mut self) -> Result<EnqueueResult>;
-
-    /// Indicates that we have finished enqueuing jobs and starts tearing things down
-    fn drain(&mut self) -> Result<()>;
-
-    /// Waits for all outstanding jobs to finish, displays a summary, and obtains an `ExitCode`
-    fn finish(&mut self) -> Result<ExitCode>;
-}
-
-struct MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
+struct MainApp<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
     queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
 }
 
-impl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps>
-    MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
-{
-    fn new(
-        state: &'state MainAppState<MainAppDepsT>,
-        queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
-        prog_driver: ProgressDriverT,
-        prog: ProgressIndicatorT,
-    ) -> Self {
-        Self {
-            state,
-            queuing,
-            prog_driver,
-            prog,
-        }
-    }
-}
-
-impl<'state, 'scope, ProgressIndicatorT, ProgressDriverT, MainAppDepsT> MainApp
-    for MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
+impl<'state, 'scope, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
+    MainApp<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
     ProgressDriverT: ProgressDriver<'scope>,
     MainAppDepsT: MainAppDeps,
 {
-    fn enqueue_one(&mut self) -> Result<EnqueueResult> {
+    pub fn new(
+        state: &'state MainAppState<MainAppDepsT>,
+        prog: ProgressIndicatorT,
+        mut prog_driver: ProgressDriverT,
+        timeout_override: Option<Option<Timeout>>,
+    ) -> Result<Self>
+    where
+        'state: 'scope,
+    {
+        prog_driver.drive(state.deps.client(), prog.clone());
+        prog.update_length(state.queuing_state.expected_job_count);
+
+        state
+            .logging_output
+            .update(progress::ProgressWriteAdapter::new(prog.clone()));
+        slog::debug!(state.log, "main app created");
+
+        let queuing = JobQueuing::new(
+            state.log.clone(),
+            &state.queuing_state,
+            &state.deps,
+            prog.clone(),
+            timeout_override,
+        )?;
+        Ok(Self {
+            state,
+            queuing,
+            prog_driver,
+            prog,
+        })
+    }
+
+    /// Enqueue one test as a job on the `Client`. This is meant to be called repeatedly until
+    /// `EnqueueResult::Done` is returned, or an error is encountered.
+    pub fn enqueue_one(&mut self) -> Result<EnqueueResult> {
         self.queuing.enqueue_one()
     }
 
+    /// Indicates that we have finished enqueuing jobs and starts tearing things down
     fn drain(&mut self) -> Result<()> {
         slog::debug!(self.queuing.log, "draining");
         self.prog
@@ -670,6 +672,7 @@ where
         Ok(())
     }
 
+    /// Waits for all outstanding jobs to finish, displays a summary, and obtains an `ExitCode`
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.state.queuing_state.tracker.wait_for_outstanding();
@@ -749,39 +752,6 @@ impl Logger {
     }
 }
 
-fn main_app_new<'state, 'scope, MainAppDepsT>(
-    state: &'state MainAppState<MainAppDepsT>,
-    prog: ui::UiSender,
-    mut prog_driver: impl ProgressDriver<'scope> + 'scope,
-    timeout_override: Option<Option<Timeout>>,
-) -> Result<Box<dyn MainApp + 'scope>>
-where
-    MainAppDepsT: MainAppDeps,
-    'state: 'scope,
-{
-    prog_driver.drive(state.deps.client(), prog.clone());
-    prog.update_length(state.queuing_state.expected_job_count);
-
-    state
-        .logging_output
-        .update(progress::ProgressWriteAdapter::new(prog.clone()));
-    slog::debug!(state.log, "main app created");
-
-    let queuing = JobQueuing::new(
-        state.log.clone(),
-        &state.queuing_state,
-        &state.deps,
-        prog.clone(),
-        timeout_override,
-    )?;
-    Ok(Box::new(MainAppImpl::new(
-        state,
-        queuing,
-        prog_driver,
-        prog,
-    )))
-}
-
 pub fn run_app_with_ui_multithreaded<MainAppDepsT, TermT>(
     state: MainAppState<MainAppDepsT>,
     stdout_is_tty: bool,
@@ -811,7 +781,7 @@ where
     });
 
     let exit_code = std::thread::scope(|scope| {
-        let mut app = main_app_new(
+        let mut app = MainApp::new(
             &state,
             prog,
             progress::DefaultProgressDriver::new(scope),

@@ -1,12 +1,11 @@
 use crate::{
     config::Quiet,
-    main_app_new,
     metadata::TestMetadata,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{TestListing, TestListingStore},
-    ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
-    MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact, TestLayers,
-    TestPackage, TestPackageId, Wait,
+    ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
+    MainAppDeps, MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
+    TestLayers, TestPackage, TestPackageId, Wait,
 };
 use anyhow::Result;
 use indicatif::InMemoryTerm;
@@ -528,7 +527,7 @@ fn run_app(
     let (ui_send, ui_recv) = std::sync::mpsc::channel();
     let prog = ui::UiSender::new(ui_send);
     let prog_driver = TestProgressDriver::default();
-    let mut app = main_app_new(&state, prog, prog_driver.clone(), None).unwrap();
+    let mut app = MainApp::new(&state, prog, prog_driver.clone(), None).unwrap();
 
     let mut running = vec![];
     loop {
