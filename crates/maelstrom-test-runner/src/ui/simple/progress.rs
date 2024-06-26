@@ -12,7 +12,6 @@ pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
 use crate::ui::{PrintWidthCb, Terminal};
 use anyhow::Result;
-use colored::Colorize as _;
 use indicatif::{ProgressBar, ProgressStyle};
 use maelstrom_client::IntrospectResponse;
 use std::{
@@ -26,14 +25,6 @@ pub trait ProgressPrinter {
 
     /// Prints a line to stdout while not interfering with any progress bars
     fn println_width(&self, cb: impl PrintWidthCb<String>);
-
-    /// Prints a line to stdout while not interfering with any progress bars and indicating it was
-    /// stderr
-    fn eprintln(&self, msg: impl AsRef<str>) {
-        for line in msg.as_ref().lines() {
-            self.println(format!("{} {line}", "stderr:".red()))
-        }
-    }
 }
 
 pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {

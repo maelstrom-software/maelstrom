@@ -1,11 +1,13 @@
+mod progress;
+
 use super::{Terminal, UiMessage};
 use crate::config::Quiet;
-use crate::progress::{
+use anyhow::Result;
+use derive_more::From;
+use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressPrinter as _, QuietNoBar,
     QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
 };
-use anyhow::Result;
-use derive_more::From;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, SystemTime};
 

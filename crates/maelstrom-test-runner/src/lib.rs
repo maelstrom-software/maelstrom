@@ -3,7 +3,6 @@ pub mod config;
 mod deps;
 mod introspect_driver;
 pub mod metadata;
-pub mod progress;
 pub mod test_listing;
 pub mod ui;
 pub mod visitor;
