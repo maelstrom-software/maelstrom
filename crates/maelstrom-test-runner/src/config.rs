@@ -12,7 +12,7 @@ use std::{
 };
 use xdg::BaseDirectories;
 
-#[derive(Clone, Deserialize, From)]
+#[derive(Copy, Clone, Deserialize, From)]
 #[serde(transparent)]
 pub struct Quiet(bool);
 

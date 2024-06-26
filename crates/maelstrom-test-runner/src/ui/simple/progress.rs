@@ -10,7 +10,8 @@ pub use quiet_no_bar::QuietNoBar;
 pub use quiet_progress_bar::QuietProgressBar;
 pub use test_listing::{TestListingProgress, TestListingProgressNoSpinner};
 
-use crate::ui::{PrintWidthCb, Terminal};
+use super::Terminal;
+use crate::ui::PrintWidthCb;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use maelstrom_client::IntrospectResponse;

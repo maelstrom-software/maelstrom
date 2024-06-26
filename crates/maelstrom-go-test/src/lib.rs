@@ -11,9 +11,9 @@ use maelstrom_client::{
 };
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
-    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::UiSender, BuildDir, CollectTests,
-    ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal, TestArtifact,
-    TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -326,20 +326,16 @@ fn maybe_print_build_error(stderr: &mut impl io::Write, res: Result<ExitCode>) -
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn main<TermT>(
+pub fn main(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
     project_dir: &Root<ProjectDir>,
     bg_proc: ClientBgProcess,
     logger: Logger,
     stderr_is_tty: bool,
-    stdout_is_tty: bool,
-    terminal: TermT,
     mut stderr: impl io::Write,
-) -> Result<ExitCode>
-where
-    TermT: Terminal,
-{
+    ui: impl Ui,
+) -> Result<ExitCode> {
     if extra_options.client_bg_proc {
         return alternative_mains::client_bg_proc();
     }
@@ -387,12 +383,6 @@ where
         log,
     )?;
 
-    let res = run_app_with_ui_multithreaded(
-        state,
-        stdout_is_tty,
-        config.parent.quiet,
-        terminal,
-        config.parent.timeout.map(Timeout::new),
-    );
+    let res = run_app_with_ui_multithreaded(state, config.parent.timeout.map(Timeout::new), ui);
     maybe_print_build_error(&mut stderr, res)
 }

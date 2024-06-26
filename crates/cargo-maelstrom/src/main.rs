@@ -1,7 +1,7 @@
 use anyhow::Result;
 use cargo_maelstrom::{cli::ExtraCommandLineOptions, config::Config, Logger};
-use console::Term;
 use maelstrom_client::ClientBgProcess;
+use maelstrom_test_runner::ui;
 use maelstrom_util::process::ExitCode;
 use std::{env, io::IsTerminal as _};
 
@@ -20,15 +20,10 @@ pub fn main() -> Result<ExitCode> {
 
     let stderr_is_tty = std::io::stderr().is_terminal();
     let stdout_is_tty = std::io::stdout().is_terminal();
-    let terminal = Term::buffered_stdout();
 
-    cargo_maelstrom::main(
-        config,
-        extra_options,
-        bg_proc,
-        logger,
-        stderr_is_tty,
-        stdout_is_tty,
-        terminal,
-    )
+    let list =
+        extra_options.list.tests || extra_options.list.binaries || extra_options.list.packages;
+    let ui = ui::factory(ui::UiKind::Simple, list, stdout_is_tty, config.parent.quiet);
+
+    cargo_maelstrom::main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
 }

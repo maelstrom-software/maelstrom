@@ -11,11 +11,9 @@ pub mod visitor;
 mod tests;
 
 pub use deps::*;
-pub use ui::Terminal;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
-use config::Quiet;
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
@@ -31,7 +29,7 @@ use std::{
     },
 };
 use test_listing::TestListingStore;
-use ui::{UiImpl, UiKind, UiSender, UiSenderWriteAdapter};
+use ui::{Ui, UiSender, UiSenderWriteAdapter};
 use visitor::{JobStatusTracker, JobStatusVisitor};
 
 #[derive(Debug)]
@@ -752,25 +750,17 @@ impl Logger {
     }
 }
 
-pub fn run_app_with_ui_multithreaded<MainAppDepsT, TermT>(
+pub fn run_app_with_ui_multithreaded<MainAppDepsT>(
     state: MainAppState<MainAppDepsT>,
-    stdout_is_tty: bool,
-    quiet: Quiet,
-    terminal: TermT,
     timeout_override: Option<Option<Timeout>>,
+    mut ui: impl Ui,
 ) -> Result<ExitCode>
 where
     MainAppDepsT: MainAppDeps,
-    TermT: Terminal,
 {
     let (ui_send, ui_recv) = std::sync::mpsc::channel();
     let ui_sender = UiSender::new(ui_send);
-    let list = state.queuing_state.list_action.is_some();
-
-    let ui_handle = std::thread::spawn(move || {
-        let mut ui = UiImpl::new(UiKind::Simple, list, stdout_is_tty, quiet, terminal);
-        ui.run(ui_recv)
-    });
+    let ui_handle = std::thread::spawn(move || ui.run(ui_recv));
 
     let exit_code = std::thread::scope(|scope| {
         let mut app = MainApp::new(

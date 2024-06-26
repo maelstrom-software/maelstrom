@@ -1,7 +1,7 @@
 use anyhow::Result;
-use console::Term;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
+use maelstrom_test_runner::ui;
 use maelstrom_util::{process::ExitCode, root::Root};
 use std::{env, io::IsTerminal as _, path::Path};
 
@@ -16,10 +16,16 @@ pub fn main() -> Result<ExitCode> {
 
     let stderr_is_tty = std::io::stderr().is_terminal();
     let stdout_is_tty = std::io::stdout().is_terminal();
-    let terminal = Term::buffered_stdout();
 
     let cwd = Path::new(".").canonicalize()?;
     let project_dir = Root::<ProjectDir>::new(&cwd);
+
+    let ui = ui::factory(
+        ui::UiKind::Simple,
+        extra_options.list,
+        stdout_is_tty,
+        config.parent.quiet,
+    );
 
     maelstrom_pytest::main(
         config,
@@ -28,8 +34,7 @@ pub fn main() -> Result<ExitCode> {
         bg_proc,
         logger,
         stderr_is_tty,
-        stdout_is_tty,
-        terminal,
         std::io::stderr(),
+        ui,
     )
 }

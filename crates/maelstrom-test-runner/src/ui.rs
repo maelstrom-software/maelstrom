@@ -3,19 +3,21 @@ mod simple;
 use crate::config::Quiet;
 use anyhow::Result;
 use colored::Colorize as _;
-use derive_more::From;
-use indicatif::TermLike;
 use maelstrom_client::IntrospectResponse;
 use std::io;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
+pub use simple::SimpleUi;
 
-impl<TermT> Terminal for TermT where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
-{
+pub trait Ui: Send + Sync + 'static {
+    fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()>;
+}
+
+impl Ui for Box<dyn Ui> {
+    fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
+        Ui::run(&mut **self, recv)
+    }
 }
 
 pub trait PrintWidthCb<RetT>: FnOnce(usize) -> RetT + Send + Sync + 'static {}
@@ -111,31 +113,6 @@ impl UiSender {
     }
 }
 
-pub enum UiKind {
-    Simple,
-}
-
-#[derive(From)]
-pub enum UiImpl<TermT> {
-    Simple(simple::SimpleUi<TermT>),
-}
-
-impl<TermT> UiImpl<TermT>
-where
-    TermT: Terminal,
-{
-    pub fn new(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet, term: TermT) -> Self {
-        match kind {
-            UiKind::Simple => simple::SimpleUi::new(list, stdout_is_tty, quiet, term).into(),
-        }
-    }
-    pub fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
-        match self {
-            Self::Simple(u) => u.run(recv),
-        }
-    }
-}
-
 pub struct UiSenderWriteAdapter {
     send: UiSender,
     line: String,
@@ -163,5 +140,20 @@ impl io::Write for UiSenderWriteAdapter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+pub enum UiKind {
+    Simple,
+}
+
+pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> Box<dyn Ui> {
+    match kind {
+        UiKind::Simple => Box::new(SimpleUi::new(
+            list,
+            stdout_is_tty,
+            quiet,
+            console::Term::buffered_stdout(),
+        )),
     }
 }

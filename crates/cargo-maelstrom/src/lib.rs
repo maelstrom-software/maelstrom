@@ -12,9 +12,9 @@ use maelstrom_client::{
     ContainerImageDepotDir, ProjectDir, StateDir,
 };
 use maelstrom_test_runner::{
-    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::UiSender, BuildDir, CollectTests,
-    ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal, TestArtifact,
-    TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
+    metadata::TestMetadata, run_app_with_ui_multithreaded, ui::Ui, ui::UiSender, BuildDir,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
     config::common::{BrokerAddr, CacheSize, InlineLimit, Slots},
@@ -507,18 +507,14 @@ fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
     Ok(cargo_metadata)
 }
 
-pub fn main<TermT>(
+pub fn main(
     config: config::Config,
     extra_options: cli::ExtraCommandLineOptions,
     bg_proc: ClientBgProcess,
     logger: Logger,
     stderr_is_tty: bool,
-    stdout_is_tty: bool,
-    terminal: TermT,
-) -> Result<ExitCode>
-where
-    TermT: Terminal,
-{
+    ui: impl Ui,
+) -> Result<ExitCode> {
     if extra_options.client_bg_proc {
         alternative_mains::client_bg_proc()
     } else if extra_options.test_metadata.init {
@@ -593,13 +589,7 @@ where
             log,
         )?;
 
-        let res = run_app_with_ui_multithreaded(
-            state,
-            stdout_is_tty,
-            config.parent.quiet,
-            terminal,
-            config.parent.timeout.map(Timeout::new),
-        );
+        let res = run_app_with_ui_multithreaded(state, config.parent.timeout.map(Timeout::new), ui);
         maybe_print_build_error(res)
     }
 }

@@ -6,6 +6,7 @@ use cargo_maelstrom::{
 };
 use indicatif::InMemoryTerm;
 use maelstrom_client::ClientBgProcess;
+use maelstrom_test_runner::ui;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -74,16 +75,9 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let logger = Logger::GivenLogger(log.clone());
 
     let bg_proc = spawn_bg_proc();
-    cargo_maelstrom::main(
-        config,
-        extra_options,
-        bg_proc,
-        logger,
-        false,
-        false,
-        term.clone(),
-    )
-    .unwrap();
+
+    let ui = ui::SimpleUi::new(false, false, false.into(), term.clone());
+    cargo_maelstrom::main(config, extra_options, bg_proc, logger, false, ui).unwrap();
 
     term.contents()
 }

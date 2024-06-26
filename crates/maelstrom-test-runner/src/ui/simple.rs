@@ -1,15 +1,24 @@
 mod progress;
 
-use super::{Terminal, UiMessage};
+use super::{Ui, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use derive_more::From;
+use indicatif::TermLike;
 use progress::{
     MultipleProgressBars, NoBar, ProgressIndicator, ProgressPrinter as _, QuietNoBar,
     QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
 };
+use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, SystemTime};
+
+pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
+
+impl<TermT> Terminal for TermT where
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
+{
+}
 
 #[derive(From)]
 pub enum SimpleUi<TermT> {
@@ -44,8 +53,13 @@ where
             }
         }
     }
+}
 
-    pub fn run(&self, recv: Receiver<UiMessage>) -> Result<()> {
+impl<TermT> Ui for SimpleUi<TermT>
+where
+    TermT: Terminal,
+{
+    fn run(&mut self, recv: Receiver<UiMessage>) -> Result<()> {
         match self {
             Self::TestListingProgress(p) => run_simple_ui(p, recv),
             Self::TestListingProgressNoSpinner(p) => run_simple_ui(p, recv),

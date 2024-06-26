@@ -3,6 +3,7 @@ use indicatif::InMemoryTerm;
 use maelstrom_client::{ClientBgProcess, ProjectDir};
 use maelstrom_container::local_registry;
 use maelstrom_pytest::{cli::ExtraCommandLineOptions, Config, Logger};
+use maelstrom_test_runner::ui;
 use maelstrom_util::{
     config::common::{CacheSize, InlineLimit, LogLevel, Slots},
     fs::Fs,
@@ -103,6 +104,7 @@ fn do_maelstrom_pytest_test(
 
     let logger = Logger::GivenLogger(log.clone());
 
+    let ui = ui::SimpleUi::new(extra_options.list, false, false.into(), term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
     let exit_code = maelstrom_pytest::main(
@@ -112,9 +114,8 @@ fn do_maelstrom_pytest_test(
         bg_proc,
         logger,
         false,
-        false,
-        term.clone(),
         &mut stderr,
+        ui,
     )
     .unwrap();
 

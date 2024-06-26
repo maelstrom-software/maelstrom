@@ -3,7 +3,8 @@ use crate::{
     introspect_driver::IntrospectDriver,
     metadata::TestMetadata,
     test_listing::{TestListing, TestListingStore},
-    ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
+    ui::{self, Ui as _},
+    BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
     MainAppDeps, MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
     TestLayers, TestPackage, TestPackageId, Wait,
 };
@@ -549,7 +550,7 @@ fn run_app(
     drop(introspect_driver);
     drop(state);
 
-    let mut ui = ui::UiImpl::new(ui::UiKind::Simple, is_list, stdout_tty, quiet, term.clone());
+    let mut ui = ui::SimpleUi::new(is_list, stdout_tty, quiet, term.clone());
     ui.run(ui_recv).unwrap();
 
     slog::info!(log, "test complete");
