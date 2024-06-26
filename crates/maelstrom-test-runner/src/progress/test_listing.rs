@@ -1,7 +1,5 @@
-use super::{ProgressBarPrinter, ProgressIndicator, TermPrinter};
-use anyhow::Result;
-use indicatif::{ProgressBar, TermLike};
-use std::panic::{RefUnwindSafe, UnwindSafe};
+use super::{ProgressBarPrinter, ProgressIndicator, TermPrinter, Terminal};
+use indicatif::ProgressBar;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -10,30 +8,39 @@ struct State {
 }
 
 #[derive(Clone)]
-pub struct TestListingProgress {
+pub struct TestListingProgress<TermT> {
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
     print_lock: Arc<Mutex<()>>,
+    term: TermT,
 }
 
-impl TestListingProgress {
-    pub fn new(_term: impl TermLike + 'static, spinner_message: &'static str) -> Self {
+impl<TermT> TestListingProgress<TermT>
+where
+    TermT: Terminal,
+{
+    pub fn new(term: TermT, spinner_message: &'static str) -> Self {
         let enqueue_spinner = ProgressBar::new_spinner().with_message(spinner_message);
         Self {
             enqueue_spinner,
             state: Default::default(),
             print_lock: Default::default(),
+            term,
         }
     }
 }
 
-impl ProgressIndicator for TestListingProgress {
+impl<TermT> ProgressIndicator for TestListingProgress<TermT>
+where
+    TermT: Terminal,
+{
     type Printer<'a> = ProgressBarPrinter<'a>;
 
     fn lock_printing(&self) -> Self::Printer<'_> {
         ProgressBarPrinter {
             out: self.enqueue_spinner.clone(),
             _guard: self.print_lock.lock().unwrap(),
+            width: self.term.width() as usize,
         }
     }
 
@@ -75,7 +82,7 @@ impl<TermT> TestListingProgressNoSpinner<TermT> {
 
 impl<TermT> ProgressIndicator for TestListingProgressNoSpinner<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
     type Printer<'a> = TermPrinter<'a, TermT>;
 
@@ -83,10 +90,5 @@ where
         TermPrinter {
             out: self.term.lock().unwrap(),
         }
-    }
-
-    fn finished(&self) -> Result<()> {
-        self.term.lock().unwrap().flush()?;
-        Ok(())
     }
 }

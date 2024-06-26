@@ -1,7 +1,5 @@
-use super::{NullPrinter, ProgressIndicator};
+use super::{NullPrinter, PrintWidthCb, ProgressIndicator, Terminal};
 use anyhow::Result;
-use indicatif::TermLike;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 
 #[derive(Clone)]
 pub struct QuietNoBar<TermT> {
@@ -16,7 +14,7 @@ impl<TermT> QuietNoBar<TermT> {
 
 impl<TermT> ProgressIndicator for QuietNoBar<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
     type Printer<'a> = NullPrinter;
 
@@ -25,7 +23,10 @@ where
         NullPrinter
     }
 
-    fn finished(&self) -> Result<()> {
+    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+        for line in summary(self.term.width() as usize) {
+            self.term.write_line(&line)?;
+        }
         self.term.flush()?;
         Ok(())
     }

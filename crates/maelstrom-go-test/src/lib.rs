@@ -4,7 +4,6 @@ mod go_test;
 pub mod pattern;
 
 use anyhow::{Context as _, Result};
-use indicatif::TermLike;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -13,7 +12,7 @@ use maelstrom_client::{
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal,
     TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
@@ -23,7 +22,6 @@ use maelstrom_util::{
     root::Root,
     template::TemplateVars,
 };
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -344,7 +342,7 @@ pub fn main<TermT>(
     mut stderr: impl io::Write,
 ) -> Result<ExitCode>
 where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
     if extra_options.client_bg_proc {
         return alternative_mains::client_bg_proc();

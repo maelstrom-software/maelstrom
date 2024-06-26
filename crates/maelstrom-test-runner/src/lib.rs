@@ -4,31 +4,27 @@ mod deps;
 pub mod metadata;
 pub mod progress;
 pub mod test_listing;
+mod ui;
 pub mod visitor;
 
 #[cfg(test)]
 mod tests;
 
 pub use deps::*;
+pub use progress::Terminal;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use config::Quiet;
-use indicatif::TermLike;
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
 use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
 use metadata::{AllMetadata, TestMetadata};
-use progress::{
-    MultipleProgressBars, NoBar, ProgressDriver, ProgressIndicator, ProgressPrinter as _,
-    QuietNoBar, QuietProgressBar, TestListingProgress, TestListingProgressNoSpinner,
-};
+use progress::{ProgressDriver, ProgressIndicator, ProgressPrinter as _};
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
-    io,
-    panic::{RefUnwindSafe, UnwindSafe},
-    str,
+    io, str,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -130,7 +126,6 @@ struct ArtifactQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
-    width: usize,
     ind: ProgressIndicatorT,
     artifact: ArtifactM<MainAppDepsT>,
     ignored_cases: HashSet<String>,
@@ -191,7 +186,6 @@ where
         log: slog::Logger,
         queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
-        width: usize,
         ind: ProgressIndicatorT,
         artifact: ArtifactM<MainAppDepsT>,
         package_name: String,
@@ -210,7 +204,6 @@ where
             log,
             queuing_state,
             deps,
-            width,
             ind,
             artifact,
             ignored_cases: listing.ignored_cases,
@@ -315,7 +308,6 @@ where
             self.artifact.to_key(),
             case_name.to_owned(),
             case_str.clone(),
-            self.width,
             self.ind.clone(),
             MainAppDepsT::TestCollector::remove_fixture_output
                 as fn(&str, Vec<String>) -> Vec<String>,
@@ -390,7 +382,6 @@ struct JobQueuing<'a, ProgressIndicatorT, MainAppDepsT: MainAppDeps> {
     log: slog::Logger,
     queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
     deps: &'a MainAppDepsT,
-    width: usize,
     ind: ProgressIndicatorT,
     wait_handle: Option<BuildHandleM<MainAppDepsT>>,
     package_match: bool,
@@ -408,7 +399,6 @@ where
         log: slog::Logger,
         queuing_state: &'a JobQueuingState<MainAppDepsT::TestCollector>,
         deps: &'a MainAppDepsT,
-        width: usize,
         ind: ProgressIndicatorT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self> {
@@ -433,7 +423,6 @@ where
             log,
             queuing_state,
             deps,
-            width,
             ind,
             package_match: false,
             artifacts,
@@ -468,7 +457,6 @@ where
             self.log.clone(),
             self.queuing_state,
             self.deps,
-            self.width,
             self.ind.clone(),
             artifact,
             package_name.into(),
@@ -638,39 +626,35 @@ pub trait MainApp {
     fn finish(&mut self) -> Result<ExitCode>;
 }
 
-struct MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
+struct MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
     queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
     prog_driver: ProgressDriverT,
     prog: ProgressIndicatorT,
-    term: TermT,
 }
 
-impl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps>
-    MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
+impl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT: MainAppDeps>
+    MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
 {
     fn new(
         state: &'state MainAppState<MainAppDepsT>,
         queuing: JobQueuing<'state, ProgressIndicatorT, MainAppDepsT>,
         prog_driver: ProgressDriverT,
         prog: ProgressIndicatorT,
-        term: TermT,
     ) -> Self {
         Self {
             state,
             queuing,
             prog_driver,
             prog,
-            term,
         }
     }
 }
 
-impl<'state, 'scope, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT> MainApp
-    for MainAppImpl<'state, TermT, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
+impl<'state, 'scope, ProgressIndicatorT, ProgressDriverT, MainAppDepsT> MainApp
+    for MainAppImpl<'state, ProgressIndicatorT, ProgressDriverT, MainAppDepsT>
 where
     ProgressIndicatorT: ProgressIndicator,
-    TermT: TermLike + Clone + 'static,
     ProgressDriverT: ProgressDriver<'scope>,
     MainAppDepsT: MainAppDeps,
 {
@@ -683,22 +667,16 @@ where
         self.prog
             .update_length(self.state.queuing_state.jobs_queued.load(Ordering::Acquire));
         self.prog.done_queuing_jobs();
-        self.prog_driver.stop()?;
         Ok(())
     }
 
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.state.queuing_state.tracker.wait_for_outstanding();
-        self.prog.finished()?;
+        self.prog_driver.stop()?;
 
-        if self.state.queuing_state.list_action.is_none() {
-            let width = self.term.width() as usize;
-            self.state
-                .queuing_state
-                .tracker
-                .print_summary(width, self.term.clone())?;
-        }
+        let summary_cb = self.state.queuing_state.tracker.print_summary_cb();
+        self.prog.finished(summary_cb)?;
 
         self.state.test_listing_store.save(
             self.state
@@ -771,22 +749,16 @@ impl Logger {
     }
 }
 
-fn new_helper<'state, 'scope, ProgressIndicatorT, TermT, MainAppDepsT>(
+fn main_app_new<'state, 'scope, MainAppDepsT>(
     state: &'state MainAppState<MainAppDepsT>,
-    prog_factory: impl FnOnce(TermT) -> ProgressIndicatorT,
-    term: TermT,
+    prog: ui::UiSender,
     mut prog_driver: impl ProgressDriver<'scope> + 'scope,
     timeout_override: Option<Option<Timeout>>,
 ) -> Result<Box<dyn MainApp + 'scope>>
 where
-    ProgressIndicatorT: ProgressIndicator,
-    TermT: TermLike + Clone + 'static,
     MainAppDepsT: MainAppDeps,
     'state: 'scope,
 {
-    let width = term.width() as usize;
-    let prog = prog_factory(term.clone());
-
     prog_driver.drive(state.deps.client(), prog.clone());
     prog.update_length(state.queuing_state.expected_job_count);
 
@@ -799,7 +771,6 @@ where
         state.log.clone(),
         &state.queuing_state,
         &state.deps,
-        width,
         prog.clone(),
         timeout_override,
     )?;
@@ -808,81 +779,7 @@ where
         queuing,
         prog_driver,
         prog,
-        term,
     )))
-}
-
-/// Construct a `MainApp`
-///
-/// `state`: The shared state for the main app
-/// `stdout_tty`: should terminal color codes be printed to stdout (provided via `term`)
-/// `quiet`: indicates whether quiet mode should be used or not
-/// `term`: represents the terminal
-/// `driver`: drives the background work needed for updating the progress bars
-pub fn main_app_new<'state, 'scope, TermT, MainAppDepsT>(
-    state: &'state MainAppState<MainAppDepsT>,
-    stdout_tty: bool,
-    quiet: Quiet,
-    term: TermT,
-    driver: impl ProgressDriver<'scope> + 'scope,
-    timeout_override: Option<Option<Timeout>>,
-) -> Result<Box<dyn MainApp + 'scope>>
-where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
-    MainAppDepsT: MainAppDeps,
-    'state: 'scope,
-{
-    let spinner_msg = MainAppDepsT::TestCollector::ENQUEUE_MESSAGE;
-    if state.queuing_state.list_action.is_some() {
-        return if stdout_tty {
-            Ok(new_helper(
-                state,
-                |term| TestListingProgress::new(term, spinner_msg),
-                term,
-                driver,
-                timeout_override,
-            )?)
-        } else {
-            Ok(new_helper(
-                state,
-                TestListingProgressNoSpinner::new,
-                term,
-                driver,
-                timeout_override,
-            )?)
-        };
-    }
-
-    match (stdout_tty, quiet.into_inner()) {
-        (true, true) => Ok(new_helper(
-            state,
-            QuietProgressBar::new,
-            term,
-            driver,
-            timeout_override,
-        )?),
-        (true, false) => Ok(new_helper(
-            state,
-            |term| MultipleProgressBars::new(term, spinner_msg),
-            term,
-            driver,
-            timeout_override,
-        )?),
-        (false, true) => Ok(new_helper(
-            state,
-            QuietNoBar::new,
-            term,
-            driver,
-            timeout_override,
-        )?),
-        (false, false) => Ok(new_helper(
-            state,
-            NoBar::new,
-            term,
-            driver,
-            timeout_override,
-        )?),
-    }
 }
 
 pub fn run_app_with_ui_multithreaded<MainAppDepsT, TermT>(
@@ -894,19 +791,38 @@ pub fn run_app_with_ui_multithreaded<MainAppDepsT, TermT>(
 ) -> Result<ExitCode>
 where
     MainAppDepsT: MainAppDeps,
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
-    std::thread::scope(|scope| {
-        let mut app = main_app_new(
-            &state,
+    let (ui_send, ui_recv) = std::sync::mpsc::channel();
+    let prog = ui::UiSender::new(ui_send);
+    let list = state.queuing_state.list_action.is_some();
+
+    let spinner_msg = MainAppDepsT::TestCollector::ENQUEUE_MESSAGE;
+    let ui_handle = std::thread::spawn(move || {
+        let mut ui = ui::UiImpl::new(
+            ui::UiKind::Simple,
+            spinner_msg,
+            list,
             stdout_is_tty,
             quiet,
             terminal,
+        );
+        ui.run(ui_recv)
+    });
+
+    let exit_code = std::thread::scope(|scope| {
+        let mut app = main_app_new(
+            &state,
+            prog,
             progress::DefaultProgressDriver::new(scope),
             timeout_override,
         )?;
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;
         app.finish()
-    })
+    })?;
+    drop(state);
+
+    ui_handle.join().unwrap()?;
+    Ok(exit_code)
 }

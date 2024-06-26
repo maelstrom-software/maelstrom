@@ -1,7 +1,5 @@
-use super::{ProgressIndicator, TermPrinter};
+use super::{PrintWidthCb, ProgressIndicator, ProgressPrinter as _, TermPrinter, Terminal};
 use anyhow::Result;
-use indicatif::TermLike;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -19,7 +17,7 @@ impl<TermT> NoBar<TermT> {
 
 impl<TermT> ProgressIndicator for NoBar<TermT>
 where
-    TermT: TermLike + Clone + Send + Sync + RefUnwindSafe + UnwindSafe + 'static,
+    TermT: Terminal,
 {
     type Printer<'a> = TermPrinter<'a, TermT>;
 
@@ -29,8 +27,11 @@ where
         }
     }
 
-    fn finished(&self) -> Result<()> {
-        self.term.lock().unwrap().flush()?;
+    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
+        let printer = self.lock_printing();
+        for line in summary(printer.out.width() as usize) {
+            printer.println(line)
+        }
         Ok(())
     }
 }

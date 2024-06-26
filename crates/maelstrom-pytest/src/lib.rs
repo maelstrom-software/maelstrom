@@ -4,7 +4,6 @@ pub mod pattern;
 mod pytest;
 
 use anyhow::{anyhow, bail, Result};
-use indicatif::TermLike;
 use maelstrom_base::{
     enum_set, JobDevice, JobMount, JobNetwork, JobOutcome, JobRootOverlay, JobStatus, Timeout,
     Utf8PathBuf,
@@ -18,7 +17,7 @@ use maelstrom_container::{DockerReference, ImageName};
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
     metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, TestArtifact,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, Terminal, TestArtifact,
     TestArtifactKey, TestCaseMetadata, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
@@ -31,7 +30,6 @@ use maelstrom_util::{
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt as _;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::{fmt, io};
@@ -591,7 +589,7 @@ pub fn main<TermT>(
     mut stderr: impl io::Write,
 ) -> Result<ExitCode>
 where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
     if extra_options.client_bg_proc {
         return alternative_mains::client_bg_proc();

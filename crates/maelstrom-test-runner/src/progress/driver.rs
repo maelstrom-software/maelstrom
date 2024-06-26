@@ -65,13 +65,13 @@ impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env
                     // Don't hammer server with requests
                     thread::sleep(Duration::from_millis(500));
                 }
-                ind.finished()?;
                 Ok(())
             })
         }));
     }
 
     fn stop(&mut self) -> Result<()> {
+        self.canceled.store(true, Ordering::Release);
         self.handle.take().unwrap().join().unwrap()
     }
 }

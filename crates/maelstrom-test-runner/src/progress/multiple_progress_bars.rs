@@ -1,6 +1,8 @@
-use super::{ProgressBarPrinter, ProgressIndicator, COLORS};
+use super::{
+    PrintWidthCb, ProgressBarPrinter, ProgressIndicator, ProgressPrinter as _, Terminal, COLORS,
+};
 use anyhow::Result;
-use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget, TermLike};
+use indicatif::{MultiProgress, ProgressBar, ProgressDrawTarget};
 use maelstrom_base::stats::{JobState, JobStateCounts};
 use maelstrom_client::{IntrospectResponse, RemoteProgress};
 use std::{
@@ -15,7 +17,10 @@ struct RemoteProgressBarTracker {
 }
 
 impl RemoteProgressBarTracker {
-    fn update(&mut self, ind: &MultipleProgressBars, states: Vec<RemoteProgress>) {
+    fn update<TermT>(&mut self, ind: &MultipleProgressBars<TermT>, states: Vec<RemoteProgress>)
+    where
+        TermT: Terminal,
+    {
         let mut existing = HashSet::new();
         for state in states {
             existing.insert(state.name.clone());
@@ -61,19 +66,26 @@ struct State {
 }
 
 #[derive(Clone)]
-pub struct MultipleProgressBars {
+pub struct MultipleProgressBars<TermT> {
     multi_bar: MultiProgress,
     bars: HashMap<JobState, ProgressBar>,
     enqueue_spinner: ProgressBar,
     state: Arc<Mutex<State>>,
     print_lock: Arc<Mutex<()>>,
     remote_bar_tracker: Arc<Mutex<RemoteProgressBarTracker>>,
+    term: TermT,
 }
 
-impl MultipleProgressBars {
-    pub fn new(term: impl TermLike + 'static, spinner_message: &'static str) -> Self {
+impl<TermT> MultipleProgressBars<TermT>
+where
+    TermT: Terminal,
+{
+    pub fn new(term: TermT, spinner_message: &'static str) -> Self {
         let multi_bar = MultiProgress::new();
-        multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(Box::new(term), 20));
+        multi_bar.set_draw_target(ProgressDrawTarget::term_like_with_hz(
+            Box::new(term.clone()),
+            20,
+        ));
         let enqueue_spinner =
             multi_bar.add(ProgressBar::new_spinner().with_message(spinner_message));
 
@@ -89,6 +101,7 @@ impl MultipleProgressBars {
             state: Default::default(),
             print_lock: Default::default(),
             remote_bar_tracker: Default::default(),
+            term,
         }
     }
 
@@ -117,13 +130,17 @@ impl MultipleProgressBars {
     }
 }
 
-impl ProgressIndicator for MultipleProgressBars {
+impl<TermT> ProgressIndicator for MultipleProgressBars<TermT>
+where
+    TermT: Terminal,
+{
     type Printer<'a> = ProgressBarPrinter<'a>;
 
     fn lock_printing(&self) -> Self::Printer<'_> {
         ProgressBarPrinter {
             out: self.bars.get(&JobState::Complete).unwrap().clone(),
             _guard: self.print_lock.lock().unwrap(),
+            width: self.term.width() as usize,
         }
     }
 
@@ -175,11 +192,16 @@ impl ProgressIndicator for MultipleProgressBars {
         self.enqueue_spinner.finish_and_clear();
     }
 
-    fn finished(&self) -> Result<()> {
+    fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         for bar in self.bars.values() {
             bar.finish_and_clear();
         }
         self.enqueue_spinner.finish_and_clear();
+
+        let printer = self.lock_printing();
+        for line in summary(self.term.width() as usize) {
+            printer.println(line);
+        }
         Ok(())
     }
 }

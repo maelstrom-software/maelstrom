@@ -22,9 +22,26 @@ use std::{
     sync::MutexGuard,
 };
 
+pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
+
+impl<TermT> Terminal for TermT where
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static
+{
+}
+
+pub trait PrintWidthCb<RetT>: FnOnce(usize) -> RetT + Send + Sync + 'static {}
+
+impl<PrintCbT, RetT> PrintWidthCb<RetT> for PrintCbT where
+    PrintCbT: FnOnce(usize) -> RetT + Send + Sync + 'static
+{
+}
+
 pub trait ProgressPrinter {
     /// Prints a line to stdout while not interfering with any progress bars
     fn println(&self, msg: String);
+
+    /// Prints a line to stdout while not interfering with any progress bars
+    fn println_width(&self, cb: impl PrintWidthCb<String>);
 
     /// Prints a line to stdout while not interfering with any progress bars and indicating it was
     /// stderr
@@ -65,7 +82,7 @@ pub trait ProgressIndicator: Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 
     fn done_queuing_jobs(&self) {}
 
     /// Called when all jobs are done
-    fn finished(&self) -> Result<()> {
+    fn finished(&self, _summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
         Ok(())
     }
 }
@@ -128,6 +145,7 @@ fn make_side_progress_bar(color: &str, message: impl Into<String>, msg_len: usiz
 
 pub struct ProgressBarPrinter<'a> {
     out: ProgressBar,
+    width: usize,
     _guard: MutexGuard<'a, ()>,
 }
 
@@ -135,21 +153,30 @@ impl<'a> ProgressPrinter for ProgressBarPrinter<'a> {
     fn println(&self, msg: String) {
         self.out.println(msg);
     }
+
+    fn println_width(&self, cb: impl PrintWidthCb<String>) {
+        self.println(cb(self.width));
+    }
 }
 
 pub struct NullPrinter;
 
 impl ProgressPrinter for NullPrinter {
     fn println(&self, _msg: String) {}
+    fn println_width(&self, _cb: impl PrintWidthCb<String>) {}
 }
 
 pub struct TermPrinter<'a, TermT> {
     out: MutexGuard<'a, TermT>,
 }
 
-impl<'a, TermT: TermLike> ProgressPrinter for TermPrinter<'a, TermT> {
+impl<'a, TermT: Terminal> ProgressPrinter for TermPrinter<'a, TermT> {
     fn println(&self, msg: String) {
         let _ = self.out.write_line(&msg);
         let _ = self.out.flush();
+    }
+
+    fn println_width(&self, cb: impl FnOnce(usize) -> String + Send + Sync + 'static) {
+        self.println(cb(self.out.width() as usize))
     }
 }

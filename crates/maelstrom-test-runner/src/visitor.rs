@@ -1,9 +1,8 @@
-use crate::progress::{ProgressIndicator, ProgressPrinter};
+use crate::progress::{PrintWidthCb, ProgressIndicator, ProgressPrinter};
 use crate::test_listing::TestListing;
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
 use colored::{ColoredString, Colorize as _};
-use indicatif::TermLike;
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
     JobStatus,
@@ -13,12 +12,13 @@ use std::sync::{Arc, Condvar, Mutex};
 use unicode_truncate::UnicodeTruncateStr as _;
 use unicode_width::UnicodeWidthStr as _;
 
+#[derive(Clone)]
 enum CaseResult {
     Ignored,
     Ran(ExitCode),
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Statuses {
     outstanding: u64,
     completed: Vec<(String, CaseResult)>,
@@ -59,68 +59,69 @@ impl JobStatusTracker {
         }
     }
 
-    pub fn print_summary(&self, width: usize, term: impl TermLike) -> Result<()> {
-        term.write_line("")?;
+    pub fn print_summary_cb(&self) -> impl PrintWidthCb<Vec<String>> {
+        let statuses = self.statuses.lock().unwrap().clone();
+        move |width| {
+            let mut summary = vec![];
+            summary.push("".into());
 
-        let heading = " Test Summary ";
-        let equal_width = (width - heading.width()) / 2;
-        term.write_line(&format!(
-            "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
-            empty = ""
-        ))?;
+            let heading = " Test Summary ";
+            let equal_width = (width - heading.width()) / 2;
+            summary.push(format!(
+                "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
+                empty = ""
+            ));
 
-        let success = "Successful Tests";
-        let failure = "Failed Tests";
-        let ignore = "Ignored Tests";
-        let mut column1_width = std::cmp::max(success.width(), failure.width());
-        let max_digits = 9;
-        let statuses = self.statuses.lock().unwrap();
-        assert_eq!(statuses.outstanding, 0);
-        let failed = statuses
-            .completed
-            .iter()
-            .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS));
-        let ignored = statuses
-            .completed
-            .iter()
-            .filter(|(_, res)| matches!(res, CaseResult::Ignored));
-        let num_failed = failed.clone().count();
-        let num_ignored = ignored.clone().count();
-        let num_succeeded = statuses.completed.len() - num_failed - num_ignored;
+            let success = "Successful Tests";
+            let failure = "Failed Tests";
+            let ignore = "Ignored Tests";
+            let mut column1_width = std::cmp::max(success.width(), failure.width());
+            let max_digits = 9;
+            assert_eq!(statuses.outstanding, 0);
+            let failed = statuses
+                .completed
+                .iter()
+                .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS));
+            let ignored = statuses
+                .completed
+                .iter()
+                .filter(|(_, res)| matches!(res, CaseResult::Ignored));
+            let num_failed = failed.clone().count();
+            let num_ignored = ignored.clone().count();
+            let num_succeeded = statuses.completed.len() - num_failed - num_ignored;
 
-        if num_ignored > 0 {
-            column1_width = std::cmp::max(column1_width, ignore.width());
-        }
-
-        term.write_line(&format!(
-            "{:<column1_width$}: {num_succeeded:>max_digits$}",
-            success.green(),
-        ))?;
-        term.write_line(&format!(
-            "{:<column1_width$}: {num_failed:>max_digits$}",
-            failure.red(),
-        ))?;
-        let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
-        for (failed, _) in failed {
-            term.write_line(&format!("    {failed:<failed_width$}: {}", "failure".red()))?;
-        }
-
-        if num_ignored > 0 {
-            term.write_line(&format!(
-                "{:<column1_width$}: {num_ignored:>max_digits$}",
-                ignore.yellow(),
-            ))?;
-            let failed_width = ignored.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
-            for (ignored, _) in ignored {
-                term.write_line(&format!(
-                    "    {ignored:<failed_width$}: {}",
-                    "ignored".yellow()
-                ))?;
+            if num_ignored > 0 {
+                column1_width = std::cmp::max(column1_width, ignore.width());
             }
-        }
 
-        term.flush()?;
-        Ok(())
+            summary.push(format!(
+                "{:<column1_width$}: {num_succeeded:>max_digits$}",
+                success.green(),
+            ));
+            summary.push(format!(
+                "{:<column1_width$}: {num_failed:>max_digits$}",
+                failure.red(),
+            ));
+            let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
+            for (failed, _) in failed {
+                summary.push(format!("    {failed:<failed_width$}: {}", "failure".red()));
+            }
+
+            if num_ignored > 0 {
+                summary.push(format!(
+                    "{:<column1_width$}: {num_ignored:>max_digits$}",
+                    ignore.yellow(),
+                ));
+                let failed_width = ignored.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
+                for (ignored, _) in ignored {
+                    summary.push(format!(
+                        "    {ignored:<failed_width$}: {}",
+                        "ignored".yellow()
+                    ));
+                }
+            }
+            summary
+        }
     }
 
     pub fn exit_code(&self) -> ExitCode {
@@ -140,7 +141,6 @@ pub struct JobStatusVisitor<
     artifact: ArtifactKeyT,
     case: String,
     case_str: String,
-    width: usize,
     ind: ProgressIndicatorT,
     remove_fixture_output: RemoveFixtureOutputFn,
 }
@@ -159,7 +159,6 @@ where
         artifact: ArtifactKeyT,
         case: String,
         case_str: String,
-        width: usize,
         ind: ProgressIndicatorT,
         remove_fixture_output: RemoveFixtureOutputFn,
     ) -> Self {
@@ -170,7 +169,6 @@ where
             artifact,
             case,
             case_str,
-            width,
             ind,
             remove_fixture_output,
         }
@@ -228,32 +226,28 @@ where
         duration_str: String,
         printer: &impl ProgressPrinter,
     ) {
-        if self.width > 10 {
-            let case_width = self.case_str.width();
-            let trailer_str = format!("{result_str} {duration_str:>8}");
-            let trailer_width = result_str.width() + 1 + std::cmp::max(duration_str.width(), 8);
-            if case_width + trailer_width < self.width {
-                let dots_width = self.width - trailer_width - case_width;
-                let case = self.case_str.bold();
+        let case_str = self.case_str.clone();
+        printer.println_width(move |width| {
+            if width > 10 {
+                let case_width = case_str.width();
+                let trailer_str = format!("{result_str} {duration_str:>8}");
+                let trailer_width = result_str.width() + 1 + std::cmp::max(duration_str.width(), 8);
+                if case_width + trailer_width < width {
+                    let dots_width = width - trailer_width - case_width;
+                    let case = case_str.bold();
 
-                printer.println(format!(
-                    "{case}{empty:.<dots_width$}{trailer_str}",
-                    empty = "",
-                ));
+                    format!("{case}{empty:.<dots_width$}{trailer_str}", empty = "",)
+                } else {
+                    let (case, case_width) =
+                        case_str.unicode_truncate_start(width - 2 - trailer_width);
+                    let case = case.bold();
+                    let dots_width = width - trailer_width - case_width - 1;
+                    format!("<{case}{empty:.<dots_width$}{trailer_str}", empty = "")
+                }
             } else {
-                let (case, case_width) = self
-                    .case_str
-                    .unicode_truncate_start(self.width - 2 - trailer_width);
-                let case = case.bold();
-                let dots_width = self.width - trailer_width - case_width - 1;
-                printer.println(format!(
-                    "<{case}{empty:.<dots_width$}{trailer_str}",
-                    empty = ""
-                ));
+                format!("{case} {result_str}", case = case_str)
             }
-        } else {
-            printer.println(format!("{case} {result_str}", case = self.case_str));
-        }
+        });
     }
 
     pub fn job_finished(&self, res: Result<(ClientJobId, JobOutcomeResult)>) {

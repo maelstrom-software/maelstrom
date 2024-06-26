@@ -6,7 +6,6 @@ pub mod pattern;
 
 use anyhow::{anyhow, bail, Context as _, Result};
 use cargo_metadata::{Metadata as CargoMetadata, Target as CargoTarget};
-use indicatif::TermLike;
 use maelstrom_base::{Timeout, Utf8PathBuf};
 use maelstrom_client::{
     AcceptInvalidRemoteContainerTlsCerts, CacheDir, Client, ClientBgProcess,
@@ -14,7 +13,7 @@ use maelstrom_client::{
 };
 use maelstrom_test_runner::{
     metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
-    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
+    CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata, Terminal,
     TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
 use maelstrom_util::{
@@ -25,7 +24,6 @@ use maelstrom_util::{
     template::TemplateVars,
 };
 use pattern::ArtifactKind;
-use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::path::Path;
 use std::str::FromStr;
 use std::{fmt, io};
@@ -523,7 +521,7 @@ pub fn main<TermT>(
     terminal: TermT,
 ) -> Result<ExitCode>
 where
-    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+    TermT: Terminal,
 {
     if extra_options.client_bg_proc {
         alternative_mains::client_bg_proc()

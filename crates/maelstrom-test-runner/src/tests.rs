@@ -4,7 +4,7 @@ use crate::{
     metadata::TestMetadata,
     progress::{ProgressDriver, ProgressIndicator},
     test_listing::{TestListing, TestListingStore},
-    BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
+    ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainAppDeps,
     MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact, TestLayers,
     TestPackage, TestPackageId, Wait,
 };
@@ -510,6 +510,7 @@ fn run_app(
         target_directory.clone(),
     );
 
+    let is_list = list.is_some();
     let state = MainAppState::new(
         deps,
         include_filter,
@@ -524,16 +525,10 @@ fn run_app(
         log.clone(),
     )
     .unwrap();
+    let (ui_send, ui_recv) = std::sync::mpsc::channel();
+    let prog = ui::UiSender::new(ui_send);
     let prog_driver = TestProgressDriver::default();
-    let mut app = main_app_new(
-        &state,
-        stdout_tty,
-        quiet,
-        term.clone(),
-        prog_driver.clone(),
-        None,
-    )
-    .unwrap();
+    let mut app = main_app_new(&state, prog, prog_driver.clone(), None).unwrap();
 
     let mut running = vec![];
     loop {
@@ -554,6 +549,20 @@ fn run_app(
     if finish {
         app.finish().unwrap();
     }
+
+    drop(app);
+    drop(prog_driver);
+    drop(state);
+
+    let mut ui = ui::UiImpl::new(
+        ui::UiKind::Simple,
+        TestCollector::ENQUEUE_MESSAGE,
+        is_list,
+        stdout_tty,
+        quiet,
+        term.clone(),
+    );
+    ui.run(ui_recv).unwrap();
 
     slog::info!(log, "test complete");
 
