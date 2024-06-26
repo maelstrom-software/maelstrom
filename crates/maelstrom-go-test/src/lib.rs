@@ -12,7 +12,7 @@ use maelstrom_client::{
 };
 use maelstrom_macro::Config;
 use maelstrom_test_runner::{
-    main_app_new, metadata::TestMetadata, progress, progress::ProgressIndicator, BuildDir,
+    metadata::TestMetadata, progress::ProgressIndicator, run_app_with_ui_multithreaded, BuildDir,
     CollectTests, ListAction, LoggingOutput, MainAppDeps, MainAppState, NoCaseMetadata,
     TestArtifact, TestArtifactKey, TestFilter, TestLayers, TestPackage, TestPackageId, Wait,
 };
@@ -393,19 +393,12 @@ where
         log,
     )?;
 
-    let res = std::thread::scope(|scope| {
-        let mut app = main_app_new(
-            &state,
-            stdout_is_tty,
-            config.parent.quiet,
-            terminal,
-            progress::DefaultProgressDriver::new(scope),
-            config.parent.timeout.map(Timeout::new),
-        )?;
-        while !app.enqueue_one()?.is_done() {}
-        app.drain()?;
-        app.finish()
-    });
-    drop(state);
+    let res = run_app_with_ui_multithreaded(
+        state,
+        stdout_is_tty,
+        config.parent.quiet,
+        terminal,
+        config.parent.timeout.map(Timeout::new),
+    );
     maybe_print_build_error(&mut stderr, res)
 }

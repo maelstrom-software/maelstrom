@@ -884,3 +884,29 @@ where
         )?),
     }
 }
+
+pub fn run_app_with_ui_multithreaded<MainAppDepsT, TermT>(
+    state: MainAppState<MainAppDepsT>,
+    stdout_is_tty: bool,
+    quiet: Quiet,
+    terminal: TermT,
+    timeout_override: Option<Option<Timeout>>,
+) -> Result<ExitCode>
+where
+    MainAppDepsT: MainAppDeps,
+    TermT: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static,
+{
+    std::thread::scope(|scope| {
+        let mut app = main_app_new(
+            &state,
+            stdout_is_tty,
+            quiet,
+            terminal,
+            progress::DefaultProgressDriver::new(scope),
+            timeout_override,
+        )?;
+        while !app.enqueue_one()?.is_done() {}
+        app.drain()?;
+        app.finish()
+    })
+}
