@@ -1,7 +1,7 @@
 use crate::{
     config::Quiet,
+    introspect_driver::IntrospectDriver,
     metadata::TestMetadata,
-    progress::ProgressDriver,
     test_listing::{TestListing, TestListingStore},
     ui, BuildDir, ClientTrait, CollectTests, EnqueueResult, ListAction, LoggingOutput, MainApp,
     MainAppDeps, MainAppState, NoCaseMetadata, SimpleFilter, StringArtifactKey, TestArtifact,
@@ -215,12 +215,12 @@ impl FakeTests {
 }
 
 #[derive(Default, Clone)]
-struct TestProgressDriver<'scope> {
+struct TestIntrospectDriver<'scope> {
     #[allow(clippy::type_complexity)]
     update_func: Rc<RefCell<Option<Box<dyn FnMut(IntrospectResponse) + 'scope>>>>,
 }
 
-impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
+impl<'scope> IntrospectDriver<'scope> for TestIntrospectDriver<'scope> {
     fn drive<'client>(&mut self, _client: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope,
@@ -234,7 +234,7 @@ impl<'scope> ProgressDriver<'scope> for TestProgressDriver<'scope> {
     }
 }
 
-impl<'scope> TestProgressDriver<'scope> {
+impl<'scope> TestIntrospectDriver<'scope> {
     fn update(&self, job_state_counts: JobStateCounts) {
         let resp = IntrospectResponse {
             job_state_counts,
@@ -522,7 +522,7 @@ fn run_app(
     .unwrap();
     let (ui_send, ui_recv) = std::sync::mpsc::channel();
     let prog = ui::UiSender::new(ui_send);
-    let prog_driver = TestProgressDriver::default();
+    let prog_driver = TestIntrospectDriver::default();
     let mut app = MainApp::new(&state, prog, prog_driver.clone(), None).unwrap();
 
     let mut running = vec![];

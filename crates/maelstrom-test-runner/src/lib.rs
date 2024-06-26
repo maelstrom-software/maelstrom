@@ -1,6 +1,7 @@
 pub mod artifacts;
 pub mod config;
 mod deps;
+mod introspect_driver;
 pub mod metadata;
 pub mod progress;
 pub mod test_listing;
@@ -16,11 +17,11 @@ pub use ui::Terminal;
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use config::Quiet;
+use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
 use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
 use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
 use metadata::{AllMetadata, TestMetadata};
-use progress::ProgressDriver;
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
@@ -610,22 +611,23 @@ impl EnqueueResult {
     }
 }
 
-struct MainApp<'state, ProgressDriverT, MainAppDepsT: MainAppDeps> {
+struct MainApp<'state, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
     queuing: JobQueuing<'state, MainAppDepsT>,
-    prog_driver: ProgressDriverT,
+    prog_driver: IntrospectDriverT,
     ui: UiSender,
 }
 
-impl<'state, 'scope, ProgressDriverT, MainAppDepsT> MainApp<'state, ProgressDriverT, MainAppDepsT>
+impl<'state, 'scope, IntrospectDriverT, MainAppDepsT>
+    MainApp<'state, IntrospectDriverT, MainAppDepsT>
 where
-    ProgressDriverT: ProgressDriver<'scope>,
+    IntrospectDriverT: IntrospectDriver<'scope>,
     MainAppDepsT: MainAppDeps,
 {
     pub fn new(
         state: &'state MainAppState<MainAppDepsT>,
         ui: UiSender,
-        mut prog_driver: ProgressDriverT,
+        mut prog_driver: IntrospectDriverT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self>
     where
@@ -781,7 +783,7 @@ where
         let mut app = MainApp::new(
             &state,
             ui_sender,
-            progress::DefaultProgressDriver::new(scope),
+            DefaultIntrospectDriver::new(scope),
             timeout_override,
         )?;
         while !app.enqueue_one()?.is_done() {}

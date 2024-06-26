@@ -9,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-pub trait ProgressDriver<'scope> {
+pub trait IntrospectDriver<'scope> {
     fn drive<'client>(&mut self, deps: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope;
@@ -17,13 +17,13 @@ pub trait ProgressDriver<'scope> {
     fn stop(&mut self) -> Result<()>;
 }
 
-pub struct DefaultProgressDriver<'scope, 'env> {
+pub struct DefaultIntrospectDriver<'scope, 'env> {
     scope: &'scope thread::Scope<'scope, 'env>,
     handle: Option<thread::ScopedJoinHandle<'scope, Result<()>>>,
     canceled: Arc<AtomicBool>,
 }
 
-impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
+impl<'scope, 'env> DefaultIntrospectDriver<'scope, 'env> {
     pub fn new(scope: &'scope thread::Scope<'scope, 'env>) -> Self {
         Self {
             scope,
@@ -33,7 +33,7 @@ impl<'scope, 'env> DefaultProgressDriver<'scope, 'env> {
     }
 }
 
-impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
+impl<'scope, 'env> Drop for DefaultIntrospectDriver<'scope, 'env> {
     fn drop(&mut self) {
         self.canceled.store(true, Ordering::Release);
         if let Some(handle) = self.handle.take() {
@@ -42,7 +42,7 @@ impl<'scope, 'env> Drop for DefaultProgressDriver<'scope, 'env> {
     }
 }
 
-impl<'scope, 'env> ProgressDriver<'scope> for DefaultProgressDriver<'scope, 'env> {
+impl<'scope, 'env> IntrospectDriver<'scope> for DefaultIntrospectDriver<'scope, 'env> {
     fn drive<'client>(&mut self, client: &'client impl ClientTrait, ind: ui::UiSender)
     where
         'client: 'scope,
