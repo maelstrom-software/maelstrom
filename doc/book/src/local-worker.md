@@ -1,9 +1,11 @@
 # Local Worker
 
-Every client has a local worker. This worker is used two in two scenarios.
+Every client has a built-in worker that is called the "local worker". The local
+worker is used to runs jobs two in two scenarios.
 
 First, if no `broker` [configuration value](config.md) is specified, then the
-client runs in **standalone mode**. In this mode, all jobs are handled by the local worker.
+client runs in **standalone mode**. In this mode, all jobs are handled by the
+local worker.
 
 Second, some jobs are considered **local-only**. These jobs must be run on the
 local machine because they utilize some resource that is only avaiable locally.

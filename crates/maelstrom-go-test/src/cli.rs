@@ -22,10 +22,11 @@ pub struct ExtraCommandLineOptions {
 
     #[arg(
         long = "list",
-        help = "Instead of running tests, print the tests that would have been run."
+        help = "Instead of running tests, print the tests that would have been run.",
+        help_heading = "List Options",
     )]
     pub list: bool,
 
-    #[arg(long, hide(true), help = "Only used for testing purposes")]
+    #[arg(long, hide(true), help = "Only used for testing purposes.")]
     pub client_bg_proc: bool,
 }

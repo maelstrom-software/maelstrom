@@ -61,21 +61,6 @@ pub struct Config {
     #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
     pub log_level: LogLevel,
 
-    /// Directory in which to put cached container images.
-    #[config(
-        value_name = "PATH",
-        default = r#"|bd: &BaseDirectories| {
-            bd.get_cache_home()
-                .parent()
-                .unwrap()
-                .join("container/")
-                .into_os_string()
-                .into_string()
-                .unwrap()
-        }"#
-    )]
-    pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
-
     /// Directory for state that persists between runs, including the client's log file.
     #[config(
         value_name = "PATH",
@@ -110,7 +95,7 @@ pub struct Config {
     #[config(
         value_name = "BYTES",
         default = "CacheSize::default()",
-        next_help_heading = "Local Worker Options"
+        next_help_heading = "Local Worker Config Options"
     )]
     pub cache_size: CacheSize,
 
@@ -122,8 +107,24 @@ pub struct Config {
     #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
 
-    /// Whether to accept invalid TLS certificates when downloading container images.
-    #[config(flag, value_name = "ACCEPT_INVALID_REMOTE_CONTAINER_TLS_CERTS")]
+    /// Directory in which to put cached container images.
+    #[config(
+        value_name = "PATH",
+        default = r#"|bd: &BaseDirectories| {
+            bd.get_cache_home()
+                .parent()
+                .unwrap()
+                .join("container/")
+                .into_os_string()
+                .into_string()
+                .unwrap()
+        }"#,
+        next_help_heading = "Container Image Config Options"
+    )]
+    pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
+
+    /// Accept invalid TLS certificates when downloading container images.
+    #[config(flag)]
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
 }
 

@@ -31,22 +31,25 @@ impl Debug for Quiet {
 
 #[derive(Config, Debug)]
 pub struct Config {
-    /// Socket address of broker. If not provided, all tests will be run locally.
+    /// The target amount of disk space to use for the cache. This bound won't be followed
+    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
     #[config(
-        option,
-        short = 'b',
-        value_name = "SOCKADDR",
-        default = r#""standalone mode""#
+        value_name = "BYTES",
+        default = "CacheSize::default()",
+        next_help_heading = "Local Worker Config Options"
     )]
-    pub broker: Option<BrokerAddr>,
+    pub cache_size: CacheSize,
 
-    /// Minimum log level to output.
-    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
-    pub log_level: LogLevel,
+    /// The maximum amount of bytes to return inline for captured stdout and stderr.
+    #[config(value_name = "BYTES", default = "InlineLimit::default()")]
+    pub inline_limit: InlineLimit,
 
-    /// Don't output information about the tests being run.
-    #[config(flag, short = 'q')]
-    pub quiet: Quiet,
+    /// The number of job slots available.
+    #[config(
+        value_name = "N",
+        default = "Slots::default()",
+    )]
+    pub slots: Slots,
 
     /// Directory in which to put cached container images.
     #[config(
@@ -59,9 +62,36 @@ pub struct Config {
                 .into_os_string()
                 .into_string()
                 .unwrap()
-        }"#
+        }"#,
+        next_help_heading = "Container Image Config Options"
     )]
     pub container_image_depot_root: RootBuf<ContainerImageDepotDir>,
+
+    /// Accept invalid TLS certificates when downloading container images.
+    #[config(flag)]
+    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+
+    /// Socket address of broker. If not provided, all tests will be run locally.
+    #[config(
+        option,
+        short = 'b',
+        value_name = "SOCKADDR",
+        default = r#""standalone mode""#,
+        next_help_heading = "Test Runner Config Options"
+    )]
+    pub broker: Option<BrokerAddr>,
+
+    /// Minimum log level to output.
+    #[config(short = 'l', value_name = "LEVEL", default = r#""info""#)]
+    pub log_level: LogLevel,
+
+    /// Don't output information about the tests being run.
+    #[config(flag, short = 'q')]
+    pub quiet: Quiet,
+
+    /// The UI format.
+    #[config(value_name = "UI_KIND", default = "UiKind::Simple")]
+    pub ui: UiKind,
 
     /// Override timeout value for all tests specified (O indicates no timeout).
     #[config(
@@ -72,33 +102,4 @@ pub struct Config {
         next_help_heading = "Test Override Config Options"
     )]
     pub timeout: Option<u32>,
-
-    /// The target amount of disk space to use for the cache. This bound won't be followed
-    /// strictly, so it's best to be conservative. SI and binary suffixes are supported.
-    #[config(
-        value_name = "BYTES",
-        default = "CacheSize::default()",
-        next_help_heading = "Local Worker Options"
-    )]
-    pub cache_size: CacheSize,
-
-    /// The maximum amount of bytes to return inline for captured stdout and stderr.
-    #[config(value_name = "BYTES", default = "InlineLimit::default()")]
-    pub inline_limit: InlineLimit,
-
-    /// The number of job slots available.
-    #[config(
-        value_name = "N",
-        default = "Slots::default()",
-        next_help_heading = "Config Options"
-    )]
-    pub slots: Slots,
-
-    /// Whether to accept invalid TLS certificates when downloading container images.
-    #[config(flag, value_name = "ACCEPT_INVALID_REMOTE_CONTAINER_TLS_CERTS")]
-    pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
-
-    /// Which UI to use
-    #[config(value_name = "UI_KIND", default = "UiKind::Simple")]
-    pub ui: UiKind,
 }
