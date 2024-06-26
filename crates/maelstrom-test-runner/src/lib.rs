@@ -613,7 +613,7 @@ impl EnqueueResult {
 struct MainApp<'state, IntrospectDriverT, MainAppDepsT: MainAppDeps> {
     state: &'state MainAppState<MainAppDepsT>,
     queuing: JobQueuing<'state, MainAppDepsT>,
-    prog_driver: IntrospectDriverT,
+    introspect_driver: IntrospectDriverT,
     ui: UiSender,
 }
 
@@ -626,13 +626,13 @@ where
     pub fn new(
         state: &'state MainAppState<MainAppDepsT>,
         ui: UiSender,
-        mut prog_driver: IntrospectDriverT,
+        mut introspect_driver: IntrospectDriverT,
         timeout_override: Option<Option<Timeout>>,
     ) -> Result<Self>
     where
         'state: 'scope,
     {
-        prog_driver.drive(state.deps.client(), ui.clone());
+        introspect_driver.drive(state.deps.client(), ui.clone());
         ui.update_length(state.queuing_state.expected_job_count);
 
         state
@@ -650,7 +650,7 @@ where
         Ok(Self {
             state,
             queuing,
-            prog_driver,
+            introspect_driver,
             ui,
         })
     }
@@ -674,7 +674,7 @@ where
     fn finish(&mut self) -> Result<ExitCode> {
         slog::debug!(self.queuing.log, "waiting for outstanding jobs");
         self.state.queuing_state.tracker.wait_for_outstanding();
-        self.prog_driver.stop()?;
+        self.introspect_driver.stop()?;
 
         let summary_cb = self.state.queuing_state.tracker.print_summary_cb();
         self.ui.finished(summary_cb)?;

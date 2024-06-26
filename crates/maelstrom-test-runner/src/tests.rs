@@ -521,9 +521,9 @@ fn run_app(
     )
     .unwrap();
     let (ui_send, ui_recv) = std::sync::mpsc::channel();
-    let prog = ui::UiSender::new(ui_send);
-    let prog_driver = TestIntrospectDriver::default();
-    let mut app = MainApp::new(&state, prog, prog_driver.clone(), None).unwrap();
+    let ui_sender = ui::UiSender::new(ui_send);
+    let introspect_driver = TestIntrospectDriver::default();
+    let mut app = MainApp::new(&state, ui_sender, introspect_driver.clone(), None).unwrap();
 
     let mut running = vec![];
     loop {
@@ -536,7 +536,7 @@ fn run_app(
         let test = fake_tests.find_case(&package_name, &case);
         running.push(test.desired_state);
 
-        prog_driver.update(counts_from_states(&running));
+        introspect_driver.update(counts_from_states(&running));
     }
 
     app.drain().unwrap();
@@ -546,7 +546,7 @@ fn run_app(
     }
 
     drop(app);
-    drop(prog_driver);
+    drop(introspect_driver);
     drop(state);
 
     let mut ui = ui::UiImpl::new(
