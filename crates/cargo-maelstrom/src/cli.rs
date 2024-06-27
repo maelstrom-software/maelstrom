@@ -8,9 +8,6 @@ pub struct ExtraCommandLineOptions {
 
     #[command(flatten)]
     pub list: ListOptions,
-
-    #[command(flatten)]
-    pub test_metadata: TestMetadataOptions,
 }
 
 #[derive(Args)]
@@ -44,16 +41,6 @@ impl ListOptions {
     pub fn any(&self) -> bool {
         self.tests || self.binaries || self.packages
     }
-}
-
-#[derive(Args)]
-#[command(next_help_heading = "Test Metadata Options")]
-pub struct TestMetadataOptions {
-    #[arg(
-        long,
-        help = "Write out a starter test metadata file if one does not exist, then exit."
-    )]
-    pub init: bool,
 }
 
 impl AsRef<maelstrom_test_runner::config::ExtraCommandLineOptions> for ExtraCommandLineOptions {

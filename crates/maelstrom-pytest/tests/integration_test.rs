@@ -156,8 +156,7 @@ fn test_simple_success() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: false,
         },
@@ -188,8 +187,7 @@ fn test_simple_failure() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: false,
         },
@@ -232,8 +230,7 @@ fn test_collection_failure() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: false,
         },
@@ -269,8 +266,7 @@ fn test_listing_all() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: true,
         },
@@ -299,8 +295,7 @@ fn test_listing_node_id() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: true,
         },
@@ -331,8 +326,7 @@ fn test_listing_marker() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["markers.contains(baz)".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: true,
         },
@@ -368,8 +362,7 @@ fn test_ignore() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: false,
         },

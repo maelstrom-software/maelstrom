@@ -97,8 +97,7 @@ fn test_simple_success() {
         ExtraCommandLineOptions {
             parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
                 include: vec!["all".into()],
-                exclude: vec![],
-                client_bg_proc: false,
+                ..Default::default()
             },
             list: false,
         },

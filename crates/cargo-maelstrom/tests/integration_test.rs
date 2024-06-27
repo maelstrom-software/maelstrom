@@ -1,6 +1,6 @@
 use cargo_maelstrom::{
     cargo::{CompilationOptions, FeatureSelectionOptions, ManifestOptions},
-    cli::{ExtraCommandLineOptions, ListOptions, TestMetadataOptions},
+    cli::{ExtraCommandLineOptions, ListOptions},
     config::Config,
     Logger,
 };
@@ -70,15 +70,13 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
     let extra_options = ExtraCommandLineOptions {
         parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
             include: vec!["all".into()],
-            exclude: vec![],
-            client_bg_proc: false,
+            ..Default::default()
         },
         list: ListOptions {
             tests: false,
             binaries: false,
             packages: false,
         },
-        test_metadata: TestMetadataOptions { init: false },
     };
     let term = InMemoryTerm::new(50, 50);
 

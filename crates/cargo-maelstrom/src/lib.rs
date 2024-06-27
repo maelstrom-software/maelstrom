@@ -517,7 +517,7 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    if extra_options.test_metadata.init {
+    if extra_options.parent.init {
         let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::init(&cargo_metadata.workspace_root)
     } else if extra_options.list.packages {

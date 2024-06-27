@@ -102,7 +102,7 @@ pub struct Config {
     pub timeout: Option<u32>,
 }
 
-#[derive(Args)]
+#[derive(Args, Default)]
 #[command(next_help_heading = "Test Selection Options")]
 #[group(id = "TestRunnerExtraCommandLineOptions")]
 pub struct ExtraCommandLineOptions {
@@ -123,6 +123,13 @@ pub struct ExtraCommandLineOptions {
         help_heading = "Test Selection Options"
     )]
     pub exclude: Vec<String>,
+
+    #[arg(
+        long,
+        help = "Write out a starter test metadata file if one does not exist, then exit.",
+        help_heading = "Test Metadata Options"
+    )]
+    pub init: bool,
 
     #[arg(long, hide(true), help = "Only used for testing purposes.")]
     pub client_bg_proc: bool,
