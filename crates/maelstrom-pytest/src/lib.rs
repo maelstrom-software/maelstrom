@@ -601,7 +601,7 @@ pub fn main(
     mut stderr: impl io::Write,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    if extra_options.client_bg_proc {
+    if extra_options.parent.client_bg_proc {
         return alternative_mains::client_bg_proc();
     }
 
@@ -645,8 +645,8 @@ pub fn main(
 
     let state = MainAppState::new(
         deps,
-        extra_options.include,
-        extra_options.exclude,
+        extra_options.parent.include,
+        extra_options.parent.exclude,
         list_action,
         stderr_is_tty,
         project_dir,

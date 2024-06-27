@@ -60,15 +60,17 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
         },
     };
     let extra_options = ExtraCommandLineOptions {
-        include: vec!["all".into()],
-        exclude: vec![],
+        parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+            include: vec!["all".into()],
+            exclude: vec![],
+            client_bg_proc: false,
+        },
         list: ListOptions {
             tests: false,
             binaries: false,
             packages: false,
         },
         test_metadata: TestMetadataOptions { init: false },
-        client_bg_proc: false,
     };
     let term = InMemoryTerm::new(50, 50);
 

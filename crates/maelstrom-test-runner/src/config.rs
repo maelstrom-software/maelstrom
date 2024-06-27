@@ -1,4 +1,5 @@
 use crate::ui::UiKind;
+use clap::{command, Args};
 use derive_more::From;
 use maelstrom_client::{AcceptInvalidRemoteContainerTlsCerts, ContainerImageDepotDir};
 use maelstrom_macro::Config;
@@ -99,4 +100,30 @@ pub struct Config {
         next_help_heading = "Test Override Config Options"
     )]
     pub timeout: Option<u32>,
+}
+
+#[derive(Args)]
+#[command(next_help_heading = "Test Selection Options")]
+#[group(id = "TestRunnerExtraCommandLineOptions")]
+pub struct ExtraCommandLineOptions {
+    #[arg(
+        long,
+        short = 'i',
+        value_name = "FILTER-EXPRESSION",
+        default_value = "all",
+        help_heading = "Test Selection Options"
+    )]
+    pub include: Vec<String>,
+
+    #[arg(
+        long,
+        short = 'x',
+        value_name = "FILTER-EXPRESSION",
+        help = "Only include tests which don't match the given filter. Can be specified multiple times.",
+        help_heading = "Test Selection Options"
+    )]
+    pub exclude: Vec<String>,
+
+    #[arg(long, hide(true), help = "Only used for testing purposes.")]
+    pub client_bg_proc: bool,
 }

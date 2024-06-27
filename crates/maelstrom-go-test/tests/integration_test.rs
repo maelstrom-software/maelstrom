@@ -81,16 +81,18 @@ fn do_maelstrom_go_test_test(
 fn test_simple_success() {
     let contents = do_maelstrom_go_test_test(
         &indoc::indoc! {"
-        package foo;
-        import \"testing\"
+            package foo;
+            import \"testing\"
 
-        func TestA(t *testing.T) {}
-    "},
+            func TestA(t *testing.T) {}
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: false,
-            client_bg_proc: false,
         },
     );
     assert!(

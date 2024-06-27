@@ -515,7 +515,7 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    if extra_options.client_bg_proc {
+    if extra_options.parent.client_bg_proc {
         alternative_mains::client_bg_proc()
     } else if extra_options.test_metadata.init {
         let cargo_metadata = read_cargo_metadata(&config)?;
@@ -524,16 +524,16 @@ pub fn main(
         let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::list_packages(
             &cargo_metadata.workspace_packages(),
-            &extra_options.include,
-            &extra_options.exclude,
+            &extra_options.parent.include,
+            &extra_options.parent.exclude,
             &mut io::stdout().lock(),
         )
     } else if extra_options.list.binaries {
         let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::list_binaries(
             &cargo_metadata.workspace_packages(),
-            &extra_options.include,
-            &extra_options.exclude,
+            &extra_options.parent.include,
+            &extra_options.parent.exclude,
             &mut io::stdout().lock(),
         )
     } else {
@@ -573,8 +573,8 @@ pub fn main(
         };
         let state = MainAppState::new(
             deps,
-            extra_options.include,
-            extra_options.exclude,
+            extra_options.parent.include,
+            extra_options.parent.exclude,
             list_action,
             stderr_is_tty,
             workspace_dir,

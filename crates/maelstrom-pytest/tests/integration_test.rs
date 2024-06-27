@@ -142,14 +142,16 @@ fn do_maelstrom_pytest_test_success(
 fn test_simple_success() {
     let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
-        def test_noop():
-            pass
-    "},
+            def test_noop():
+                pass
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: false,
-            client_bg_proc: false,
         },
     );
     assert!(
@@ -172,14 +174,16 @@ fn test_simple_success() {
 fn test_simple_failure() {
     let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
-        def test_error():
-            raise Exception('test error')
-    "},
+            def test_error():
+                raise Exception('test error')
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: false,
-            client_bg_proc: false,
         },
     );
     assert_eq!(stderr, "");
@@ -215,13 +219,15 @@ fn test_simple_failure() {
 fn test_collection_failure() {
     let (contents, stderr, exit_code) = do_maelstrom_pytest_test(
         &indoc::indoc! {"
-        raise Exception('import error')
-    "},
+            raise Exception('import error')
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: false,
-            client_bg_proc: false,
         },
     );
     assert_eq!(contents, "");
@@ -246,17 +252,19 @@ fn test_collection_failure() {
 fn test_listing_all() {
     let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
-        def test_foo():
-            pass
+            def test_foo():
+                pass
 
-        def test_bar():
-            pass
-    "},
+            def test_bar():
+                pass
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: true,
-            client_bg_proc: false,
         },
     );
 
@@ -274,17 +282,19 @@ fn test_listing_all() {
 fn test_listing_node_id() {
     let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
-        def test_foo():
-            pass
+            def test_foo():
+                pass
 
-        def test_bar():
-            pass
-    "},
+            def test_bar():
+                pass
+        "},
         ExtraCommandLineOptions {
-            include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: true,
-            client_bg_proc: false,
         },
     );
 
@@ -301,20 +311,22 @@ fn test_listing_node_id() {
 fn test_listing_marker() {
     let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
-        import pytest
+            import pytest
 
-        @pytest.mark.baz
-        def test_foo():
-            pass
+            @pytest.mark.baz
+            def test_foo():
+                pass
 
-        def test_bar():
-            pass
-    "},
+            def test_bar():
+                pass
+        "},
         ExtraCommandLineOptions {
-            include: vec!["markers.contains(baz)".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["markers.contains(baz)".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: true,
-            client_bg_proc: false,
         },
     );
 
@@ -331,25 +343,27 @@ fn test_listing_marker() {
 fn test_ignore() {
     let contents = do_maelstrom_pytest_test_success(
         &indoc::indoc! {"
-        import pytest
+            import pytest
 
-        @pytest.mark.skip(reason='just because')
-        def test_foo():
-            pass
+            @pytest.mark.skip(reason='just because')
+            def test_foo():
+                pass
 
-        @pytest.mark.skipif(True, reason='just because')
-        def test_bar():
-            pass
+            @pytest.mark.skipif(True, reason='just because')
+            def test_bar():
+                pass
 
-        @pytest.mark.skipif(False, reason='just because')
-        def test_baz():
-            pass
-    "},
+            @pytest.mark.skipif(False, reason='just because')
+            def test_baz():
+                pass
+        "},
         ExtraCommandLineOptions {
-            include: vec!["all".into()],
-            exclude: vec![],
+            parent: maelstrom_test_runner::config::ExtraCommandLineOptions {
+                include: vec!["all".into()],
+                exclude: vec![],
+                client_bg_proc: false,
+            },
             list: false,
-            client_bg_proc: false,
         },
     );
 
