@@ -442,8 +442,11 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         _options: &PytestOptions,
         _packages: Vec<&PytestPackage>,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
-        let (handle, stream) =
-            pytest::pytest_collect_tests(color, self.collect_from_module.as_ref(), &self.project_dir)?;
+        let (handle, stream) = pytest::pytest_collect_tests(
+            color,
+            self.collect_from_module.as_ref(),
+            &self.project_dir,
+        )?;
         Ok((handle, stream))
     }
 
