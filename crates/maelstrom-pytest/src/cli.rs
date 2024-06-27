@@ -23,13 +23,15 @@ pub struct ExtraCommandLineOptions {
     #[arg(
         long = "list",
         help = "Instead of running tests, print the tests that would have been run.",
-        help_heading = "List Options",
+        help_heading = "List Options"
     )]
     pub list: bool,
 
-    #[arg(long = "pyargs", help = "This argument is passed through to pytest.",
-        help_heading = "Pytest Options",
-        )]
+    #[arg(
+        long = "pyargs",
+        help = "This argument is passed through to pytest.",
+        help_heading = "Pytest Options"
+    )]
     pub pyargs: Option<String>,
 
     #[arg(long, hide(true), help = "Only used for testing purposes.")]

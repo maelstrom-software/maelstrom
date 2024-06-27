@@ -45,10 +45,7 @@ pub struct Config {
     pub inline_limit: InlineLimit,
 
     /// The number of job slots available.
-    #[config(
-        value_name = "N",
-        default = "Slots::default()",
-    )]
+    #[config(value_name = "N", default = "Slots::default()")]
     pub slots: Slots,
 
     /// Directory in which to put cached container images.
