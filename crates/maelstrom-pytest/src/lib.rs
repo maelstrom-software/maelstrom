@@ -36,10 +36,25 @@ use std::{fmt, io};
 
 pub use maelstrom_test_runner::Logger;
 
+#[derive(Config, Debug, Default)]
+pub struct PytestConfigValues {
+    /// Collect tests from the provided module intead of using pytest's default collection
+    /// algorithm. This will pass the provided module to pytest along with the --pyargs flag.
+    #[config(
+        option,
+        value_name = "MODULE",
+        default = r#""pytest's default collection algorithm""#
+    )]
+    pub collect_from_module: Option<String>,
+}
+
 #[derive(Config, Debug)]
 pub struct Config {
     #[config(flatten)]
     pub parent: maelstrom_test_runner::config::Config,
+
+    #[config(flatten, next_help_heading = "Pytest Config Options")]
+    pub pytest_options: PytestConfigValues,
 }
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
@@ -97,7 +112,7 @@ struct DefaultMainAppDeps<'client> {
 impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
         project_dir: &Root<ProjectDir>,
-        pyargs: Option<String>,
+        collect_from_module: Option<String>,
         cache_dir: &Root<CacheDir>,
         client: &'client Client,
     ) -> Result<Self> {
@@ -107,7 +122,7 @@ impl<'client> DefaultMainAppDeps<'client> {
                 client,
                 project_dir: project_dir.to_owned(),
                 cache_dir: cache_dir.to_owned(),
-                pyargs,
+                collect_from_module,
             },
         })
     }
@@ -166,7 +181,7 @@ struct PytestTestCollector<'client> {
     project_dir: RootBuf<ProjectDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
-    pyargs: Option<String>,
+    collect_from_module: Option<String>,
 }
 
 impl<'client> PytestTestCollector<'client> {
@@ -428,7 +443,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         _packages: Vec<&PytestPackage>,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let (handle, stream) =
-            pytest::pytest_collect_tests(color, self.pyargs.as_ref(), &self.project_dir)?;
+            pytest::pytest_collect_tests(color, self.collect_from_module.as_ref(), &self.project_dir)?;
         Ok((handle, stream))
     }
 
@@ -612,7 +627,12 @@ pub fn main(
         config.parent.accept_invalid_remote_container_tls_certs,
         log.clone(),
     )?;
-    let deps = DefaultMainAppDeps::new(project_dir, extra_options.pyargs, &cache_dir, &client)?;
+    let deps = DefaultMainAppDeps::new(
+        project_dir,
+        config.pytest_options.collect_from_module,
+        &cache_dir,
+        &client,
+    )?;
 
     let packages = vec![PytestPackage {
         name: "default".into(),
