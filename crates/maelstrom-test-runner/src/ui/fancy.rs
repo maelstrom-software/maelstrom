@@ -15,7 +15,7 @@ use ratatui::{
 };
 use std::io::stdout;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 pub struct FancyUi {
     jobs_completed: u64,
@@ -41,14 +41,11 @@ impl Ui for FancyUi {
 
         let mut terminal = init_terminal()?;
 
-        let mut last_tick = SystemTime::now();
+        let mut last_tick = Instant::now();
         loop {
-            if last_tick
-                .elapsed()
-                .is_ok_and(|v| v > Duration::from_millis(500))
-            {
+            if last_tick.elapsed() > Duration::from_millis(500) {
                 terminal.draw(|f| f.render_widget(&*self, f.size()))?;
-                last_tick = SystemTime::now();
+                last_tick = Instant::now();
             }
 
             match recv.recv_timeout(Duration::from_millis(500)) {

@@ -11,7 +11,7 @@ use progress::{
 };
 use std::panic::{RefUnwindSafe, UnwindSafe};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant};
 
 pub trait Terminal: TermLike + Clone + Send + Sync + UnwindSafe + RefUnwindSafe + 'static {}
 
@@ -78,14 +78,11 @@ fn run_simple_ui<ProgressIndicatorT>(
 where
     ProgressIndicatorT: ProgressIndicator,
 {
-    let mut last_tick = SystemTime::now();
+    let mut last_tick = Instant::now();
     loop {
-        if last_tick
-            .elapsed()
-            .is_ok_and(|v| v > Duration::from_millis(500))
-        {
+        if last_tick.elapsed() > Duration::from_millis(500) {
             prog.tick();
-            last_tick = SystemTime::now();
+            last_tick = Instant::now();
         }
 
         match recv.recv_timeout(Duration::from_millis(500)) {
