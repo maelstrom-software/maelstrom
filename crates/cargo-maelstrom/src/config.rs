@@ -15,3 +15,9 @@ pub struct Config {
     #[config(flatten, next_help_heading = "Manifest Config Options")]
     pub cargo_manifest_options: ManifestOptions,
 }
+
+impl AsRef<maelstrom_test_runner::config::Config> for Config {
+    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
+        &self.parent
+    }
+}

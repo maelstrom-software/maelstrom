@@ -14,15 +14,21 @@ pub use deps::*;
 
 use anyhow::Result;
 use artifacts::GeneratedArtifacts;
+use clap::{Args, Command};
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
 use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
-use maelstrom_client::{spec::JobSpec, ProjectDir, StateDir};
-use maelstrom_util::{config::common::LogLevel, fs::Fs, process::ExitCode, root::Root};
+use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
+use maelstrom_util::{
+    config::common::LogLevel, config::Config, fs::Fs, process::ExitCode, root::Root,
+};
 use metadata::{AllMetadata, TestMetadata};
 use slog::Drain as _;
 use std::{
     collections::{BTreeMap, HashSet},
-    io, str,
+    ffi::OsString,
+    fmt::Debug,
+    io::{self, IsTerminal as _},
+    str,
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -777,4 +783,53 @@ where
 
     ui_handle.join().unwrap()?;
     Ok(exit_code)
+}
+
+pub fn main<ConfigT, ExtraCommandLineOptionsT, ArgsT, ArgsIntoIterT, IsListFn, MainFn>(
+    command: Command,
+    base_directories_prefix: &'static str,
+    env_var_prefix: &'static str,
+    args: ArgsIntoIterT,
+    is_list: IsListFn,
+    main: MainFn,
+) -> Result<ExitCode>
+where
+    ConfigT: Config + Debug + AsRef<config::Config>,
+    ExtraCommandLineOptionsT: Args,
+    ArgsIntoIterT: IntoIterator<Item = ArgsT>,
+    ArgsT: Into<OsString> + Clone,
+    IsListFn: FnOnce(&ExtraCommandLineOptionsT) -> bool,
+    MainFn: FnOnce(
+        ConfigT,
+        ExtraCommandLineOptionsT,
+        ClientBgProcess,
+        Logger,
+        bool,
+        Box<dyn Ui>,
+    ) -> Result<ExitCode>,
+{
+    let (config, extra_options): (ConfigT, ExtraCommandLineOptionsT) =
+        maelstrom_util::config::new_config_with_extra_from_args(
+            command,
+            base_directories_prefix,
+            env_var_prefix,
+            args,
+        )?;
+
+    let config_parent = config.as_ref();
+
+    let bg_proc = ClientBgProcess::new_from_fork(config_parent.log_level)?;
+    let logger = Logger::DefaultLogger(config_parent.log_level);
+
+    let stderr_is_tty = io::stderr().is_terminal();
+    let stdout_is_tty = io::stdout().is_terminal();
+
+    let ui = ui::factory(
+        config_parent.ui,
+        is_list(&extra_options),
+        stdout_is_tty,
+        config_parent.quiet,
+    );
+
+    main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
 }

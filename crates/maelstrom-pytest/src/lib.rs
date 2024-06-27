@@ -57,6 +57,12 @@ pub struct Config {
     pub pytest_options: PytestConfigValues,
 }
 
+impl AsRef<maelstrom_test_runner::config::Config> for Config {
+    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
+        &self.parent
+    }
+}
+
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
 

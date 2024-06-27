@@ -35,6 +35,12 @@ pub struct Config {
     pub parent: maelstrom_test_runner::config::Config,
 }
 
+impl AsRef<maelstrom_test_runner::config::Config> for Config {
+    fn as_ref(&self) -> &maelstrom_test_runner::config::Config {
+        &self.parent
+    }
+}
+
 pub const MAELSTROM_TEST_TOML: &str = "maelstrom-go-test.toml";
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
