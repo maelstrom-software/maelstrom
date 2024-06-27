@@ -1,3 +1,4 @@
+use crate::ui::UiKind;
 use derive_more::From;
 use maelstrom_client::{AcceptInvalidRemoteContainerTlsCerts, ContainerImageDepotDir};
 use maelstrom_macro::Config;
@@ -86,10 +87,18 @@ pub struct Config {
     pub inline_limit: InlineLimit,
 
     /// The number of job slots available.
-    #[config(value_name = "N", default = "Slots::default()")]
+    #[config(
+        value_name = "N",
+        default = "Slots::default()",
+        next_help_heading = "Config Options"
+    )]
     pub slots: Slots,
 
     /// Whether to accept invalid TLS certificates when downloading container images.
     #[config(flag, value_name = "ACCEPT_INVALID_REMOTE_CONTAINER_TLS_CERTS")]
     pub accept_invalid_remote_container_tls_certs: AcceptInvalidRemoteContainerTlsCerts,
+
+    /// Which UI to use
+    #[config(value_name = "UI_KIND", default = "UiKind::Simple")]
+    pub ui: UiKind,
 }

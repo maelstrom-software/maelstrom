@@ -98,6 +98,7 @@ fn do_maelstrom_pytest_test(
             inline_limit: InlineLimit::default(),
             slots: Slots::default(),
             accept_invalid_remote_container_tls_certs: true.into(),
+            ui: ui::UiKind::Simple,
         },
     };
     let term = InMemoryTerm::new(50, 50);

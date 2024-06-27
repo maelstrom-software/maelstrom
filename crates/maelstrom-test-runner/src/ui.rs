@@ -4,9 +4,10 @@ use crate::config::Quiet;
 use anyhow::Result;
 use colored::Colorize as _;
 use maelstrom_client::IntrospectResponse;
-use std::io;
+use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::{fmt, io, str};
 
 pub use simple::SimpleUi;
 
@@ -143,8 +144,43 @@ impl io::Write for UiSenderWriteAdapter {
     }
 }
 
+#[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum UiKind {
     Simple,
+}
+
+impl fmt::Display for UiKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Simple => write!(f, "simple"),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct UnknownUiError {
+    ui_name: String,
+}
+
+impl fmt::Display for UnknownUiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "unknown UI {:?}", self.ui_name)
+    }
+}
+
+impl std::error::Error for UnknownUiError {}
+
+impl str::FromStr for UiKind {
+    type Err = UnknownUiError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, UnknownUiError> {
+        match s {
+            "simple" => Ok(Self::Simple),
+            ui_name => Err(UnknownUiError {
+                ui_name: ui_name.into(),
+            }),
+        }
+    }
 }
 
 pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> Box<dyn Ui> {

@@ -23,7 +23,7 @@ pub fn main() -> Result<ExitCode> {
     let project_dir = Root::<ProjectDir>::new(&cwd);
 
     let ui = ui::factory(
-        ui::UiKind::Simple,
+        config.parent.ui,
         extra_options.list,
         stdout_is_tty,
         config.parent.quiet,

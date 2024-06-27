@@ -23,7 +23,7 @@ pub fn main() -> Result<ExitCode> {
 
     let list =
         extra_options.list.tests || extra_options.list.binaries || extra_options.list.packages;
-    let ui = ui::factory(ui::UiKind::Simple, list, stdout_is_tty, config.parent.quiet);
+    let ui = ui::factory(config.parent.ui, list, stdout_is_tty, config.parent.quiet);
 
     cargo_maelstrom::main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
 }

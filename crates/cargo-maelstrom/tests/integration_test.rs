@@ -50,6 +50,7 @@ fn do_cargo_maelstrom_test(source_contents: &str) -> String {
             inline_limit: InlineLimit::default(),
             slots: Slots::default(),
             accept_invalid_remote_container_tls_certs: true.into(),
+            ui: ui::UiKind::Simple,
         },
         cargo_feature_selection_options: FeatureSelectionOptions::default(),
         cargo_compilation_options: CompilationOptions::default(),
