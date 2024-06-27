@@ -1,3 +1,4 @@
+mod fancy;
 mod simple;
 
 use crate::config::Quiet;
@@ -147,12 +148,14 @@ impl io::Write for UiSenderWriteAdapter {
 #[derive(Copy, Clone, Debug, Serialize, Deserialize)]
 pub enum UiKind {
     Simple,
+    Fancy,
 }
 
 impl fmt::Display for UiKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Simple => write!(f, "simple"),
+            Self::Fancy => write!(f, "fancy"),
         }
     }
 }
@@ -176,6 +179,7 @@ impl str::FromStr for UiKind {
     fn from_str(s: &str) -> std::result::Result<Self, UnknownUiError> {
         match s {
             "simple" => Ok(Self::Simple),
+            "fancy" => Ok(Self::Fancy),
             ui_name => Err(UnknownUiError {
                 ui_name: ui_name.into(),
             }),
@@ -191,5 +195,6 @@ pub fn factory(kind: UiKind, list: bool, stdout_is_tty: bool, quiet: Quiet) -> B
             quiet,
             console::Term::buffered_stdout(),
         )),
+        UiKind::Fancy => Box::new(fancy::FancyUi::new(list, stdout_is_tty, quiet)),
     }
 }
