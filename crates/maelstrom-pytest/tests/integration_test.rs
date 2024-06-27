@@ -109,15 +109,15 @@ fn do_maelstrom_pytest_test(
     let ui = ui::SimpleUi::new(extra_options.list, false, false.into(), term.clone());
     let mut stderr = vec![];
     let bg_proc = spawn_bg_proc();
-    let exit_code = maelstrom_pytest::main(
+    let exit_code = maelstrom_pytest::main_with_stderr_and_project_dir(
         config,
         extra_options,
-        &Root::<ProjectDir>::new(&project_dir),
         bg_proc,
         logger,
         false,
-        &mut stderr,
         ui,
+        &mut stderr,
+        &Root::<ProjectDir>::new(&project_dir),
     )
     .unwrap();
 

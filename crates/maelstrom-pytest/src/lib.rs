@@ -590,16 +590,38 @@ fn find_artifacts(path: &Path) -> Result<Vec<PytestArtifactKey>> {
         .collect())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn main(
     config: Config,
     extra_options: cli::ExtraCommandLineOptions,
-    project_dir: &Root<ProjectDir>,
     bg_proc: ClientBgProcess,
     logger: Logger,
     stderr_is_tty: bool,
-    mut stderr: impl io::Write,
     ui: impl Ui,
+) -> Result<ExitCode> {
+    let cwd = Path::new(".").canonicalize()?;
+    let project_dir = Root::<ProjectDir>::new(&cwd);
+    main_with_stderr_and_project_dir(
+        config,
+        extra_options,
+        bg_proc,
+        logger,
+        stderr_is_tty,
+        ui,
+        std::io::stderr(),
+        project_dir,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn main_with_stderr_and_project_dir(
+    config: Config,
+    extra_options: cli::ExtraCommandLineOptions,
+    bg_proc: ClientBgProcess,
+    logger: Logger,
+    stderr_is_tty: bool,
+    ui: impl Ui,
+    mut stderr: impl io::Write,
+    project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
     if extra_options.parent.client_bg_proc {
         return alternative_mains::client_bg_proc();

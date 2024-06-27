@@ -1,9 +1,8 @@
 use anyhow::Result;
-use maelstrom_client::{ClientBgProcess, ProjectDir};
+use maelstrom_client::ClientBgProcess;
 use maelstrom_go_test::{cli::ExtraCommandLineOptions, Config, Logger};
 use maelstrom_test_runner::ui;
-use maelstrom_util::{process::ExitCode, root::Root};
-use std::path::Path;
+use maelstrom_util::process::ExitCode;
 use std::{env, io::IsTerminal as _};
 
 pub fn main() -> Result<ExitCode> {
@@ -19,9 +18,6 @@ pub fn main() -> Result<ExitCode> {
     let stderr_is_tty = std::io::stderr().is_terminal();
     let stdout_is_tty = std::io::stdout().is_terminal();
 
-    let cwd = Path::new(".").canonicalize()?;
-    let project_dir = Root::<ProjectDir>::new(&cwd);
-
     let ui = ui::factory(
         config.parent.ui,
         extra_options.list,
@@ -29,14 +25,5 @@ pub fn main() -> Result<ExitCode> {
         config.parent.quiet,
     );
 
-    maelstrom_go_test::main(
-        config,
-        extra_options,
-        project_dir,
-        bg_proc,
-        logger,
-        stderr_is_tty,
-        std::io::stderr(),
-        ui,
-    )
+    maelstrom_go_test::main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
 }
