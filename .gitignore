@@ -5,6 +5,7 @@ rusty-tags.vi
 /.config
 /.cache
 /.direnv
+/.maelstrom-pytest
 result*
 **/.DS_Store
 /crates/maelstrom-web/target
