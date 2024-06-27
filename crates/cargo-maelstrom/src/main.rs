@@ -14,9 +14,7 @@ pub fn main() -> Result<ExitCode> {
         "maelstrom/cargo-maelstrom",
         "CARGO_MAELSTROM",
         args,
-        |extra_options: &ExtraCommandLineOptions| {
-            extra_options.list.tests || extra_options.list.binaries || extra_options.list.packages
-        },
+        |extra_options: &ExtraCommandLineOptions| extra_options.list.any(),
         cargo_maelstrom::main,
     )
 }

@@ -40,6 +40,12 @@ pub struct ListOptions {
     pub packages: bool,
 }
 
+impl ListOptions {
+    pub fn any(&self) -> bool {
+        self.tests || self.binaries || self.packages
+    }
+}
+
 #[derive(Args)]
 #[command(next_help_heading = "Test Metadata Options")]
 pub struct TestMetadataOptions {
