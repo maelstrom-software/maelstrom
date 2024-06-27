@@ -100,6 +100,7 @@ fn do_maelstrom_pytest_test(
             accept_invalid_remote_container_tls_certs: true.into(),
             ui: ui::UiKind::Simple,
         },
+        pytest_options: Default::default(),
     };
     let term = InMemoryTerm::new(50, 50);
 
@@ -148,7 +149,6 @@ fn test_simple_success() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -179,7 +179,6 @@ fn test_simple_failure() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -222,7 +221,6 @@ fn test_collection_failure() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -258,7 +256,6 @@ fn test_listing_all() {
             include: vec!["all".into()],
             exclude: vec![],
             list: true,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -287,7 +284,6 @@ fn test_listing_node_id() {
             include: vec!["node_id.equals(test_foo.py::test_foo)".into()],
             exclude: vec![],
             list: true,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -318,7 +314,6 @@ fn test_listing_marker() {
             include: vec!["markers.contains(baz)".into()],
             exclude: vec![],
             list: true,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
@@ -354,7 +349,6 @@ fn test_ignore() {
             include: vec!["all".into()],
             exclude: vec![],
             list: false,
-            pyargs: None,
             client_bg_proc: false,
         },
     );
