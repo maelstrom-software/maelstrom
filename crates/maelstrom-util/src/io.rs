@@ -943,7 +943,10 @@ impl Splicer {
     pub fn copy_to_fd(&mut self, fd: linux::Fd, offset: Option<u64>) -> io::Result<()> {
         let copied = linux::splice(self.pipe_out.as_fd(), None, fd, offset, self.written)?;
         if copied != self.written {
-            bail!("short write splicing data {} < {}", copied, self.written);
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                format!("short write splicing data {} < {}", copied, self.written),
+            ));
         }
         self.written = 0;
         Ok(())
