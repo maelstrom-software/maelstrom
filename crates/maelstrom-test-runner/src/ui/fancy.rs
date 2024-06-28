@@ -50,9 +50,9 @@ impl Ui for FancyUi {
 
             match recv.recv_timeout(Duration::from_millis(500)) {
                 Ok(msg) => match msg {
-                    UiMessage::PrintLine(_line) => {}
-                    UiMessage::PrintLineWidth(_cb) => {}
-                    UiMessage::JobFinished => self.jobs_completed += 1,
+                    UiMessage::LogMessage(_) => {}
+                    UiMessage::List(_) => {}
+                    UiMessage::JobFinished(_) => self.jobs_completed += 1,
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::UpdateIntrospectState(_resp) => {}
                     UiMessage::UpdateEnqueueStatus(_msg) => {}

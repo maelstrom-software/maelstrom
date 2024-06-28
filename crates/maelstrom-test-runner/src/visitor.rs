@@ -1,17 +1,13 @@
 use crate::test_listing::TestListing;
-use crate::ui::PrintWidthCb;
-use crate::ui::{UiSender, UiSenderPrinter};
+use crate::ui::{UiJobResult, UiJobStatus, UiJobSummary, UiSender};
 use crate::{TestArtifactKey, TestCaseMetadata};
 use anyhow::Result;
-use colored::{ColoredString, Colorize as _};
 use maelstrom_base::{
     ClientJobId, JobCompleted, JobEffects, JobError, JobOutcome, JobOutcomeResult, JobOutputResult,
     JobStatus,
 };
 use maelstrom_util::process::{ExitCode, ExitCodeAccumulator};
 use std::sync::{Arc, Condvar, Mutex};
-use unicode_truncate::UnicodeTruncateStr as _;
-use unicode_width::UnicodeWidthStr as _;
 
 #[derive(Clone)]
 enum CaseResult {
@@ -60,68 +56,27 @@ impl JobStatusTracker {
         }
     }
 
-    pub fn print_summary_cb(&self) -> impl PrintWidthCb<Vec<String>> {
-        let statuses = self.statuses.lock().unwrap().clone();
-        move |width| {
-            let mut summary = vec![];
-            summary.push("".into());
+    pub fn ui_summary(&self) -> UiJobSummary {
+        let statuses = self.statuses.lock().unwrap();
+        assert_eq!(statuses.outstanding, 0);
+        let failed: Vec<_> = statuses
+            .completed
+            .iter()
+            .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS))
+            .map(|(n, _)| n.clone())
+            .collect();
+        let ignored: Vec<_> = statuses
+            .completed
+            .iter()
+            .filter(|(_, res)| matches!(res, CaseResult::Ignored))
+            .map(|(n, _)| n.clone())
+            .collect();
 
-            let heading = " Test Summary ";
-            let equal_width = (width - heading.width()) / 2;
-            summary.push(format!(
-                "{empty:=<equal_width$}{heading}{empty:=<equal_width$}",
-                empty = ""
-            ));
-
-            let success = "Successful Tests";
-            let failure = "Failed Tests";
-            let ignore = "Ignored Tests";
-            let mut column1_width = std::cmp::max(success.width(), failure.width());
-            let max_digits = 9;
-            assert_eq!(statuses.outstanding, 0);
-            let failed = statuses
-                .completed
-                .iter()
-                .filter(|(_, res)| matches!(res, CaseResult::Ran(e) if e != &ExitCode::SUCCESS));
-            let ignored = statuses
-                .completed
-                .iter()
-                .filter(|(_, res)| matches!(res, CaseResult::Ignored));
-            let num_failed = failed.clone().count();
-            let num_ignored = ignored.clone().count();
-            let num_succeeded = statuses.completed.len() - num_failed - num_ignored;
-
-            if num_ignored > 0 {
-                column1_width = std::cmp::max(column1_width, ignore.width());
-            }
-
-            summary.push(format!(
-                "{:<column1_width$}: {num_succeeded:>max_digits$}",
-                success.green(),
-            ));
-            summary.push(format!(
-                "{:<column1_width$}: {num_failed:>max_digits$}",
-                failure.red(),
-            ));
-            let failed_width = failed.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
-            for (failed, _) in failed {
-                summary.push(format!("    {failed:<failed_width$}: {}", "failure".red()));
-            }
-
-            if num_ignored > 0 {
-                summary.push(format!(
-                    "{:<column1_width$}: {num_ignored:>max_digits$}",
-                    ignore.yellow(),
-                ));
-                let failed_width = ignored.clone().map(|(n, _)| n.width()).max().unwrap_or(0);
-                for (ignored, _) in ignored {
-                    summary.push(format!(
-                        "    {ignored:<failed_width$}: {}",
-                        "ignored".yellow()
-                    ));
-                }
-            }
-            summary
+        let succeeded = statuses.completed.len() - failed.len() - ignored.len();
+        UiJobSummary {
+            succeeded,
+            failed,
+            ignored,
         }
     }
 
@@ -220,42 +175,11 @@ where
     CaseMetadataT: TestCaseMetadata,
     RemoveFixtureOutputFn: Fn(&str, Vec<String>) -> Vec<String>,
 {
-    fn print_job_result(
-        &self,
-        result_str: ColoredString,
-        duration_str: String,
-        printer: &UiSenderPrinter<'_>,
-    ) {
-        let case_str = self.case_str.clone();
-        printer.println_width(move |width| {
-            if width > 10 {
-                let case_width = case_str.width();
-                let trailer_str = format!("{result_str} {duration_str:>8}");
-                let trailer_width = result_str.width() + 1 + std::cmp::max(duration_str.width(), 8);
-                if case_width + trailer_width < width {
-                    let dots_width = width - trailer_width - case_width;
-                    let case = case_str.bold();
-
-                    format!("{case}{empty:.<dots_width$}{trailer_str}", empty = "",)
-                } else {
-                    let (case, case_width) =
-                        case_str.unicode_truncate_start(width - 2 - trailer_width);
-                    let case = case.bold();
-                    let dots_width = width - trailer_width - case_width - 1;
-                    format!("<{case}{empty:.<dots_width$}{trailer_str}", empty = "")
-                }
-            } else {
-                format!("{case} {result_str}", case = case_str)
-            }
-        });
-    }
-
     pub fn job_finished(&self, res: Result<(ClientJobId, JobOutcomeResult)>) {
-        let result_str: ColoredString;
-        let mut result_details: Option<String> = None;
+        let test_status: UiJobStatus;
         let mut test_output_stderr: Vec<String> = vec![];
         let mut test_output_stdout: Vec<String> = vec![];
-        let mut duration_str = String::new();
+        let mut test_duration = None;
         let exit_code = match res {
             Ok((
                 cjid,
@@ -269,21 +193,21 @@ where
                         },
                 })),
             )) => {
-                duration_str = format!("{:.3}s", duration.as_secs_f64());
+                test_duration = Some(duration);
                 let mut job_failed = true;
                 let exit_code = match status {
                     JobStatus::Exited(code) => {
-                        result_str = if code == 0 {
+                        test_status = if code == 0 {
                             job_failed = false;
-                            "OK".green()
+                            UiJobStatus::Ok
                         } else {
-                            "FAIL".red()
+                            UiJobStatus::Failure(None)
                         };
                         ExitCode::from(code)
                     }
                     JobStatus::Signaled(signo) => {
-                        result_str = "FAIL".red();
-                        result_details = Some(format!("killed by signal {signo}"));
+                        test_status =
+                            UiJobStatus::Failure(Some(format!("killed by signal {signo}")));
                         ExitCode::FAILURE
                     }
                 };
@@ -324,8 +248,8 @@ where
                     duration,
                 })),
             )) => {
-                result_str = "TIMEOUT".red();
-                result_details = Some("timed out".into());
+                test_duration = Some(duration);
+                test_status = UiJobStatus::TimedOut;
                 test_output_stdout.extend(format_test_output(
                     &stdout,
                     "stdout",
@@ -354,44 +278,39 @@ where
                 ExitCode::FAILURE
             }
             Ok((_, Err(JobError::Execution(err)))) => {
-                result_str = "ERR".yellow();
-                result_details = Some(format!("execution error: {err}"));
+                test_status = UiJobStatus::Error(format!("execution error: {err}"));
                 ExitCode::FAILURE
             }
             Ok((_, Err(JobError::System(err)))) => {
-                result_str = "ERR".yellow();
-                result_details = Some(format!("system error: {err}"));
+                test_status = UiJobStatus::Error(format!("system error: {err}"));
                 ExitCode::FAILURE
             }
             Err(err) => {
-                result_str = "ERR".yellow();
-                result_details = Some(format!("remote error: {err}"));
+                test_status = UiJobStatus::Error(format!("remote error: {err}"));
                 ExitCode::FAILURE
             }
         };
-        let printer = self.ui.lock_printing();
-        self.print_job_result(result_str, duration_str, &printer);
 
-        if let Some(details_str) = result_details {
-            printer.println(details_str);
-        }
-        for line in test_output_stdout {
-            printer.println(line);
-        }
-        for line in test_output_stderr {
-            printer.eprintln(line);
-        }
-        drop(printer);
-
-        self.ui.job_finished();
+        self.ui.job_finished(UiJobResult {
+            name: self.case_str.clone(),
+            status: test_status,
+            duration: test_duration,
+            stdout: test_output_stdout,
+            stderr: test_output_stderr,
+        });
 
         // This call unblocks main thread, so it must go last
         self.tracker.job_exited(self.case_str.clone(), exit_code);
     }
 
     pub fn job_ignored(&self) {
-        self.print_job_result("IGNORED".yellow(), "".into(), &self.ui.lock_printing());
-        self.ui.job_finished();
+        self.ui.job_finished(UiJobResult {
+            name: self.case_str.clone(),
+            status: UiJobStatus::Ignored,
+            duration: None,
+            stdout: vec![],
+            stderr: vec![],
+        });
 
         // This call unblocks main thread, so it must go last
         self.tracker.job_ignored(self.case_str.clone());

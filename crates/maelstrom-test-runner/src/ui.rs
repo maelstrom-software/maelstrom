@@ -3,11 +3,10 @@ mod simple;
 
 use crate::config::Quiet;
 use anyhow::Result;
-use colored::Colorize as _;
 use maelstrom_client::IntrospectResponse;
 use serde::{Deserialize, Serialize};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use std::{fmt, io, str};
 
 pub use simple::SimpleUi;
@@ -29,64 +28,71 @@ impl<PrintCbT, RetT> PrintWidthCb<RetT> for PrintCbT where
 {
 }
 
-#[allow(dead_code)]
+pub enum UiJobStatus {
+    Ok,
+    Failure(Option<String>),
+    TimedOut,
+    Error(String),
+    Ignored,
+}
+
+impl UiJobStatus {
+    fn details(self) -> Option<String> {
+        match self {
+            Self::Failure(d) => d,
+            Self::Error(d) => Some(d),
+            _ => None,
+        }
+    }
+}
+
+pub struct UiJobSummary {
+    pub failed: Vec<String>,
+    pub ignored: Vec<String>,
+    pub succeeded: usize,
+}
+
+pub struct UiJobResult {
+    pub name: String,
+    pub duration: Option<Duration>,
+    pub status: UiJobStatus,
+    pub stdout: Vec<String>,
+    pub stderr: Vec<String>,
+}
+
 pub enum UiMessage {
-    PrintLine(String),
-    PrintLineWidth(Box<dyn PrintWidthCb<String>>),
-    JobFinished,
+    LogMessage(String),
+    List(String),
+    JobFinished(UiJobResult),
     UpdatePendingJobsCount(u64),
     UpdateIntrospectState(IntrospectResponse),
     UpdateEnqueueStatus(String),
     DoneQueuingJobs,
-    AllJobsFinished(Box<dyn PrintWidthCb<Vec<String>>>),
-}
-
-pub struct UiSenderPrinter<'a> {
-    send: Sender<UiMessage>,
-    _guard: MutexGuard<'a, ()>,
-}
-
-impl<'a> UiSenderPrinter<'a> {
-    pub fn println(&self, msg: String) {
-        let _ = self.send.send(UiMessage::PrintLine(msg));
-    }
-
-    pub fn println_width(&self, cb: impl FnOnce(usize) -> String + Send + Sync + 'static) {
-        let _ = self.send.send(UiMessage::PrintLineWidth(Box::new(cb)));
-    }
-
-    pub fn eprintln(&self, msg: impl AsRef<str>) {
-        for line in msg.as_ref().lines() {
-            self.println(format!("{} {line}", "stderr:".red()))
-        }
-    }
+    AllJobsFinished(UiJobSummary),
 }
 
 #[derive(Clone)]
 pub struct UiSender {
     send: Sender<UiMessage>,
-    print_lock: Arc<Mutex<()>>,
 }
 
 impl UiSender {
     pub fn new(send: Sender<UiMessage>) -> Self {
-        Self {
-            send,
-            print_lock: Default::default(),
-        }
+        Self { send }
     }
 }
 
 impl UiSender {
-    pub fn lock_printing(&self) -> UiSenderPrinter<'_> {
-        UiSenderPrinter {
-            send: self.send.clone(),
-            _guard: self.print_lock.lock().unwrap(),
-        }
+    pub fn log_message(&self, line: String) {
+        let _ = self.send.send(UiMessage::LogMessage(line));
     }
 
-    pub fn job_finished(&self) {
-        let _ = self.send.send(UiMessage::JobFinished);
+    pub fn list(&self, line: String) {
+        let _ = self.send.send(UiMessage::List(line));
+    }
+
+    pub fn job_finished(&self, res: UiJobResult) {
+        let _ = self.send.send(UiMessage::JobFinished(res));
     }
 
     pub fn update_length(&self, new_length: u64) {
@@ -107,10 +113,8 @@ impl UiSender {
         let _ = self.send.send(UiMessage::DoneQueuingJobs);
     }
 
-    pub fn finished(&self, summary: impl PrintWidthCb<Vec<String>>) -> Result<()> {
-        let _ = self
-            .send
-            .send(UiMessage::AllJobsFinished(Box::new(summary)));
+    pub fn finished(&self, summary: UiJobSummary) -> Result<()> {
+        let _ = self.send.send(UiMessage::AllJobsFinished(summary));
         Ok(())
     }
 }
@@ -135,7 +139,7 @@ impl io::Write for UiSenderWriteAdapter {
         if let Some(p) = self.line.bytes().position(|b| b == b'\n') {
             let remaining = self.line.split_off(p);
             let line = std::mem::replace(&mut self.line, remaining[1..].into());
-            self.send.lock_printing().println(line);
+            self.send.log_message(line);
         }
         Ok(buf.len())
     }

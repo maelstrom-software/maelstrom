@@ -258,7 +258,7 @@ where
         slog::debug!(self.log, "enqueuing test case"; "case" => &case_str);
 
         if self.queuing_state.list_action.is_some() {
-            self.ui.lock_printing().println(case_str);
+            self.ui.list(case_str);
             return Ok(EnqueueResult::Listed);
         }
 
@@ -682,8 +682,8 @@ where
         self.state.queuing_state.tracker.wait_for_outstanding();
         self.introspect_driver.stop()?;
 
-        let summary_cb = self.state.queuing_state.tracker.print_summary_cb();
-        self.ui.finished(summary_cb)?;
+        let summary = self.state.queuing_state.tracker.ui_summary();
+        self.ui.finished(summary)?;
 
         self.state.test_listing_store.save(
             self.state
