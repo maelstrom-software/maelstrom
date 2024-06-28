@@ -1,38 +1,3 @@
-# Because it has no `filter` field, this directive applies to all tests.
-[[directives]]
-# Copy any shared libraries the test depends on along with the binary.
-include_shared_libraries = true
-
-# Don't bother enabling the network. We can set to "loopback" to run on the
-# cluster using only the loopback network, or to "local" to only run on the
-# local machine but with full network access.
-network = "disabled"
-
-# Don't bother creating a writable container for our test. It can still write to /tmp .
-enable_writable_file_system = false
-
-# Have our tests run with root as a working directory.
-working_directory = "/"
-
-# Run our test as root.
-user = 0
-group = 0
-
-# This layer just includes files and directories for mounting the following
-# file-systems and devices.
-layers = [
-    { stubs = [ "/{proc,sys,tmp}/", "/dev/{full,null,random,urandom,zero}" ] },
-]
-
-# Provide /tmp, /proc, /sys. These are used pretty commonly by tests.
-mounts = [
-    { type = "tmp", mount_point = "/tmp" },
-    { type = "proc", mount_point = "/proc" },
-    { type = "sys", mount_point = "/sys" },
-]
-
-# Mount these devices in /dev/. These are used pretty commonly by tests.
-devices = ["full", "null", "random", "urandom", "zero"]
 
 # Uncomment this line to forward the RUST_BACKTRACE environment variable.
 # Later directives can override the `environment` key, but the `added_environment` key is only

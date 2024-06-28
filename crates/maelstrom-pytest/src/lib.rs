@@ -35,6 +35,9 @@ use std::{fmt, io};
 
 pub use maelstrom_test_runner::Logger;
 
+pub const MAELSTROM_TEST_TOML: &str = "maelstrom-pytest.toml";
+pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
+
 #[derive(Config, Debug, Default)]
 pub struct PytestConfigValues {
     /// Collect tests from the provided module intead of using pytest's default collection
@@ -566,7 +569,7 @@ impl<'client> MainAppDeps for DefaultMainAppDeps<'client> {
         Ok(TemplateVars::new())
     }
 
-    const MAELSTROM_TEST_TOML: &'static str = "maelstrom-pytest.toml";
+    const MAELSTROM_TEST_TOML: &'static str = MAELSTROM_TEST_TOML;
 }
 
 impl Wait for pytest::WaitHandle {

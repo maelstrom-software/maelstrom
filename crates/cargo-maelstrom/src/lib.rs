@@ -31,6 +31,7 @@ use std::{fmt, io};
 pub use maelstrom_test_runner::Logger;
 
 pub const MAELSTROM_TEST_TOML: &str = "cargo-maelstrom.toml";
+pub const ADDED_DEFAULT_TEST_METADATA: &str = include_str!("added-default-test-metadata.toml");
 
 /// The Maelstrom target directory is <target-dir>/maelstrom.
 pub struct MaelstromTargetDir;
@@ -490,7 +491,7 @@ fn maybe_print_build_error(res: Result<ExitCode>) -> Result<ExitCode> {
     res
 }
 
-fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
+pub fn read_cargo_metadata(config: &config::Config) -> Result<CargoMetadata> {
     let output = std::process::Command::new("cargo")
         .args(["metadata", "--format-version=1"])
         .args(config.cargo_feature_selection_options.iter())
@@ -517,10 +518,7 @@ pub fn main(
     stderr_is_tty: bool,
     ui: impl Ui,
 ) -> Result<ExitCode> {
-    if extra_options.parent.init {
-        let cargo_metadata = read_cargo_metadata(&config)?;
-        alternative_mains::init(&cargo_metadata.workspace_root)
-    } else if extra_options.list.packages {
+    if extra_options.list.packages {
         let cargo_metadata = read_cargo_metadata(&config)?;
         alternative_mains::list_packages(
             &cargo_metadata.workspace_packages(),

@@ -17,7 +17,7 @@ use anyhow::Result;
 use artifacts::GeneratedArtifacts;
 use clap::{Args, Command};
 use introspect_driver::{DefaultIntrospectDriver, IntrospectDriver};
-use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout};
+use maelstrom_base::{ArtifactType, JobRootOverlay, Sha256Digest, Timeout, Utf8PathBuf};
 use maelstrom_client::{spec::JobSpec, ClientBgProcess, ProjectDir, StateDir};
 use maelstrom_util::{
     config::common::LogLevel, config::Config, fs::Fs, process::ExitCode, root::Root,
@@ -793,12 +793,24 @@ where
     Ok(exit_code)
 }
 
-pub fn main<ConfigT, ExtraCommandLineOptionsT, ArgsT, ArgsIntoIterT, IsListFn, MainFn>(
+#[allow(clippy::too_many_arguments)]
+pub fn main<
+    ConfigT,
+    ExtraCommandLineOptionsT,
+    ArgsT,
+    ArgsIntoIterT,
+    IsListFn,
+    GetProjectDirFn,
+    MainFn,
+>(
     command: Command,
     base_directories_prefix: &'static str,
     env_var_prefix: &'static str,
     args: ArgsIntoIterT,
     is_list: IsListFn,
+    get_project_dir: GetProjectDirFn,
+    test_toml_name: &str,
+    test_toml_specific_contents: &str,
     main: MainFn,
 ) -> Result<ExitCode>
 where
@@ -807,6 +819,7 @@ where
     ArgsIntoIterT: IntoIterator<Item = ArgsT>,
     ArgsT: Into<OsString> + Clone,
     IsListFn: FnOnce(&ExtraCommandLineOptionsT) -> bool,
+    GetProjectDirFn: FnOnce(&ConfigT) -> Result<Utf8PathBuf>,
     MainFn: FnOnce(
         ConfigT,
         ExtraCommandLineOptionsT,
@@ -841,6 +854,12 @@ where
 
     if extra_options.as_ref().client_bg_proc {
         alternative_mains::client_bg_proc()
+    } else if extra_options.as_ref().init {
+        alternative_mains::init(
+            &get_project_dir(&config)?,
+            test_toml_name,
+            test_toml_specific_contents,
+        )
     } else {
         main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
     }

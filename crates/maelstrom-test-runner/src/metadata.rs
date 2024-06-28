@@ -21,7 +21,7 @@ use std::{
 
 /// This file is what we write out for the user when `--init` is provided. It should contain the
 /// same data as `AllMetadata::default()` but it contains nice formatting, comments, and examples.
-pub const DEFAULT_TEST_METADATA: &str = include_str!("default_test_metadata.toml");
+pub const DEFAULT_TEST_METADATA: &str = include_str!("default-test-metadata.toml");
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
