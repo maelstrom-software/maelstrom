@@ -77,8 +77,3 @@ pub fn list_binaries(
     }
     Ok(ExitCode::SUCCESS)
 }
-
-pub fn client_bg_proc() -> Result<ExitCode> {
-    maelstrom_client::bg_proc_main()?;
-    Ok(ExitCode::from(0))
-}

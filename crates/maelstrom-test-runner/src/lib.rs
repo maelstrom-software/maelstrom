@@ -1,3 +1,4 @@
+mod alternative_mains;
 pub mod artifacts;
 pub mod config;
 mod deps;
@@ -802,7 +803,7 @@ pub fn main<ConfigT, ExtraCommandLineOptionsT, ArgsT, ArgsIntoIterT, IsListFn, M
 ) -> Result<ExitCode>
 where
     ConfigT: Config + Debug + AsRef<config::Config>,
-    ExtraCommandLineOptionsT: Args,
+    ExtraCommandLineOptionsT: Args + AsRef<config::ExtraCommandLineOptions>,
     ArgsIntoIterT: IntoIterator<Item = ArgsT>,
     ArgsT: Into<OsString> + Clone,
     IsListFn: FnOnce(&ExtraCommandLineOptionsT) -> bool,
@@ -838,5 +839,9 @@ where
         config_parent.quiet,
     );
 
-    main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
+    if extra_options.as_ref().client_bg_proc {
+        alternative_mains::client_bg_proc()
+    } else {
+        main(config, extra_options, bg_proc, logger, stderr_is_tty, ui)
+    }
 }

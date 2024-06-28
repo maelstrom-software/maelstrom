@@ -1,4 +1,3 @@
-mod alternative_mains;
 pub mod cli;
 pub mod pattern;
 mod pytest;
@@ -634,10 +633,6 @@ pub fn main_with_stderr_and_project_dir(
     mut stderr: impl io::Write,
     project_dir: &Root<ProjectDir>,
 ) -> Result<ExitCode> {
-    if extra_options.parent.client_bg_proc {
-        return alternative_mains::client_bg_proc();
-    }
-
     let logging_output = LoggingOutput::default();
     let log = logger.build(logging_output.clone());
 

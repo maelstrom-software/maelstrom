@@ -49,3 +49,9 @@ pub struct TestMetadataOptions {
     )]
     pub init: bool,
 }
+
+impl AsRef<maelstrom_test_runner::config::ExtraCommandLineOptions> for ExtraCommandLineOptions {
+    fn as_ref(&self) -> &maelstrom_test_runner::config::ExtraCommandLineOptions {
+        &self.parent
+    }
+}
