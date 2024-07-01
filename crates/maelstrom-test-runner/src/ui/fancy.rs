@@ -23,6 +23,7 @@ pub struct FancyUi {
     jobs_completed: u64,
     jobs_pending: u64,
     all_done: bool,
+    done_building: bool,
 
     completed_tests: Vec<Line<'static>>,
     build_output: Vec<Line<'static>>,
@@ -34,6 +35,7 @@ impl FancyUi {
             jobs_completed: 0,
             jobs_pending: 0,
             all_done: false,
+            done_building: false,
 
             completed_tests: vec![],
             build_output: vec![],
@@ -73,6 +75,9 @@ impl Ui for FancyUi {
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::UpdateIntrospectState(_resp) => {}
                     UiMessage::UpdateEnqueueStatus(_msg) => {}
+                    UiMessage::DoneBuilding => {
+                        self.done_building = true;
+                    }
                     UiMessage::DoneQueuingJobs => {}
                     UiMessage::AllJobsFinished(_summary) => {
                         self.all_done = true;
@@ -160,15 +165,22 @@ fn title_block(title: &str) -> Block {
 
 impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let layout = Layout::vertical([
-            Constraint::Ratio(1, 2),
-            Constraint::Ratio(3, 8),
-            Constraint::Ratio(1, 8),
-        ]);
-        let [tests_area, build_area, gauge_area] = layout.areas(area);
-        self.render_completed_tests(tests_area, buf);
-        self.render_build_output(build_area, buf);
-        self.render_gauge(gauge_area, buf);
+        if self.done_building {
+            let layout = Layout::vertical([Constraint::Ratio(7, 8), Constraint::Ratio(1, 8)]);
+            let [tests_area, gauge_area] = layout.areas(area);
+            self.render_completed_tests(tests_area, buf);
+            self.render_gauge(gauge_area, buf);
+        } else {
+            let layout = Layout::vertical([
+                Constraint::Ratio(1, 2),
+                Constraint::Ratio(3, 8),
+                Constraint::Ratio(1, 8),
+            ]);
+            let [tests_area, build_area, gauge_area] = layout.areas(area);
+            self.render_completed_tests(tests_area, buf);
+            self.render_build_output(build_area, buf);
+            self.render_gauge(gauge_area, buf);
+        }
     }
 }
 

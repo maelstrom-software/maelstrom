@@ -208,6 +208,7 @@ where
                 }
                 UiMessage::UpdateEnqueueStatus(msg) => prog.update_enqueue_status(msg),
                 UiMessage::DoneQueuingJobs => prog.done_queuing_jobs(),
+                UiMessage::DoneBuilding => {}
                 UiMessage::AllJobsFinished(summary) => all_jobs_finished(prog, summary)?,
             },
             Err(RecvTimeoutError::Timeout) => continue,

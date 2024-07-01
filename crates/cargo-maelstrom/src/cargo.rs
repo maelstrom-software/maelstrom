@@ -122,6 +122,7 @@ pub fn run_cargo_test(
             stderr_string += "\n";
             ui.build_output_line(line);
         }
+        ui.done_building();
         Ok(stderr_string)
     });
 

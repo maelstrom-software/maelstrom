@@ -68,6 +68,7 @@ pub enum UiMessage {
     UpdatePendingJobsCount(u64),
     UpdateIntrospectState(IntrospectResponse),
     UpdateEnqueueStatus(String),
+    DoneBuilding,
     DoneQueuingJobs,
     AllJobsFinished(UiJobSummary),
 }
@@ -84,6 +85,10 @@ impl UiSender {
 }
 
 impl UiSender {
+    pub fn done_building(&self) {
+        let _ = self.send.send(UiMessage::DoneBuilding);
+    }
+
     pub fn build_output_line(&self, line: String) {
         let _ = self.send.send(UiMessage::BuildOutputLine(line));
     }
