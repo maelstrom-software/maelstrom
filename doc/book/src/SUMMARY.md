@@ -28,6 +28,7 @@
     - [`maelstrom-run`](run.md)
         - [Job Specification](run/spec.md)
         - [Configuration Values](run/config.md)
+    - [`maelstrom-pytest`](maelstrom-pytest.md)
 - [`maelstrom-broker`](broker.md)
     - [Configuration Values](broker/config.md)
     - [Running as `systemd` Service](broker/systemd-service.md)

@@ -1,19 +1,25 @@
 # Installation
 
 Maelstrom consists of the following binaries:
-  - [`cargo-maelstrom`](cargo-maelstrom.md): A Rust test runner. This can be run in
-    standalone mode &mdash; where tests will be executed on the local machine
-    &mdash; or in clustered mode. In standalone mode, no other Maelstrom
-    binaries need be installed, but in clustered mode, there must be a broker
-    and some workers available on the network.
-  - [`maelstrom-broker`](broker.md): The Maelstrom cluster scheduler. There must be one of
-    these per Maelstrom cluster.
-  - [`maelstrom-worker`](worker.md): The Maelstrom cluster worker. This must be
-    installed on the machines in the cluster that will actually run jobs
-    (i.e. tests).
-  - [`maelstrom-run`](run.md): A Maelstrom client for running arbitrary commands on a
-    Maelstrom cluster. While this binary can run in standalone mode, it's only really
-    useful in clustered mode.
+  - Clustering Binaries
+      - [`maelstrom-broker`](broker.md): The Maelstrom cluster scheduler. There must be one of
+        these per Maelstrom cluster.
+      - [`maelstrom-worker`](worker.md): The Maelstrom cluster worker. This must be
+        installed on the machines in the cluster that will actually run jobs
+        (i.e. tests).
+  - Client Binaries
+      - [`maelstrom-run`](run.md): A Maelstrom client for running arbitrary commands on a
+        Maelstrom cluster. While this binary can run in standalone mode, it's only really
+        useful in clustered mode.
+  - Test Runners
+    These are clients which run tests from different languages.
+    This can be run in standalone mode &mdash; where tests will be executed on the local machine
+    &mdash; or in clustered mode. In standalone mode, no other Maelstrom binaries need be installed,
+    but in clustered mode, there must be a broker and some workers available on the network.
+
+    Test runner binaries consist of the following:
+    - [`cargo-maelstrom`](cargo-maelstrom.md): A Rust test runner.
+    - [`maelstrom-pytest`](maelstrom-pytest.md): A Python test runner.
 
 The installation process is virtually identical for all binaries. We'll
 demonstrate how to install all the binaries in the following sections. You can
@@ -27,10 +33,11 @@ The easiest way to install Maelstrom binaries is to use
 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
 ```bash
-cargo binstall cargo-maelstrom
 cargo binstall maelstrom-worker
 cargo binstall maelstrom-broker
 cargo binstall maelstrom-run
+cargo binstall cargo-maelstrom
+cargo binstall maelstrom-pytest
 ```
 
 These commands retrieve the pre-built binaries from the [Maelstrom GitHub
@@ -60,9 +67,10 @@ Maelstrom binaries can be built from source using [`cargo
 install`](https://doc.rust-lang.org/cargo/commands/cargo-install.html):
 
 ```bash
-cargo install cargo-maelstrom
 cargo install maelstrom-worker
 cargo install maelstrom-run
+cargo install cargo-maelstrom
+cargo install maelstrom-pytest
 ```
 
 However, `maelstrom-broker` requires some extra dependencies be installed
