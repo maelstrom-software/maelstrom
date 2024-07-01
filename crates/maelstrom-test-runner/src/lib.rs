@@ -769,7 +769,7 @@ where
     let ui_sender = UiSender::new(ui_send);
     let ui_handle = std::thread::spawn(move || ui.run(ui_recv));
 
-    let exit_code = std::thread::scope(|scope| {
+    let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
             &state,
             ui_sender,
@@ -779,10 +779,14 @@ where
         while !app.enqueue_one()?.is_done() {}
         app.drain()?;
         app.finish()
-    })?;
+    });
     drop(state);
 
-    ui_handle.join().unwrap()?;
+    let ui_res = ui_handle.join().unwrap();
+
+    let exit_code = exit_code_res?;
+    ui_res?;
+
     Ok(exit_code)
 }
 
