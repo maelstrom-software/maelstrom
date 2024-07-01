@@ -419,6 +419,7 @@ where
                     queuing_state.stderr_color,
                     &queuing_state.collector_options,
                     queuing_state.packages.values().collect(),
+                    &ui,
                 )
             })
             .transpose()?

@@ -16,6 +16,7 @@ clap.workspace = true
 colored.workspace = true
 combine.workspace = true
 console.workspace = true
+crossterm.workspace = true
 derive_more.workspace = true
 enumset.workspace = true
 globset.workspace = true

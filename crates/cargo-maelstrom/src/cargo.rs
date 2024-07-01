@@ -3,13 +3,14 @@ use cargo_metadata::{
     Artifact as CargoArtifact, Message as CargoMessage, MessageIter as CargoMessageIter,
 };
 use maelstrom_macro::Config;
+use maelstrom_test_runner::ui::UiSender;
 use maelstrom_util::process::ExitCode;
 use regex::Regex;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     ffi::OsString,
     fmt,
-    io::{BufReader, Read as _},
+    io::{BufRead as _, BufReader},
     iter,
     path::{Path, PathBuf},
     process::{Child, ChildStdout, Command, Stdio},
@@ -90,6 +91,7 @@ pub fn run_cargo_test(
     compilation_options: &CompilationOptions,
     manifest_options: &ManifestOptions,
     packages: Vec<String>,
+    ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let mut cmd = Command::new("cargo");
     cmd.arg("test")
@@ -111,10 +113,15 @@ pub fn run_cargo_test(
 
     let mut child = cmd.spawn()?;
     let stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
+    let stderr = BufReader::new(child.stderr.take().unwrap());
     let stderr_handle = thread::spawn(move || {
         let mut stderr_string = String::new();
-        stderr.read_to_string(&mut stderr_string)?;
+        for line in stderr.lines() {
+            let line = line?;
+            stderr_string += &line;
+            stderr_string += "\n";
+            ui.build_output_line(line);
+        }
         Ok(stderr_string)
     });
 

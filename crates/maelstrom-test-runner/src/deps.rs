@@ -170,6 +170,7 @@ pub trait CollectTests {
         color: bool,
         options: &Self::Options,
         packages: Vec<&Self::Package>,
+        ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)>;
 
     fn get_test_layers(&self, metadata: &TestMetadata, ind: &ui::UiSender) -> Result<TestLayers>;

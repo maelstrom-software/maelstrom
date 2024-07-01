@@ -447,6 +447,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
         color: bool,
         _options: &PytestOptions,
         _packages: Vec<&PytestPackage>,
+        _ui: &UiSender,
     ) -> Result<(pytest::WaitHandle, pytest::TestArtifactStream)> {
         let (handle, stream) = pytest::pytest_collect_tests(
             color,

@@ -282,6 +282,7 @@ impl CollectTests for GoTestCollector {
         color: bool,
         _options: &GoTestOptions,
         packages: Vec<&GoPackage>,
+        _ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
         go_test::build_and_collect(color, packages)
     }

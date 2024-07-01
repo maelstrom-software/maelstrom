@@ -3275,6 +3275,7 @@ dependencies = [
  "colored",
  "combine",
  "console",
+ "crossterm",
  "derive_more",
  "enum-map",
  "enumset",

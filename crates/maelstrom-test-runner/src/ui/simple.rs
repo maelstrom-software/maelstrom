@@ -199,6 +199,7 @@ where
         match recv.recv_timeout(Duration::from_millis(500)) {
             Ok(msg) => match msg {
                 UiMessage::List(line) => prog.lock_printing().println(line),
+                UiMessage::BuildOutputLine(_) => {}
                 UiMessage::LogMessage(line) => prog.lock_printing().println(line),
                 UiMessage::JobFinished(res) => job_finished(prog, res),
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),

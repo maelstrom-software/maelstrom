@@ -61,6 +61,7 @@ pub struct UiJobResult {
 }
 
 pub enum UiMessage {
+    BuildOutputLine(String),
     LogMessage(String),
     List(String),
     JobFinished(UiJobResult),
@@ -83,6 +84,10 @@ impl UiSender {
 }
 
 impl UiSender {
+    pub fn build_output_line(&self, line: String) {
+        let _ = self.send.send(UiMessage::BuildOutputLine(line));
+    }
+
     pub fn log_message(&self, line: String) {
         let _ = self.send.send(UiMessage::LogMessage(line));
     }

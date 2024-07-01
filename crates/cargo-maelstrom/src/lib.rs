@@ -339,6 +339,7 @@ impl CollectTests for CargoTestCollector {
         color: bool,
         options: &CargoOptions,
         packages: Vec<&CargoPackage>,
+        ui: &UiSender,
     ) -> Result<(cargo::WaitHandle, CargoTestArtifactStream)> {
         let packages: Vec<_> = packages
             .into_iter()
@@ -351,6 +352,7 @@ impl CollectTests for CargoTestCollector {
             &options.compilation_options,
             &options.manifest_options,
             packages,
+            ui.clone(),
         )?;
         Ok((handle, CargoTestArtifactStream(stream)))
     }

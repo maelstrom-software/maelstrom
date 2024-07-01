@@ -421,6 +421,7 @@ impl CollectTests for TestCollector {
         _color: bool,
         _options: &TestOptions,
         packages: Vec<&FakeTestPackage>,
+        _ui: &ui::UiSender,
     ) -> Result<(Self::BuildHandle, Self::ArtifactStream)> {
         let fs = Fs::new();
         fs.create_dir_all(&self.target_dir).unwrap();
