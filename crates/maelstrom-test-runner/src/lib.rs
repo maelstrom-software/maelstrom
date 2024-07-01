@@ -772,7 +772,7 @@ where
     let exit_code_res = std::thread::scope(|scope| {
         let mut app = MainApp::new(
             &state,
-            ui_sender,
+            ui_sender.clone(),
             DefaultIntrospectDriver::new(scope),
             timeout_override,
         )?;
@@ -782,6 +782,7 @@ where
     });
     drop(state);
 
+    ui_sender.shutdown();
     let ui_res = ui_handle.join().unwrap();
 
     let exit_code = exit_code_res?;

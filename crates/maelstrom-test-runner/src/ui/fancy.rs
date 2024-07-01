@@ -82,6 +82,7 @@ impl Ui for FancyUi {
                     UiMessage::AllJobsFinished(_summary) => {
                         self.all_done = true;
                     }
+                    UiMessage::Shutdown => break,
                 },
                 Err(RecvTimeoutError::Timeout) => continue,
                 Err(RecvTimeoutError::Disconnected) => break,

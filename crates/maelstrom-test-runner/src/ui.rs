@@ -71,6 +71,7 @@ pub enum UiMessage {
     DoneBuilding,
     DoneQueuingJobs,
     AllJobsFinished(UiJobSummary),
+    Shutdown,
 }
 
 #[derive(Clone)]
@@ -85,6 +86,10 @@ impl UiSender {
 }
 
 impl UiSender {
+    pub fn shutdown(&self) {
+        let _ = self.send.send(UiMessage::Shutdown);
+    }
+
     pub fn done_building(&self) {
         let _ = self.send.send(UiMessage::DoneBuilding);
     }
