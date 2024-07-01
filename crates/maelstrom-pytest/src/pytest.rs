@@ -1,5 +1,5 @@
-use crate::{PytestCaseMetadata, PytestPackageId, PytestTestArtifact};
-use anyhow::{bail, Result};
+use crate::{BuildDir, PytestCaseMetadata, PytestPackageId, PytestTestArtifact};
+use anyhow::{anyhow, bail, Result};
 use maelstrom_client::ProjectDir;
 use maelstrom_util::{process::ExitCode, root::Root};
 use serde::Deserialize;
@@ -113,10 +113,17 @@ pub fn pytest_collect_tests(
     _color: bool,
     pyargs: Option<&String>,
     project_dir: &Root<ProjectDir>,
+    build_dir: &Root<BuildDir>,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     compile_python(project_dir.as_ref())?;
 
-    let mut args = vec![];
+    let mut args = vec![
+        "--ignore".into(),
+        build_dir
+            .to_str()
+            .ok_or_else(|| anyhow!("non UTF-8 path"))?
+            .to_owned(),
+    ];
     if let Some(arg) = pyargs {
         args.push("--pyargs".into());
         args.push(arg.into());

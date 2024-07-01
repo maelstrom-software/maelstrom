@@ -118,6 +118,7 @@ struct DefaultMainAppDeps<'client> {
 impl<'client> DefaultMainAppDeps<'client> {
     pub fn new(
         project_dir: &Root<ProjectDir>,
+        build_dir: &Root<BuildDir>,
         collect_from_module: Option<String>,
         cache_dir: &Root<CacheDir>,
         client: &'client Client,
@@ -127,6 +128,7 @@ impl<'client> DefaultMainAppDeps<'client> {
             test_collector: PytestTestCollector {
                 client,
                 project_dir: project_dir.to_owned(),
+                build_dir: build_dir.to_owned(),
                 cache_dir: cache_dir.to_owned(),
                 collect_from_module,
             },
@@ -185,6 +187,7 @@ struct PytestOptions;
 
 struct PytestTestCollector<'client> {
     project_dir: RootBuf<ProjectDir>,
+    build_dir: RootBuf<BuildDir>,
     cache_dir: RootBuf<CacheDir>,
     client: &'client Client,
     collect_from_module: Option<String>,
@@ -453,6 +456,7 @@ impl<'client> CollectTests for PytestTestCollector<'client> {
             color,
             self.collect_from_module.as_ref(),
             &self.project_dir,
+            &self.build_dir,
         )?;
         Ok((handle, stream))
     }
@@ -661,6 +665,7 @@ pub fn main_with_stderr_and_project_dir(
     )?;
     let deps = DefaultMainAppDeps::new(
         project_dir,
+        build_dir,
         config.pytest_options.collect_from_module,
         &cache_dir,
         &client,
