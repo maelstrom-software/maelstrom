@@ -6,14 +6,14 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![CI](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml/badge.svg)](https://github.com/maelstrom-software/maelstrom/actions/workflows/ci.yml)
 
-Maelstrom is a Rust test runner, built on top of a general-purpose
-clustered job runner. Maelstrom packages your Rust tests into hermetic
-micro-containers, then distributes them to be run on an arbitrarily large
-cluster of test-runners, or locally on your machine. You might use
-Maelstrom to run your tests because:
+Maelstrom is a suite of tools for running tests in hermetic micro-containers
+locally on your machine or distributed across arbitrarily large clusters.
+Maelstrom currently has test runners for Rust and Python, with more on the
+way.
 
-* It's easy. Maelstrom functions as a drop-in replacement for `cargo test`, so in
-  most cases, it just works.
+* It's easy. Maelstrom provides a drop-in replacement for `cargo test`, and a
+  pytest plugin. In most cases, it just works with your existing tests without
+  any configuration.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
   container, eliminating confusing errors caused by inter-test or implicit
   test-environment dependencies.
@@ -21,31 +21,34 @@ Maelstrom to run your tests because:
   linearly increase test throughput.
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
   without using clustering.
-* It's clean. Maelstrom has a from-scratch, rootless container implementation
-  (not relying on Docker or RunC), optimized to be low-overhead and start
-  quickly.
-* It's Rusty. The whole project is written in Rust.
+* It's clean. Maelstrom has built a rootless container implementation (not
+  relying on Docker or RunC) from scratch, in Rust, optimized to be
+  low-overhead and start quickly.
 
-We started with a Rust test runner, but Maelstrom's underlying job execution
-system is general-purpose. We will add support for other languages' test
-frameworks in the near future. We have also provided tools for adventurous users
-to run arbitrary jobs, either using a command-line tool or a gRPC-based SDK.
-
-The project is currently Linux-only (x86 and ARM), as it relies on namespaces
-to implement containers.
+While our main focus thus far has been on running tests, Maelstrom's underlying
+job execution system is general-purpose. We provide a general-purpose command
+line utility to run arbitrary commands, as well a gRPC-based API and Rust
+bindings for programmatic access and control.
 
 See the [book](https://maelstrom-software.com/book/) for more information.
 
 # Getting Started
 
-## Installing `cargo-maelstrom`
+## Installing Pre-Built Binaries
 
-To run your tests using Maelstrom, you need the `cargo-maelstrom`
-binary. The easiest way to get it is using
+To run your tests using Maelstrom, you need a test runner binary.
+The easiest way to get it is using
 [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+
+For Rust tests:
 
 ```bash
 cargo binstall cargo-maelstrom
+```
+
+For Python tests:
+```bash
+cargo binstall maelstrom-pytest
 ```
 
 This will install a pre-built binary from the [github releases page](https://github.com/maelstrom-software/maelstrom/releases).
@@ -76,6 +79,51 @@ cargo maelstrom --init
 
 Then edit the created `maelstrom-test.toml` file as described in the [book](https://maelstrom-software.com/book/cargo-maelstrom/spec.html).
 
+## Running `maelstrom-pytest`
+
+Before running tests, we need to do a little setup.
+
+## Choosing a Python Image
+First generate a `maelstrom-pytest.toml` file
+```bash
+maelstrom-pytest --init
+```
+
+Then update the file to include a python image
+```toml
+[[directives]]
+image.name = "docker://python:3.11-slim"
+image.use = ["layers", "environment"]
+```
+This example installs an [image from Docker](https://hub.docker.com/_/python)
+
+## Including Your Project Python Files
+So that your tests can be run from the container, your project's python must be included.
+```toml
+added_layers = [ { glob = "**.py" } ]
+```
+This example just adds all files with a `.py` extension. You may also need to include `.pyi` files
+or other files.
+
+## Including `pip` Packages
+If you have an image named "python", maelstrom-pytest will automatically include pip packages for
+you as part of the container. It expects to read these packages from a `test-requirements.txt` file
+in your project directory. This needs to at a minimum include the `pytest` package
+
+`test-requirements.txt`
+```
+pytest==8.1.1
+```
+
+Now we are ready to try to run tests. Just invoke `maelstrom-pytest`:
+
+```bash
+maelstrom-pytest
+```
+
+This runs in "standalone" mode, meaning all tests are run locally. Each test is run in its own
+container.
+
 ## Setting Up a Cluster
 
 To get even more out of Maelstrom, you can set up a cluster to run your tests on.
@@ -102,10 +150,11 @@ Then a few workers:
 maelstrom-worker --broker=broker-host:1234
 ```
 
-And then run `cargo-maelstrom` against the cluster:
+And then run `cargo-maelstrom` or `maelstrom-pytest` against the cluster:
 
 ```bash
 cargo maelstrom --broker=broker-host:1234
+maelstrom-pytest --broker=broker-host:1234
 ```
 
 # Learn More
