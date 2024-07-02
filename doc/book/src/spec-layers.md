@@ -1,4 +1,4 @@
-# Layers
+# Job Specification Layers
 
 At the lowest level, a layer is just a tar file or a manifest. A manifest is a
 Maelstrom-specific file format that allows for file data to be transferred
@@ -7,45 +7,55 @@ same.
 
 As a user, having to specify every layer as a tar file would be very painful.
 For this reason, Maelstrom provides some conveniences for creating layers based
-on specification. Under the covers, there is an API that the Maelstrom clients
-`cargo-maelstrom` and `maelstrom-run` use for creating layers. This is what
-that API looks like:
+on specifications. There is an API function that clients can call where they
+provide a layer specification and get back a layer. A layer specification looks
+like this:
 
-```protobuf
-message AddLayerRequest {
-    oneof Layer {
-        TarLayer tar = 1;
-        GlobLayer glob = 2;
-        PathsLayer paths = 3;
-        StubsLayer stubs = 4;
-        SymlinksLayer symlinks = 5;
-    }
+```rust
+pub enum Layer {
+    Tar {
+        path: Utf8PathBuf,
+    },
+    Glob {
+        glob: String,
+        prefix_options: PrefixOptions,
+    },
+    Paths {
+        paths: Vec<Utf8PathBuf>,
+        prefix_options: PrefixOptions,
+    },
+    Stubs { stubs: Vec<String> },
+    Symlinks { symlinks: Vec<SymlinkSpec> },
 }
 ```
 
 We will cover each layer type below.
 
-## `tar`
-```protobuf
-message TarLayer {
-    string path = 1;
+## `Tar`
+```rust
+pub enum Layer {
+    Tar {
+        path: Utf8PathBuf,
+    },
+    // ...
 }
 ```
 
-The `tar` layer type is very simple: The provided tar file will be used as a layer.
-The path is specified relative to the client.
+The `Tar` layer type is very simple: The provided tar file will be used as a
+layer. The path is specified relative to the [project
+directory](project-dir.md).
 
-## `prefix_options`
-```protobuf
-message PrefixOptions {
-    optional string strip_prefix = 1;
-    optional string prepend_prefix = 2;
-    bool canonicalize = 3;
-    bool follow_symlinks = 4;
+## `PrefixOptions`
+```rust
+pub struct PrefixOptions {
+    pub strip_prefix: Option<Utf8PathBuf>,
+    pub prepend_prefix: Option<Utf8PathBuf>,
+    pub canonicalize: bool,
+    pub follow_symlinks: bool,
 }
 ```
 
-The [`paths`](#paths) and [`glob`](#glob) layer types support some options that
+The [`Paths`](#paths) and [`Glob`](#glob) layer types support some options that
 can be used to control how the resulting layer is created. They apply to all
 paths included in the layer. These options can be combined, and in such a
 scenario you can think of them taking effect in the given order:
@@ -83,52 +93,62 @@ will put the file in the container at `/a/a.bin`.
 If `layers/a/a.bin` is specified with `prepend_prefix = "test/"`, then
 Maelstrom will put the file in the container at `/test/layers/a/a.bin`.
 
-## `glob`
-```protobuf
-message GlobLayer {
-    string glob = 1;
-    PrefixOptions prefix_options = 2;
+## `Glob`
+```rust
+pub enum Layer {
+    // ...
+    Glob {
+        glob: String,
+        prefix_options: PrefixOptions,
+    },
+    // ...
 }
 ```
 
-The `glob` layer type will include the files specified by the glob pattern in
+The `Glob` layer type will include the files specified by the glob pattern in
 the layer. The glob pattern is executed by the client relative to the [project
-directory](../project-dir.md). The glob pattern must use relative paths. The
+directory](project-dir.md). The glob pattern must use relative paths. The
 [`globset`](https://docs.rs/globset/latest/globset/) crate is used for glob
 pattern matching.
 
-The `prefix_options` are applied to every matching path, as [described above](#prefix_options).
+The `prefix_options` are applied to every matching path, as [described above](#prefixoptions).
 
-## `paths`
-```protobuf
-message PathsLayer {
-    repeated string paths = 1;
-    PrefixOptions prefix_options = 2;
+## `Paths`
+```rust
+pub enum Layer {
+    // ...
+    Paths {
+        paths: Vec<Utf8PathBuf>,
+        prefix_options: PrefixOptions,
+    },
+    // ...
 }
 ```
 
-The `paths` layer type will include each file referenced by the
+The `Paths` layer type will include each file referenced by the
 specified paths. This is executed by the client relative to the [project
-directory](../project-dir.md). Relative and absolute paths may be used.
+directory](project-dir.md). Relative and absolute paths may be used.
 
-The `prefix_options` are applied to every matching path, as [described above](#prefix_options).
+The `prefix_options` are applied to every matching path, as [described above](#prefixoptions).
 
 If a path points to a file, the file is included in the layer. If the path
 points to a symlink, either the symlink or the pointed-to-file gets included,
 depending on [`prefix_options.follow_symlinks`](#follow_symlinks). If the path points to a
 directory, an empty directory is included.
 
-To include a directory and all of its contents, use the [`glob`](#glob) layer
+To include a directory and all of its contents, use the [`Glob`](#glob) layer
 type.
 
-## `stubs`
-```protobuf
-message StubsLayer {
-    repeated string stubs = 1;
+## `Stubs`
+```rust
+pub enum Layer {
+    // ...
+    Stubs { stubs: Vec<String> },
+    // ...
 }
 ```
 
-The `stubs` layer type is used to create empty files and directories, usually
+The `Stubs` layer type is used to create empty files and directories, usually
 so that they can be mount points for [devices](spec.md#devices) or
 [mounts](spec.md#mounts).
 
@@ -150,18 +170,19 @@ result in a layer with the following files and directories:
   - `/usr/`
   - `/usr/bin/`
 
-## `symlinks`
-```protobuf
-message SymlinkSpec {
-    string link = 1;
-    string target = 2;
+## `Symlinks`
+```rust
+pub enum Layer {
+    // ...
+    Symlinks { symlinks: Vec<SymlinkSpec> },
 }
 
-message SymlinksLayer {
-    repeated SymlinkSpec symlinks = 1;
+pub struct SymlinkSpec {
+    pub link: Utf8PathBuf,
+    pub target: Utf8PathBuf,
 }
 ```
 
-The `symlinks` layer is used to create symlinks. The specified `link`s will be
-created, with the specified `target`s. Any parent directories will also be
-created, as necessary.
+The `Symlinks` layer is used to create symlinks. The specified `link`s will be
+created, pointing to the specified `target`s. Any parent directories will also
+be created, as necessary.

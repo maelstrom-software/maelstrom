@@ -2,7 +2,7 @@
 
 Each job run by Maelstrom is defined by a **job specification**, or "job spec"
 for short. Understanding job specifications is important for understanding
-what's going on with your tests, for toubleshooting failing tests, and for
+what's going on with your tests, for troubleshooting failing tests, and for
 understanding test runners' [configuration
 directives](cargo-maelstrom/spec.md) and `maelstrom-run`'s [input
 format](maelstrom-run/spec.md).
@@ -106,13 +106,13 @@ The `name` field is a URI in the format defined
 
 A `use_layers` value of `true` indicates that the job specification should use
 the image's layers as the bottom of it's layers stack. More layers can be added
-with the job specification's [`layers`](#layers) field.
+with the job specifications [`layers`](#layers) field.
 
 ### `use_environment`
 
 A `use_environment` value of `true` indicates that the job specification should
 use the image's environment variables as a base. These can be modified with the
-job specifications's [`environment`](#environment) field.
+job specification's [`environment`](#environment) field.
 
 ### `use_working_directory`
 
@@ -284,7 +284,7 @@ later layers overriding earlier layers.
 
 Each layer will be a tar file, or Maelstrom's equivalent called a "manifest
 file". These `LayerSpec` objects are usually generated with an
-`AddLayerRequest`, which is described [in the next chapter](spec/layers.md).
+`AddLayerRequest`, which is described [in the next chapter](spec-layers.md).
 [Test runners](cargo-maelstrom/spec.md) and
 [`maelstrom-run`](maelstrom-run/spec.md) provide ways to conveniently specify
 these, as described in their respective chapters.
@@ -451,7 +451,7 @@ system at the provided mount point. Maelstrom will always specify a
 
 If this file system is mounted, it usually makes sense to also add a symlink
 from `/dev/pts/ptmx` (or wherever the file system is mounted) to `/dev/ptmx`.
-This can be done with the [`symlinks` layer type](spec/layers.md#symlinks).
+This can be done with the [`symlinks` layer type](spec-layers.md#symlinks).
 
 ### Mqueue
 
@@ -543,7 +543,7 @@ If this field is set to `Local`, the job will become a [local-only
 job](local-worker.md), that can only be run on the local worker, not
 distributed on a cluster. The job will then be run without a network namespace,
 meaning that it will have access to all of the local machine's network devices.
-Note: if the job also specifieds a [`Sys`](#sys) file system mount, Linux will
+Note: if the job also specifies a [`Sys`](#sys) file system mount, Linux will
 fail to execute the job.
 
 In the future, we plan to add more `network` options that will allow clustered
@@ -679,7 +679,7 @@ scheduling](https://en.wikipedia.org/wiki/Longest-processing-time-first_scheduli
 (LPT). It's up to clients to provide a best guess of how long a job will take.
 If they can't provide one, they leave this field empty.
 
-Test runers [keep track](cargo-maelstrom/target-dir.md#test-listing) of how
+Test runners [keep track](cargo-maelstrom/target-dir.md#test-listing) of how
 long previous instances of a test took and use that information to fill in this
 field.
 
@@ -698,7 +698,7 @@ pub struct JobTty {
 
 The `allocate_tty` field is used by `maelstrom-run` with the `--tty`
 command-line option to implement run the job interactively with a
-psuedo-terminal attached. Jobs run this way will have standard input, output,
+pseudo-terminal attached. Jobs run this way will have standard input, output,
 and error all associated with the allocated tty.
 
 This can be useful for inspecting the container environment for a job.

@@ -1,7 +1,7 @@
-# Standard Command-Line Options
+# Common Command-Line Options
 
 Every Maelstrom program supports the following command-line options, in
-addition to those command line options for configuration [common configuration
+addition to those command line options for [common configuration
 values](common-config.md).
 
 ## `--help`

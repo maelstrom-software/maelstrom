@@ -64,7 +64,7 @@ Matcher       | Matches If Selected Name...
 `globs`       | matches argument evaluated as glob pattern
 
 Compound selectors and matchers are separated by `.` characters. Arguments are
-contained within delimiters, which must be a matched pair:
+contained within delimeters, which must be a matched pair:
 
 Left | Right
 :---:|:----:

@@ -5,7 +5,7 @@ minimal and are built entirely from files copied from the local machine. This
 works well for compiled languages (like Rust), where job don't depend on
 executing other programs. However, for interpreted languages (like Python), or
 in situations where the job needs to execute other programs, Maelstrom provides a way to
-create jobs' containers based off of a standard, OCI container images. These
+create containers based off of a standard, OCI container images. These
 container images can be retrieved from a container registry like [Docker
 Hub](https://hub.docker.com/), or provided from the local machine.
 
@@ -94,3 +94,25 @@ when running tests.
 To update a tag to the latest version, remove the corresponding line from the
 lock file and then run the client. This will force it to re-evaluate the tag
 and store the new results.
+
+## Authentication
+
+When a client connects to a container registry, it may need to authenticate.
+Maelstrom currently only supports registries for no authentication or with
+anonymous authentication. Password authentication will be added in the future.
+
+## Image Registry TLS Certificates {#accept-invalid-remote-container-tls-certs}
+
+Maelstrom always uses HTTPS to connect to container registries. By default, it
+will reject self-signed or otherwise invalid certificates. However, clients can be told to accept these
+certificates with the `accept-invalid-remote-container-tls-certs`
+[configuration value](config.md).
+
+## Configuration Values
+
+All clients support the following container-image-related configuration values:
+
+Value                                       | Type   | Description                                                                                 | Default
+--------------------------------------------|--------|---------------------------------------------------------------------------------------------|----------
+`container-image-depot-root`                | string | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
+`accept-invalid-remote-container-tls-certs` | bool   | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`

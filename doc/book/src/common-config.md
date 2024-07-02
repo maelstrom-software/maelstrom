@@ -17,6 +17,6 @@ Level         | Meaning
 
 The default value is `"info"`.
 
-Most programs output log messages to standard output, though the
-`maelstrom-client` background process will log them to a file in the state
+Most programs output log messages to standard output or standard error, though
+the `maelstrom-client` background process will log them to a file in the state
 directory.

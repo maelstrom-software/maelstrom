@@ -3,14 +3,14 @@
 Maelstrom is a suite of tools for running tests in hermetic micro-containers
 locally on your machine or distributed across arbitrarily large clusters.
 Maelstrom currently has test runners for Rust and Python, with more on the
-way.
+way. You might use Maelstrom to run your tests because:
 
-* It's easy. Maelstrom provides a drop-in replacement for `cargo test`, and a
+* It's easy. Maelstrom provides a drop-in replacement for `cargo test` and a
   pytest plugin. In most cases, it just works with your existing tests without
   any configuration.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
-  container, eliminating confusing errors caused by inter-test or implicit
-  test-environment dependencies.
+  container, eliminating confusing errors caused by inter-test dependencies or
+  implicit test-environment dependencies.
 * It's scalable. Maelstrom can be run as a cluster. You can add more worker machines to
   linearly increase test throughput.
 * It's fast. In most cases, Maelstrom is faster than `cargo test`, even
@@ -31,10 +31,11 @@ to implement containers.
 
 This book will start out covering how to [install](installation.md) Maelstrom.
 Next, it will cover [common concepts](common.md) that are applicable to all
-Maelstrom components. After that, there are in-depth chapters for each of the
-five binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
-[`maelstrom-pytest`](maelstrom-pytest.md), [`maelstrom-run`](run.md),
+Maelstrom components, and [other concepts](client-specific-concepts.md) that
+are specific to all Maelstrom clients. After that, there are in-depth chapters
+for each of the five binaries: [`cargo-maelstrom`](cargo-maelstrom.md),
+[`maelstrom-pytest`](pytest.md), [`maelstrom-run`](run.md),
 [`maelstrom-broker`](broker.md), and [`maelstrom-worker`](worker.md).
 
 There is no documentation yet for the gRPC API or the Rust bindings. Contact us
-if you're interested in using it, and we'll help get you started.
+if you're interested in using them, and we'll help get you started.

@@ -1,3 +1,4 @@
 # Common Concepts
 
-This chaper covers concepts that are common to Maelstrom as a whole. Later chapers will cover specific programs.
+This chapter covers concepts that are common to Maelstrom as a whole. Later
+chapters will cover individual programs and program classes in greater detail.

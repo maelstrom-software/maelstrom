@@ -49,7 +49,7 @@ above this amount in two cases. First, the worker always needs all of the
 currently-executing jobs' layers in cache. Second, the worker currently first
 downloads an artifact in its entirety, then adds it to the cache, then removes
 old values if the cache has grown too large. In this scenario, the combined
-size of the downloading artiface and the cache may exceed <span
+size of the downloading artifact and the cache may exceed <span
 style="white-space: nowrap;">`cache-size`</span>.
 
 For these reasons, it's important to leave some wiggle room in the <span

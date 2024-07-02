@@ -6,7 +6,7 @@ fields](../../spec.md).
 
 ## `filter`
 
-This field must be a string, which is interpreted as a [test filter
+This field must be a string, which is interpretted as a [test filter
 pattern](filter.md). The directive only applies to tests that match the filter.
 If there is no `filter` field, the directive applies to all tests.
 
@@ -31,22 +31,22 @@ mounts = [{ type = "tmp", mount_point = "/tmp" }]
 include_shared_libraries = true
 ```
 
-This boolean field sets the `include_shared_libraries` job spec pseudo-field.
-We call it a pseudo-field because it's not a real field in the job spec, but
+This boolean field sets the `include_shared_libraries` job spec psuedo-field.
+We call it a psuedo-field because it's not a real field in the job spec, but
 instead determines how `cargo-maelstrom` will do its post-processing after
 computing the job spec from directives.
 
-In post-processing, if the `include_shared_libraries` pseudo-field is false,
+In post-processing, if the `include_shared_libraries` psuedo-field is false,
 `cargo-maelstrom` will only push a single layer onto the job spec. This layer
 will contain the test executable, placed in the root directory.
 
-On the other hand, if the pseudo-field is true, then `cargo-maelstrom` will
+On the other hand, if the psuedo-field is true, then `cargo-maelstrom` will
 push two layers onto the job spec. The first will be a layer containing all of
 the shared-library dependencies for the test executable. The second will
 contain the test executable, placed in the root directory. (Two layers are used
 so that the shared-library layer can be cached and used by other tests.)
 
-If the pseudo-field is never set one way or the other, then `cargo-maelstrom`
+If the psuedo-field is never set one way or the other, then `cargo-maelstrom`
 will choose a value based on the `layers` field of the job spec. In this case,
 `include_shared_libraries` will be true if and only if `layers` is empty.
 
@@ -335,7 +335,7 @@ contains `"working_directory"`.
 network = "loopback"
 ```
 
-This field sets the [`network`](../../spec.md#network) field of the job spec. It
+This field sets the [`network`](../../spec.md#nework) field of the job spec. It
 must be a string. It defaults to `"disabled"`.
 
 ## `enable_writable_file_system`

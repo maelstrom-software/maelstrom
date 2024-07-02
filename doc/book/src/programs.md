@@ -5,9 +5,9 @@ categories: clients and daemons.
 
 ## Clients
 
-First, there are the clients. This category includes the test runners like
-`cargo-maelstrom` and `maelstrom-pytest`, and also the CLI tool
-`maelstrom-run`.
+Clients include the test runners like [`cargo-maelstrom`](cargo-maelstrom.md)
+and [`maelstrom-pytest`](pytest.md), and also the CLI tool
+[`maelstrom-run`](run.md).
 
 ### Test Runners
 
@@ -28,30 +28,30 @@ In addition to the test runners, there is also a general-purpose CLI for
 running arbitrary jobs in the Maelstrom environment: `maelstrom-run`.
 This program can be useful in a few different scenarios.
 
-First, it can be used for exploring and debugging containers used by other
-jobs. Sometimes, if you can't figure out why a test fails in a container but
-succeeds otherwise, it's useful to enter the container environment and poke
-around. You can try running test manually, exploring the directory structure,
-etc. This is done by running `maelstrom-run --tty`. In this scenario, it's very
-similar in feel to `docker exec -it`. 
+First, it can be used to explore and debug containers used by tests. Sometimes,
+if you can't figure out why a test fails in a container but succeeds otherwise,
+it's useful to enter the container environment and poke around. You can try
+running test manually, exploring the directory structure, etc. This is done by
+running `maelstrom-run --tty`. In this scenario, it's very similar in feel to
+`docker exec -it`. 
 
-Second, it can be used in a script to execute arbitrary jobs on the cluster.
-Let's say you had a Monte Cargo simlution program and you wanted to run it
-thousands of times, in parallel, on your Maelstrom cluster. You could use
-`maelstrom-run` to do this easily, either from the shell command-line or from a
+Second, it can be used in a script to execute arbitrary programs on the
+cluster. Let's say you had a Monte Cargo simulation program and you wanted to
+run it thousands of times, in parallel, on your Maelstrom cluster. You could
+use `maelstrom-run` to do this easily, either from the command-line or from a
 script.
 
 ## Daemons
 
-Unless configured otherwise, Maelstrom clients will just execute their jobs
-locally, in standalone mode. Put another way: clustering is completely
+Unless configured otherwise, Maelstrom clients will execute jobs locally, in
+[standalone mode](local-worker.md). Put another way: clustering is completely
 optional. While standalone mode can be useful in certain applications,
 Maelstrom becomes even more powerful when jobs are executed on a cluster. The
 Maelstrom daemon programs are used to create Maelstrom clusters.
 
 ### `maelstrom-worker`
 
-Each Malestrom cluster must have at least one worker. Workers are where jobs
+Each Maelstrom cluster must have at least one worker. Workers are where jobs
 are actually executed. The worker executes each jobs in its own rootless
 container. Our custom-built container implementation ensures that there is very
 little overhead for container startup or teardown.

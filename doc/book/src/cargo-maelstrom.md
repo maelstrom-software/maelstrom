@@ -14,5 +14,5 @@ out of the box. Some tests, though, have external dependencies that cause them
 to fail when run in `cargo-maelstrom`'s default, stripped-down containers. When
 this happens, it's usually pretty easy to configure `cargo-maelstrom` so that
 it invokes the test in a container that contains all of the necessary
-dependencies. The [Job Specification](cargo-maelstrom/spec.md) chaper goes into
+dependencies. The [Job Specification](cargo-maelstrom/spec.md) chapter goes into
 detail about how to do so.

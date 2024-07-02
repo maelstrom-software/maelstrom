@@ -1,7 +1,7 @@
 # Configuration Values
 
 All Maelstrom [programs](programs.md) are configured through "configuration
-values". Configuration values can be set through commmand-line options,
+values". Configuration values can be set through command-line options,
 environment variables, or configuration files.
 
 Each configuration value has a type, which is either string, number, or
@@ -37,7 +37,7 @@ configuration files, but are overridden by command-line options.
 The environment variable name is created by converting the configuration value
 to ["screaming snake case"](https://en.wikipedia.org/wiki/Snake_case), and
 prepending a program-specific prefix. Image that we're evaluating configuration
-values for a program name "maelstrom-prog":
+values for a program called `maelstrom-prog`:
 
 Type    | Example
 --------|----------------------
@@ -46,14 +46,14 @@ number  | `MAELSTROM_PROG_FROB_SIZE=42`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=true`
 boolean | `MAELSTROM_PROG_ENABLE_FROBS=false`
 
-Note that you don't need to put quotation marks around string values. You also
-can set boolean values to either `true` or `false`.
+Note that you don't put quotation marks around string values. You also can set
+boolean values to either `true` or `false`.
 
 ## Configuration Files
 
-Configuration files are in [TOML](https://toml.io/en/) format. In TOML files,
-configuration values map to keys of the same name. Values types map to the
-corresponding TOML types. For example:
+Configuration files are in [TOML](https://toml.io/en/) format. In configuration
+files, configuration values map to keys of the same name. Values types map to
+the corresponding TOML types. For example:
 
 ```toml
 frob-name = "string"
@@ -73,9 +73,9 @@ By default, Maelstrom programs will use the [XDG Base Directory
 Specification](https://specifications.freedesktop.org/basedir-spec/basedir-spec-latest.html)
 for searching for configuration files.
 
-Specifically, any configuration file found in `XDG_CONFIG_HOME` has the higest
+Specifically, any configuration file found in `XDG_CONFIG_HOME` has the highest
 preference, followed by those found in `XDG_CONFIG_DIRS`. If `XDG_CONFIG_HOME` is not
-set, or is empty, then `~/.config/` is used. Similiarly, if `XDG_CONFIG_DIRS`
+set, or is empty, then `~/.config/` is used. Similarly, if `XDG_CONFIG_DIRS`
 is not set, or is empty, then `/etc/xdg/` is used.
 
 Each program has a program-specific suffix that it appends to the directory it
@@ -89,6 +89,7 @@ More concretely, these are where Maelstrom programs will look for configuration 
 Program          | Configuration File
 -----------------|-----------------------------------------------------
 cargo-maelstrom  | `<xdg-config-dir>/maelstrom/cargo-maelstrom/config.toml`
+maelstrom-pytest | `<xdg-config-dir>/maelstrom/pytest/config.toml`
 maelstrom-run    | `<xdg-config-dir>/maelstrom/run/config.toml`
 maelstrom-broker | `<xdg-config-dir>/maelstrom/broker/config.toml`
 maelstrom-worker | `<xdg-config-dir>/maelstrom/worker/config.toml`
@@ -100,11 +101,13 @@ For example, if neither `XDG_CONFIG_HOME` nor `XDG_CONFIG_DIRS` is set, then
 
 ### Overriding Configuration File Location {#config-file}
 
-Maelstrom programs also support the `--config-file` (`-c`) command-line option.
+Maelstrom programs support the `--config-file` (`-c`) command-line option.
 If this option is provided, the specified configuration file, and only that
 file, will be used.
 
 If `--config-file` is given `-` as an argument, then no configuration file is used.
+
+Here is a summary of which configuration files will be used for a given value of `--config-file`:
 
 Command Line                                   | Configuration File(s)
 -----------------------------------------------|----------------------
