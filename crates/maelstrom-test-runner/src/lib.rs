@@ -303,6 +303,7 @@ where
             self.queuing_state.expected_job_count,
             count + 1,
         ));
+        self.ui.job_enqueued(case_str.clone());
         self.queuing_state.tracker.add_outstanding();
 
         let visitor = JobStatusVisitor::new(

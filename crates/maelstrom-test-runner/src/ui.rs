@@ -66,6 +66,7 @@ pub enum UiMessage {
     List(String),
     JobFinished(UiJobResult),
     UpdatePendingJobsCount(u64),
+    JobEnqueued(String),
     UpdateIntrospectState(IntrospectResponse),
     UpdateEnqueueStatus(String),
     DoneBuilding,
@@ -114,6 +115,10 @@ impl UiSender {
         let _ = self
             .send
             .send(UiMessage::UpdatePendingJobsCount(new_length));
+    }
+
+    pub fn job_enqueued(&self, name: String) {
+        let _ = self.send.send(UiMessage::JobEnqueued(name));
     }
 
     pub fn update_enqueue_status(&self, msg: impl Into<String>) {

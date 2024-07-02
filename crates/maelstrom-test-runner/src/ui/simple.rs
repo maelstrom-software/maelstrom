@@ -203,6 +203,7 @@ where
                 UiMessage::LogMessage(line) => prog.lock_printing().println(line),
                 UiMessage::JobFinished(res) => job_finished(prog, res),
                 UiMessage::UpdatePendingJobsCount(count) => prog.update_length(count),
+                UiMessage::JobEnqueued(_) => {}
                 UiMessage::UpdateIntrospectState(resp) => {
                     prog.update_introspect_state(resp);
                 }
