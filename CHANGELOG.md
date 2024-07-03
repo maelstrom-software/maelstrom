@@ -6,14 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-### General
-#### Added
-- `devpts` and `mqueue` mount types.
+### High-Level
+This release contains three big new things. The new Python test runner, the new `--tty` mode for
+`maelstrom-run`, and big upgrades to the container image handling code.
 
 ### `cargo-maelstrom`
-The test configuration language now supports a single template argument in
-paths. When `<build-dir>` is found in a path, it will be replaced with a path to
-the build output directory for the current profile.
+- The test configuration language now supports a single template argument in
+  paths. When `<build-dir>` is found in a path, it will be replaced with a path to
+  the build output directory for the current profile.
+- Use `cargo-maelstrom.toml` as the default place for test configuration. `maelstrom-test.toml` is
+  still checked and used if `cargo-maelstrom.toml` doesn't exist.
+- Fixed issue where test binary name was being printed even when it was the same as the package name
+  on newer versions of `cargo`.
+
+### `maelstrom-pytest`
+First release of new test runner for Python tests. See the book for more details around its usage.
+
+### Client Job Specification
+These changes affect the job specification used by all the test runners and `maelstrom-run`.
+- Deprecated `devices` and `added_devices` fields. Added new `devices` mount type
+- Changed format of container image names to be more standardized and support new features. See the
+  book for details of new format.
+- Added `devpts` and `mqueue` mount types.
+
+### `cargo-maelstrom`, `maelstrom-pytest` and `maelstrom-run`
+- Added the `--accept-invalid-remote-container-tls-certs` flag.
+- Changed meaning of the sha256 hashes in the container lock-file to better match other tools. The
+  version of the file was bumped to reflect this change. Users will be forced to regenerate their
+  lock-file to get the new hashes thanks to the new version number.
+- When generating manifests, if a file is under a certain size (< 200KiB) the data is included
+  as part of the manifest instead of uploaded as a separate artifact.
+- Fixed issue where we were running out of file descriptors contending with ourselves on the
+  contianer tags lock. \[[291](https://github.com/maelstrom-software/maelstrom/issues/291)\]
+- Support for docker images with a `/` in the name as added.
+  \[[295](https://github.com/maelstrom-software/maelstrom/issues/295)\]
+- Support for docker images from other public container image providers was added.
+- Now search PATH environment variable when looking for a program to execute when running a job.
+  \[[300](https://github.com/maelstrom-software/maelstrom/issues/300)\]
+
+### `maelstrom-run`
+- Add new `--file` argument to pass a job specification via path.
+- Add new `--one` argument which allows extra functionality when running only one job.
+- Add new `--tty` flag which attaches a TTY to a job being run.
+
+### `maelstrom-worker` and Standalone Mode for Clients
+- Added a "graceful shutdown" which waits for jobs to be canceled when exiting. Also catch most
+  signals and ensure we go through "graceful shutdown" in response. This should remove the vast
+  majority of leaked broken FUSE mounts.
+  \[[303](https://github.com/maelstrom-software/maelstrom/issues/303)\]
+
+### Client Internals
+- Replaced `enable_writable_file_system` with new `JobRootOverlay` type.
+- Added new `JobRootOverlay::Local` variant which allows for providing the overlay directory on
+  local jobs
 
 ## [0.9.0] - 2024-05-21
 
