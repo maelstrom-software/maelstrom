@@ -268,11 +268,14 @@ pub struct CliArgs {
     dry_run: bool,
 }
 
-const ARTIFACT_NAMES: [&str; 4] = [
+const ARTIFACT_NAMES: [&str; 7] = [
     "cargo-maelstrom",
-    "maelstrom-worker",
     "maelstrom-broker",
+    "maelstrom-client",
+    "maelstrom-go-test",
+    "maelstrom-pytest",
     "maelstrom-run",
+    "maelstrom-worker",
 ];
 
 fn tar_gz(binary: &Path, target: &Path) -> Result<()> {
