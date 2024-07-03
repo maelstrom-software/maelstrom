@@ -14,8 +14,8 @@ This release contains three big new things. The new Python test runner, the new 
 - The test configuration language now supports a single template argument in
   paths. When `<build-dir>` is found in a path, it will be replaced with a path to
   the build output directory for the current profile.
-- Use `cargo-maelstrom.toml` as the default place for test configuration. `maelstrom-test.toml` is
-  still checked and used if `cargo-maelstrom.toml` doesn't exist.
+- `cargo-maelstrom.toml` is now the default place for test configuration. `maelstrom-test.toml` is
+  still checked and used if `cargo-maelstrom.toml` doesn't exist, though it's use is deprecated.
 - Fixed issue where test binary name was being printed even when it was the same as the package name
   on newer versions of `cargo`.
 
@@ -24,7 +24,7 @@ First release of new test runner for Python tests. See the book for more details
 
 ### Client Job Specification
 These changes affect the job specification used by all the test runners and `maelstrom-run`.
-- Deprecated `devices` and `added_devices` fields. Added new `devices` mount type
+- Deprecated `devices` and `added_devices` fields. Added new `devices` mount type.
 - Changed format of container image names to be more standardized and support new features. See the
   book for details of new format.
 - Added `devpts` and `mqueue` mount types.
@@ -58,7 +58,7 @@ These changes affect the job specification used by all the test runners and `mae
 ### Client Internals
 - Replaced `enable_writable_file_system` with new `JobRootOverlay` type.
 - Added new `JobRootOverlay::Local` variant which allows for providing the overlay directory on
-  local jobs
+  local jobs.
 
 ## [0.9.0] - 2024-05-21
 
