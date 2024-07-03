@@ -392,7 +392,7 @@ With a bind mount, the directory at `mount_point` in the job's container will
 refer to the directory at `local_path` in the client. In other words,
 `local_path` made available to the job at `mount_point` within the container.
 `local_path` is evaluated relative to the client's [project
-directory](project-dir.md).
+directory](dirs.md#project-directory).
 
 The `read_only` flag specifies whether or not the job can write to the
 directory. **NOTE**: the mount isn't "locked", which means that if the job

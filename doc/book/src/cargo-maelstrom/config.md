@@ -10,7 +10,7 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`container-image-depot-root`</span> | string  | [directory for cached container images](#container-image-depot-root) | `$XDG_CACHE_HOME/maelstrom/containers`
 `timeout`                                                              | string  | [override timeout value tests](#timeout)                             | don't override
 <span style="white-space: nowrap;">`cache-size`</span>                 | string  | [target cache disk space usage](#cache-size)                         | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span>               | string  | [maximum amount of captured stdout and stderr](#inline-limit)        | `"1 MB"`
+<span style="white-space: nowrap;">`inline-limit`</span>               | string  | [maximum amount of captured standard output error](#inline-limit)        | `"1 MB"`
 `slots`                                                                | number  | [job slots available](#slots)                                        | 1 per CPU
 `features`                                                             | string  | [comma-separated list of features to activate](#cargo)               | Cargo's default
 <span style="white-space: nowrap;">`all-features`</span>               | boolean | [activate all available features](#cargo)                            | Cargo's default

@@ -43,7 +43,7 @@ pub enum Layer {
 
 The `Tar` layer type is very simple: The provided tar file will be used as a
 layer. The path is specified relative to the [project
-directory](project-dir.md).
+directory](dirs.md#project-directory).
 
 ## `PrefixOptions`
 ```rust
@@ -107,7 +107,7 @@ pub enum Layer {
 
 The `Glob` layer type will include the files specified by the glob pattern in
 the layer. The glob pattern is executed by the client relative to the [project
-directory](project-dir.md). The glob pattern must use relative paths. The
+directory](dirs.md#project-directory). The glob pattern must use relative paths. The
 [`globset`](https://docs.rs/globset/latest/globset/) crate is used for glob
 pattern matching.
 
@@ -127,7 +127,7 @@ pub enum Layer {
 
 The `Paths` layer type will include each file referenced by the
 specified paths. This is executed by the client relative to the [project
-directory](project-dir.md). Relative and absolute paths may be used.
+directory](dirs.md#project-directory). Relative and absolute paths may be used.
 
 The `prefix_options` are applied to every matching path, as [described above](#prefixoptions).
 

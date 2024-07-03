@@ -22,10 +22,10 @@ workers:
 Value                                                    | Type    | Description                                                   | Default
 ---------------------------------------------------------|---------|---------------------------------------------------------------|----------
 <span style="white-space: nowrap;">`cache-size`</span>   | string  | [target cache disk space usage](#cache-size)                  | `"1 GB"`
-<span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured stdout and stderr](#inline-limit) | `"1 MB"`
+<span style="white-space: nowrap;">`inline-limit`</span> | string  | [maximum amount of captured standard output and error](#inline-limit) | `"1 MB"`
 `slots`                                                  | number  | [job slots available](#slots)                                 | 1 per CPU
 
-## <span style="white-space: nowrap;">`cache-size`</span>
+## `cache-size`
 
 The <span style="white-space: nowrap;">`cache-size`</span> configuration value
 specifies a target size for the cache. Its default value is 1&nbsp;GB. When the
@@ -43,7 +43,7 @@ style="white-space: nowrap;">`cache-size`</span>.
 For these reasons, it's important to leave some wiggle room in the <span
 style="white-space: nowrap;">`cache-size`</span> setting.
 
-## <span style="white-space: nowrap;">`inline-limit`</span>
+## `inline-limit`
 
 The <span style="white-space: nowrap;">`inline-limit`</span> configuration
 value specifies how many bytes of stdout or stderr will be captured from jobs.

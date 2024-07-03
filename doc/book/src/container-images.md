@@ -87,7 +87,7 @@ lock file instead of resolving the tag again. This guarantees that subsequent
 runs use the same images as previous runs.
 
 The lock file is `maelstrom-container-tags.lock`, stored in the [project
-directory](project-dir.md). It is recommended that this file be committed to
+directory](dirs.md#project-directory). It is recommended that this file be committed to
 revision control, so that others in the project, and CI, use the same images
 when running tests.
 
@@ -112,7 +112,7 @@ certificates with the `accept-invalid-remote-container-tls-certs`
 
 All clients support the following container-image-related configuration values:
 
-Value                                       | Type   | Description                                                                                 | Default
---------------------------------------------|--------|---------------------------------------------------------------------------------------------|----------
-`container-image-depot-root`                | string | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
-`accept-invalid-remote-container-tls-certs` | bool   | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
+Value                                       | Type    | Description                                                                                 | Default
+--------------------------------------------|---------|---------------------------------------------------------------------------------------------|----------
+`container-image-depot-root`                | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
+`accept-invalid-remote-container-tls-certs` | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
