@@ -15,7 +15,7 @@ homepage = "https://maelstrom-software.com"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/maelstrom-software/maelstrom"
 rust-version = "1.79.0"
-version = "0.10.0"
+version = "0.11.0-dev"
 
 [workspace.dependencies]
 anstyle = "1.0.6"
@@ -71,24 +71,24 @@ itertools = "0.10.5"
 lddtree = "0.3"
 libc = "0.2"
 lru = "0.12"
-maelstrom-base = { version = "0.10.0", path = "crates/maelstrom-base" }
-maelstrom-broker = { version = "0.10.0", path = "crates/maelstrom-broker" }
-maelstrom-client = { version = "0.10.0", path = "crates/maelstrom-client" }
-maelstrom-client-base = { version = "0.10.0", path = "crates/maelstrom-client-base" }
-maelstrom-client-process = { version = "0.10.0", path = "crates/maelstrom-client-process" }
-maelstrom-container = { version = "0.10.0", path = "crates/maelstrom-container" }
-maelstrom-fuse = { version = "0.10.0", path = "crates/maelstrom-fuse" }
-maelstrom-layer-fs = { version = "0.10.0", path = "crates/maelstrom-layer-fs" }
-maelstrom-linux = { version = "0.10.0", path = "crates/maelstrom-linux" }
-maelstrom-macro = { version = "0.10.0", path = "crates/maelstrom-macro" }
-maelstrom-plot = { version = "0.10.0", path = "crates/maelstrom-plot" }
-maelstrom-simex = { version = "0.10.0", path = "crates/maelstrom-simex" }
-maelstrom-test = { version = "0.10.0", path = "crates/maelstrom-test" }
-maelstrom-test-runner = { version = "0.10.0", path = "crates/maelstrom-test-runner" }
-maelstrom-util = { version = "0.10.0", path = "crates/maelstrom-util" }
-maelstrom-web = { version = "0.10.0", path = "crates/maelstrom-web" }
-maelstrom-worker = { version = "0.10.0", path = "crates/maelstrom-worker" }
-maelstrom-worker-child = { version = "0.10.0", path = "crates/maelstrom-worker-child" }
+maelstrom-base = { version = "0.11.0-dev", path = "crates/maelstrom-base" }
+maelstrom-broker = { version = "0.11.0-dev", path = "crates/maelstrom-broker" }
+maelstrom-client = { version = "0.11.0-dev", path = "crates/maelstrom-client" }
+maelstrom-client-base = { version = "0.11.0-dev", path = "crates/maelstrom-client-base" }
+maelstrom-client-process = { version = "0.11.0-dev", path = "crates/maelstrom-client-process" }
+maelstrom-container = { version = "0.11.0-dev", path = "crates/maelstrom-container" }
+maelstrom-fuse = { version = "0.11.0-dev", path = "crates/maelstrom-fuse" }
+maelstrom-layer-fs = { version = "0.11.0-dev", path = "crates/maelstrom-layer-fs" }
+maelstrom-linux = { version = "0.11.0-dev", path = "crates/maelstrom-linux" }
+maelstrom-macro = { version = "0.11.0-dev", path = "crates/maelstrom-macro" }
+maelstrom-plot = { version = "0.11.0-dev", path = "crates/maelstrom-plot" }
+maelstrom-simex = { version = "0.11.0-dev", path = "crates/maelstrom-simex" }
+maelstrom-test = { version = "0.11.0-dev", path = "crates/maelstrom-test" }
+maelstrom-test-runner = { version = "0.11.0-dev", path = "crates/maelstrom-test-runner" }
+maelstrom-util = { version = "0.11.0-dev", path = "crates/maelstrom-util" }
+maelstrom-web = { version = "0.11.0-dev", path = "crates/maelstrom-web" }
+maelstrom-worker = { version = "0.11.0-dev", path = "crates/maelstrom-worker" }
+maelstrom-worker-child = { version = "0.11.0-dev", path = "crates/maelstrom-worker-child" }
 maplit = "1"
 memchr = "2"
 native-tls = "0.2"
