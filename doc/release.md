@@ -37,7 +37,7 @@ git commit -am "Update CHANGELOG.md for version $VERSION."
 ### Change Headings and Links
 
 The second thing to do is to update the headers and links in `CHANGELOG.md`.
-This is done with `cargo xtask changelog open`:
+This is done with `cargo xtask changelog close`:
 ```bash
 cargo xtask changelog close "$VERSION"
 ```
