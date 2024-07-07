@@ -1,7 +1,7 @@
 use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
-use maelstrom_util::ext::BoolExt as _;
+use maelstrom_util::ext::OptionExt as _;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     buffer::Buffer,
@@ -16,7 +16,7 @@ use ratatui::{
     widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget},
     TerminalOptions,
 };
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::io::stdout;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
@@ -40,13 +40,22 @@ fn format_finished(res: UiJobResult) -> Row<'static> {
     Row::new(line.into_iter().map(Cell::from))
 }
 
+fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
+    let d = time.elapsed();
+
+    Row::new([
+        Cell::from(name.to_owned()),
+        Cell::from(format!("{:.3}s", d.as_secs_f64())),
+    ])
+}
+
 pub struct FancyUi {
     jobs_completed: u64,
     jobs_pending: u64,
     all_done: Option<UiJobSummary>,
     done_building: bool,
 
-    running_tests: BTreeSet<String>,
+    running_tests: BTreeMap<String, Instant>,
     build_output: Vec<Line<'static>>,
     completed_tests: Vec<Row<'static>>,
 }
@@ -59,7 +68,7 @@ impl FancyUi {
             all_done: None,
             done_building: false,
 
-            running_tests: BTreeSet::new(),
+            running_tests: BTreeMap::new(),
             build_output: vec![],
             completed_tests: vec![],
         }
@@ -88,7 +97,7 @@ impl Ui for FancyUi {
                             [
                                 Constraint::Fill(1),
                                 Constraint::Length(7),
-                                Constraint::Length(6),
+                                Constraint::Length(8),
                             ],
                         )
                         .render(buf.area, buf)
@@ -107,12 +116,14 @@ impl Ui for FancyUi {
                     UiMessage::List(_) => {}
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
-                        self.running_tests.remove(&res.name).assert_is_true();
+                        self.running_tests.remove(&res.name).assert_is_some();
                         self.completed_tests.push(format_finished(res));
                     }
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::JobEnqueued(name) => {
-                        self.running_tests.insert(name).assert_is_true();
+                        self.running_tests
+                            .insert(name, Instant::now())
+                            .assert_is_none();
                     }
                     UiMessage::UpdateIntrospectState(_resp) => {}
                     UiMessage::UpdateEnqueueStatus(_msg) => {}
@@ -145,16 +156,16 @@ impl FancyUi {
     fn render_running_tests(&mut self, area: Rect, buf: &mut Buffer) {
         let create_block = |title: &'static str| Block::bordered().gray().title(title.bold());
 
-        let vertical_scroll = (self.running_tests.len() as u16).saturating_sub(area.height);
-        Paragraph::new(
-            self.running_tests
-                .iter()
-                .map(|s| Line::from(s.as_str()))
-                .collect::<Vec<_>>(),
+        let mut running_tests: Vec<_> = self.running_tests.iter().collect();
+        running_tests.sort_by_key(|a| a.1);
+        Table::new(
+            running_tests
+                .into_iter()
+                .map(|(name, t)| format_running_test(name.as_str(), t)),
+            [Constraint::Fill(1), Constraint::Length(8)],
         )
         .block(create_block("Running Tests"))
         .gray()
-        .scroll((vertical_scroll, 0))
         .render(area, buf);
     }
 
@@ -231,8 +242,9 @@ impl Widget for &mut FancyUi {
             sections.push((Constraint::Fill(1), FancyUi::render_summary as _));
         } else {
             if !self.running_tests.is_empty() {
+                let height = std::cmp::min(self.running_tests.len(), 20);
                 sections.push((
-                    Constraint::Length(10),
+                    Constraint::Length(height as u16 + 2),
                     FancyUi::render_running_tests as SectionFnPtr,
                 ));
             }
