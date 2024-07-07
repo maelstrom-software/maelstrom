@@ -9,11 +9,11 @@ use ratatui::{
         terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
         ExecutableCommand as _,
     },
-    layout::{Alignment, Constraint, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     style::{palette::tailwind, Stylize as _},
     terminal::{Terminal, Viewport},
     text::{Line, Span},
-    widgets::{block::Title, Block, Borders, Cell, Gauge, Padding, Paragraph, Row, Table, Widget},
+    widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget},
     TerminalOptions,
 };
 use std::collections::BTreeSet;
@@ -170,19 +170,20 @@ impl FancyUi {
     }
 
     fn render_gauge(&mut self, area: Rect, buf: &mut Buffer) {
-        let title = title_block("Jobs Completed");
         let mut prcnt = self.jobs_completed as f64 / self.jobs_pending as f64;
         if prcnt.is_nan() {
             prcnt = 0.0;
         }
-        let label = format!("{}/{}", self.jobs_completed, self.jobs_pending);
+        let label = format!(
+            "{}/{} tests completed",
+            self.jobs_completed, self.jobs_pending
+        );
         let color = if self.all_done {
             tailwind::GREEN.c800
         } else {
             tailwind::ORANGE.c800
         };
         Gauge::default()
-            .block(title)
             .gauge_style(color)
             .ratio(prcnt)
             .label(label)
@@ -199,15 +200,6 @@ impl FancyUi {
 
 type SectionFnPtr = fn(&mut FancyUi, Rect, &mut Buffer);
 
-fn title_block(title: &str) -> Block {
-    let title = Title::from(title).alignment(Alignment::Center);
-    Block::new()
-        .borders(Borders::NONE)
-        .padding(Padding::vertical(1))
-        .title(title)
-        .fg(tailwind::SLATE.c200)
-}
-
 impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut sections = vec![];
@@ -220,7 +212,7 @@ impl Widget for &mut FancyUi {
         if !self.done_building {
             sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
         }
-        sections.push((Constraint::Length(4), FancyUi::render_gauge as _));
+        sections.push((Constraint::Length(1), FancyUi::render_gauge as _));
 
         let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
         let sections = sections
