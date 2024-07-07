@@ -101,6 +101,8 @@ pub struct FancyUi {
     running_tests: BTreeMap<String, Instant>,
     build_output: Vec<Line<'static>>,
     print_above: Vec<PrintAbove>,
+    enqueue_status: Option<String>,
+    throbber_state: throbber_widgets_tui::ThrobberState,
 }
 
 impl FancyUi {
@@ -114,6 +116,8 @@ impl FancyUi {
             running_tests: BTreeMap::new(),
             build_output: vec![],
             print_above: vec![],
+            enqueue_status: Some("starting...".into()),
+            throbber_state: Default::default(),
         }
     }
 }
@@ -138,6 +142,7 @@ impl Ui for FancyUi {
                         terminal.insert_before(1, move |buf| t.render(buf.area, buf))?;
                     }
                 }
+                self.throbber_state.calc_next();
                 terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
                 last_tick = Instant::now();
             }
@@ -163,11 +168,15 @@ impl Ui for FancyUi {
                             .assert_is_none();
                     }
                     UiMessage::UpdateIntrospectState(_resp) => {}
-                    UiMessage::UpdateEnqueueStatus(_msg) => {}
+                    UiMessage::UpdateEnqueueStatus(msg) => {
+                        self.enqueue_status = Some(msg);
+                    }
                     UiMessage::DoneBuilding => {
                         self.done_building = true;
                     }
-                    UiMessage::DoneQueuingJobs => {}
+                    UiMessage::DoneQueuingJobs => {
+                        self.enqueue_status = None;
+                    }
                     UiMessage::AllJobsFinished(summary) => {
                         self.all_done = Some(summary);
                     }
@@ -296,6 +305,17 @@ impl FancyUi {
         }
     }
 
+    fn render_enqueue_status(&mut self, area: Rect, buf: &mut Buffer) {
+        use ratatui::widgets::StatefulWidget;
+
+        let status = self.enqueue_status.as_ref().unwrap();
+        let t = throbber_widgets_tui::Throbber::default()
+            .label(status.clone())
+            .throbber_set(throbber_widgets_tui::BRAILLE_SIX_DOUBLE)
+            .use_type(throbber_widgets_tui::WhichUse::Spin);
+        StatefulWidget::render(t, area, buf, &mut self.throbber_state);
+    }
+
     fn render_sections(&mut self, buf: &mut Buffer, sections: Vec<(Rect, SectionFnPtr)>) {
         for (rect, f) in sections {
             f(self, rect, buf)
@@ -321,6 +341,9 @@ impl Widget for &mut FancyUi {
             }
             if !self.done_building {
                 sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
+            }
+            if self.enqueue_status.is_some() {
+                sections.push((Constraint::Length(1), FancyUi::render_enqueue_status as _));
             }
             sections.push((Constraint::Length(1), FancyUi::render_gauge as _));
         }

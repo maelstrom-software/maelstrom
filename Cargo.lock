@@ -3306,6 +3306,7 @@ dependencies = [
  "strum 0.25.0",
  "tar",
  "tempfile",
+ "throbber-widgets-tui",
  "toml",
  "unicode-truncate 0.2.0",
  "unicode-width",
@@ -5237,6 +5238,16 @@ checksum = "8b9ef9bad013ada3808854ceac7b46812a6465ba368859a37e2100283d2d719c"
 dependencies = [
  "cfg-if",
  "once_cell",
+]
+
+[[package]]
+name = "throbber-widgets-tui"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "685391f5e78b08989c1014f5a0edddf6751e0726b6a8dd1bdcc98d05921b19b6"
+dependencies = [
+ "rand",
+ "ratatui",
 ]
 
 [[package]]
