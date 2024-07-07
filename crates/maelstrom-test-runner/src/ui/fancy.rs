@@ -23,7 +23,7 @@ use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthStr as _;
 
-fn format_finished(res: UiJobResult) -> Vec<CompletedTestOutput> {
+fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
     let result_span: Span = match &res.status {
         UiJobStatus::Ok => "OK".green(),
         UiJobStatus::Failure(_) => "FAIL".red(),
@@ -70,12 +70,12 @@ fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
 }
 
 #[derive(From)]
-enum CompletedTestOutput {
+enum PrintAbove {
     StatusLine(Row<'static>),
     Output(Line<'static>),
 }
 
-impl Widget for CompletedTestOutput {
+impl Widget for PrintAbove {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
             Self::StatusLine(row) => Table::new(
@@ -100,7 +100,7 @@ pub struct FancyUi {
 
     running_tests: BTreeMap<String, Instant>,
     build_output: Vec<Line<'static>>,
-    completed_tests: Vec<CompletedTestOutput>,
+    print_above: Vec<PrintAbove>,
 }
 
 impl FancyUi {
@@ -113,7 +113,7 @@ impl FancyUi {
 
             running_tests: BTreeMap::new(),
             build_output: vec![],
-            completed_tests: vec![],
+            print_above: vec![],
         }
     }
 }
@@ -132,8 +132,8 @@ impl Ui for FancyUi {
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
         loop {
             if last_tick.elapsed() > Duration::from_millis(33) {
-                if !self.completed_tests.is_empty() {
-                    let rows = std::mem::take(&mut self.completed_tests);
+                if !self.print_above.is_empty() {
+                    let rows = std::mem::take(&mut self.print_above);
                     for t in rows {
                         terminal.insert_before(1, move |buf| t.render(buf.area, buf))?;
                     }
@@ -144,7 +144,9 @@ impl Ui for FancyUi {
 
             match recv.recv_timeout(Duration::from_millis(33)) {
                 Ok(msg) => match msg {
-                    UiMessage::LogMessage(_) => {}
+                    UiMessage::LogMessage(line) => {
+                        self.print_above.push(Line::from(line).into());
+                    }
                     UiMessage::BuildOutputLine(line) => {
                         self.build_output.push(line.into());
                     }
@@ -152,7 +154,7 @@ impl Ui for FancyUi {
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
                         self.running_tests.remove(&res.name).assert_is_some();
-                        self.completed_tests.extend(format_finished(res));
+                        self.print_above.extend(format_finished(res));
                     }
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::JobEnqueued(name) => {
