@@ -1,6 +1,7 @@
 use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
+use derive_more::From;
 use maelstrom_util::ext::OptionExt as _;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -21,7 +22,7 @@ use std::io::stdout;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
 
-fn format_finished(res: UiJobResult) -> Row<'static> {
+fn format_finished(res: UiJobResult) -> Vec<CompletedTestOutput> {
     let result_span: Span = match &res.status {
         UiJobStatus::Ok => "OK".green(),
         UiJobStatus::Failure(_) => "FAIL".red(),
@@ -37,7 +38,21 @@ fn format_finished(res: UiJobResult) -> Row<'static> {
         line.push(format!("{:.3}s", d.as_secs_f64()).into());
     }
 
-    Row::new(line.into_iter().map(Cell::from))
+    let mut output = vec![Row::new(line.into_iter().map(Cell::from)).into()];
+
+    for l in res.stdout {
+        output.push(Line::from(l).into());
+    }
+
+    for l in res.stderr {
+        output.push(
+            ["stderr: ".red(), l.into()]
+                .into_iter()
+                .collect::<Line<'static>>()
+                .into(),
+        );
+    }
+    output
 }
 
 fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
@@ -49,6 +64,29 @@ fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
     ])
 }
 
+#[derive(From)]
+enum CompletedTestOutput {
+    StatusLine(Row<'static>),
+    Output(Line<'static>),
+}
+
+impl Widget for CompletedTestOutput {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        match self {
+            Self::StatusLine(row) => Table::new(
+                [row],
+                [
+                    Constraint::Fill(1),
+                    Constraint::Length(7),
+                    Constraint::Length(8),
+                ],
+            )
+            .render(area, buf),
+            Self::Output(l) => l.render(area, buf),
+        }
+    }
+}
+
 pub struct FancyUi {
     jobs_completed: u64,
     jobs_pending: u64,
@@ -57,7 +95,7 @@ pub struct FancyUi {
 
     running_tests: BTreeMap<String, Instant>,
     build_output: Vec<Line<'static>>,
-    completed_tests: Vec<Row<'static>>,
+    completed_tests: Vec<CompletedTestOutput>,
 }
 
 impl FancyUi {
@@ -90,18 +128,10 @@ impl Ui for FancyUi {
         loop {
             if last_tick.elapsed() > Duration::from_millis(33) {
                 if !self.completed_tests.is_empty() {
-                    let t = std::mem::take(&mut self.completed_tests);
-                    terminal.insert_before(t.len() as u16, move |buf| {
-                        Table::new(
-                            t.into_iter(),
-                            [
-                                Constraint::Fill(1),
-                                Constraint::Length(7),
-                                Constraint::Length(8),
-                            ],
-                        )
-                        .render(buf.area, buf)
-                    })?;
+                    let rows = std::mem::take(&mut self.completed_tests);
+                    for t in rows {
+                        terminal.insert_before(1, move |buf| t.render(buf.area, buf))?;
+                    }
                 }
                 terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
                 last_tick = Instant::now();
@@ -117,7 +147,7 @@ impl Ui for FancyUi {
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
                         self.running_tests.remove(&res.name).assert_is_some();
-                        self.completed_tests.push(format_finished(res));
+                        self.completed_tests.extend(format_finished(res));
                     }
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::JobEnqueued(name) => {
