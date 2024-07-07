@@ -2,6 +2,8 @@ use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use derive_more::From;
+use indicatif::HumanBytes;
+use maelstrom_client::RemoteProgress;
 use maelstrom_util::ext::OptionExt as _;
 use ratatui::{
     backend::{Backend, CrosstermBackend},
@@ -103,6 +105,7 @@ pub struct FancyUi {
     print_above: Vec<PrintAbove>,
     enqueue_status: Option<String>,
     throbber_state: throbber_widgets_tui::ThrobberState,
+    remote_progress: Vec<RemoteProgress>,
 }
 
 impl FancyUi {
@@ -118,6 +121,7 @@ impl FancyUi {
             print_above: vec![],
             enqueue_status: Some("starting...".into()),
             throbber_state: Default::default(),
+            remote_progress: vec![],
         }
     }
 }
@@ -167,7 +171,11 @@ impl Ui for FancyUi {
                             .insert(name, Instant::now())
                             .assert_is_none();
                     }
-                    UiMessage::UpdateIntrospectState(_resp) => {}
+                    UiMessage::UpdateIntrospectState(resp) => {
+                        let mut states = resp.artifact_uploads;
+                        states.extend(resp.image_downloads);
+                        self.remote_progress = states;
+                    }
                     UiMessage::UpdateEnqueueStatus(msg) => {
                         self.enqueue_status = Some(msg);
                     }
@@ -316,6 +324,27 @@ impl FancyUi {
         StatefulWidget::render(t, area, buf, &mut self.throbber_state);
     }
 
+    fn render_remote_progress(&mut self, area: Rect, buf: &mut Buffer) {
+        let gauge_f = |name, size, progress| {
+            let mut prcnt = progress as f64 / size as f64;
+            if prcnt.is_nan() {
+                prcnt = 0.0;
+            }
+            let progress = HumanBytes(progress);
+            let size = HumanBytes(size);
+            Gauge::default()
+                .gauge_style(tailwind::ORANGE.c800)
+                .ratio(prcnt)
+                .label(format!("{progress}/{size} {name}"))
+                .use_unicode(true)
+        };
+        let len = self.remote_progress.len();
+        let layout = Layout::vertical(std::iter::repeat(Constraint::Length(1)).take(len));
+        for (p, area) in self.remote_progress.iter().zip(layout.split(area).iter()) {
+            gauge_f(&p.name, p.size, p.progress).render(*area, buf);
+        }
+    }
+
     fn render_sections(&mut self, buf: &mut Buffer, sections: Vec<(Rect, SectionFnPtr)>) {
         for (rect, f) in sections {
             f(self, rect, buf)
@@ -337,6 +366,13 @@ impl Widget for &mut FancyUi {
                 sections.push((
                     Constraint::Length(height as u16 + 2),
                     FancyUi::render_running_tests as SectionFnPtr,
+                ));
+            }
+            if !self.remote_progress.is_empty() {
+                let len = self.remote_progress.len().try_into().unwrap_or(u16::MAX);
+                sections.push((
+                    Constraint::Length(len),
+                    FancyUi::render_remote_progress as _,
                 ));
             }
             if !self.done_building {
