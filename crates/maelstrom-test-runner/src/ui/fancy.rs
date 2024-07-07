@@ -40,6 +40,10 @@ fn format_finished(res: UiJobResult) -> Vec<CompletedTestOutput> {
 
     let mut output = vec![Row::new(line.into_iter().map(Cell::from)).into()];
 
+    if let Some(details) = res.status.details() {
+        output.push(Line::from(details).into());
+    }
+
     for l in res.stdout {
         output.push(Line::from(l).into());
     }
