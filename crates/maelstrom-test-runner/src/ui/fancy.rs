@@ -163,7 +163,15 @@ impl FancyUi {
             .use_unicode(true)
             .render(area, buf);
     }
+
+    fn render_sections(&mut self, buf: &mut Buffer, sections: Vec<(Rect, SectionFnPtr)>) {
+        for (rect, f) in sections {
+            f(self, rect, buf)
+        }
+    }
 }
+
+type SectionFnPtr = fn(&mut FancyUi, Rect, &mut Buffer);
 
 fn title_block(title: &str) -> Block {
     let title = Title::from(title).alignment(Alignment::Center);
@@ -176,22 +184,26 @@ fn title_block(title: &str) -> Block {
 
 impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        if self.done_building {
-            let layout = Layout::vertical([Constraint::Length(10), Constraint::Length(4)]);
-            let [tests_area, gauge_area] = layout.areas(area);
-            self.render_running_tests(tests_area, buf);
-            self.render_gauge(gauge_area, buf);
-        } else {
-            let layout = Layout::vertical([
+        let mut sections = vec![];
+        if !self.running_tests.is_empty() {
+            sections.push((
                 Constraint::Length(10),
-                Constraint::Length(4),
-                Constraint::Length(4),
-            ]);
-            let [tests_area, build_area, gauge_area] = layout.areas(area);
-            self.render_running_tests(tests_area, buf);
-            self.render_build_output(build_area, buf);
-            self.render_gauge(gauge_area, buf);
+                FancyUi::render_running_tests as SectionFnPtr,
+            ));
         }
+        if !self.done_building {
+            sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
+        }
+        sections.push((Constraint::Length(4), FancyUi::render_gauge as _));
+
+        let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
+        let sections = sections
+            .into_iter()
+            .zip(layout.split(area).iter())
+            .map(|((_, f), a)| (*a, f))
+            .collect();
+
+        self.render_sections(buf, sections);
     }
 }
 
