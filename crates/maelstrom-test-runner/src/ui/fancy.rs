@@ -1,4 +1,4 @@
-use super::{Ui, UiJobResult, UiJobStatus, UiMessage};
+use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use maelstrom_util::ext::BoolExt as _;
@@ -43,7 +43,7 @@ fn format_finished(res: UiJobResult) -> Row<'static> {
 pub struct FancyUi {
     jobs_completed: u64,
     jobs_pending: u64,
-    all_done: bool,
+    all_done: Option<UiJobSummary>,
     done_building: bool,
 
     running_tests: BTreeSet<String>,
@@ -56,7 +56,7 @@ impl FancyUi {
         Self {
             jobs_completed: 0,
             jobs_pending: 0,
-            all_done: false,
+            all_done: None,
             done_building: false,
 
             running_tests: BTreeSet::new(),
@@ -120,8 +120,8 @@ impl Ui for FancyUi {
                         self.done_building = true;
                     }
                     UiMessage::DoneQueuingJobs => {}
-                    UiMessage::AllJobsFinished(_summary) => {
-                        self.all_done = true;
+                    UiMessage::AllJobsFinished(summary) => {
+                        self.all_done = Some(summary);
                     }
                     UiMessage::Shutdown => break,
                 },
@@ -178,17 +178,40 @@ impl FancyUi {
             "{}/{} tests completed",
             self.jobs_completed, self.jobs_pending
         );
-        let color = if self.all_done {
-            tailwind::GREEN.c800
-        } else {
-            tailwind::ORANGE.c800
-        };
         Gauge::default()
-            .gauge_style(color)
+            .gauge_style(tailwind::BLUE.c800)
             .ratio(prcnt)
             .label(label)
             .use_unicode(true)
             .render(area, buf);
+    }
+
+    fn render_summary(&mut self, area: Rect, buf: &mut Buffer) {
+        let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
+        let [title_area, rest] = layout.areas(area);
+        Paragraph::new(Line::from("Test Summary").centered()).render(title_area, buf);
+
+        let summary = self.all_done.as_ref().unwrap();
+        let num_failed = summary.failed.len();
+        let num_ignored = summary.ignored.len();
+        let num_succeeded = summary.succeeded;
+        let mut rows = vec![
+            Row::new([
+                Cell::from("Successful Tests".green()),
+                Cell::from(format!("{num_succeeded}")),
+            ]),
+            Row::new([
+                Cell::from("Failed Tests".red()),
+                Cell::from(format!("{num_failed}")),
+            ]),
+        ];
+        if num_ignored > 0 {
+            rows.push(Row::new([
+                Cell::from("Ignored Tests".yellow()),
+                Cell::from(format!("{num_ignored}")),
+            ]));
+        }
+        Table::new(rows, [Constraint::Fill(1), Constraint::Length(4)]).render(rest, buf)
     }
 
     fn render_sections(&mut self, buf: &mut Buffer, sections: Vec<(Rect, SectionFnPtr)>) {
@@ -203,16 +226,21 @@ type SectionFnPtr = fn(&mut FancyUi, Rect, &mut Buffer);
 impl Widget for &mut FancyUi {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let mut sections = vec![];
-        if !self.running_tests.is_empty() {
-            sections.push((
-                Constraint::Length(10),
-                FancyUi::render_running_tests as SectionFnPtr,
-            ));
+
+        if self.all_done.is_some() {
+            sections.push((Constraint::Fill(1), FancyUi::render_summary as _));
+        } else {
+            if !self.running_tests.is_empty() {
+                sections.push((
+                    Constraint::Length(10),
+                    FancyUi::render_running_tests as SectionFnPtr,
+                ));
+            }
+            if !self.done_building {
+                sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
+            }
+            sections.push((Constraint::Length(1), FancyUi::render_gauge as _));
         }
-        if !self.done_building {
-            sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
-        }
-        sections.push((Constraint::Length(1), FancyUi::render_gauge as _));
 
         let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
         let sections = sections
@@ -240,5 +268,6 @@ fn init_terminal() -> Result<Terminal<impl Backend>> {
 fn restore_terminal() -> Result<()> {
     disable_raw_mode()?;
     stdout().execute(Clear(ClearType::FromCursorDown))?;
+    println!();
     Ok(())
 }
