@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::io::stdout;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
+use unicode_width::UnicodeWidthStr as _;
 
 fn format_finished(res: UiJobResult) -> Vec<CompletedTestOutput> {
     let result_span: Span = match &res.status {
@@ -233,30 +234,64 @@ impl FancyUi {
 
     fn render_summary(&mut self, area: Rect, buf: &mut Buffer) {
         let layout = Layout::vertical([Constraint::Length(1), Constraint::Fill(1)]);
-        let [title_area, rest] = layout.areas(area);
+        let [title_area, table_area] = layout.areas(area);
         Paragraph::new(Line::from("Test Summary").centered()).render(title_area, buf);
 
         let summary = self.all_done.as_ref().unwrap();
         let num_failed = summary.failed.len();
         let num_ignored = summary.ignored.len();
         let num_succeeded = summary.succeeded;
-        let mut rows = vec![
-            Row::new([
-                Cell::from("Successful Tests".green()),
-                Cell::from(format!("{num_succeeded}")),
-            ]),
-            Row::new([
-                Cell::from("Failed Tests".red()),
-                Cell::from(format!("{num_failed}")),
-            ]),
+
+        let summary_line = |msg, cnt| {
+            (
+                Constraint::Length(1),
+                Table::new(
+                    [Row::new([Cell::from(msg), Cell::from(format!("{cnt}"))])],
+                    [Constraint::Fill(1), Constraint::Length(9)],
+                ),
+            )
+        };
+
+        let list_tests = |tests: &Vec<String>, status: Span<'static>| {
+            let longest = tests.iter().map(|t| t.width()).max().unwrap_or(0);
+            (
+                Constraint::Length(tests.len().try_into().unwrap_or(u16::MAX)),
+                Table::new(
+                    tests.iter().map(|t| {
+                        Row::new([
+                            Cell::from(""),
+                            Cell::from(format!("{t}:")),
+                            Cell::from(status.clone()),
+                        ])
+                    }),
+                    [
+                        Constraint::Length(4),
+                        Constraint::Length(longest as u16 + 1),
+                        Constraint::Length(7),
+                    ],
+                ),
+            )
+        };
+
+        let mut sections = vec![
+            summary_line("Successful Tests".green(), num_succeeded),
+            summary_line("Failed Tests".red(), num_failed),
+            list_tests(&summary.failed, "failure".red()),
         ];
         if num_ignored > 0 {
-            rows.push(Row::new([
-                Cell::from("Ignored Tests".yellow()),
-                Cell::from(format!("{num_ignored}")),
-            ]));
+            sections.push(summary_line("Ignored Tests".yellow(), num_ignored));
+            sections.push(list_tests(&summary.ignored, "ignored".yellow()));
         }
-        Table::new(rows, [Constraint::Fill(1), Constraint::Length(4)]).render(rest, buf)
+
+        let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
+        let areas = layout.split(table_area);
+        let sections = sections
+            .into_iter()
+            .zip(areas.iter())
+            .map(|((_, t), a)| (*a, t));
+        for (rect, t) in sections {
+            t.render(rect, buf);
+        }
     }
 
     fn render_sections(&mut self, buf: &mut Buffer, sections: Vec<(Rect, SectionFnPtr)>) {
