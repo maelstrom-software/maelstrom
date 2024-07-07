@@ -1,4 +1,4 @@
-use super::{Ui, UiMessage};
+use super::{Ui, UiJobResult, UiJobStatus, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use maelstrom_util::ext::BoolExt as _;
@@ -12,14 +12,33 @@ use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{palette::tailwind, Stylize as _},
     terminal::{Terminal, Viewport},
-    text::Line,
-    widgets::{block::Title, Block, Borders, Gauge, Padding, Paragraph, Widget},
+    text::{Line, Span},
+    widgets::{block::Title, Block, Borders, Cell, Gauge, Padding, Paragraph, Row, Table, Widget},
     TerminalOptions,
 };
 use std::collections::BTreeSet;
 use std::io::stdout;
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::time::{Duration, Instant};
+
+fn format_finished(res: UiJobResult) -> Row<'static> {
+    let result_span: Span = match &res.status {
+        UiJobStatus::Ok => "OK".green(),
+        UiJobStatus::Failure(_) => "FAIL".red(),
+        UiJobStatus::TimedOut => "TIMEOUT".red(),
+        UiJobStatus::Error(_) => "ERR".red(),
+        UiJobStatus::Ignored => "IGNORED".yellow(),
+    };
+
+    let case = res.name.bold();
+    let mut line = vec![case, result_span];
+
+    if let Some(d) = res.duration {
+        line.push(format!("{:.3}s", d.as_secs_f64()).into());
+    }
+
+    Row::new(line.into_iter().map(Cell::from))
+}
 
 pub struct FancyUi {
     jobs_completed: u64,
@@ -29,7 +48,7 @@ pub struct FancyUi {
 
     running_tests: BTreeSet<String>,
     build_output: Vec<Line<'static>>,
-    completed_tests: Vec<String>,
+    completed_tests: Vec<Row<'static>>,
 }
 
 impl FancyUi {
@@ -64,8 +83,15 @@ impl Ui for FancyUi {
                 if !self.completed_tests.is_empty() {
                     let t = std::mem::take(&mut self.completed_tests);
                     terminal.insert_before(t.len() as u16, move |buf| {
-                        Paragraph::new(t.into_iter().map(Line::from).collect::<Vec<_>>())
-                            .render(buf.area, buf)
+                        Table::new(
+                            t.into_iter(),
+                            [
+                                Constraint::Fill(1),
+                                Constraint::Length(7),
+                                Constraint::Length(6),
+                            ],
+                        )
+                        .render(buf.area, buf)
                     })?;
                 }
                 terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
@@ -82,7 +108,7 @@ impl Ui for FancyUi {
                     UiMessage::JobFinished(res) => {
                         self.jobs_completed += 1;
                         self.running_tests.remove(&res.name).assert_is_true();
-                        self.completed_tests.push(res.name);
+                        self.completed_tests.push(format_finished(res));
                     }
                     UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
                     UiMessage::JobEnqueued(name) => {
