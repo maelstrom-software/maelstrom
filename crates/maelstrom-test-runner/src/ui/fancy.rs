@@ -1,10 +1,14 @@
+mod multi_gauge;
+
 use super::{Ui, UiJobResult, UiJobStatus, UiJobSummary, UiMessage};
 use crate::config::Quiet;
 use anyhow::Result;
 use derive_more::From;
 use indicatif::HumanBytes;
+use maelstrom_base::stats::JobState;
 use maelstrom_client::RemoteProgress;
 use maelstrom_util::ext::OptionExt as _;
+use multi_gauge::{InnerGauge, MultiGauge};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     buffer::Buffer,
@@ -98,8 +102,12 @@ impl Widget for PrintAbove {
 }
 
 pub struct FancyUi {
-    jobs_completed: u64,
+    jobs_waiting_for_artifacts: u64,
     jobs_pending: u64,
+    jobs_running: u64,
+    jobs_completed: u64,
+    jobs_outstanding: u64,
+
     all_done: Option<UiJobSummary>,
     done_building: bool,
 
@@ -114,8 +122,12 @@ pub struct FancyUi {
 impl FancyUi {
     pub fn new(_list: bool, _stdout_is_tty: bool, _quiet: Quiet) -> Self {
         Self {
-            jobs_completed: 0,
+            jobs_waiting_for_artifacts: 0,
             jobs_pending: 0,
+            jobs_running: 0,
+            jobs_completed: 0,
+            jobs_outstanding: 0,
+
             all_done: None,
             done_building: false,
 
@@ -168,7 +180,7 @@ impl Ui for FancyUi {
                         self.running_tests.remove(&res.name).assert_is_some();
                         self.print_above.extend(format_finished(res));
                     }
-                    UiMessage::UpdatePendingJobsCount(count) => self.jobs_pending = count,
+                    UiMessage::UpdatePendingJobsCount(count) => self.jobs_outstanding = count,
                     UiMessage::JobEnqueued(name) => {
                         self.running_tests
                             .insert(name, Instant::now())
@@ -178,6 +190,11 @@ impl Ui for FancyUi {
                         let mut states = resp.artifact_uploads;
                         states.extend(resp.image_downloads);
                         self.remote_progress = states;
+
+                        self.jobs_waiting_for_artifacts =
+                            resp.job_state_counts[JobState::WaitingForArtifacts];
+                        self.jobs_pending = resp.job_state_counts[JobState::Pending];
+                        self.jobs_running = resp.job_state_counts[JobState::Running];
                     }
                     UiMessage::UpdateEnqueueStatus(msg) => {
                         self.enqueue_status = Some(msg);
@@ -247,19 +264,33 @@ impl FancyUi {
     }
 
     fn render_gauge(&mut self, area: Rect, buf: &mut Buffer) {
-        let mut prcnt = self.jobs_completed as f64 / self.jobs_pending as f64;
-        if prcnt.is_nan() {
-            prcnt = 0.0;
-        }
-        let label = format!(
-            "{}/{} tests completed",
-            self.jobs_completed, self.jobs_pending
-        );
-        Gauge::default()
-            .gauge_style(tailwind::BLUE.c800)
-            .ratio(prcnt)
-            .label(label)
-            .use_unicode(true)
+        let build_gauge = |color, mut n, d| {
+            n = std::cmp::min(n, d);
+            let mut prcnt = n as f64 / d as f64;
+            if prcnt.is_nan() {
+                prcnt = 0.0;
+            }
+            InnerGauge::default().gauge_style(color).ratio(prcnt)
+        };
+
+        let d = self.jobs_outstanding;
+
+        MultiGauge::default()
+            .gauge(build_gauge(tailwind::GREEN.c800, self.jobs_completed, d))
+            .gauge(build_gauge(tailwind::BLUE.c800, self.jobs_running, d))
+            .gauge(build_gauge(tailwind::YELLOW.c800, self.jobs_pending, d))
+            .gauge(build_gauge(
+                tailwind::ORANGE.c800,
+                self.jobs_waiting_for_artifacts,
+                d,
+            ))
+            .label(format!(
+                "{}w {}p {}r {}c / {d}e",
+                self.jobs_waiting_for_artifacts,
+                self.jobs_pending,
+                self.jobs_running,
+                self.jobs_completed,
+            ))
             .render(area, buf);
     }
 
@@ -395,7 +426,7 @@ impl Widget for &mut FancyUi {
             if self.enqueue_status.is_some() {
                 sections.push((Constraint::Length(1), FancyUi::render_enqueue_status as _));
             }
-            sections.push((Constraint::Length(1), FancyUi::render_gauge as _));
+            sections.push((Constraint::Length(3), FancyUi::render_gauge as _));
         }
 
         let layout = Layout::vertical(sections.iter().map(|(c, _)| *c));
