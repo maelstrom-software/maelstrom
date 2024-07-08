@@ -65,10 +65,13 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
 fn format_running_test(name: &str, time: &Instant) -> Row<'static> {
     let d = time.elapsed();
 
-    Row::new([
-        Cell::from(name.to_owned()),
-        Cell::from(format!("{:.3}s", d.as_secs_f64())),
-    ])
+    let duration = if d < Duration::from_secs(1) {
+        "<1s".into()
+    } else {
+        format!("{}s", d.as_secs_f64().round() as usize)
+    };
+
+    Row::new([Cell::from(name.to_owned()), Cell::from(duration)])
 }
 
 #[derive(From)]
@@ -225,7 +228,7 @@ impl FancyUi {
                 .rev()
                 .skip(omitted_tests)
                 .map(|(name, t)| format_running_test(name.as_str(), t)),
-            [Constraint::Fill(1), Constraint::Length(8)],
+            [Constraint::Fill(1), Constraint::Length(4)],
         )
         .block(create_block(format!("Running Tests{}", omitted_trailer)))
         .gray()
