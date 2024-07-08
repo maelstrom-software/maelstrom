@@ -208,8 +208,15 @@ impl Drop for FancyUi {
 
 impl FancyUi {
     fn render_running_tests(&mut self, area: Rect, buf: &mut Buffer) {
-        let create_block = |title: &'static str| Block::bordered().gray().title(title.bold());
+        let create_block = |title: String| Block::bordered().gray().title(title.bold());
 
+        let omitted_tests = self
+            .running_tests
+            .len()
+            .saturating_sub(area.height as usize);
+        let omitted_trailer = (omitted_tests > 0)
+            .then(|| format!(" ({omitted_tests} tests not shown)"))
+            .unwrap_or_default();
         let mut running_tests: Vec<_> = self.running_tests.iter().collect();
         running_tests.sort_by_key(|a| a.1);
         Table::new(
@@ -218,7 +225,7 @@ impl FancyUi {
                 .map(|(name, t)| format_running_test(name.as_str(), t)),
             [Constraint::Fill(1), Constraint::Length(8)],
         )
-        .block(create_block("Running Tests"))
+        .block(create_block(format!("Running Tests{}", omitted_trailer)))
         .gray()
         .render(area, buf);
     }
