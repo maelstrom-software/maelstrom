@@ -362,16 +362,18 @@ impl Widget for &mut FancyUi {
             sections.push((Constraint::Fill(1), FancyUi::render_summary as _));
         } else {
             if !self.running_tests.is_empty() {
-                let height = std::cmp::min(self.running_tests.len(), 20);
+                let max_height = (self.running_tests.len() + 2)
+                    .try_into()
+                    .unwrap_or(u16::MAX);
                 sections.push((
-                    Constraint::Length(height as u16 + 2),
+                    Constraint::Max(max_height),
                     FancyUi::render_running_tests as SectionFnPtr,
                 ));
             }
             if !self.remote_progress.is_empty() {
-                let len = self.remote_progress.len().try_into().unwrap_or(u16::MAX);
+                let max_height = self.remote_progress.len().try_into().unwrap_or(u16::MAX);
                 sections.push((
-                    Constraint::Length(len),
+                    Constraint::Max(max_height),
                     FancyUi::render_remote_progress as _,
                 ));
             }
@@ -398,10 +400,11 @@ impl Widget for &mut FancyUi {
 fn init_terminal() -> Result<Terminal<impl Backend>> {
     enable_raw_mode()?;
     let backend = CrosstermBackend::new(stdout());
+    let height = backend.size()?.height;
     let terminal = Terminal::with_options(
         backend,
         TerminalOptions {
-            viewport: Viewport::Inline(18),
+            viewport: Viewport::Inline(height / 4),
         },
     )?;
     Ok(terminal)
