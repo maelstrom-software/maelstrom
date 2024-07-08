@@ -16,10 +16,10 @@ use ratatui::{
         terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
         ExecutableCommand as _,
     },
-    layout::{Constraint, Layout, Rect},
+    layout::{Alignment, Constraint, Layout, Rect},
     style::{palette::tailwind, Stylize as _},
     terminal::{Terminal, Viewport},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{Block, Cell, Gauge, Paragraph, Row, Table, Widget},
     TerminalOptions,
 };
@@ -39,13 +39,15 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
     };
 
     let case = res.name.bold();
-    let mut line = vec![case, result_span];
+    let mut line = vec![Cell::from(case), Cell::from(result_span)];
 
     if let Some(d) = res.duration {
-        line.push(format!("{:.3}s", d.as_secs_f64()).into());
+        line.push(Cell::from(
+            Text::from(format!("{:.3}s", d.as_secs_f64())).alignment(Alignment::Right),
+        ));
     }
 
-    let mut output = vec![Row::new(line.into_iter().map(Cell::from)).into()];
+    let mut output = vec![Row::new(line.into_iter()).into()];
 
     if let Some(details) = res.status.details() {
         output.extend(details.split('\n').map(|l| Line::from(l.to_owned()).into()));
