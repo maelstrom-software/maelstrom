@@ -3308,8 +3308,10 @@ dependencies = [
  "tempfile",
  "throbber-widgets-tui",
  "toml",
+ "tui-term",
  "unicode-truncate 0.2.0",
  "unicode-width",
+ "vt100",
  "xdg",
 ]
 
@@ -5594,6 +5596,16 @@ name = "ttf-parser"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "17f77d76d837a7830fe1d4f12b7b4ba4192c1888001c7164257e4bc6d21d96b4"
+
+[[package]]
+name = "tui-term"
+version = "0.1.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fac7538a3b9d5e92739253323e169ed25f005669c0e7f9d98f50f697fcada4e8"
+dependencies = [
+ "ratatui",
+ "vt100",
+]
 
 [[package]]
 name = "tungstenite"

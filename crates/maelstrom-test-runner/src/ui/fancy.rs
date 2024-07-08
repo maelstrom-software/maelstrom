@@ -114,7 +114,7 @@ pub struct FancyUi {
     done_building: bool,
 
     running_tests: BTreeMap<String, Instant>,
-    build_output: Vec<Line<'static>>,
+    build_output: vt100::Parser,
     print_above: Vec<PrintAbove>,
     enqueue_status: Option<String>,
     throbber_state: throbber_widgets_tui::ThrobberState,
@@ -134,7 +134,7 @@ impl FancyUi {
             done_building: false,
 
             running_tests: BTreeMap::new(),
-            build_output: vec![],
+            build_output: vt100::Parser::new(3, u16::MAX, 0),
             print_above: vec![],
             enqueue_status: Some("starting...".into()),
             throbber_state: Default::default(),
@@ -174,7 +174,8 @@ impl Ui for FancyUi {
                         self.print_above.push(Line::from(line).into());
                     }
                     UiMessage::BuildOutputLine(line) => {
-                        self.build_output.push(line.into());
+                        self.build_output.process(line.as_bytes());
+                        self.build_output.process(b"\r\n");
                     }
                     UiMessage::List(_) => {}
                     UiMessage::JobFinished(res) => {
@@ -256,12 +257,8 @@ impl FancyUi {
 
     fn render_build_output(&mut self, area: Rect, buf: &mut Buffer) {
         let create_block = |title: &'static str| Block::bordered().gray().title(title.bold());
-
-        let vertical_scroll = (self.build_output.len() as u16).saturating_sub(area.height);
-        Paragraph::new(self.build_output.clone())
+        tui_term::widget::PseudoTerminal::new(self.build_output.screen())
             .block(create_block("Build Output"))
-            .gray()
-            .scroll((vertical_scroll, 0))
             .render(area, buf);
     }
 
