@@ -213,7 +213,7 @@ impl FancyUi {
         let omitted_tests = self
             .running_tests
             .len()
-            .saturating_sub(area.height as usize);
+            .saturating_sub((area.height as usize).saturating_sub(2));
         let omitted_trailer = (omitted_tests > 0)
             .then(|| format!(" ({omitted_tests} tests not shown)"))
             .unwrap_or_default();
@@ -222,6 +222,8 @@ impl FancyUi {
         Table::new(
             running_tests
                 .into_iter()
+                .rev()
+                .skip(omitted_tests)
                 .map(|(name, t)| format_running_test(name.as_str(), t)),
             [Constraint::Fill(1), Constraint::Length(8)],
         )
