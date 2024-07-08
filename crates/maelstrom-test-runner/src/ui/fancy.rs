@@ -44,7 +44,7 @@ fn format_finished(res: UiJobResult) -> Vec<PrintAbove> {
     let mut output = vec![Row::new(line.into_iter().map(Cell::from)).into()];
 
     if let Some(details) = res.status.details() {
-        output.push(Line::from(details).into());
+        output.extend(details.split('\n').map(|l| Line::from(l.to_owned()).into()));
     }
 
     for l in res.stdout {
