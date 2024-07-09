@@ -7,12 +7,15 @@ use derive_more::From;
 use indicatif::HumanBytes;
 use maelstrom_base::stats::JobState;
 use maelstrom_client::RemoteProgress;
+use maelstrom_linux as linux;
 use maelstrom_util::ext::OptionExt as _;
 use multi_gauge::{InnerGauge, MultiGauge};
 use ratatui::{
     backend::{Backend, CrosstermBackend},
     buffer::Buffer,
     crossterm::{
+        cursor,
+        event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
         terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType},
         ExecutableCommand as _,
     },
@@ -157,6 +160,12 @@ impl Ui for FancyUi {
         terminal.draw(|f| f.render_widget(&mut *self, f.size()))?;
         loop {
             if last_tick.elapsed() > Duration::from_millis(33) {
+                while crossterm::event::poll(Duration::from_secs(0))? {
+                    if let crossterm::event::Event::Key(key) = crossterm::event::read()? {
+                        self.handle_key(key);
+                    }
+                }
+
                 if !self.print_above.is_empty() {
                     let rows = std::mem::take(&mut self.print_above);
                     for t in rows {
@@ -230,6 +239,18 @@ impl Drop for FancyUi {
 }
 
 impl FancyUi {
+    fn handle_key(&mut self, key: KeyEvent) {
+        if key.kind != KeyEventKind::Press {
+            return;
+        }
+
+        if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
+            let _ = restore_terminal();
+            linux::raise(linux::Signal::INT).unwrap();
+            unreachable!();
+        }
+    }
+
     fn render_running_tests(&mut self, area: Rect, buf: &mut Buffer) {
         let create_block = |title: String| Block::bordered().gray().title(title.bold());
 
@@ -455,6 +476,7 @@ fn init_terminal() -> Result<Terminal<impl Backend>> {
 fn restore_terminal() -> Result<()> {
     disable_raw_mode()?;
     stdout().execute(Clear(ClearType::FromCursorDown))?;
+    stdout().execute(cursor::Show)?;
     println!();
     Ok(())
 }

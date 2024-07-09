@@ -24,6 +24,7 @@ indicatif.workspace = true
 maplit.workspace = true
 maelstrom-base.workspace = true
 maelstrom-client.workspace = true
+maelstrom-linux.workspace = true
 maelstrom-macro.workspace = true
 maelstrom-util.workspace = true
 num-derive.workspace = true

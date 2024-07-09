@@ -3285,6 +3285,7 @@ dependencies = [
  "maelstrom-base",
  "maelstrom-broker",
  "maelstrom-client",
+ "maelstrom-linux",
  "maelstrom-macro",
  "maelstrom-test",
  "maelstrom-util",
