@@ -10,7 +10,7 @@
 - [Clients](clients.md)
     - [Client-Specific Concepts](client-specific-concepts.md)
         - [Local Worker](local-worker.md)
-        - [Specifing the Broker](specifying-broker.md)
+        - [Specifying the Broker](specifying-broker.md)
         - [Directories](dirs.md)
         - [Container Images](container-images.md)
         - [Job Specification](spec.md)

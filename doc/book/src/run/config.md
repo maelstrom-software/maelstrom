@@ -64,7 +64,7 @@ command-line option).
 
 In TTY mode, all key presses are sent to the job's terminal. So, a `^C` typed
 at the user's terminal be transmitted to the job's terminal, where it will be
-interpretted however the job interprets it. This is true for all control
+interpreted however the job interprets it. This is true for all control
 characters. As a result, typing `^C` will not kill the `maelstrom-run`, nor
 will typing `^Z` suspend `maelstrom-run`.
 

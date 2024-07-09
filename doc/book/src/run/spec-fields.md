@@ -253,7 +253,7 @@ This field must be a string, and it specifies the working directory of the
 program be run. It sets the [`working_directory`](../spec.md#working_directory)
 field of the job spec. If not provided, `/` will be used.
 
-This field is imcompatible with an [`image` that has a `use` of
+This field is incompatible with an [`image` that has a `use` of
 `working_directory`](#image-use-working-directory).
 
 For example:

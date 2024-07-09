@@ -1,4 +1,4 @@
-# Specifing the Broker
+# Specifying the Broker
 
 Every client has a `broker` configuration value that specifies the socket
 address of the broker. This configuration value is optional. If not provided, the client will run
