@@ -14,18 +14,12 @@ Here is a simple example:
 
 ```json
 {
-        "image": {
-               "name": "docker://alpine",
-               "use": ["layers", "environment"]
-        },
+        "image": "docker://alpine",
         "program": "echo",
         "arguments": ["Hello", "world!"]
 }
 {
-        "image": {
-               "name": "docker://alpine",
-               "use": ["layers", "environment"]
-        },
+        "image": "docker://alpine",
         "program": "echo",
         "arguments": ["¡Hola", "mundo!"]
 }

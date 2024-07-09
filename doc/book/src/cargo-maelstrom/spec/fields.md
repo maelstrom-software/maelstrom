@@ -69,16 +69,16 @@ This is what the `image` field is for. It is used to set the job spec's
 filter = "package.equals(cargo-maelstrom)"
 image.name = "docker://rust"
 image.use = ["layers", "environment"]
-
-[[directives]]
-filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
-image = { name = "docker://alpine", use = ["layers", "environment"] }
 ```
 
-In the example above, we specified a TOML table in two different, equivalent
-ways for illustrative purposes.
+The `image` field may either be a string or a table. If it's a string, then
+it's assumed to be the URI of the image to use, as documented
+[here](../container-images.html#container-image-uris). In this case, the job
+spec will have [`use_layers`](../../spec.md#use_layers) and
+[`use_environment`](../../spec.md#use_environment) both set to `true`.
 
-The `image` field must be a table with two subfields: `name` and `use`.
+If the `image` field is a table, then it must have a `name` subfield and
+optionally may have a `use` subfield.
 
 The `name` sub-field specifies the name of the image. It must be a string. It
 specifies the URI of the image to use, as documented
@@ -94,6 +94,35 @@ container image to use for the job spec. It must contain a non-empty subset of:
   - `working_directory`: This sets the
 	[`use_working_directory`](../../spec.md#use_working_directory) field in the job spec's
 	image value.
+
+If the `use` sub-field isn't specified, then the job spec will have
+[`use_layers`](../../spec.md#use_layers) and
+[`use_environment`](../../spec.md#use_environment) both set to `true`.
+
+For example, the following directives all have semantically equivalent `image` fields:
+
+```toml
+[[directives]]
+filter = "package.equals(package-1)"
+image.name = "docker://rust"
+image.use = ["layers", "environment"]
+
+[[directives]]
+filter = "package.equals(package-2)"
+image = { name = "docker://rust", use = ["layers", "environment"] }
+
+[[directives]]
+filter = "package.equals(package-3)"
+image.name = "docker://rust"
+
+[[directives]]
+filter = "package.equals(package-4)"
+image = { name = "docker://rust" }
+
+[[directives]]
+filter = "package.equals(package-5)"
+image = "docker://rust"
+```
 
 ## `layers`
 
