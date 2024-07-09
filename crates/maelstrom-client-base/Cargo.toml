@@ -27,8 +27,10 @@ tonic.workspace = true
 tuple.workspace = true
 
 [dev-dependencies]
+indoc.workspace = true
 maplit.workspace = true
 maelstrom-test.workspace = true
+toml.workspace = true
 
 [build-dependencies]
 protoc-bin-vendored.workspace = true

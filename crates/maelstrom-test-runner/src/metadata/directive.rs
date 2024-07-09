@@ -521,6 +521,42 @@ mod tests {
     }
 
     #[test]
+    fn image_with_no_use() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                image = { name = "rust" }
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                image: Some(string!("rust")),
+                layers: Some(PossiblyImage::Image),
+                environment: Some(PossiblyImage::Image),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
+    fn image_as_string() {
+        assert_eq!(
+            parse_test_directive(
+                r#"
+                image = "rust"
+                "#
+            )
+            .unwrap(),
+            TestDirective {
+                image: Some(string!("rust")),
+                layers: Some(PossiblyImage::Image),
+                environment: Some(PossiblyImage::Image),
+                ..Default::default()
+            }
+        );
+    }
+
+    #[test]
     fn image_with_working_directory() {
         assert_eq!(
             parse_test_directive(

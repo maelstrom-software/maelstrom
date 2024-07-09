@@ -10,11 +10,11 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Sha256Digest, Timeout,
-    UserId, Utf8PathBuf,
+    enum_set, ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Sha256Digest,
+    Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
-use serde::{de, Deserialize, Serialize};
+use serde::{de, Deserialize, Deserializer, Serialize};
 use std::time::Duration;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -378,11 +378,40 @@ pub enum ImageUse {
 
 /// A struct used for deserializing "image" statements in JSON, TOML, or other similar formats.
 /// This allows the user to specify an image name and the parts of the image they want to use.
-#[derive(Deserialize)]
+#[derive(Debug, PartialEq)]
 pub struct Image {
     pub name: String,
-    #[serde(rename = "use")]
     pub use_: EnumSet<ImageUse>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ImageForDeserialize {
+    AsString(String),
+    AsStruct {
+        name: String,
+        #[serde(rename = "use", default = "use_default")]
+        use_: EnumSet<ImageUse>,
+    },
+}
+
+fn use_default() -> EnumSet<ImageUse> {
+    enum_set! {ImageUse::Layers | ImageUse::Environment}
+}
+
+impl<'de> Deserialize<'de> for Image {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        ImageForDeserialize::deserialize(deserializer).map(|i| match i {
+            ImageForDeserialize::AsString(name) => Image {
+                name,
+                use_: use_default(),
+            },
+            ImageForDeserialize::AsStruct { name, use_ } => Image { name, use_ },
+        })
+    }
 }
 
 /// A simple wrapper struct for the config of a local OCI image. This is used for dependency
@@ -486,6 +515,7 @@ impl ConvertedImage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indoc::indoc;
     use maelstrom_test::{path_buf_vec, string, string_vec, tar_layer};
     use maplit::btreemap;
     use std::{ffi::OsStr, os::unix::ffi::OsStrExt as _};
@@ -700,5 +730,62 @@ mod tests {
             ],
             vec!["D=1"],
         )
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct ImageContainer {
+        image: Image,
+    }
+
+    impl ImageContainer {
+        fn new(image: Image) -> Self {
+            Self { image }
+        }
+    }
+
+    fn parse_image_container(file: &str) -> ImageContainer {
+        toml::from_str(file).unwrap()
+    }
+
+    #[test]
+    fn image_deserialize() {
+        assert_eq!(
+            parse_image_container(indoc! {r#"
+                [image]
+                name = "name"
+                use = [ "layers", "environment", "working_directory" ]
+            "#}),
+            ImageContainer::new(Image {
+                name: "name".into(),
+                use_: enum_set! {ImageUse::Layers | ImageUse::Environment | ImageUse::WorkingDirectory},
+            })
+        );
+    }
+
+    #[test]
+    fn image_deserialize_no_use() {
+        assert_eq!(
+            parse_image_container(indoc! {r#"
+                [image]
+                name = "name"
+            "#}),
+            ImageContainer::new(Image {
+                name: "name".into(),
+                use_: enum_set! {ImageUse::Layers | ImageUse::Environment},
+            })
+        );
+    }
+
+    #[test]
+    fn image_deserialize_as_string() {
+        assert_eq!(
+            parse_image_container(indoc! {r#"
+                image = "name"
+            "#}),
+            ImageContainer::new(Image {
+                name: "name".into(),
+                use_: enum_set! {ImageUse::Layers | ImageUse::Environment},
+            })
+        );
     }
 }
