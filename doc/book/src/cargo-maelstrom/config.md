@@ -60,7 +60,7 @@ The directory to use for cached container images. See
 
 The optional `timeout` configuration value provides the
 [timeout](../spec.md#timeout) value to use for all tests. This will override
-any value set in [`maelstrom-test.toml`](spec/fields.md#timeout).
+any value set in [`cargo-maelstrom.toml`](spec/fields.md#timeout).
 
 ## <span style="white-space: nowrap;">`cache-size`</span>
 

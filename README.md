@@ -70,14 +70,14 @@ run in its own container, configured with a few common dependencies. It may work
 
 If some tests fail, however, it likely means those tests have dependencies on
 their execution environment that aren't packaged in their containers.
-You can remedy this by adding directives to the `maelstrom-test.toml` file. To
+You can remedy this by adding directives to the `cargo-maelstrom.toml` file. To
 do this, run:
 
 ```bash
 cargo maelstrom --init
 ```
 
-Then edit the created `maelstrom-test.toml` file as described in the [book](https://maelstrom-software.com/book/cargo-maelstrom/spec.html).
+Then edit the created `cargo-maelstrom.toml` file as described in the [book](https://maelstrom-software.com/book/cargo-maelstrom/spec.html).
 
 ## Running `maelstrom-pytest`
 

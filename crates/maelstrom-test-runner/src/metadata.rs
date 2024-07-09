@@ -31,9 +31,8 @@ pub struct AllMetadata<TestFilterT> {
 }
 
 impl<TestFilterT> Default for AllMetadata<TestFilterT> {
-    /// The default test metadata is used when there is no `maelstrom-test.toml` file.
-    /// It provides some commonly used functionality by test processes in an attempt to give a good
-    /// default.
+    /// The default test metadata is used when there is no configuration file. It provides some
+    /// commonly used functionality by test processes in an attempt to give a good default.
     fn default() -> Self {
         let single_directive = TestDirective {
             filter: None,

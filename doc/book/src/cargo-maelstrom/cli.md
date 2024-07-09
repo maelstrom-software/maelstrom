@@ -6,7 +6,7 @@ Besides the [standard command-line options](../standard-cli.md) and the options 
 ## `--init`
 
 The `--init` command-line option is used to create a starter
-`maelstrom-test.toml` file. See [here](spec/initializing.html) for more
+`cargo-maelstrom.toml` file. See [here](spec/initializing.html) for more
 information.
 
 ## `--list-tests` or `--list`

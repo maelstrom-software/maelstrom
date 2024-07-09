@@ -1,6 +1,6 @@
 # Default Configuration
 
-If there is no `maelstrom-test.toml` in the workspace root, then
+If there is no `cargo-maelstrom.toml` in the workspace root, then
 `cargo-maelstrom` will run with the following defaults:
 
 ```toml

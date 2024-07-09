@@ -1,6 +1,6 @@
 # Directives
 
-The `maelstrom-test.toml` file consists of a list of "directives" which are
+The `cargo-maelstrom.toml` file consists of a list of "directives" which are
 applied in order. Each directive has some optional fields, one of which may be
 `filter`. To compute the job spec for a test, `cargo-maelstrom` starts with a
 default spec, then iterates over all the directives in order. If a directive's
