@@ -244,23 +244,26 @@
               (<tt>maelstrom-broker</tt>) somewhere, and one copy of the worker
               (<tt>maelstrom-worker</tt>) on each node of the cluster.
             </p>
-            <p>You can install these using <a href=https://maelstrom-software.com/book/install/clustered_job_runner.html)> multiple methods</a>,
-              including <tt>cargo-binstall</tt>:</p>
-              <code>cargo binstall maelstrom-worker maelstrom-broker</code>
-              <p></p>
-              <p>Then you can start the broker:</p>
-              <code>maelstrom-broker --port=1234</code>
-              <p></p>
-              <p>Then a few workers:</p>
-              <code>maelstrom-worker --broker=broker-host:1234</code>
-              <p></p>
-              <p>Then run 'cargo-maelstrom' against the cluster:</p>
-              <code>cargo maelstrom --broker=broker-host:12344</code>
-              <p></p>
-              <p>See the book for more information:</p>
-              <ul class="actions">
-                <li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
-              </ul>
+            <p>
+              You can install these using <a
+              href=https://maelstrom-software.com/book/installation.html>
+              multiple methods</a>, including <tt>cargo-binstall</tt>:
+            </p>
+            <code>cargo binstall maelstrom-worker maelstrom-broker</code>
+            <p></p>
+            <p>Then you can start the broker:</p>
+            <code>maelstrom-broker --port=1234</code>
+            <p></p>
+            <p>Then a few workers:</p>
+            <code>maelstrom-worker --broker=broker-host:1234</code>
+            <p></p>
+            <p>Then run 'cargo-maelstrom' against the cluster:</p>
+            <code>cargo maelstrom --broker=broker-host:12344</code>
+            <p></p>
+            <p>See the book for more information:</p>
+            <ul class="actions">
+              <li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
+            </ul>
           </article>
         </div>
       </div>
