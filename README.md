@@ -53,7 +53,7 @@ cargo binstall maelstrom-pytest
 
 This will install a pre-built binary from the [github releases page](https://github.com/maelstrom-software/maelstrom/releases).
 
-If you don't have `cargo-binstall`, you can download the binary manually.
+If you don't have `cargo-binstall`, you can download the binaries manually.
 
 Check out the [book](https://maelstrom-software.com/book/installation.html) for more ways to get `cargo-maelstrom`.
 
