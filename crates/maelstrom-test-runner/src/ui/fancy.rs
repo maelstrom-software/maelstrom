@@ -300,7 +300,7 @@ impl FancyUi {
             .gauge(build_gauge(tailwind::BLUE.c800, self.jobs_running, d))
             .gauge(build_gauge(tailwind::YELLOW.c800, self.jobs_pending, d))
             .gauge(build_gauge(
-                tailwind::ORANGE.c800,
+                tailwind::PURPLE.c800,
                 self.jobs_waiting_for_artifacts,
                 d,
             ))
@@ -396,7 +396,7 @@ impl FancyUi {
             let progress = HumanBytes(progress);
             let size = HumanBytes(size);
             Gauge::default()
-                .gauge_style(tailwind::ORANGE.c800)
+                .gauge_style(tailwind::PURPLE.c800)
                 .ratio(prcnt)
                 .label(format!("{progress}/{size} {name}"))
                 .use_unicode(true)
