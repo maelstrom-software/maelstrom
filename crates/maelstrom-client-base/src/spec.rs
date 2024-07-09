@@ -10,8 +10,8 @@ use crate::{proto, IntoProtoBuf, TryFromProtoBuf};
 use anyhow::{anyhow, Error, Result};
 use enumset::{EnumSet, EnumSetType};
 use maelstrom_base::{
-    ArtifactType, GroupId, JobDevice, JobMount, JobNetwork, JobRootOverlay, JobTty, Sha256Digest,
-    Timeout, UserId, Utf8PathBuf,
+    ArtifactType, GroupId, JobMount, JobNetwork, JobRootOverlay, JobTty, Sha256Digest, Timeout,
+    UserId, Utf8PathBuf,
 };
 use maelstrom_util::template::{replace_template_vars, TemplateVars};
 use serde::{de, Deserialize, Serialize};
@@ -176,7 +176,6 @@ pub struct JobSpec {
     pub image: Option<ImageSpec>,
     pub environment: Vec<EnvironmentSpec>,
     pub layers: Vec<(Sha256Digest, ArtifactType)>,
-    pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
@@ -199,7 +198,6 @@ impl JobSpec {
             image: None,
             arguments: Default::default(),
             environment: Default::default(),
-            devices: Default::default(),
             mounts: Default::default(),
             network: Default::default(),
             root_overlay: Default::default(),
@@ -228,11 +226,6 @@ impl JobSpec {
 
     pub fn environment(mut self, environment: impl IntoEnvironment) -> Self {
         self.environment = environment.into_environment();
-        self
-    }
-
-    pub fn devices(mut self, devices: impl IntoIterator<Item = JobDevice>) -> Self {
-        self.devices = devices.into_iter().collect();
         self
     }
 

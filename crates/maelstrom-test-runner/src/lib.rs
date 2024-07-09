@@ -344,7 +344,6 @@ where
                 image: test_metadata.image,
                 environment: test_metadata.environment,
                 layers,
-                devices: test_metadata.devices,
                 mounts: test_metadata.mounts,
                 network: test_metadata.network,
                 root_overlay: if test_metadata.enable_writable_file_system {

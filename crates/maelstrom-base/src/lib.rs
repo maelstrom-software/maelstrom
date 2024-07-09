@@ -306,7 +306,6 @@ pub struct JobSpec {
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
     pub layers: NonEmpty<(Sha256Digest, ArtifactType)>,
-    pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
@@ -328,7 +327,6 @@ impl JobSpec {
             layers: layers.into(),
             arguments: Default::default(),
             environment: Default::default(),
-            devices: Default::default(),
             mounts: Default::default(),
             network: Default::default(),
             root_overlay: Default::default(),
@@ -356,11 +354,6 @@ impl JobSpec {
         T: Into<String>,
     {
         self.environment = environment.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn devices(mut self, devices: impl IntoIterator<Item = JobDevice>) -> Self {
-        self.devices = devices.into_iter().collect();
         self
     }
 

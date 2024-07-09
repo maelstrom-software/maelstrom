@@ -1,8 +1,5 @@
 use anyhow::Result;
-use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMountForTomlAndJson, JobNetwork,
-    Timeout, UserId, Utf8PathBuf,
-};
+use maelstrom_base::{GroupId, JobMountForTomlAndJson, JobNetwork, Timeout, UserId, Utf8PathBuf};
 use maelstrom_client::spec::{incompatible, Image, ImageUse, Layer, PossiblyImage};
 use serde::{de, Deserialize, Deserializer};
 use std::{
@@ -10,11 +7,7 @@ use std::{
     fmt::Display,
     marker::PhantomData,
     str::{self, FromStr},
-    sync::OnceLock,
 };
-
-static DEPRECATED_ADDED_DEVICES_WARNING: OnceLock<()> = OnceLock::new();
-static DEPRECATED_DEVICES_WARNING: OnceLock<()> = OnceLock::new();
 
 #[derive(Debug, Default, PartialEq)]
 pub struct TestDirective<TestFilterT> {
@@ -31,8 +24,6 @@ pub struct TestDirective<TestFilterT> {
     pub added_layers: Vec<Layer>,
     pub mounts: Option<Vec<JobMountForTomlAndJson>>,
     pub added_mounts: Vec<JobMountForTomlAndJson>,
-    pub devices: Option<EnumSet<JobDevice>>,
-    pub added_devices: EnumSet<JobDevice>,
     pub environment: Option<PossiblyImage<BTreeMap<String, String>>>,
     pub added_environment: BTreeMap<String, String>,
     pub working_directory: Option<PossiblyImage<Utf8PathBuf>>,
@@ -50,8 +41,6 @@ enum DirectiveField {
     Timeout,
     Mounts,
     AddedMounts,
-    Devices,
-    AddedDevices,
     Image,
     WorkingDirectory,
     Layers,
@@ -85,8 +74,6 @@ where
         let mut timeout = None;
         let mut mounts = None;
         let mut added_mounts = None;
-        let mut devices = None;
-        let mut added_devices = None;
         let mut image = None;
         let mut working_directory = None;
         let mut layers = None;
@@ -129,24 +116,6 @@ where
                 }
                 DirectiveField::AddedMounts => {
                     added_mounts = Some(map.next_value()?);
-                }
-                DirectiveField::Devices => {
-                    if DEPRECATED_DEVICES_WARNING.set(()).is_ok() {
-                        eprintln!("WARNING: field `devices` is deprecated, use a `mounts` of type `devices` instead");
-                    }
-                    incompatible(
-                        &added_devices,
-                        "field `devices` cannot be set after `added_devices`",
-                    )?;
-                    let d = map.next_value::<EnumSet<JobDeviceForTomlAndJson>>()?;
-                    devices = Some(d.into_iter().map(JobDevice::from).collect());
-                }
-                DirectiveField::AddedDevices => {
-                    if DEPRECATED_ADDED_DEVICES_WARNING.set(()).is_ok() {
-                        eprintln!("WARNING: field `added_devices` is deprecated, use an `added_mounts` of type `devices` instead");
-                    }
-                    let d = map.next_value::<EnumSet<JobDeviceForTomlAndJson>>()?;
-                    added_devices = Some(d.into_iter().map(JobDevice::from).collect());
                 }
                 DirectiveField::Image => {
                     let i = map.next_value::<Image>()?;
@@ -236,8 +205,6 @@ where
             added_mounts: added_mounts.unwrap_or_default(),
             image,
             working_directory,
-            devices,
-            added_devices: added_devices.unwrap_or_default(),
             environment,
             added_environment: added_environment.unwrap_or_default(),
         })
@@ -261,7 +228,7 @@ mod tests {
     use super::*;
     use anyhow::Error;
     use indoc::indoc;
-    use maelstrom_base::enum_set;
+    use maelstrom_base::{enum_set, JobDeviceForTomlAndJson};
     use maelstrom_client::spec::SymlinkSpec;
     use maelstrom_test::{glob_layer, paths_layer, string, tar_layer, utf8_path_buf};
     use toml::de::Error as TomlError;

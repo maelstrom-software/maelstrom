@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use maelstrom_base::{
-    ArtifactType, EnumSet, GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty,
+    ArtifactType, GroupId, JobMountForTomlAndJson, JobNetwork, JobRootOverlay, NonEmpty,
     Sha256Digest, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::spec::{
@@ -126,7 +126,6 @@ impl Job {
             image,
             environment,
             layers,
-            devices: EnumSet::empty(),
             mounts: self
                 .mounts
                 .unwrap_or_default()

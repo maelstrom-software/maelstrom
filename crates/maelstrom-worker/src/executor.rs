@@ -8,8 +8,8 @@ use bumpalo::{
 use futures::ready;
 use maelstrom_base::{
     tty::{self, DecodeInputChunk, DecodeInputRemainder},
-    EnumSet, GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork,
-    JobOutputResult, JobResult, JobRootOverlay, JobStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
+    GroupId, JobCompleted, JobDevice, JobEffects, JobError, JobMount, JobNetwork, JobOutputResult,
+    JobResult, JobRootOverlay, JobStatus, JobTty, UserId, Utf8PathBuf, WindowSize,
 };
 use maelstrom_linux::{
     self as linux, CloneArgs, CloneFlags, CloseRangeFirst, CloseRangeFlags, CloseRangeLast, Errno,
@@ -66,7 +66,6 @@ pub struct JobSpec {
     pub program: Utf8PathBuf,
     pub arguments: Vec<String>,
     pub environment: Vec<String>,
-    pub devices: EnumSet<JobDevice>,
     pub mounts: Vec<JobMount>,
     pub network: JobNetwork,
     pub root_overlay: JobRootOverlay,
@@ -83,7 +82,6 @@ impl JobSpec {
             arguments,
             environment,
             layers: _,
-            devices,
             mounts,
             network,
             root_overlay,
@@ -98,7 +96,6 @@ impl JobSpec {
             program,
             arguments,
             environment,
-            devices,
             mounts,
             network,
             root_overlay,
@@ -884,38 +881,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         Ok(())
     }
 
-    fn open_mount_fds_for_devices_pre_pivot_root<'bump>(
-        &'bump self,
-        spec: &JobSpec,
-        bump: &'bump Bump,
-        builder: &mut ScriptBuilder<'bump>,
-        mount_fds: &mut BumpVec<'bump, FdSlot<'bump>>,
-    ) {
-        // Open all of the source paths for devices before we chdir or pivot_root. We create
-        // devices in the container by bind mounting them from the host instead of creating
-        // devices. We do this because we don't assume we're running as root, and as such, we can't
-        // create device files.
-        for device in spec.devices.iter() {
-            let Device { cstr, str } = Device::new(device);
-            let mount_fd = new_fd_slot(bump);
-            mount_fds.push(mount_fd);
-            builder.push(
-                Syscall::OpenTree {
-                    dirfd: Fd::AT_FDCWD,
-                    path: cstr,
-                    // We don't pass recursive because we assume we're just cloning a file.
-                    flags: OpenTreeFlags::CLONE,
-                    out: mount_fd,
-                },
-                bump.alloc(move |err| {
-                    execerr(anyhow!(
-                        "opening local path for bind mount of device {str}: {err}",
-                    ))
-                }),
-            );
-        }
-    }
-
     fn open_mount_fds_for_mounts_pre_pivot_root<'bump>(
         &'bump self,
         spec: &'bump JobSpec,
@@ -1053,31 +1018,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
             }
         }
         Ok(())
-    }
-
-    fn complete_device_mounts_post_pivot_root<'bump>(
-        &'bump self,
-        spec: &'bump JobSpec,
-        bump: &'bump Bump,
-        builder: &mut ScriptBuilder<'bump>,
-        mount_fds: &mut impl Iterator<Item = FdSlot<'bump>>,
-    ) {
-        for device in spec.devices.iter() {
-            let Device { cstr, str } = Device::new(device);
-            let mount_local_path_fd = mount_fds.next().unwrap();
-            builder.push(
-                Syscall::MoveMount {
-                    from_dirfd: mount_local_path_fd,
-                    from_path: c"",
-                    to_dirfd: Fd::AT_FDCWD,
-                    to_path: cstr,
-                    flags: MoveMountFlags::F_EMPTY_PATH,
-                },
-                bump.alloc(move |err| {
-                    execerr(anyhow!("move_mount for bind mount of device {str}: {err}",))
-                }),
-            );
-        }
     }
 
     fn complete_mounts_post_pivot_root<'bump>(
@@ -1493,7 +1433,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // mount (or sysfs?) if we don't already have one open in our namespace. By doing this
         // here, we don't have to worry about the existing proc going away when we pivot_root.
         let mut mount_fds = BumpVec::new_in(&bump);
-        self.open_mount_fds_for_devices_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.open_mount_fds_for_mounts_pre_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
 
         // Pivot root and unmount the old root. This places us in the new /.
@@ -1502,7 +1441,6 @@ impl<'clock, ClockT: Clock> Executor<'clock, ClockT> {
         // At this point, we've pivoted root and are in /. Do all of the move_mounts to complete
         // the mounting of file systems.
         let mut mount_fds = mount_fds.into_iter();
-        self.complete_device_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds);
         self.complete_mounts_post_pivot_root(spec, &bump, &mut builder, &mut mount_fds)?;
 
         // We don't want to chdir until we've completed mounting, since we want clients to be able
@@ -1752,7 +1690,9 @@ mod tests {
     use bytes::BytesMut;
     use bytesize::ByteSize;
     use indoc::indoc;
-    use maelstrom_base::{enum_set, nonempty, ArtifactType, JobStatus, Utf8Path, WindowSize};
+    use maelstrom_base::{
+        enum_set, nonempty, ArtifactType, EnumSet, JobStatus, Utf8Path, WindowSize,
+    };
     use maelstrom_layer_fs::{BlobDir, BottomLayerBuilder, LayerFs, ReaderCache};
     use maelstrom_test::{boxed_u8, digest, utf8_path_buf};
     use maelstrom_util::{async_fs, log::test_logger, sync, time::TickingClock};
@@ -2185,8 +2125,10 @@ mod tests {
                     local_path: utf8_path_buf!("/"),
                     read_only: false,
                 },
-            ])
-            .devices([JobDevice::Null]);
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Null),
+                },
+            ]);
         let JobCompleted {
             status,
             effects: JobEffects { stdout, stderr, .. },
@@ -2457,8 +2399,9 @@ mod tests {
     #[tokio::test]
     async fn dev_full() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Full)),
+            bash_spec("/bin/ls -l /dev/full | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: enum_set!(JobDevice::Full),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 7\n")))
         .run()
@@ -2476,8 +2419,9 @@ mod tests {
     #[tokio::test]
     async fn dev_null() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Null)),
+            bash_spec("/bin/ls -l /dev/null | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: enum_set!(JobDevice::Null),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 3\n")))
         .run()
@@ -2487,8 +2431,9 @@ mod tests {
     #[tokio::test]
     async fn dev_null_write() {
         Test::new(
-            bash_spec("echo foo > /dev/null && cat /dev/null")
-                .devices(EnumSet::only(JobDevice::Null)),
+            bash_spec("echo foo > /dev/null && cat /dev/null").mounts([JobMount::Devices {
+                devices: enum_set!(JobDevice::Null),
+            }]),
         )
         .run()
         .await;
@@ -2505,8 +2450,11 @@ mod tests {
     #[tokio::test]
     async fn dev_random() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Random)),
+            bash_spec("/bin/ls -l /dev/random | awk '{print $5, $6}'").mounts([
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Random),
+                },
+            ]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 8\n")))
         .run()
@@ -2524,8 +2472,9 @@ mod tests {
     #[tokio::test]
     async fn dev_tty() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Tty)),
+            bash_spec("/bin/ls -l /dev/tty | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: enum_set!(JobDevice::Tty),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"5, 0\n")))
         .run()
@@ -2543,8 +2492,11 @@ mod tests {
     #[tokio::test]
     async fn dev_urandom() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Urandom)),
+            bash_spec("/bin/ls -l /dev/urandom | awk '{print $5, $6}'").mounts([
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Urandom),
+                },
+            ]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 9\n")))
         .run()
@@ -2562,8 +2514,9 @@ mod tests {
     #[tokio::test]
     async fn dev_zero() {
         Test::new(
-            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'")
-                .devices(EnumSet::only(JobDevice::Zero)),
+            bash_spec("/bin/ls -l /dev/zero | awk '{print $5, $6}'").mounts([JobMount::Devices {
+                devices: enum_set!(JobDevice::Zero),
+            }]),
         )
         .expected_stdout(JobOutputResult::Inline(boxed_u8!(b"1, 5\n")))
         .run()
@@ -2781,14 +2734,18 @@ mod tests {
                 "(echo goodbye > /mnt/{}) 2>/dev/null",
                 temp_file.path().file_name().unwrap().to_str().unwrap()
             ))
-            .devices(enum_set!(JobDevice::Null))
-            .mounts([JobMount::Bind {
-                mount_point: utf8_path_buf!("/mnt"),
-                local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
-                    .unwrap()
-                    .to_owned(),
-                read_only: true,
-            }]),
+            .mounts([
+                JobMount::Bind {
+                    mount_point: utf8_path_buf!("/mnt"),
+                    local_path: <&Utf8Path>::try_from(temp_file.path().parent().unwrap())
+                        .unwrap()
+                        .to_owned(),
+                    read_only: true,
+                },
+                JobMount::Devices {
+                    devices: enum_set!(JobDevice::Null),
+                },
+            ]),
         )
         .expected_status(JobStatus::Exited(1))
         .run()

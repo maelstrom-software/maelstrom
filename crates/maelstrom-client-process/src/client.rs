@@ -591,7 +591,6 @@ impl Client {
             arguments: spec.arguments,
             environment: environment_eval(initial_env, spec.environment, std_env_lookup)?,
             layers: layers.try_into().map_err(|_| anyhow!("missing layers"))?,
-            devices: spec.devices,
             mounts: spec.mounts,
             network: spec.network,
             root_overlay: spec.root_overlay,

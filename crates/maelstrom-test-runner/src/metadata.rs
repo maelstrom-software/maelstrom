@@ -5,8 +5,8 @@ use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMount, JobMountForTomlAndJson,
-    JobNetwork, Timeout, UserId, Utf8PathBuf,
+    GroupId, JobDeviceForTomlAndJson, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout,
+    UserId, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage},
@@ -78,8 +78,6 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
                     ),
                 },
             ]),
-            devices: None,
-            added_devices: enum_set!(),
             added_environment: Default::default(),
             added_layers: vec![],
             added_mounts: vec![],
@@ -114,7 +112,6 @@ pub struct TestMetadata {
     pub layers: Vec<Layer>,
     pub environment: Vec<EnvironmentSpec>,
     pub mounts: Vec<JobMount>,
-    pub devices: EnumSet<JobDevice>,
 }
 
 impl Default for TestMetadata {
@@ -131,7 +128,6 @@ impl Default for TestMetadata {
             layers: Default::default(),
             environment: Default::default(),
             mounts: Default::default(),
-            devices: Default::default(),
         }
     }
 }
@@ -164,8 +160,6 @@ impl TestMetadata {
             ref added_layers,
             ref mounts,
             ref added_mounts,
-            devices,
-            added_devices,
             ref environment,
             ref added_environment,
             ref working_directory,
@@ -204,8 +198,6 @@ impl TestMetadata {
         });
         self.mounts
             .extend(added_mounts.iter().cloned().map(Into::into));
-
-        self.devices = devices.unwrap_or(self.devices).union(added_devices);
 
         match environment {
             Some(PossiblyImage::Explicit(environment)) => {
@@ -334,7 +326,7 @@ mod tests {
     use super::*;
     use crate::{NoCaseMetadata, SimpleFilter};
     use anyhow::Error;
-    use maelstrom_base::enum_set;
+    use maelstrom_base::{enum_set, JobDevice};
     use maelstrom_test::{tar_layer, utf8_path_buf};
     use maplit::btreemap;
     use toml::de::Error as TomlError;
@@ -1159,11 +1151,11 @@ mod tests {
             r#"
             [[directives]]
             filter = "package = \"package1\""
-            devices = [ "null" ]
+            mounts = [ { type = "devices", devices = [ "null" ] } ]
 
             [[directives]]
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
-            devices = [ "zero", "tty" ]
+            mounts = [ { type = "devices", devices = [ "zero", "tty" ] } ]
             "#,
         )
         .unwrap();
@@ -1171,20 +1163,24 @@ mod tests {
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Zero | JobDevice::Tty},
+                .mounts,
+            vec![JobMount::Devices {
+                devices: enum_set! {JobDevice::Zero | JobDevice::Tty}
+            }],
         );
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Null},
+                .mounts,
+            vec![JobMount::Devices {
+                devices: enum_set! {JobDevice::Null}
+            }],
         );
         assert_eq!(
             all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            EnumSet::EMPTY,
+                .mounts,
+            vec![],
         );
     }
 
@@ -1193,25 +1189,25 @@ mod tests {
         let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            added_devices = [ "tty" ]
+            added_mounts = [ { type = "devices", devices = [ "tty" ] } ]
 
             [[directives]]
             filter = "package = \"package1\""
-            devices = [ "zero", "null" ]
-            added_devices = [ "full" ]
+            mounts = [ { type = "devices", devices = [ "zero", "null" ] } ]
+            added_mounts = [ { type = "devices", devices = [ "full" ] } ]
 
             [[directives]]
             filter = "and = [{ package = \"package1\" }, { name = \"test1\" }]"
-            added_devices = [ "random" ]
+            added_mounts = [ { type = "devices", devices = [ "random" ] } ]
 
             [[directives]]
             filter = "and = [{ package = \"package1\" }, { name = \"test2\" }]"
-            added_devices = [ "urandom" ]
+            added_mounts = [ { type = "devices", devices = [ "urandom" ] } ]
 
             [[directives]]
             filter = "and = [{ package = \"package1\" }, { name = \"test3\" }]"
-            devices = []
-            added_devices = [ "zero" ]
+            mounts = []
+            added_mounts = [ { type = "devices", devices = [ "zero" ] } ]
             "#,
         )
         .unwrap();
@@ -1219,26 +1215,50 @@ mod tests {
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Random},
+                .mounts,
+            vec![
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Zero | JobDevice::Null}
+                },
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Full}
+                },
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Random}
+                },
+            ]
         );
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test2", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Zero | JobDevice::Null | JobDevice::Full | JobDevice::Urandom},
+                .mounts,
+            vec![
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Zero | JobDevice::Null}
+                },
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Full}
+                },
+                JobMount::Devices {
+                    devices: enum_set! {JobDevice::Urandom}
+                },
+            ]
         );
         assert_eq!(
             all.get_metadata_for_test("package1", &"package1".into(), ("test3", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Zero},
+                .mounts,
+            vec![JobMount::Devices {
+                devices: enum_set! {JobDevice::Zero}
+            }],
         );
         assert_eq!(
             all.get_metadata_for_test("package2", &"package2".into(), ("test1", &NoCaseMetadata))
                 .unwrap()
-                .devices,
-            enum_set! {JobDevice::Tty},
+                .mounts,
+            vec![JobMount::Devices {
+                devices: enum_set! {JobDevice::Tty}
+            }],
         );
     }
 
