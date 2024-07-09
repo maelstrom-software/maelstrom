@@ -18,10 +18,22 @@ Option                                                      | Short Alias | Argu
 <span style="white-space: nowrap;">`--list-binaries`</span> |             |                      | [only list matching test binaries instead of running tests](#--list-binaries)
 <span style="white-space: nowrap;">`--list-packages`</span> |             |                      | [only list matching test packages instead of running tests](#--list-packages)
 
-# Command-Line Options
+## `--include` and `--exclude` {#include-and-exclude}
 
-Besides the [standard command-line options](../standard-cli.md) and the options for [configuration values](config.md),
-`cargo-maelstrom` supports additional command-line-options.
+The `--include` (`-i`) and `--exclude` (`-x`) command-line options control which tests
+`cargo-maelstrom` runs or lists.
+
+These options take a [test filter pattern](filter.md). The `--include` option
+includes any test that matches the pattern. Similarly, `--exclude` pattern
+excludes any test that matches the pattern. Both options are allowed to be
+repeated arbitrarily.
+
+The tests that are selected are the set which match any `--include` pattern but
+don't match any `--exclude` pattern. In other words, `--exclude`s have precedence
+over `--include`s, regardless of the order they are specified.
+
+If no `--include` option is provided, `cargo-maelstrom` acts as if an
+`--include all` option was provided.
 
 ## `--init`
 
@@ -52,23 +64,6 @@ packages from which it would run tests, without actually building any binaries
 or running any tests.
 
 This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
-
-## `--include` and `--exclude` {#include-and-exclude}
-
-The `--include` (`-i`) and `--exclude` (`-x`) command-line options control which tests
-`cargo-maelstrom` runs or lists.
-
-These options take a [test filter pattern](filter.md). The `--include` option
-includes any test that matches the pattern. Similarly, `--exclude` pattern
-excludes any test that matches the pattern. Both options are allowed to be
-repeated arbitrarily.
-
-The tests that are selected are the set which match any `--include` pattern but
-don't match any `--exclude` pattern. In other words, `--exclude`s have precedence
-over `--include`s, regardless of the order they are specified.
-
-If no `--include` option is provided, `cargo-maelstrom` acts as if an
-`--include all` option was provided.
 
 ### Working with Workspaces
 

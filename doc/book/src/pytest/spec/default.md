@@ -1,14 +1,11 @@
 # Default Configuration
 
-If there is no `cargo-maelstrom.toml` in the workspace root, then
-`cargo-maelstrom` will run with the following defaults:
+If there is no `maelstrom-pytest.toml` in the project directory, then
+`maelstrom-pytest.toml` will run with the following defaults:
 
 ```toml
 # Because it has no `filter` field, this directive applies to all tests.
 [[directives]]
-
-# Copy any shared libraries the test depends on along with the binary.
-include_shared_libraries = true
 
 # This layer just includes files and directories for mounting the following
 # file-systems and devices.
