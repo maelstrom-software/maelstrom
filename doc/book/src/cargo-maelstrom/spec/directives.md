@@ -32,4 +32,3 @@ The first directive applies to all tests, since it has no `filter`. It sets the
 `include_shared_libraries` pseudo-field in the job spec. The second directive
 only applies to a single test named `io::splicer` in the `maelstrom-util`
 package. It adds a layer and a mount to that test's job spec.
-```

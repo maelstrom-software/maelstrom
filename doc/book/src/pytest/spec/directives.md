@@ -28,4 +28,3 @@ added_layers = [{ stubs = [ "proc/" ] }]
 The first directive applies to all tests, since it has no `filter`. The second
 directive only applies to a single test named `io::splicer` in the `maelstrom`
 package. It adds a layer and a mount to that test's job spec.
-```
