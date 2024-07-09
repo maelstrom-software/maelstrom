@@ -67,32 +67,33 @@ This is what the `image` field is for. It is used to set the job spec's
 ```toml
 [[directives]]
 filter = "package.equals(cargo-maelstrom)"
-image.name = "rust"
+image.name = "docker://rust"
 image.use = ["layers", "environment"]
 
 [[directives]]
 filter = "package.equals(maelstrom-client) && test.equals(integration_test)"
-image = { name = "alpine", use = ["layers", "environment"] }
+image = { name = "docker://alpine", use = ["layers", "environment"] }
 ```
+
+In the example above, we specified a TOML table in two different, equivalent
+ways for illustrative purposes.
 
 The `image` field must be a table with two subfields: `name` and `use`.
 
-The `name` sub-field specifies the name of the image. It must be a string. This
-will be used to find the image on [Docker Hub](https://hub.docker.com/).
+The `name` sub-field specifies the name of the image. It must be a string. It
+specifies the URI of the image to use, as documented
+[here](../container-images.html#container-image-uris).
 
 The `use` sub-field must be a list of strings specifying what parts of the
 container image to use for the job spec. It must contain a non-empty subset of:
-  - `"layers"`: The [`layers`](../../spec.md#layers) field of the job spec is
-    replaced by the layers specified in the container image. These layers will be
-    [`tar`](../../spec-layers.md#tar) layers pointing to the tar files in the
-    container depot.
-  - `"environment"`: The [`environment`](../../spec.md#environment) field of the
-    job spec is replaced by the environment specified in the container image.
-  - `"working_directory"`: The
-    [`working_directory`](../../spec.md#working_directory) field of the job spec
-    is replaced by the working directory specified in the container image.
-
-In the example above, we specified a TOML table in two different, equivalent ways for illustrative purposes.
+  - `layers`: This sets the
+	[`use_layers`](../../spec.md#use_layers) field in the job spec's image value.
+  - `environment`: This sets the
+	[`use_environment`](../../spec.md#use_environment) field in the job spec's
+	image value.
+  - `working_directory`: This sets the
+	[`use_working_directory`](../../spec.md#use_working_directory) field in the job spec's
+	image value.
 
 ## `layers`
 
@@ -261,58 +262,24 @@ any of the other environment variables.
 ```toml
 [[directives]]
 mounts = [
-    { type = "tmp", mount_point = "/tmp" },
+    { type = "bind", mount_point = "/mnt", local_path = "data-for-job", read_only = true },
+    { type = "devices", devices = [ "full", "fuse", "null", "random", "shm", "tty", "urandom", "zero" ] },
+    { type = "devpts", mount_point = "/dev/pts" },
+    { type = "mqueue", mount_point = "/dev/mqueue" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
-    { type = "bind", mount_point = "/mnt", local_path = "data-for-job", read_only = true },
+    { type = "tmp", mount_point = "/tmp" },
 ]
 ```
 
 This field sets the [`mounts`](../../spec.md#mounts) field of
-the job spec. It must be a list of tables, each of which must have two fields:
-  - `type`: This indicates the type of special file system to mount, and
-    must be one of the following strings: `"tmp"`, `"proc"`, `"sys"`, or `"bind"`.
-  - `mount_point`: This must be a string. It specifies the mount point within
-    the container for the file system.
-  - `local_path`: This must be provided for `"bind"` mounts, and may not be
-    provided for any other type. It must be a string. It specifies the local
-    directory to bind into the job's container. See [here](../../spec.md#bind)
-    for more information.
-  - `read_only`: This may only be provided for `"bind"` mounts. It is optional
-    and defaults to `false`. It specifies whether the mounted directory should
-    be read-only or read-write. See [here](../../spec.md#bind) for more
-    information.
+the job spec. It must be a list of tables, each of which is a TOML translation
+of the corresponding [job-spec type](../../spec.md#mounts).
 
 ## `added_mounts`
 
 This field is like [`mounts`](#mounts), except it appends to the job spec's
 [`mounts`](../../spec.md#mounts) field instead of replacing it.
-
-## `devices`
-
-```toml
-[[directives]]
-devices = ["fuse", "full", "null", "random", "tty", "urandom", "zero"]
-```
-
-This field sets the [`devices`](../../spec.md#devices) field of
-the job spec. It must be a list of strings, whose elements must be one of:
-  - `"full"`
-  - `"fuse"`
-  - `"null"`
-  - `"random"`
-  - `"shm"`
-  - `"tty"`
-  - `"urandom"`
-  - `"zero"`
-
-The order of the values doesn't matter, as the list is treated like an
-unordered set.
-
-## `added_devices`
-
-This field is like [`devices`](#devices), except it inserts into to the job
-spec's [`devices`](../../spec.md#devices) set instead of replacing it.
 
 ## `working_directory`
 
