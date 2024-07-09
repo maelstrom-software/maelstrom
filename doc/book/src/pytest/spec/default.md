@@ -19,6 +19,6 @@ mounts = [
     { type = "tmp", mount_point = "/tmp" },
     { type = "proc", mount_point = "/proc" },
     { type = "sys", mount_point = "/sys" },
-    { type = "devices", devices = devices = ["full", "null", "random", "urandom", "zero"] },
+    { type = "devices", devices = ["full", "null", "random", "urandom", "zero"] },
 ]
 ```

@@ -5,8 +5,8 @@ use anyhow::{anyhow, Context as _, Result};
 use directive::TestDirective;
 use enumset::enum_set;
 use maelstrom_base::{
-    EnumSet, GroupId, JobDevice, JobMount, JobMountForTomlAndJson, JobNetwork, Timeout, UserId,
-    Utf8PathBuf,
+    EnumSet, GroupId, JobDevice, JobDeviceForTomlAndJson, JobMount, JobMountForTomlAndJson,
+    JobNetwork, Timeout, UserId, Utf8PathBuf,
 };
 use maelstrom_client::{
     spec::{EnvironmentSpec, ImageSpec, Layer, PossiblyImage},
@@ -67,15 +67,18 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
                 JobMountForTomlAndJson::Sys {
                     mount_point: "/sys".into(),
                 },
+                // These special devices are fairly commonly used. Especially /dev/null.
+                JobMountForTomlAndJson::Devices {
+                    devices: enum_set!(
+                        JobDeviceForTomlAndJson::Full
+                            | JobDeviceForTomlAndJson::Null
+                            | JobDeviceForTomlAndJson::Random
+                            | JobDeviceForTomlAndJson::Urandom
+                            | JobDeviceForTomlAndJson::Zero
+                    ),
+                },
             ]),
-            // These special devices are fairly commonly used. Especially /dev/null.
-            devices: Some(enum_set!(
-                JobDevice::Full
-                    | JobDevice::Null
-                    | JobDevice::Random
-                    | JobDevice::Urandom
-                    | JobDevice::Zero
-            )),
+            devices: None,
             added_devices: enum_set!(),
             added_environment: Default::default(),
             added_layers: vec![],
