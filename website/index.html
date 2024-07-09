@@ -203,8 +203,7 @@
             <code>maelstrom-pytest --init</code>
             <p>Then update the file to include a python image.</p>
             <code>[[directives]]</code><br>
-            <code>image.name="docker://python:3.11-slim"</code><br>
-            <code>image.use = ["layers", "environment"]</code>
+            <code>image = "docker://python:3.11-slim"</code>
             <p>
               This example installs an <a
               href="https://hub.docker.com/_/python">image from Docker</a>.
