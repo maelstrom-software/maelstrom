@@ -111,6 +111,7 @@ pub struct ExtraCommandLineOptions {
         short = 'i',
         value_name = "FILTER-EXPRESSION",
         default_value = "all",
+        help = "Only include tests which match the given filter. Can be specified multiple times.",
         help_heading = "Test Selection Options"
     )]
     pub include: Vec<String>,

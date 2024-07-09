@@ -1,5 +1,25 @@
 # Command-Line Options
 
+In addition the command-line options for used to specify [configuration
+values](../config.md) described in the [previous chapter](config.md),
+`cargo-maelstrom` supports these command-line options:
+
+Option                                                      | Short Alias | Argument             | Description
+------------------------------------------------------------|-------------|----------------------|------------
+<span style="white-space: nowrap;">`--help`</span>          | `-h`        |                      | [print help and exit](../common-cli.md#--help)
+<span style="white-space: nowrap;">`--version`</span>       |             |                      | [print version and exit](../common-cli.md#--version)
+<span style="white-space: nowrap;">`--print-config`</span>  | `-P`        |                      | [print all configuration values and exit](../common-cli.md#--print-config)
+<span style="white-space: nowrap;">`--config-file`</span>   | `-c`        | path or `-`          | [file to read configuration values from](../common-cli.md#--config-file)
+<span style="white-space: nowrap;">`--include`</span>       | `-i`        | [pattern](filter.md) | [include tests that match pattern](#--include-and---exclude)
+<span style="white-space: nowrap;">`--exclude`</span>       | `-x`        | [pattern](filter.md) | [exclude tests that match pattern](#--include-and---exclude)                                                  
+<span style="white-space: nowrap;">`--init`</span>          |             |                      | [initialize test metadata file](#--init)
+<span style="white-space: nowrap;">`--list`</span>          |             |                      | [alias for `--list-tests`](#--list-tests-or---list)
+<span style="white-space: nowrap;">`--list-tests`</span>    |             |                      | [only list matching tests instead of running them](#--list-tests-or---list)
+<span style="white-space: nowrap;">`--list-binaries`</span> |             |                      | [only list matching test binaries instead of running tests](#--list-binaries)
+<span style="white-space: nowrap;">`--list-packages`</span> |             |                      | [only list matching test packages instead of running tests](#--list-packages)
+
+# Command-Line Options
+
 Besides the [standard command-line options](../standard-cli.md) and the options for [configuration values](config.md),
 `cargo-maelstrom` supports additional command-line-options.
 
@@ -15,7 +35,7 @@ The `--list-tests` (or `--list`) command-line option causes `cargo-maelstrom`
 to build all required test binaries, then print the tests that would normally
 be run, without actually running them.
 
-This option can be combined with [`--include` and `--exclude`](#include_and_exclude).
+This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
 
 ## `--list-binaries`
 
@@ -23,7 +43,7 @@ The `--list-binaries` command-line option causes `cargo-maelstrom` to print the
 names and types of the crates that it would run tests from, without actually
 building any binaries or running any tests.
 
-This option can be combined with [`--include` and `--exclude`](#include_and_exclude).
+This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
 
 ## `--list-packages`
 
@@ -31,9 +51,9 @@ The `--list-packages` command-line option causes `cargo-maelstrom` to print the
 packages from which it would run tests, without actually building any binaries
 or running any tests.
 
-This option can be combined with [`--include` and `--exclude`](#include_and_exclude).
+This option can be combined with [`--include` and `--exclude`](#include-and-exclude).
 
-## `--include` and `--exclude` {#include_and_exclude}
+## `--include` and `--exclude` {#include-and-exclude}
 
 The `--include` (`-i`) and `--exclude` (`-x`) command-line options control which tests
 `cargo-maelstrom` runs or lists.
