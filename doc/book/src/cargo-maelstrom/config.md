@@ -10,19 +10,19 @@ Value                                                                  | Type   
 <span style="white-space: nowrap;">`container-image-depot-root`</span> | string  | [container images cache directory](#container-image-depot-root)                             | `$XDG_CACHE_HOME/maelstrom/containers`
 `accept-invalid-remote-container-tls-certs`                            | boolean | [allow invalid container registry certificates](#accept-invalid-remote-container-tls-certs) | `false`
 <span style="white-space: nowrap;">`broker`</span>                     | string  | [address of broker](#broker)                                                                | standalone mode
-<span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                      | `"info"`
-<span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                          | `false`
-<span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                             | don't override
-<span style="white-space: nowrap;">`features`</span>                   | string  | [comma-separated list of features to activate](#cargo)               | Cargo's default
-<span style="white-space: nowrap;">`all-features`</span>               | boolean | [activate all available features](#cargo)                            | Cargo's default
-<span style="white-space: nowrap;">`no-default-features`</span>        | boolean | [do not activate the `default` feature](#cargo)                      | Cargo's default
-<span style="white-space: nowrap;">`profile`</span>                    | string  | [build artifacts with the specified profile](#cargo)                 | Cargo's default
-<span style="white-space: nowrap;">`target`</span>                     | string  | [build for the target triple](#cargo)                                | Cargo's default
-<span style="white-space: nowrap;">`target-dir`</span>                 | string  | [directory for all generated artifacts](#cargo)                      | Cargo's default
-<span style="white-space: nowrap;">`manifest-path`</span>              | string  | [path to `Cargo.toml`](#cargo)                                       | Cargo's default
-<span style="white-space: nowrap;">`frozen`</span>                     | boolean | [require `Cargo.lock` and cache are up to date](#cargo)              | Cargo's default
-<span style="white-space: nowrap;">`locked`</span>                     | boolean | [require `Cargo.lock` is up to date](#cargo)                         | Cargo's default
-<span style="white-space: nowrap;">`offline`</span>                    | boolean | [run without Cargo accessing the network](#cargo)                    | Cargo's default
+<span style="white-space: nowrap;">`log-level`</span>                  | string  | [minimum log level](#log-level)                                                             | `"info"`
+<span style="white-space: nowrap;">`quiet`</span>                      | boolean | [don't output per-test information](#quiet)                                                 | `false`
+<span style="white-space: nowrap;">`timeout`</span>                    | string  | [override timeout value tests](#timeout)                                                    | don't override
+<span style="white-space: nowrap;">`features`</span>                   | string  | [comma-separated list of features to activate](#cargo)                                      | Cargo's default
+<span style="white-space: nowrap;">`all-features`</span>               | boolean | [activate all available features](#cargo)                                                   | Cargo's default
+<span style="white-space: nowrap;">`no-default-features`</span>        | boolean | [do not activate the `default` feature](#cargo)                                             | Cargo's default
+<span style="white-space: nowrap;">`profile`</span>                    | string  | [build artifacts with the specified profile](#cargo)                                        | Cargo's default
+<span style="white-space: nowrap;">`target`</span>                     | string  | [build for the target triple](#cargo)                                                       | Cargo's default
+<span style="white-space: nowrap;">`target-dir`</span>                 | string  | [directory for all generated artifacts](#cargo)                                             | Cargo's default
+<span style="white-space: nowrap;">`manifest-path`</span>              | string  | [path to `Cargo.toml`](#cargo)                                                              | Cargo's default
+<span style="white-space: nowrap;">`frozen`</span>                     | boolean | [require `Cargo.lock` and cache are up to date](#cargo)                                     | Cargo's default
+<span style="white-space: nowrap;">`locked`</span>                     | boolean | [require `Cargo.lock` is up to date](#cargo)                                                | Cargo's default
+<span style="white-space: nowrap;">`offline`</span>                    | boolean | [run without Cargo accessing the network](#cargo)                                           | Cargo's default
 
 ## `cache-size`
 
