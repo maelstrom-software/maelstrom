@@ -52,12 +52,12 @@
           <!-- Content -->
           <article id="content">
             <header>
-              <h2>About Maelstrom</h2> 
+              <h2>About Maelstrom</h2>
               </header>
               <p>Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners, or locally on your machine. You might use Maelstrom to run your tests because:</p>
               <a href="https://maelstrom-software.com/book/" class="rightimg wrap"><img src="images/Architecture Small.png" alt="" /></a>
               <p><ul><li><B> It's easy. </B> Maelstrom functions as a drop-in replacement for <tt>cargo-test</tt> and <tt>pytest</tt>. In most cases, it just works with your existing tests with minimal configuration.
-              <li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing errors caused by inter-test or implicit test-environment dependencies. 
+              <li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing errors caused by inter-test or implicit test-environment dependencies.
               <li> <B> It's scalable. </B> You can run Maelstrom as a cluster -- add more worker machines to linearly increase test throughput.
               <li> <B> It's clean.</B> Maelstrom has a from-scratch, rootless container implementation
                 (not relying on docker or RunC) written in Rust, optimized to be low-overhead and start
@@ -66,7 +66,7 @@
                   without adding clustering. Maelstrom’s test-per-process model is inherently slower than pytest’s shared-process model, but Maelstrom provides test isolation at a low performance cost.
               <p>Maelstrom is currently available for Rust and Pytest on Linux. C++, Typescript, and Java are coming soon.</p>
               <p>While our focus thus far has been on running tests, Maelstrom's underlying job execution system is general-purpose. We provide a command line utility to run arbitrary commands, as well a gRPC-based API and Rust bindings for programmatic access and control.</p>
-              
+
               <p>See the book for more information:</p>
               <ul class="actions">
                 <li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
@@ -103,7 +103,7 @@
               <p>This will install a pre-built binary from the <a href="https://github.com/maelstrom-software/maelstrom/releases">github releases page.</a>
               If you don't have <tt>cargo-binstall</tt>, you can download the binary manually.
               Check out <a href="https://maelstrom-software.com/book/install/cargo_maelstrom.html">the book</a> for more ways to get <tt>cargo-maelstrom</tt>.</p>
-          
+
               <p><h3><b>Running <tt>cargo-maelstrom</tt></b></h3></p>
             <p>To run your Rust tests, use <tt>cargo-maelstrom</tt>:</p>
               <code>cargo maelstrom</code>
@@ -171,7 +171,7 @@
       <div id="footer-wrapper">
         <div id="footer" class="container">
           <header class="major">
-            <h2>Connect with us</h2> 
+            <h2>Connect with us</h2>
             <br>
             </section>
             <section class="col-4 col-18-narrower">
