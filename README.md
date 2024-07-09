@@ -11,7 +11,7 @@ locally on your machine or distributed across arbitrarily large clusters.
 Maelstrom currently has test runners for Rust and Python, with more on the
 way.
 
-* It's easy. Maelstrom provides a drop-in replacement for `cargo test`, and a
+* It's easy. Maelstrom provides a drop-in replacement for `cargo test` and a
   pytest plugin. In most cases, it just works with your existing tests without
   any configuration.
 * It's reliable. Maelstrom runs every test hermetically in its own lightweight
