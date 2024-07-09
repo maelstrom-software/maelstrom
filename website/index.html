@@ -1,205 +1,206 @@
 <!DOCTYPE HTML>
+<!-- vim: set sw=2 ts=2 et si: -->
 <!--
-	Maelstom Software Website
+  Maelstom Software Website
 -->
 <html>
-	<head>
-		<title>Maelstrom Software</title>
-		<meta charset="utf-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
-		<link rel="stylesheet" href="assets/css/main.css" />
-		<link rel="icon" type="png" href="images/Favicon.png">
-	</head>
-	<body class="homepage is-preload">
-		<div id="page-wrapper">
+  <head>
+    <title>Maelstrom Software</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <link rel="stylesheet" href="assets/css/main.css" />
+    <link rel="icon" type="png" href="images/Favicon.png">
+  </head>
+  <body class="homepage is-preload">
+    <div id="page-wrapper">
 
-			<!-- Header -->
-				<div id="header-wrapper">
-					<div id="header" class="container">
+      <!-- Header -->
+      <div id="header-wrapper">
+        <div id="header" class="container">
 
-						<!-- Logo -->
-							<h1 id="logo"><a href="index.html" class="image featured first"><img src="images/MaelstromLogo.png" alt="" /></a></h1>
+          <!-- Logo -->
+          <h1 id="logo"><a href="index.html" class="image featured first"><img src="images/MaelstromLogo.png" alt="" /></a></h1>
 
-						<!-- Nav -->
-							<nav id="nav">
-								<ul>
-									<li><a href="https://maelstrom-software.com/book/">Documentation</a></li>
-									<li class="icon brands fa-discord"><a href="https://discord.gg/rgeuZz6CfV"><span class="extra"></span>Discord</a></li>
-									<li class="icon brands fa-github"><a href="https://github.com/maelstrom-software/maelstrom"><span class="extra"></span>Github</a></li>
-								</ul>
-							</nav>
+          <!-- Nav -->
+          <nav id="nav">
+            <ul>
+              <li><a href="https://maelstrom-software.com/book/">Documentation</a></li>
+              <li class="icon brands fa-discord"><a href="https://discord.gg/rgeuZz6CfV"><span class="extra"></span>Discord</a></li>
+              <li class="icon brands fa-github"><a href="https://github.com/maelstrom-software/maelstrom"><span class="extra"></span>Github</a></li>
+            </ul>
+          </nav>
 
-					</div>
+        </div>
 
-					<!-- Hero -->
-						<section id="hero" class="container">
-							<header>
-								<h2>A clustered, hermetic test runner.
-							</header>
-							<p>Maelstrom is a test runner for Rust and Pytest, built on top of a general-purpose clustered job engine. </p>
-							<ul class="actions">
-								<li><a href="https://maelstrom-software.com/book/" class="button">Learn More</a></li>
-							</ul>
-						</section>
+        <!-- Hero -->
+        <section id="hero" class="container">
+          <header>
+            <h2>A clustered, hermetic test runner.
+          </header>
+          <p>Maelstrom is a test runner for Rust and Pytest, built on top of a general-purpose clustered job engine. </p>
+          <ul class="actions">
+            <li><a href="https://maelstrom-software.com/book/" class="button">Learn More</a></li>
+          </ul>
+        </section>
 
-				</div>
+      </div>
 
-		<!-- Overview -->
-				<div class="wrapper">
-					<div class="container" id="main">
+      <!-- Overview -->
+      <div class="wrapper">
+        <div class="container" id="main">
 
-						<!-- Content -->
-							<article id="content">
-								<header>
-									<h2>About Maelstrom</h2> 
-									</header>
-									<p>Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners, or locally on your machine. You might use Maelstrom to run your tests because:</p>
-									<a href="https://maelstrom-software.com/book/" class="rightimg wrap"><img src="images/Architecture Small.png" alt="" /></a>
-									<p><ul><li><B> It's easy. </B> Maelstrom functions as a drop-in replacement for <tt>cargo-test</tt> and <tt>pytest</tt>. In most cases, it just works with your existing tests with minimal configuration.
-									<li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing errors caused by inter-test or implicit test-environment dependencies. 
-									<li> <B> It's scalable. </B> You can run Maelstrom as a cluster -- add more worker machines to linearly increase test throughput.
-									<li> <B> It's clean.</B> Maelstrom has a from-scratch, rootless container implementation
-										(not relying on docker or RunC) written in Rust, optimized to be low-overhead and start
-										quickly.
-									<li> <B> It's fast.</B> In most cases, Maelstrom is faster than <tt>cargo test</tt>, even
-											without adding clustering. Maelstrom’s test-per-process model is inherently slower than pytest’s shared-process model, but Maelstrom provides test isolation at a low performance cost.
-									<p>Maelstrom is currently available for Rust and Pytest on Linux. C++, Typescript, and Java are coming soon.</p>
-									<p>While our focus thus far has been on running tests, Maelstrom's underlying job execution system is general-purpose. We provide a command line utility to run arbitrary commands, as well a gRPC-based API and Rust bindings for programmatic access and control.</p>
-									
-									<p>See the book for more information:</p>
-									<ul class="actions">
-										<li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
-				</div>
-					</article>
-				</div>
+          <!-- Content -->
+          <article id="content">
+            <header>
+              <h2>About Maelstrom</h2> 
+              </header>
+              <p>Maelstrom packages your Rust tests into hermetic micro-containers, then distributes them to be run on an arbitrarily large cluster of test-runners, or locally on your machine. You might use Maelstrom to run your tests because:</p>
+              <a href="https://maelstrom-software.com/book/" class="rightimg wrap"><img src="images/Architecture Small.png" alt="" /></a>
+              <p><ul><li><B> It's easy. </B> Maelstrom functions as a drop-in replacement for <tt>cargo-test</tt> and <tt>pytest</tt>. In most cases, it just works with your existing tests with minimal configuration.
+              <li> <B> It's reliable. </B> Maelstrom runs every test hermetically in its own lightweight container and runs each test independently, eliminating confusing errors caused by inter-test or implicit test-environment dependencies. 
+              <li> <B> It's scalable. </B> You can run Maelstrom as a cluster -- add more worker machines to linearly increase test throughput.
+              <li> <B> It's clean.</B> Maelstrom has a from-scratch, rootless container implementation
+                (not relying on docker or RunC) written in Rust, optimized to be low-overhead and start
+                quickly.
+              <li> <B> It's fast.</B> In most cases, Maelstrom is faster than <tt>cargo test</tt>, even
+                  without adding clustering. Maelstrom’s test-per-process model is inherently slower than pytest’s shared-process model, but Maelstrom provides test isolation at a low performance cost.
+              <p>Maelstrom is currently available for Rust and Pytest on Linux. C++, Typescript, and Java are coming soon.</p>
+              <p>While our focus thus far has been on running tests, Maelstrom's underlying job execution system is general-purpose. We provide a command line utility to run arbitrary commands, as well a gRPC-based API and Rust bindings for programmatic access and control.</p>
+              
+              <p>See the book for more information:</p>
+              <ul class="actions">
+                <li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
+          </article>
+        </div>
+      </div>
 
-		<!-- Promo -->
-				<div id="promo-wrapper">
-					<section id="promo">
-						<a href="https://maelstrom-software.com/book/installation.html" class="image promo"><img src="images/Maelstrom.gif" alt=""></a>
-						<ul class="actions major">
-					</section>
-				</div>
+      <!-- Promo -->
+      <div id="promo-wrapper">
+        <section id="promo">
+          <a href="https://maelstrom-software.com/book/installation.html" class="image promo"><img src="images/Maelstrom.gif" alt=""></a>
+          <ul class="actions major">
+        </section>
+      </div>
 
-		<!-- Overview -->
-				<div class="wrapper">
-					<div class="container" id="main">
+      <!-- Overview -->
+      <div class="wrapper">
+        <div class="container" id="main">
 
-						<!-- Content -->
-							<article id="content">
-								<header>
-									<h2>Getting Started</h2>
-								</header>
-								<p><h3><b>Installing Pre-Built Binaries</b></h3></p>
-								<p>To run your tests using Maelstrom, you need a test-runner
-									binary. The easiest way to get it is using <a href="https://github.com/cargo-bins/cargo-binstall">cargo-binstall.</a>
-									</p>
-									<p>For Rust tests:</p>
-									<code>cargo binstall cargo-maelstrom</code>
-									<p></p>
-									<p>For Python tests:</p>
-									<code>cargo binstall maelstrom-pytest</code>
-									<p>This will install a pre-built binary from the <a href="https://github.com/maelstrom-software/maelstrom/releases">github releases page.</a>
-									If you don't have <tt>cargo-binstall</tt>, you can download the binary manually.
-									Check out <a href="https://maelstrom-software.com/book/install/cargo_maelstrom.html">the book</a> for more ways to get <tt>cargo-maelstrom</tt>.</p>
-							
-									<p><h3><b>Running <tt>cargo-maelstrom</tt></b></h3></p>
-								<p>To run your Rust tests, use <tt>cargo-maelstrom</tt>:</p>
-									<code>cargo maelstrom</code>
-									<p></p>
+          <!-- Content -->
+          <article id="content">
+            <header>
+              <h2>Getting Started</h2>
+            </header>
+            <p><h3><b>Installing Pre-Built Binaries</b></h3></p>
+            <p>To run your tests using Maelstrom, you need a test-runner
+              binary. The easiest way to get it is using <a href="https://github.com/cargo-bins/cargo-binstall">cargo-binstall.</a>
+              </p>
+              <p>For Rust tests:</p>
+              <code>cargo binstall cargo-maelstrom</code>
+              <p></p>
+              <p>For Python tests:</p>
+              <code>cargo binstall maelstrom-pytest</code>
+              <p>This will install a pre-built binary from the <a href="https://github.com/maelstrom-software/maelstrom/releases">github releases page.</a>
+              If you don't have <tt>cargo-binstall</tt>, you can download the binary manually.
+              Check out <a href="https://maelstrom-software.com/book/install/cargo_maelstrom.html">the book</a> for more ways to get <tt>cargo-maelstrom</tt>.</p>
+          
+              <p><h3><b>Running <tt>cargo-maelstrom</tt></b></h3></p>
+            <p>To run your Rust tests, use <tt>cargo-maelstrom</tt>:</p>
+              <code>cargo maelstrom</code>
+              <p></p>
 
-									<p>This runs in "standalone" mode, meaning all tests are run locally. Each test is
-										run in its own container, configured with a few common dependencies. It may work for your project without any further configuration.</p>
-									<p>If some tests fail, however, it likely means those tests have dependencies on
-										their execution environment that aren't packaged in their containers.
-										You can remedy this by adding directives to the <tt>cargo-maelstrom.toml</tt> file. To
-										do this, run:</p>
-										<code>cargo maelstrom --init</code>
-										<p></p>
-									<p>Then edit the created <tt>cargo-maelstrom.toml</tt> file as described <a href="https://maelstrom-software.com/book/cargo_maelstrom/execution_environment.html"> in the book.</a></p>
-									<p></p>
-									<p><h3><b>Running <tt>maelstrom-pytest</tt></b></h3></p>
-									<p>Before running tests, we need to do a little setup.</p>
-									<p><h4><b>Choosing a Python Image</b></h4></p>
-										<p>First, generate a <tt>maelstrom-pytest.toml</tt> file</p>
-										<code>maelstrom-pytest --init</code>
-										<p>Then update the file to include a python image.</p>
-										<code>[[directives]]</code><br>
-											<code>image.name="docker://python:3.11-slim"</code><br>
-											<code>image.use = ["layers", "environment"]</code>
-										<p>This example installs an <a href="https://hub.docker.com/_/python">image from Docker</a>.</p>
-									<p><h4><b>Including Your Project Python Files</b></h4></p>
-									<p>So that your tests can be run from the container, your project's python must be included.</p>
-									<code>added_layers = [ { glob = "**.py" } ]</code>
-									<p>This example just adds all files with a <tt>.py</tt> extension. You may also need to include <tt>.pyi</tt> files or other files.</p>
-									<p><h4><b>Including <tt>pip</tt> Packages</b></h4></p>
-									<p>If you have an image named "python", maelstrom-pytest will automatically include pip packages for you as part of the container. It expects to read these packages from a test-requirements.txt file in your project directory. This needs to at a minimum include the pytest package <tt> test-requirements.txt</tt>.</p>
-									<code>pytest==8.1.1</code>
-									<p>Now we are ready to try to run tests. Just invoke <tt>maelstrom-pytest</tt>:</p>
-									<code>maelstrom-pytest</code>
-									<p>This runs in "standalone" mode, meaning all tests are run locally. Each test is run in its own container.</p>
+              <p>This runs in "standalone" mode, meaning all tests are run locally. Each test is
+                run in its own container, configured with a few common dependencies. It may work for your project without any further configuration.</p>
+              <p>If some tests fail, however, it likely means those tests have dependencies on
+                their execution environment that aren't packaged in their containers.
+                You can remedy this by adding directives to the <tt>cargo-maelstrom.toml</tt> file. To
+                do this, run:</p>
+                <code>cargo maelstrom --init</code>
+                <p></p>
+              <p>Then edit the created <tt>cargo-maelstrom.toml</tt> file as described <a href="https://maelstrom-software.com/book/cargo_maelstrom/execution_environment.html"> in the book.</a></p>
+              <p></p>
+              <p><h3><b>Running <tt>maelstrom-pytest</tt></b></h3></p>
+              <p>Before running tests, we need to do a little setup.</p>
+              <p><h4><b>Choosing a Python Image</b></h4></p>
+                <p>First, generate a <tt>maelstrom-pytest.toml</tt> file</p>
+                <code>maelstrom-pytest --init</code>
+                <p>Then update the file to include a python image.</p>
+                <code>[[directives]]</code><br>
+                  <code>image.name="docker://python:3.11-slim"</code><br>
+                  <code>image.use = ["layers", "environment"]</code>
+                <p>This example installs an <a href="https://hub.docker.com/_/python">image from Docker</a>.</p>
+              <p><h4><b>Including Your Project Python Files</b></h4></p>
+              <p>So that your tests can be run from the container, your project's python must be included.</p>
+              <code>added_layers = [ { glob = "**.py" } ]</code>
+              <p>This example just adds all files with a <tt>.py</tt> extension. You may also need to include <tt>.pyi</tt> files or other files.</p>
+              <p><h4><b>Including <tt>pip</tt> Packages</b></h4></p>
+              <p>If you have an image named "python", maelstrom-pytest will automatically include pip packages for you as part of the container. It expects to read these packages from a test-requirements.txt file in your project directory. This needs to at a minimum include the pytest package <tt> test-requirements.txt</tt>.</p>
+              <code>pytest==8.1.1</code>
+              <p>Now we are ready to try to run tests. Just invoke <tt>maelstrom-pytest</tt>:</p>
+              <code>maelstrom-pytest</code>
+              <p>This runs in "standalone" mode, meaning all tests are run locally. Each test is run in its own container.</p>
 
 
-								<p><h4><b>Setting Up a Cluster</b></h4></p>
-								<p>To get even more out of Maelstrom, you can set up a cluster to run your tests on.
-									You will need to run one copy of the broker (<tt>maelstrom-broker</tt>) somewhere, and
-									one copy of the worker (<tt>maelstrom-worker</tt>) on each node of the cluster.
-									</p>
-								<p>You can install these using <a href=https://maelstrom-software.com/book/install/clustered_job_runner.html)> multiple methods</a>,
-									including <tt>cargo-binstall</tt>:</p>
-									<code>cargo binstall maelstrom-worker maelstrom-broker</code>
-									<p></p>
-									<p>Then you can start the broker:</p>
-									<code>maelstrom-broker --port=1234</code>
-									<p></p>
-									<p>Then a few workers:</p>
-									<code>maelstrom-worker --broker=broker-host:1234</code>
-									<p></p>
-									<p>Then run 'cargo-maelstrom' against the cluster:</p>
-									<code>cargo maelstrom --broker=broker-host:12344</code>
-									<p></p>
-									<p>See the book for more information:</p>
-									<ul class="actions">
-										<li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
-						</ul> </article>
-					</div>
-				</div>
+            <p><h4><b>Setting Up a Cluster</b></h4></p>
+            <p>To get even more out of Maelstrom, you can set up a cluster to run your tests on.
+              You will need to run one copy of the broker (<tt>maelstrom-broker</tt>) somewhere, and
+              one copy of the worker (<tt>maelstrom-worker</tt>) on each node of the cluster.
+              </p>
+            <p>You can install these using <a href=https://maelstrom-software.com/book/install/clustered_job_runner.html)> multiple methods</a>,
+              including <tt>cargo-binstall</tt>:</p>
+              <code>cargo binstall maelstrom-worker maelstrom-broker</code>
+              <p></p>
+              <p>Then you can start the broker:</p>
+              <code>maelstrom-broker --port=1234</code>
+              <p></p>
+              <p>Then a few workers:</p>
+              <code>maelstrom-worker --broker=broker-host:1234</code>
+              <p></p>
+              <p>Then run 'cargo-maelstrom' against the cluster:</p>
+              <code>cargo maelstrom --broker=broker-host:12344</code>
+              <p></p>
+              <p>See the book for more information:</p>
+              <ul class="actions">
+                <li><a href="https://maelstrom-software.com/book/" class="button">Maelstrom Book</a></li>
+              </ul>
+          </article>
+        </div>
+      </div>
 
-			<!-- Footer -->
-				<div id="footer-wrapper">
-					<div id="footer" class="container">
-						<header class="major">
-							<h2>Connect with us</h2> 
-							<br>
-							</section>
-							<section class="col-4 col-18-narrower">
-								<div class="row gtr-0">
-									<ul class="divided icons col-4 col-8-mobile">
-										<li class="icon brands fa-discord"><a href="https://discord.gg/rgeuZz6CfV"><span class="extra"></span>Discord</a></li>
-									</ul>
-									<ul class="divided icons col-4 col-8-mobile">
-										<li class="icon brands fa-github"><a href="https://github.com/maelstrom-software/maelstrom"><span class="extra"></span>Github</a></li>
-									</ul>
-								</div>
-							</section>
-						</div>
-					</div>
-					<div id="copyright" class="container">
-						<ul class="menu">
-							<li>&copy; Maelstrom. All rights reserved.</li>
-						</ul>
-					</div>
-				</div>
+      <!-- Footer -->
+      <div id="footer-wrapper">
+        <div id="footer" class="container">
+          <header class="major">
+            <h2>Connect with us</h2> 
+            <br>
+            </section>
+            <section class="col-4 col-18-narrower">
+              <div class="row gtr-0">
+                <ul class="divided icons col-4 col-8-mobile">
+                  <li class="icon brands fa-discord"><a href="https://discord.gg/rgeuZz6CfV"><span class="extra"></span>Discord</a></li>
+                </ul>
+                <ul class="divided icons col-4 col-8-mobile">
+                  <li class="icon brands fa-github"><a href="https://github.com/maelstrom-software/maelstrom"><span class="extra"></span>Github</a></li>
+                </ul>
+              </div>
+            </section>
+          </div>
+        </div>
+        <div id="copyright" class="container">
+          <ul class="menu">
+            <li>&copy; Maelstrom. All rights reserved.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
 
-		</div>
+    <!-- Scripts -->
+    <script src="assets/js/jquery.min.js"></script>
+    <script src="assets/js/jquery.dropotron.min.js"></script>
+    <script src="assets/js/browser.min.js"></script>
+    <script src="assets/js/breakpoints.min.js"></script>
+    <script src="assets/js/util.js"></script>
+    <script src="assets/js/main.js"></script>
 
-		<!-- Scripts -->
-			<script src="assets/js/jquery.min.js"></script>
-			<script src="assets/js/jquery.dropotron.min.js"></script>
-			<script src="assets/js/browser.min.js"></script>
-			<script src="assets/js/breakpoints.min.js"></script>
-			<script src="assets/js/util.js"></script>
-			<script src="assets/js/main.js"></script>
-
-	</body>
+  </body>
 </html>
