@@ -74,6 +74,6 @@ any value set in [`maelstrom-pytest.toml`](spec/fields.md#timeout).
 
 ## `collect-from-module`
 
-Collect tests from the provided module intead of using pytest's default
+Collect tests from the provided module instead of using pytest's default
 collection algorithm. This will pass the provided module to pytest along with
 the `--pyargs` flag.
