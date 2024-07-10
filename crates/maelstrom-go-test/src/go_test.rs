@@ -1,12 +1,13 @@
 use crate::{GoPackage, GoPackageId, GoTestArtifact};
 use anyhow::{Context as _, Result};
+use maelstrom_test_runner::ui::UiSender;
 use maelstrom_util::fs::Fs;
 use maelstrom_util::process::ExitCode;
 use std::ffi::OsStr;
 use std::os::unix::process::ExitStatusExt as _;
 use std::{
     fmt,
-    io::Read as _,
+    io::{BufRead as _, BufReader},
     path::Path,
     process::{Command, Stdio},
     str,
@@ -54,7 +55,7 @@ impl Iterator for TestArtifactStream {
     }
 }
 
-fn go_build(dir: &Path) -> Result<String> {
+fn go_build(dir: &Path, ui: UiSender) -> Result<String> {
     let mut child = Command::new("go")
         .current_dir(dir)
         .arg("test")
@@ -63,22 +64,35 @@ fn go_build(dir: &Path) -> Result<String> {
         .stdout(Stdio::piped())
         .spawn()?;
 
-    let mut stdout = child.stdout.take().unwrap();
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let ui_clone = ui.clone();
     let stdout_handle = thread::spawn(move || -> Result<String> {
         let mut stdout_string = String::new();
-        stdout.read_to_string(&mut stdout_string)?;
+        for line in stdout.lines() {
+            let line = line?;
+            stdout_string += &line;
+            stdout_string += "\n";
+            ui_clone.build_output_line(line);
+        }
         Ok(stdout_string)
     });
 
-    let mut stderr = child.stderr.take().unwrap();
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let ui_clone = ui.clone();
     let stderr_handle = thread::spawn(move || -> Result<String> {
         let mut stderr_string = String::new();
-        stderr.read_to_string(&mut stderr_string)?;
+        for line in stderr.lines() {
+            let line = line?;
+            stderr_string += &line;
+            stderr_string += "\n";
+            ui_clone.build_output_line(line);
+        }
         Ok(stderr_string)
     });
 
     let stdout = stdout_handle.join().unwrap()?;
     let stderr = stderr_handle.join().unwrap()?;
+    ui.done_building();
 
     let exit_status = child.wait()?;
     if exit_status.success() {
@@ -105,12 +119,17 @@ fn is_no_go_files_error<V>(res: &Result<V>) -> bool {
     false
 }
 
-fn multi_go_build(packages: Vec<GoPackage>, send: mpsc::Sender<GoTestArtifact>) -> Result<()> {
+fn multi_go_build(
+    packages: Vec<GoPackage>,
+    send: mpsc::Sender<GoTestArtifact>,
+    ui: UiSender,
+) -> Result<()> {
     let mut handles = vec![];
     for p in packages {
         let send_clone = send.clone();
+        let ui_clone = ui.clone();
         handles.push(thread::spawn(move || -> Result<()> {
-            let res = go_build(&p.package_dir);
+            let res = go_build(&p.package_dir, ui_clone);
             if is_no_go_files_error(&res) {
                 return Ok(());
             }
@@ -134,10 +153,11 @@ fn multi_go_build(packages: Vec<GoPackage>, send: mpsc::Sender<GoTestArtifact>) 
 pub(crate) fn build_and_collect(
     _color: bool,
     packages: Vec<&GoPackage>,
+    ui: UiSender,
 ) -> Result<(WaitHandle, TestArtifactStream)> {
     let paths = packages.into_iter().cloned().collect();
     let (send, recv) = mpsc::channel();
-    let handle = thread::spawn(move || multi_go_build(paths, send));
+    let handle = thread::spawn(move || multi_go_build(paths, send, ui));
     Ok((WaitHandle { handle }, TestArtifactStream { recv }))
 }
 

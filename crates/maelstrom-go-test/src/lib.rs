@@ -282,9 +282,9 @@ impl CollectTests for GoTestCollector {
         color: bool,
         _options: &GoTestOptions,
         packages: Vec<&GoPackage>,
-        _ui: &UiSender,
+        ui: &UiSender,
     ) -> Result<(go_test::WaitHandle, go_test::TestArtifactStream)> {
-        go_test::build_and_collect(color, packages)
+        go_test::build_and_collect(color, packages, ui.clone())
     }
 
     fn get_test_layers(&self, _metadata: &TestMetadata, _ind: &UiSender) -> Result<TestLayers> {
