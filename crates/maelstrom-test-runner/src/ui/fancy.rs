@@ -114,7 +114,7 @@ pub struct FancyUi {
     jobs_outstanding: u64,
 
     all_done: Option<UiJobSummary>,
-    done_building: bool,
+    producing_build_output: bool,
 
     running_tests: BTreeMap<String, Instant>,
     build_output: vt100::Parser,
@@ -134,7 +134,7 @@ impl FancyUi {
             jobs_outstanding: 0,
 
             all_done: None,
-            done_building: false,
+            producing_build_output: false,
 
             running_tests: BTreeMap::new(),
             build_output: vt100::Parser::new(3, u16::MAX, 0),
@@ -185,6 +185,7 @@ impl Ui for FancyUi {
                     UiMessage::BuildOutputLine(line) => {
                         self.build_output.process(line.as_bytes());
                         self.build_output.process(b"\r\n");
+                        self.producing_build_output = true;
                     }
                     UiMessage::List(_) => {}
                     UiMessage::JobFinished(res) => {
@@ -212,7 +213,7 @@ impl Ui for FancyUi {
                         self.enqueue_status = Some(msg);
                     }
                     UiMessage::DoneBuilding => {
-                        self.done_building = true;
+                        self.producing_build_output = false;
                     }
                     UiMessage::DoneQueuingJobs => {
                         self.enqueue_status = None;
@@ -440,7 +441,7 @@ impl Widget for &mut FancyUi {
                     FancyUi::render_remote_progress as _,
                 ));
             }
-            if !self.done_building {
+            if self.producing_build_output {
                 sections.push((Constraint::Length(4), FancyUi::render_build_output as _));
             }
             if self.enqueue_status.is_some() {
