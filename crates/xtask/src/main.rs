@@ -1,12 +1,14 @@
 mod changelog;
 mod distribute;
 mod publish;
+mod book;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    Book(book::CliArgs),
     Changelog(changelog::CliArgs),
     Publish(publish::CliArgs),
     Distribute(distribute::CliArgs),
@@ -24,6 +26,7 @@ struct CliArgs {
 
 fn main() -> Result<()> {
     match CliArgs::parse().command {
+        Command::Book(options) => book::main(options),
         Command::Changelog(options) => changelog::main(options),
         Command::Publish(options) => publish::main(options),
         Command::Distribute(options) => distribute::main(options),

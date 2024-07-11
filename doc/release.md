@@ -51,10 +51,17 @@ we get it right:
 cargo set-version "$VERSION"
 ```
 
+## Update Book Directories
+
+We move the `head` book into the new version, then update the `latest` symlink:
+```bash
+cargo xtask book close "$VERSION"
+```
+
 ## Commit Above Changes
 
 This commit should only include the mechanical changes to `CHANGELOG.md`,
-`Cargo.toml`, and `Cargo.lock`.
+`Cargo.toml`, `Cargo.lock`, and the changes in `doc/book`.
 ```bash
 git status
 git commit -am "Version $VERSION."
@@ -140,6 +147,13 @@ cargo xtask changelog open
 Use `cargo set-version` again:
 ```bash
 cargo set-version "$NEXT_VERSION-dev"
+```
+
+## Update Book Directories
+
+We copy all of the files from the `latest` directory to `head`:
+```bash
+cargo xtask book open
 ```
 
 ## Commit Above Changes
