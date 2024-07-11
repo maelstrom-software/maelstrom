@@ -12,7 +12,10 @@ if [ ! -d "$1" ]; then
 	exit 1
 fi
 
-# Get absolute path.
+# Get absolute path. mdbook does this very annoying thing when it is given a
+# relative path: it interprets its relative to the source directory. We really
+# don't want to mess around with that nonsense and all the headaches is causes,
+# so we just get an absolute path and continue on.
 dest="$(cd "$1" && pwd -P)"
 
 for i in *; do
