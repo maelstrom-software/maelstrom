@@ -34,7 +34,7 @@ bindings for programmatic access and control.
 The project is currently Linux-only (x86 and ARM), as it relies on namespaces
 to implement containers.
 
-See the [book](https://maelstrom-software.com/book/) for more information.
+See the [book](https://maelstrom-software.com/doc/book/latest/) for more information.
 
 # Getting Started
 
@@ -59,7 +59,7 @@ This will install a pre-built binary from the [github releases page](https://git
 
 If you don't have `cargo-binstall`, you can download the binaries manually.
 
-Check out the [book](https://maelstrom-software.com/book/installation.html) for more ways to get Maelstrom.
+Check out the [book](https://maelstrom-software.com/doc/book/latest/installation.html) for more ways to get Maelstrom.
 
 ## Running `cargo-maelstrom`
 
@@ -81,7 +81,7 @@ do this, run:
 cargo maelstrom --init
 ```
 
-Then edit the created `cargo-maelstrom.toml` file as described in the [book](https://maelstrom-software.com/book/cargo-maelstrom/spec.html).
+Then edit the created `cargo-maelstrom.toml` file as described in the [book](https://maelstrom-software.com/doc/book/latest/cargo-maelstrom/spec.html).
 
 ## Running `maelstrom-pytest`
 
@@ -135,7 +135,7 @@ You will need to run one copy of the broker (`maelstrom-broker`) somewhere, and
 one copy of the worker (`maelstrom-worker`) on each node of the cluster.
 
 You can install these using [multiple
-methods](https://maelstrom-software.com/book/installation.html),
+methods](https://maelstrom-software.com/doc/book/latest/installation.html),
 including `cargo-binstall`:
 
 ```bash
@@ -163,7 +163,7 @@ maelstrom-pytest --broker=broker-host:1234
 
 # Learn More
 
-Find our complete documentation in the [book](https://maelstrom-software.com/book/).
+Find our complete documentation in the [book](https://maelstrom-software.com/doc/book/latest/).
 
 # Licensing
 

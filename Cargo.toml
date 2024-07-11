@@ -9,7 +9,7 @@ panic = "abort"
 panic = "abort"
 
 [workspace.package]
-documentation = "https://maelstrom-software.com/book/"
+documentation = "https://maelstrom-software.com/doc/book/latest/"
 edition = "2021"
 homepage = "https://maelstrom-software.com"
 license = "MIT OR Apache-2.0"
