@@ -9,15 +9,11 @@ fields](../spec.md).
 This field must be an object as described below. It specifies the
 [`image`](../spec.md#image) field of the job spec.
 
-The field can either be a string or an object. If it's a string, then it
+The provided object must have exactly two fields. The first is `name`. It must be a string. It
 specifies the URI of the image to use, as documented
 [here](../container-images.html#container-image-uris).
 
-If it's an object, then it must have a string `name` field and it may have an
-optional `use` field. The `name` field specifies the URI of the image to use,
-as documented [here](../container-images.html#container-image-uris).
-
-The `use` fiels must be a list of strings specifying what parts of the
+The second is `use`. It must be a list of strings specifying what parts of the
 container image to use for the job spec. It must contain a non-empty subset of:
   - `layers`<a id="image-use-layers">: This sets the
 	[`use_layers`](../spec.md#use_layers) field in the job spec's image value.
@@ -32,32 +28,6 @@ container image to use for the job spec. It must contain a non-empty subset of:
 	[`use_working_directory`](../spec.md#use_working_directory) field in the job spec's
 	image value. This is incompatible with the
     [`working_directory`](#working_directory) field.
-
-If no `use` field is provided, or if the first form is used where only a URI is
-specified, then the image will use the layers and environment from the image.
-
-For example, the following three are identical job specifications:
-
-```json
-{
-        "image": {
-                "name": "docker://ubuntu",
-                "use": [ "layers", "environment" ]
-        },
-        "program": "echo",
-        "arguments": [ "hello", "world" ]
-}
-{
-        "image": { "name": "docker://ubuntu" },
-        "program": "echo",
-        "arguments": [ "hello", "world" ]
-}
-{
-        "image": "docker://ubuntu",
-        "program": "echo",
-        "arguments": [ "hello", "world" ]
-}
-```
 
 ## `program`
 
@@ -185,7 +155,10 @@ Here's an example:
 ```json
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers" ]
+        },
         "added_layers": [
                 { "stubs": [ "/foo/{bar,baz}" ] }
         ],
@@ -209,7 +182,10 @@ For example:
 ```json
 % maelstrom-run
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": ["layers", "environment"]
+        },
         "added_layers": [
                 { "stubs": [ "/dev/{null,zero}" ] }
         ],
@@ -234,7 +210,10 @@ Bind mounts can be used to transfer data out of the job:
 % cat output
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": ["layers", "environment"]
+        },
         "added_layers": [
                 { "stubs": [ "/output" ] }
         ],
@@ -281,13 +260,19 @@ For example:
 ```json
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "pwd"
 }
 /
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "pwd",
         "working_directory": "/root"
 }
@@ -305,13 +290,19 @@ For example:
 ```json
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "id"
 }
 uid=0(root) gid=0(root) groups=0(root),65534(nogroup)
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "id",
         "user": 1234
 }
@@ -329,13 +320,19 @@ For example:
 ```json
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "id"
 }
 uid=0(root) gid=0(root) groups=0(root),65534(nogroup)
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "id",
         "group": 4321
 }
@@ -353,7 +350,10 @@ For example:
 ```json
 % maelstrom-run --one
 {
-        "image": "docker://ubuntu",
+        "image": {
+                "name": "docker://ubuntu",
+                "use": [ "layers", "environment" ]
+        },
         "program": "sleep",
         "arguments": [ "1d" ],
         "timeout": 1

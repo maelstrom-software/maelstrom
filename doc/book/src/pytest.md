@@ -11,7 +11,8 @@ maelstrom-pytest --init
 Then update the file to include a python image
 ```toml
 [[directives]]
-image = "docker://python:3.11-slim"
+image.name = "docker://python:3.11-slim"
+image.use = ["layers", "environment"]
 ```
 This example installs an [image from Docker](https://hub.docker.com/_/python)
 
