@@ -136,12 +136,14 @@ impl TestMetadata {
     /// Return whether to include a layer of shared library dependencies.
     ///
     /// The logic here is that if they explicitly set the value to something, we should return
-    /// that. Otherwise, we should see if they set any layers. If they explicitly added layers,
-    /// they probably don't want us pushing shared libraries on those layers.
+    /// that. Otherwise, we should see if they specified an image. If they specified an image, we
+    /// can assume that the image has shared libraries, and we shouldn't push shared libraries on
+    /// top of it. Otherwise, if they didn't provide an image, then they probably don't want to
+    /// have to provide a layer with shared libraries in it.
     pub fn include_shared_libraries(&self) -> bool {
         match self.include_shared_libraries {
             Some(val) => val,
-            None => self.layers.is_empty(),
+            None => self.image.is_none(),
         }
     }
 
@@ -346,12 +348,12 @@ mod tests {
         let all = AllMetadata::<SimpleFilter>::from_str(
             r#"
             [[directives]]
-            filter = "package = \"package1\""
+            filter = "and = [ { package = \"package1\" }, { name = \"test1\" } ]"
             layers = [{ tar = "layer1" }]
 
             [[directives]]
-            filter = "and = [ { package = \"package1\" }, { name = \"test1\" } ]"
-            layers = []
+            filter = "and = [ { package = \"package1\" }, { name = \"test2\" } ]"
+            image = "foo"
             "#,
         )
         .unwrap();
