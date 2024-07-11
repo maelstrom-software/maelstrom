@@ -47,8 +47,9 @@ contain the test executable, placed in the root directory. (Two layers are used
 so that the shared-library layer can be cached and used by other tests.)
 
 If the pseudo-field is never set one way or the other, then `cargo-maelstrom`
-will choose a value based on the `layers` field of the job spec. In this case,
-`include_shared_libraries` will be true if and only if `layers` is empty.
+will choose a value based on the `image` field of the job spec. In this case,
+`include_shared_libraries` will be true if and only if `image` is not
+specified.
 
 You usually want this pseudo-field to be true, unless you're using a container
 image for your tests. In that case, you probably want to use the shared
