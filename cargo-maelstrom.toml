@@ -52,8 +52,7 @@ environment = { HOME = "/tmp" }
 [[directives]]
 filter = "package.equals(maelstrom-pytest) && test.equals(integration_test)"
 include_shared_libraries = true
-image.name = "docker://python:3.11-slim"
-image.use = ["layers", "environment"]
+image = "docker://python:3.11-slim"
 added_layers = [
     { stubs = ["/{proc,tmp}/", "/dev/{null,fuse}"] },
     { paths = ["crates/maelstrom-pytest/src/python.tar"], canonicalize = true },
@@ -70,8 +69,7 @@ enable_writable_file_system = true
 [[directives]]
 filter = "package.equals(maelstrom-go-test) && test.equals(integration_test)"
 include_shared_libraries = true
-image.name = "docker://golang"
-image.use = ["layers", "environment"]
+image = "docker://golang"
 added_layers = [
     { stubs = ["/{proc,sys,tmp}/", "/dev/{full,fuse,urandom,random,null,zero}"] },
     { paths = ["<build-dir>/maelstrom-go-test"], canonicalize = true }
@@ -129,8 +127,7 @@ added_layers = [{ stubs = [ "root/", "proc/", "tmp/", "dev/fuse", "dev/null" ] }
 [[directives]]
 filter = "package.equals(cargo-maelstrom) && test.equals(integration_test)"
 include_shared_libraries = true
-image.name = "docker://rust:alpine"
-image.use = ["layers", "environment"]
+image = "docker://rust:alpine"
 added_layers = [
     { stubs = ["/dev/{full,fuse,null,urandom,random,zero}"] },
     { paths = ["<build-dir>/cargo-maelstrom"], canonicalize = true }
