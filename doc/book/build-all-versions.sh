@@ -7,7 +7,13 @@ if [ $# -ne 1 ]; then
 	exit 1
 fi
 
-dest="$1"
+if [ ! -d "$1" ]; then
+	echo "destination directory does not exist" >&2
+	exit 1
+fi
+
+# Get absolute path.
+dest="$(cd "$1" && pwd -P)"
 
 for i in *; do
 	if [ -d "$i" -a ! -L "$i" ]; then
