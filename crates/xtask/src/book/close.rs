@@ -1,11 +1,6 @@
 use anyhow::{bail, Result};
 use clap::Parser;
-use std::{
-    path::PathBuf,
-    process::Command,
-    os::unix::fs as unix_fs,
-    fs,
-};
+use std::{fs, os::unix::fs as unix_fs, path::PathBuf, process::Command};
 
 /// Close book to prepare for release.
 #[derive(Debug, Parser)]
@@ -22,9 +17,13 @@ pub fn main(books: PathBuf, args: CliArgs) -> Result<()> {
     let mut latest_path = books.clone();
     latest_path.push("latest");
 
-    let status = Command::new("git").arg("mv").arg(&head_path).arg(&version_path).status()?;
+    let status = Command::new("git")
+        .arg("mv")
+        .arg(&head_path)
+        .arg(&version_path)
+        .status()?;
     if !status.success() {
-	bail!("git mv failed");
+        bail!("git mv failed");
     }
 
     fs::remove_file(&latest_path)?;
@@ -32,7 +31,7 @@ pub fn main(books: PathBuf, args: CliArgs) -> Result<()> {
 
     let status = Command::new("git").arg("add").arg(&latest_path).status()?;
     if !status.success() {
-	bail!("git mv failed");
+        bail!("git mv failed");
     }
 
     Ok(())

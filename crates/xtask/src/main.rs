@@ -1,7 +1,7 @@
+mod book;
 mod changelog;
 mod distribute;
 mod publish;
-mod book;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
