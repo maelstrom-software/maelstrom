@@ -9,11 +9,6 @@ fi
 
 dest="$1"
 
-if [ ! -d "$dest" ]; then
-	echo "destination directory does not exist" >&2
-	exit 1
-fi
-
 for i in *; do
 	if [ -d "$i" -a ! -L "$i" ]; then
 		mdbook build --dest-dir "$dest/$i" "$i"
