@@ -226,7 +226,7 @@ async fn wait_for_child(
     loop {
         select! {
             _ = &mut kill_event_receiver, if !kill_event_received => {
-                linux::pidfd_send_signal(async_fd.get_ref().as_fd(), Signal::KILL)?;
+                linux::pidfd_send_signal(async_fd.get_ref(), Signal::KILL)?;
                 kill_event_received = true;
             },
             res = async_fd.readable() => {
@@ -385,7 +385,7 @@ impl<'bump> Drop for ChildProcess<'bump> {
         if let Some(child_pidfd) = &self.child_pidfd {
             // The pidfd_send_signal really shouldn't ever give us an error. But even if it does
             // for some reason, we're need to wait for the child.
-            let _ = linux::pidfd_send_signal(child_pidfd.as_fd(), Signal::KILL);
+            let _ = linux::pidfd_send_signal(child_pidfd, Signal::KILL);
 
             // This should never fail, but if it does, it means that the process doesn't exist so
             // we're free to continue and drop the stack.
