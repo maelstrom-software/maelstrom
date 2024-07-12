@@ -1,7 +1,7 @@
 # maelstrom-broker
 
-The `maelstrom-broker` is the coordinator and scheduler for a Maelstrom
-cluster. In order to have a cluster, there must be a broker. The broker must be
+The `maelstrom-broker` is the coordinator for a Maelstrom cluster. it is
+responsible for scheduling work onto nodes in the cluster. The broker must be
 started before clients and workers, as the clients and workers connect to the
 broker, and will exit if they can't establish a connection.
 

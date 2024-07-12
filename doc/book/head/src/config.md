@@ -7,8 +7,9 @@ environment variables, or configuration files.
 Each configuration value has a type, which is either string, number, or
 boolean.
 
-Imagine a configuration value named `config-value` in a program called
-`maelstrom-prog`. This configuration value can be specified via:
+Imagine a hypothetical configuration value named `config-value` in a
+hypothetical program called `maelstrom-prog`. This configuration value could be
+specified via:
   - The `--config-value` command-line option.
   - The `MAELSTROM_PROG_CONFIG_VALUE` environment variable.
   - The `config-value` key in a configuration file.
@@ -79,7 +80,7 @@ set, or is empty, then `~/.config/` is used. Similarly, if `XDG_CONFIG_DIRS`
 is not set, or is empty, then `/etc/xdg/` is used.
 
 Each program has a program-specific suffix that it appends to the directory it
-gets from XDG. This has the form `maelstrom/prog`, where `prog` is
+gets from XDG. This has the form `maelstrom/<prog>`, where `<prog>` is
 program-specific.
 
 Finally, the program looks for a file named `config.toml` in these directories.

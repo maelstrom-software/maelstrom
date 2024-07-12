@@ -16,7 +16,8 @@ Maelstrom currently only supports Linux.
 ## Installing From Pre-Built Binaries
 
 The easiest way to install Maelstrom binaries is to use
-[cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+[cargo-binstall](https://github.com/cargo-bins/cargo-binstall), which allows
+you to pick and choose the binaries you want to install:
 
 ```bash
 cargo binstall maelstrom-run
@@ -28,24 +29,25 @@ cargo binstall maelstrom-worker
 
 These commands retrieve the pre-built binaries from the [Maelstrom GitHub
 release page](https://github.com/maelstrom-software/maelstrom/releases). If you
-don't have `cargo-binstall`, you can just manually install the binaries from the
-releases page. For example:
+don't have `cargo-binstall`, you can directly install the pre-built binaries by
+simply untarring the release artifacts. For example:
 
 ```bash
 wget -q -O - https://github.com/maelstrom-software/maelstrom/releases/latest/download/cargo-maelstrom-x86_64-unknown-linux-gnu.tgz | tar xzf -
 ```
 
-This will download and extract the latest release of `cargo-maelstrom` for x86 Linux.
+This will download and extract the latest release of `cargo-maelstrom` for
+Linux on the x86-64 architecture.
 
 ## Installing Using Nix
 
-We have a `nix.flake` file, so you can install all Maelstrom binaries with something like:
+Maelstrom includes a `nix.flake` file, so you can install all Maelstrom binaries with `nix profile install`:
 
 ```bash
 nix profile install github:maelstrom-software/maelstrom
 ```
 
-Our Nix flake doesn't currently have the ability to install individual binaries.
+The Nix flake doesn't currently support installing individual binaries.
 
 ## Installing From Source With `cargo install`
 
