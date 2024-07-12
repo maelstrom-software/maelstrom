@@ -28,6 +28,15 @@ extern "C" {
     fn strerrordesc_np(errnum: c_int) -> *const c_char;
 }
 
+/*  _
+ * | |_ _   _ _ __   ___  ___
+ * | __| | | | '_ \ / _ \/ __|
+ * | |_| |_| | |_) |  __/\__ \
+ *  \__|\__, | .__/ \___||___/
+ *      |___/|_|
+ *  FIGLET: types
+ */
+
 #[derive(BitOr, Clone, Copy, Default)]
 pub struct AccessMode(c_int);
 
@@ -915,6 +924,30 @@ pub enum WaitStatus {
     Signaled(Signal),
 }
 
+pub enum Whence {
+    SeekSet,
+    SeekCur,
+    SeekEnd,
+}
+
+impl Whence {
+    fn as_i32(&self) -> i32 {
+        match self {
+            Self::SeekSet => libc::SEEK_SET,
+            Self::SeekCur => libc::SEEK_CUR,
+            Self::SeekEnd => libc::SEEK_END,
+        }
+    }
+}
+
+/*   __                  _   _
+ *  / _|_   _ _ __   ___| |_(_) ___  _ __  ___
+ * | |_| | | | '_ \ / __| __| |/ _ \| '_ \/ __|
+ * |  _| |_| | | | | (__| |_| | (_) | | | \__ \
+ * |_|  \__,_|_| |_|\___|\__|_|\___/|_| |_|___/
+ *  FIGLET: functions
+ */
+
 pub fn access(path: &CStr, mode: AccessMode) -> Result<(), Errno> {
     let path_ptr = path.as_ptr();
     Errno::result(unsafe { libc::access(path_ptr, mode.0) }).map(drop)
@@ -1135,6 +1168,10 @@ pub fn kill(pid: Pid, signal: Signal) -> Result<(), Errno> {
 
 pub fn listen(fd: Fd, backlog: u32) -> Result<(), Errno> {
     Errno::result(unsafe { libc::listen(fd.0, backlog as c_int) }).map(drop)
+}
+
+pub fn lseek(fd: Fd, offset: i64, whence: Whence) -> Result<i64, Errno> {
+    Errno::result(unsafe { libc::lseek(fd.0, offset, whence.as_i32()) })
 }
 
 pub fn mkdir(path: &CStr, mode: FileMode) -> Result<(), Errno> {
@@ -1552,33 +1589,13 @@ pub fn get_pipe_size(fd: Fd) -> Result<usize, Errno> {
     Errno::result(unsafe { libc::fcntl(fd.0, libc::F_GETPIPE_SZ) }).map(|sz| sz as usize)
 }
 
-pub enum Whence {
-    SeekSet,
-    SeekCur,
-    SeekEnd,
-}
-
-impl Whence {
-    fn as_i32(&self) -> i32 {
-        match self {
-            Self::SeekSet => libc::SEEK_SET,
-            Self::SeekCur => libc::SEEK_CUR,
-            Self::SeekEnd => libc::SEEK_END,
-        }
-    }
-}
-
-pub fn lseek(fd: Fd, offset: i64, whence: Whence) -> Result<i64, Errno> {
-    Errno::result(unsafe { libc::lseek(fd.0, offset, whence.as_i32()) })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn signal_display() {
-        assert_eq!(std::format!("{}", Signal::CHLD).as_str(), "SIGCHLD",);
+        assert_eq!(std::format!("{}", Signal::CHLD).as_str(), "SIGCHLD");
     }
 
     #[test]
