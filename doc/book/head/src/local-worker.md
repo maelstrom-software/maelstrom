@@ -1,7 +1,7 @@
 # Local Worker
 
 Every client has a local built-in worker. The local worker is used to runs jobs
-two in two scenarios.
+in two scenarios.
 
 First, if no `broker` [configuration value](config.md) is specified, then the
 client runs in **standalone mode**. In this mode, all jobs are executed by the
