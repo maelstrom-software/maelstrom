@@ -7,9 +7,6 @@ If there is no `cargo-maelstrom.toml` in the workspace root, then
 # Because it has no `filter` field, this directive applies to all tests.
 [[directives]]
 
-# Copy any shared libraries the test depends on along with the binary.
-include_shared_libraries = true
-
 # This layer just includes files and directories for mounting the following
 # file-systems and devices.
 layers = [

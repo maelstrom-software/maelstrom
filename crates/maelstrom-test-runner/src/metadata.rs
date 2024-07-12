@@ -36,8 +36,7 @@ impl<TestFilterT> Default for AllMetadata<TestFilterT> {
     fn default() -> Self {
         let single_directive = TestDirective {
             filter: None,
-            // Include any shared libraries needed for running the binary
-            include_shared_libraries: Some(true),
+            include_shared_libraries: None,
             network: Some(JobNetwork::Disabled),
             enable_writable_file_system: Some(false),
             working_directory: Some(PossiblyImage::Explicit(Utf8PathBuf::from("/"))),

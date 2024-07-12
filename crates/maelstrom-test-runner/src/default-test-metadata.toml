@@ -1,7 +1,5 @@
 # Because it has no `filter` field, this directive applies to all tests.
 [[directives]]
-# Copy any shared libraries the test depends on along with the binary.
-include_shared_libraries = true
 
 # Don't bother enabling the network. We can set to "loopback" to run on the
 # cluster using only the loopback network, or to "local" to only run on the
